@@ -1,54 +1,9 @@
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: agentic-operator-role
+  name: agentic-operator
 rules:
-# Agentic operator resources
-- apiGroups:
-  - agentic.example.com
-  resources:
-  - agents
-  - modelapis
-  - mcpservers
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - agentic.example.com
-  resources:
-  - agents/finalizers
-  - modelapis/finalizers
-  - mcpservers/finalizers
-  verbs:
-  - update
-- apiGroups:
-  - agentic.example.com
-  resources:
-  - agents/status
-  - modelapis/status
-  - mcpservers/status
-  verbs:
-  - get
-  - patch
-  - update
-# Kubernetes core resources (Deployments, Services)
-- apiGroups:
-  - apps
-  resources:
-  - deployments
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
 - apiGroups:
   - ""
   resources:
@@ -61,13 +16,47 @@ rules:
   - patch
   - update
   - watch
-# Allowed to read Secrets and ConfigMaps for env var references
 - apiGroups:
-  - ""
+  - agentic.example.com
   resources:
-  - secrets
-  - configmaps
+  - agents
+  - mcpservers
+  - modelapis
   verbs:
+  - create
+  - delete
   - get
   - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - agentic.example.com
+  resources:
+  - agents/finalizers
+  - mcpservers/finalizers
+  - modelapis/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - agentic.example.com
+  resources:
+  - agents/status
+  - mcpservers/status
+  - modelapis/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - apps
+  resources:
+  - deployments
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
   - watch

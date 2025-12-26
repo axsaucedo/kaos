@@ -194,11 +194,14 @@ async def call_model(prompt: str, system: Optional[str] = None) -> Optional[str]
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
+        # Get model name from environment or default
+        model_name = os.getenv("MODEL_NAME", "smollm2:135m")
+
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post(
                 f"{agent_config['model_api_url']}/chat/completions",
                 json={
-                    "model": "smollm2:135m",  # TODO: make configurable
+                    "model": model_name,
                     "messages": messages,
                     "temperature": 0.7,
                     "max_tokens": 1000,

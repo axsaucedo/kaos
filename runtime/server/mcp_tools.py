@@ -17,8 +17,17 @@ logger = logging.getLogger(__name__)
 class MCPToolLoader:
     """Loads tools from remote MCP servers"""
 
-    def __init__(self):
-        self.mcp_servers: Dict[str, str] = self._load_mcp_config()
+    def __init__(self, mcp_servers_config: Optional[Dict[str, str]] = None):
+        """Initialize MCP tool loader
+
+        Args:
+            mcp_servers_config: Optional pre-configured MCP servers. If not provided,
+                              will load from environment variables.
+        """
+        if mcp_servers_config:
+            self.mcp_servers = mcp_servers_config
+        else:
+            self.mcp_servers = self._load_mcp_config()
         self.tools_cache: Dict[str, Any] = {}
 
     def _load_mcp_config(self) -> Dict[str, str]:
@@ -84,6 +93,17 @@ class MCPToolLoader:
             tools = await self.load_tools(server_name)
             if tools:
                 all_tools[server_name] = tools
+        return all_tools
+
+    async def list_tools(self) -> List[Dict[str, Any]]:
+        """List all available tools from all MCP servers"""
+        all_tools = []
+        all_tools_by_server = await self.load_all_tools()
+        for server_name, tools in all_tools_by_server.items():
+            for tool in tools:
+                # Add server name to tool for identification
+                tool["server"] = server_name
+                all_tools.append(tool)
         return all_tools
 
     async def execute_tool(

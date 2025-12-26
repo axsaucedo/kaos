@@ -84,7 +84,7 @@ type AgentStatus struct {
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:subresource:scale:specReplicasPath=.spec.replicas,statusReplicasPath=.status.observedReplicas
+// +kubebuilder:subresource:scale:specpath=.spec.replicas,statuspath=.status.observedReplicas
 // +kubebuilder:resource:shortName=agent;agents
 // +kubebuilder:printcolumn:name="ModelAPI",type=string,JSONPath=`.spec.modelAPI`
 // +kubebuilder:printcolumn:name="Replicas",type=integer,JSONPath=`.status.observedReplicas`

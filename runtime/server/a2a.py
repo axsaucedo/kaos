@@ -16,8 +16,19 @@ logger = logging.getLogger(__name__)
 class A2AClient:
     """Manages A2A communication with peer agents"""
 
-    def __init__(self):
-        self.peer_agents: Dict[str, str] = self._load_peer_config()
+    def __init__(self, self_name: str = "", peer_agents: Optional[Dict[str, str]] = None):
+        """Initialize A2A client
+
+        Args:
+            self_name: Name of this agent (for identification)
+            peer_agents: Optional pre-configured peer agents. If not provided,
+                        will load from environment variables.
+        """
+        self.self_name = self_name
+        if peer_agents is not None:
+            self.peer_agents = peer_agents
+        else:
+            self.peer_agents = self._load_peer_config()
 
     def _load_peer_config(self) -> Dict[str, str]:
         """Load peer agent configuration from environment variables"""

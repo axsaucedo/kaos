@@ -2,8 +2,8 @@
 
 # Configuration
 IMG ?= agentic-operator:latest
-CONTROLLER_GEN ?= $(shell pwd)/bin/controller-gen
-CRD_OPTIONS ?= "crd:trivialVersions=true,preserveUnknownFields=false"
+CONTROLLER_GEN ?= $(shell which controller-gen || echo "$(shell pwd)/bin/controller-gen")
+CRD_OPTIONS ?= "crd:generateEmbeddedObjectMeta=true"
 
 # Paths
 ENVTEST ?= $(shell pwd)/bin/setup-envtest
@@ -33,20 +33,16 @@ deploy: manifests
 	kubectl apply -f config/manager/
 
 # Generate CRD code
-generate: controller-gen
-	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./..."
+generate:
+	$(CONTROLLER_GEN) object paths="./..."
 
 # Generate CRD manifests
-manifests: controller-gen
+manifests:
 	$(CONTROLLER_GEN) $(CRD_OPTIONS) rbac:roleName=agentic-operator paths="./..." output:crd:artifacts:config=config/crd/bases
 
 # Run tests
 test: generate manifests envtest
 	KUBEBUILDER_ASSETS=$(shell $(ENVTEST) use 1.24 -p path) go test ./... -coverprofile cover.out
-
-# Controller-gen tool
-controller-gen:
-	test -s $(CONTROLLER_GEN) || { curl -Ss "https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/master/hack/install.sh" | sh -s -- $(subst v3,,$(CONTROLLER_GEN_VERSION)); }
 
 # Envtest setup
 envtest:
