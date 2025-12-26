@@ -15,6 +15,8 @@ const (
 	MCPServerTypeNode MCPServerType = "node-runtime"
 )
 
+// +kubebuilder:object:generate=true
+
 // MCPServerConfig defines the configuration for MCP server
 type MCPServerConfig struct {
 	// MCP is the package name to run with uvx (e.g., "mcp-server-calculator")
@@ -26,6 +28,8 @@ type MCPServerConfig struct {
 	// +kubebuilder:validation:Optional
 	Env []corev1.EnvVar `json:"env,omitempty"`
 }
+
+// +kubebuilder:object:generate=true
 
 // MCPServerSpec defines the desired state of MCPServer
 type MCPServerSpec struct {
@@ -40,6 +44,8 @@ type MCPServerSpec struct {
 	// +kubebuilder:validation:Optional
 	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
 }
+
+// +kubebuilder:object:generate=true
 
 // MCPServerStatus defines the observed state of MCPServer
 type MCPServerStatus struct {

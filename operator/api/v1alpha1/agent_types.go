@@ -5,6 +5,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+// +kubebuilder:object:generate=true
+
 // AgentNetworkConfig defines A2A communication settings
 type AgentNetworkConfig struct {
 	// Expose indicates if this agent exposes an Agent Card endpoint for A2A
@@ -15,6 +17,8 @@ type AgentNetworkConfig struct {
 	// +kubebuilder:validation:Optional
 	Access []string `json:"access,omitempty"`
 }
+
+// +kubebuilder:object:generate=true
 
 // AgentConfig defines agent-specific configuration
 type AgentConfig struct {
@@ -30,6 +34,8 @@ type AgentConfig struct {
 	// +kubebuilder:validation:Optional
 	Env []corev1.EnvVar `json:"env,omitempty"`
 }
+
+// +kubebuilder:object:generate=true
 
 // AgentSpec defines the desired state of Agent
 type AgentSpec struct {
@@ -57,6 +63,8 @@ type AgentSpec struct {
 	// +kubebuilder:validation:Optional
 	Replicas *int32 `json:"replicas,omitempty"`
 }
+
+// +kubebuilder:object:generate=true
 
 // AgentStatus defines the observed state of Agent
 type AgentStatus struct {

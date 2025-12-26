@@ -63,3 +63,5 @@ dist/
 # Build artifacts
 build/
 dist/
+CLAUDE.md
+TASKS.md

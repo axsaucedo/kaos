@@ -49,8 +49,6 @@ func main() {
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
-		MetricsBindAddress:     metricsAddr,
-		Port:                   9443,
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
 		LeaderElectionID:       "agentic-operator.agentic.example.com",
@@ -63,7 +61,7 @@ func main() {
 	// Setup controllers
 	if err = (&controllers.ModelAPIReconciler{
 		Client: mgr.GetClient(),
-		Log:    ctrl.Log.WithName("controllers").WithName("ModelAPI"),
+		Log:    setupLog,
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ModelAPI")
@@ -72,7 +70,7 @@ func main() {
 
 	if err = (&controllers.MCPServerReconciler{
 		Client: mgr.GetClient(),
-		Log:    ctrl.Log.WithName("controllers").WithName("MCPServer"),
+		Log:    setupLog,
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "MCPServer")
@@ -81,28 +79,15 @@ func main() {
 
 	if err = (&controllers.AgentReconciler{
 		Client: mgr.GetClient(),
-		Log:    ctrl.Log.WithName("controllers").WithName("Agent"),
+		Log:    setupLog,
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Agent")
 		os.Exit(1)
 	}
 
-	// Setup webhooks if enabled
-	if os.Getenv("ENABLE_WEBHOOKS") != "false" {
-		if err = (&agenticv1alpha1.ModelAPI{}).SetupWebhookWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create webhook", "webhook", "ModelAPI")
-			os.Exit(1)
-		}
-		if err = (&agenticv1alpha1.MCPServer{}).SetupWebhookWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create webhook", "webhook", "MCPServer")
-			os.Exit(1)
-		}
-		if err = (&agenticv1alpha1.Agent{}).SetupWebhookWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create webhook", "webhook", "Agent")
-			os.Exit(1)
-		}
-	}
+	// Webhooks not implemented yet in this version
+	// TODO: Add webhook setup when webhooks are needed
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		setupLog.Error(err, "unable to set up health check")

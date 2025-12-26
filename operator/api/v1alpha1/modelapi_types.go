@@ -15,12 +15,16 @@ const (
 	ModelAPIModeHosted ModelAPIMode = "Hosted"
 )
 
+// +kubebuilder:object:generate=true
+
 // ProxyConfig defines configuration for LiteLLM proxy mode
 type ProxyConfig struct {
 	// Env variables to pass to the proxy container
 	// +kubebuilder:validation:Optional
 	Env []corev1.EnvVar `json:"env,omitempty"`
 }
+
+// +kubebuilder:object:generate=true
 
 // ServerConfig defines configuration for vLLM hosted mode
 type ServerConfig struct {
@@ -36,6 +40,8 @@ type ServerConfig struct {
 	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
 }
 
+// +kubebuilder:object:generate=true
+
 // ModelAPISpec defines the desired state of ModelAPI
 type ModelAPISpec struct {
 	// Mode specifies the deployment mode (Proxy or Hosted)
@@ -50,6 +56,8 @@ type ModelAPISpec struct {
 	// +kubebuilder:validation:Optional
 	ServerConfig *ServerConfig `json:"serverConfig,omitempty"`
 }
+
+// +kubebuilder:object:generate=true
 
 // ModelAPIStatus defines the observed state of ModelAPI
 type ModelAPIStatus struct {
