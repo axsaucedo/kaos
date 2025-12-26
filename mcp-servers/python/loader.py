@@ -5,7 +5,15 @@ This is the main entry point for the MCP servers. It loads and manages
 multiple MCP servers based on environment configuration and exposes
 them through a unified HTTP API.
 
-Security First: Only safe, proven servers are enabled by default.
+Philosophy: Uses externally-maintained, proven MCP servers to:
+- Reduce maintenance burden
+- Leverage community-reviewed implementations
+- Ensure security through proven packages
+- Simplify operations (fewer Docker images to manage)
+
+Security First: Only safe, externally-maintained, proven servers are enabled.
+
+Default: calculator (mcp-server-calculator) - safe arithmetic operations
 """
 
 import os
@@ -27,9 +35,10 @@ app = FastAPI(
 )
 
 # Registry of available MCP servers
+# Uses proven, externally-maintained MCP servers for safety and simplicity
 SAFE_SERVERS = {
-    "math": "servers.math_tools",
-    # Add more safe servers here as they are implemented
+    "calculator": "mcp_server_calculator",  # External: pip install mcp-server-calculator
+    # Add more proven servers here as needed
 }
 
 # Loaded server instances
@@ -60,11 +69,14 @@ def load_server(server_name: str) -> Any:
     """
     Load a safe MCP server by name.
 
+    Uses externally-maintained, proven MCP servers to avoid maintenance burden
+    and leverage community-reviewed implementations.
+
     Args:
         server_name: Name of the server to load
 
     Returns:
-        Server instance
+        Server instance/module
 
     Raises:
         ValueError: If server is not found or not safe
@@ -76,18 +88,19 @@ def load_server(server_name: str) -> Any:
         return _loaded_servers[server_name]
 
     try:
-        module_path = SAFE_SERVERS[server_name]
-        module = import_module(module_path)
+        module_name = SAFE_SERVERS[server_name]
+        module = import_module(module_name)
 
-        # Servers should have a Server class or instance
-        server = getattr(module, "Server", None) or getattr(module, "server", None)
-        if server is None:
-            raise ImportError(f"No Server class/instance found in {module_path}")
+        logger.info(f"Loaded external MCP server: {server_name} (module: {module_name})")
+        _loaded_servers[server_name] = module
+        return module
 
-        _loaded_servers[server_name] = server
-        logger.info(f"Loaded server: {server_name}")
-        return server
-
+    except ImportError as e:
+        logger.error(
+            f"Failed to load server {server_name}: {e}. "
+            f"Make sure it's installed via pip (e.g., pip install {module_name.replace('_', '-')})"
+        )
+        raise
     except Exception as e:
         logger.error(f"Failed to load server {server_name}: {e}")
         raise
@@ -98,9 +111,10 @@ def get_enabled_servers() -> List[str]:
     Get list of enabled MCP servers from environment.
 
     Reads MCP_SERVERS env var (comma-separated list).
-    Only safe servers are enabled.
+    Defaults to "calculator" (mcp-server-calculator).
+    Only safe, externally-maintained servers are enabled.
     """
-    mcp_servers = os.getenv("MCP_SERVERS", "math").split(",")
+    mcp_servers = os.getenv("MCP_SERVERS", "calculator").split(",")
     enabled = []
 
     for server_name in mcp_servers:
