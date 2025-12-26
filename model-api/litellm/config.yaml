@@ -1,0 +1,34 @@
+# LiteLLM Proxy Configuration
+# Routes all OpenAI-compatible API calls to local Ollama server
+
+model_list:
+  - model_name: "smollm2:135m"
+    litellm_params:
+      model: "ollama/smollm2:135m"
+      api_base: "http://host.docker.internal:11434"
+      stream_timeout: 600
+
+  - model_name: "llama2"
+    litellm_params:
+      model: "ollama/llama2"
+      api_base: "http://host.docker.internal:11434"
+      stream_timeout: 600
+
+  - model_name: "neural-chat"
+    litellm_params:
+      model: "ollama/neural-chat"
+      api_base: "http://host.docker.internal:11434"
+      stream_timeout: 600
+
+# Global settings
+general_settings:
+  completion_model: "smollm2:135m"
+  function_calling: false
+  drop_params: true
+  enable_model_cost_map: false
+
+# Default router settings
+router_settings:
+  enable_cooldowns: true
+  cooldown_time: 60
+  request_timeout: 600

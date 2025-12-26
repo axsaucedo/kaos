@@ -1,0 +1,20 @@
+version: '3.8'
+
+services:
+  litellm-proxy:
+    image: ghcr.io/berri-ai/litellm:latest
+    ports:
+      - "4000:4000"  # LiteLLM proxy port
+    environment:
+      - LITELLM_MODE=proxy
+      - LITELLM_PROXY_LOG=true
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+    volumes:
+      - ./config.yaml:/app/config.yaml
+    command: --config /app/config.yaml --port 4000
+    networks:
+      - agentic
+
+networks:
+  agentic:
+    driver: bridge
