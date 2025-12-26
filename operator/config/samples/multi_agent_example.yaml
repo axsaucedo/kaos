@@ -1,0 +1,98 @@
+---
+# Coordinator Agent: orchestrates other agents
+apiVersion: agentic.example.com/v1alpha1
+kind: Agent
+metadata:
+  name: coordinator
+  namespace: default
+spec:
+  modelAPI: ollama-proxy
+  mcpServers: []
+  config:
+    description: "Coordinator agent that orchestrates other agents"
+    instructions: |
+      You are a coordinator agent.
+      You have access to other agents via A2A communication.
+      Your role is to coordinate tasks between specialized agents.
+      Available agents: researcher, analyst
+    env:
+    - name: AGENT_LOG_LEVEL
+      value: "INFO"
+  agentNetwork:
+    expose: true
+    access:
+    - researcher
+    - analyst
+  replicas: 1
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "200m"
+    limits:
+      memory: "512Mi"
+      cpu: "1000m"
+
+---
+# Researcher Agent: has web search capabilities
+apiVersion: agentic.example.com/v1alpha1
+kind: Agent
+metadata:
+  name: researcher
+  namespace: default
+spec:
+  modelAPI: ollama-proxy
+  mcpServers: []
+  config:
+    description: "Research agent with web search capabilities"
+    instructions: |
+      You are a researcher agent.
+      You can be called by the coordinator agent.
+      Your role is to gather and analyze information.
+    env:
+    - name: AGENT_LOG_LEVEL
+      value: "INFO"
+  agentNetwork:
+    expose: true
+    access:
+    - coordinator
+  replicas: 1
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "200m"
+    limits:
+      memory: "512Mi"
+      cpu: "1000m"
+
+---
+# Analyst Agent: has math/calculation tools
+apiVersion: agentic.example.com/v1alpha1
+kind: Agent
+metadata:
+  name: analyst
+  namespace: default
+spec:
+  modelAPI: ollama-proxy
+  mcpServers:
+  - math-tools
+  config:
+    description: "Analyst agent with calculation capabilities"
+    instructions: |
+      You are an analyst agent with math tools.
+      You can be called by the coordinator agent.
+      Your role is to perform calculations and analysis.
+    env:
+    - name: AGENT_LOG_LEVEL
+      value: "INFO"
+  agentNetwork:
+    expose: true
+    access:
+    - coordinator
+  replicas: 1
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "200m"
+    limits:
+      memory: "512Mi"
+      cpu: "1000m"

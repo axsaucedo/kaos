@@ -1,0 +1,19 @@
+apiVersion: agentic.example.com/v1alpha1
+kind: MCPServer
+metadata:
+  name: math-tools
+  namespace: default
+spec:
+  type: python-runtime
+  config:
+    mcp: "mcp-server-calculator"
+    env:
+    - name: LOG_LEVEL
+      value: "INFO"
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "500m"

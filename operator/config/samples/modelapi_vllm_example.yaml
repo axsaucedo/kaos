@@ -1,0 +1,21 @@
+apiVersion: agentic.example.com/v1alpha1
+kind: ModelAPI
+metadata:
+  name: vllm-hosted
+  namespace: default
+spec:
+  mode: Hosted
+  serverConfig:
+    model: "NousResearch/Hermes-2-Theta-Llama-3-8B"
+    env:
+    - name: VLLM_USE_V2_BEHAVIOR
+      value: "1"
+    - name: VLLM_LOGGING_LEVEL
+      value: "INFO"
+    resources:
+      requests:
+        memory: "8Gi"
+        cpu: "2"
+      limits:
+        memory: "16Gi"
+        cpu: "4"

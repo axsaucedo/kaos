@@ -1,0 +1,29 @@
+apiVersion: agentic.example.com/v1alpha1
+kind: Agent
+metadata:
+  name: math-agent
+  namespace: default
+spec:
+  modelAPI: ollama-proxy
+  mcpServers:
+  - math-tools
+  config:
+    description: "A mathematical reasoning agent"
+    instructions: |
+      You are a helpful mathematical assistant.
+      You have access to a calculator tool for performing calculations.
+      Always show your reasoning and calculations clearly.
+    env:
+    - name: AGENT_LOG_LEVEL
+      value: "INFO"
+  agentNetwork:
+    expose: true
+    access: []
+  replicas: 1
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "200m"
+    limits:
+      memory: "512Mi"
+      cpu: "1000m"
