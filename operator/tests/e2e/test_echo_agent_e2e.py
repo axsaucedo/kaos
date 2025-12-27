@@ -4,9 +4,7 @@ import time
 import subprocess
 import pytest
 import httpx
-
-from mcp.client.sse import sse_client
-from mcp.client.session import ClientSession
+import json
 
 from .conftest import (
     create_custom_resource,
@@ -16,6 +14,15 @@ from .conftest import (
     create_mcpserver_resource,
     create_agent_resource,
 )
+
+
+def parse_sse_response(sse_text: str) -> dict:
+    """Parse SSE format response to extract JSON data."""
+    lines = sse_text.strip().split('\n')
+    for line in lines:
+        if line.startswith('data: '):
+            return json.loads(line[6:])
+    return None
 
 
 @pytest.mark.asyncio
@@ -155,19 +162,58 @@ async def test_mcpserver_deployment(test_namespace: str):
 
     time.sleep(2)
 
-    async with sse_client("http://localhost:18020/sse") as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        headers = {
+            "Accept": "application/json, text/event-stream",
+            "Content-Type": "application/json"
+        }
 
-            tools = await session.list_tools()
-            assert tools.tools
-            tool_names = [t.name for t in tools.tools]
-            assert "echo" in tool_names
+        # Initialize connection
+        init_request = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "test-client", "version": "1.0"}
+            }
+        }
 
-            result = await session.call_tool("echo", {"text": "Hello from Kubernetes"})
-            assert result.content
-            assert result.content[0].text
-            assert "Hello from Kubernetes" in result.content[0].text
+        response = await client.post("http://localhost:18020/mcp", headers=headers, json=init_request)
+        session_id = response.headers.get("mcp-session-id")
+        assert session_id
+
+        # List tools
+        headers["mcp-session-id"] = session_id
+        list_request = {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}
+
+        response = await client.post("http://localhost:18020/mcp", headers=headers, json=list_request)
+        data = parse_sse_response(response.text)
+
+        assert data
+        assert "result" in data
+        tools = data["result"].get("tools", [])
+        assert tools
+        tool_names = [t["name"] for t in tools]
+        assert "echo" in tool_names
+
+        # Call echo tool
+        call_request = {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "tools/call",
+            "params": {"name": "echo", "arguments": {"text": "Hello from Kubernetes"}}
+        }
+
+        response = await client.post("http://localhost:18020/mcp", headers=headers, json=call_request)
+        data = parse_sse_response(response.text)
+
+        assert data
+        assert "result" in data
+        result_content = data["result"].get("content", [])
+        assert result_content
+        assert result_content[0].get("text") == "Hello from Kubernetes"
 
     pf_process.terminate()
     pf_process.wait(timeout=5)
