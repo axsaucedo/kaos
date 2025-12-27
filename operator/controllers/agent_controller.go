@@ -15,6 +15,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	agenticv1alpha1 "agentic.example.com/agentic-operator/api/v1alpha1"
@@ -416,9 +417,53 @@ func (r *AgentReconciler) constructService(agent *agenticv1alpha1.Agent) *corev1
 
 // SetupWithManager sets up the controller with the Manager.
 func (r *AgentReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	// Map ModelAPI changes to related Agents
+	mapModelAPIToAgents := handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []ctrl.Request {
+		modelapi := obj.(*agenticv1alpha1.ModelAPI)
+		// Find all Agents in the same namespace
+		agentList := &agenticv1alpha1.AgentList{}
+		if err := r.List(ctx, agentList, client.InNamespace(modelapi.Namespace)); err != nil {
+			return []ctrl.Request{}
+		}
+
+		requests := []ctrl.Request{}
+		for _, agent := range agentList.Items {
+			if agent.Spec.ModelAPI == modelapi.Name {
+				requests = append(requests, ctrl.Request{
+					NamespacedName: types.NamespacedName{Name: agent.Name, Namespace: agent.Namespace},
+				})
+			}
+		}
+		return requests
+	})
+
+	// Map MCPServer changes to related Agents
+	mapMCPServerToAgents := handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []ctrl.Request {
+		mcpserver := obj.(*agenticv1alpha1.MCPServer)
+		// Find all Agents in the same namespace
+		agentList := &agenticv1alpha1.AgentList{}
+		if err := r.List(ctx, agentList, client.InNamespace(mcpserver.Namespace)); err != nil {
+			return []ctrl.Request{}
+		}
+
+		requests := []ctrl.Request{}
+		for _, agent := range agentList.Items {
+			for _, mcpName := range agent.Spec.MCPServers {
+				if mcpName == mcpserver.Name {
+					requests = append(requests, ctrl.Request{
+						NamespacedName: types.NamespacedName{Name: agent.Name, Namespace: agent.Namespace},
+					})
+				}
+			}
+		}
+		return requests
+	})
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&agenticv1alpha1.Agent{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
+		Watches(&agenticv1alpha1.ModelAPI{}, mapModelAPIToAgents).
+		Watches(&agenticv1alpha1.MCPServer{}, mapMCPServerToAgents).
 		Complete(r)
 }

@@ -34,6 +34,7 @@ type ModelAPIReconciler struct {
 //+kubebuilder:rbac:groups=ethical.institute,resources=modelapis/finalizers,verbs=update
 //+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -75,6 +76,37 @@ func (r *ModelAPIReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		modelapi.Status.Ready = false
 		if err := r.Status().Update(ctx, modelapi); err != nil {
 			log.Error(err, "failed to update status")
+			return ctrl.Result{}, err
+		}
+	}
+
+	// Create or update ConfigMap for LiteLLM config (only for Proxy mode)
+	if modelapi.Spec.Mode == agenticv1alpha1.ModelAPIModeProxy {
+		configmap := &corev1.ConfigMap{}
+		configmapName := fmt.Sprintf("litellm-config")
+		err := r.Get(ctx, types.NamespacedName{Name: configmapName, Namespace: modelapi.Namespace}, configmap)
+
+		if err != nil && apierrors.IsNotFound(err) {
+			// Create new ConfigMap
+			configmap = r.constructConfigMap(modelapi)
+			if err := controllerutil.SetControllerReference(modelapi, configmap, r.Scheme); err != nil {
+				log.Error(err, "failed to set controller reference for ConfigMap")
+				return ctrl.Result{}, err
+			}
+
+			log.Info("Creating ConfigMap", "name", configmap.Name)
+			if err := r.Create(ctx, configmap); err != nil {
+				log.Error(err, "failed to create ConfigMap")
+				modelapi.Status.Phase = "Failed"
+				modelapi.Status.Message = fmt.Sprintf("Failed to create ConfigMap: %v", err)
+				r.Status().Update(ctx, modelapi)
+				return ctrl.Result{}, err
+			}
+		} else if err != nil {
+			log.Error(err, "failed to get ConfigMap")
+			modelapi.Status.Phase = "Failed"
+			modelapi.Status.Message = fmt.Sprintf("Failed to get ConfigMap: %v", err)
+			r.Status().Update(ctx, modelapi)
 			return ctrl.Result{}, err
 		}
 	}
@@ -161,6 +193,22 @@ func (r *ModelAPIReconciler) constructDeployment(modelapi *agenticv1alpha1.Model
 	}
 
 	replicas := int32(1)
+
+	// Build volumes list - only add litellm-config for Proxy mode
+	volumes := []corev1.Volume{}
+	if modelapi.Spec.Mode == agenticv1alpha1.ModelAPIModeProxy {
+		volumes = append(volumes, corev1.Volume{
+			Name: "litellm-config",
+			VolumeSource: corev1.VolumeSource{
+				ConfigMap: &corev1.ConfigMapVolumeSource{
+					LocalObjectReference: corev1.LocalObjectReference{
+						Name: "litellm-config",
+					},
+				},
+			},
+		})
+	}
+
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("modelapi-%s", modelapi.Name),
@@ -180,18 +228,7 @@ func (r *ModelAPIReconciler) constructDeployment(modelapi *agenticv1alpha1.Model
 					Containers: []corev1.Container{
 						r.constructContainer(modelapi),
 					},
-					Volumes: []corev1.Volume{
-						{
-							Name: "litellm-config",
-							VolumeSource: corev1.VolumeSource{
-								ConfigMap: &corev1.ConfigMapVolumeSource{
-									LocalObjectReference: corev1.LocalObjectReference{
-										Name: "litellm-config",
-									},
-								},
-							},
-						},
-					},
+					Volumes: volumes,
 				},
 			},
 		},
@@ -239,6 +276,15 @@ func (r *ModelAPIReconciler) constructContainer(modelapi *agenticv1alpha1.ModelA
 		}
 	}
 
+	// Build volume mounts - only add litellm-config for Proxy mode
+	volumeMounts := []corev1.VolumeMount{}
+	if modelapi.Spec.Mode == agenticv1alpha1.ModelAPIModeProxy {
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{
+			Name:      "litellm-config",
+			MountPath: "/etc/litellm",
+		})
+	}
+
 	container := corev1.Container{
 		Name:            "model-api",
 		Image:           image,
@@ -251,13 +297,8 @@ func (r *ModelAPIReconciler) constructContainer(modelapi *agenticv1alpha1.ModelA
 				Protocol:      corev1.ProtocolTCP,
 			},
 		},
-		Env: env,
-		VolumeMounts: []corev1.VolumeMount{
-			{
-				Name:      "litellm-config",
-				MountPath: "/etc/litellm",
-			},
-		},
+		Env:           env,
+		VolumeMounts:  volumeMounts,
 		LivenessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
 				HTTPGet: &corev1.HTTPGetAction{
@@ -268,6 +309,8 @@ func (r *ModelAPIReconciler) constructContainer(modelapi *agenticv1alpha1.ModelA
 			},
 			InitialDelaySeconds: 30,
 			PeriodSeconds:       10,
+			TimeoutSeconds:      5,
+			FailureThreshold:    3,
 		},
 		ReadinessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
@@ -277,8 +320,10 @@ func (r *ModelAPIReconciler) constructContainer(modelapi *agenticv1alpha1.ModelA
 					Scheme: corev1.URISchemeHTTP,
 				},
 			},
-			InitialDelaySeconds: 10,
+			InitialDelaySeconds: 15,
 			PeriodSeconds:       5,
+			TimeoutSeconds:      5,
+			FailureThreshold:    3,
 		},
 	}
 
@@ -320,11 +365,57 @@ func (r *ModelAPIReconciler) constructService(modelapi *agenticv1alpha1.ModelAPI
 	return service
 }
 
+// constructConfigMap creates a ConfigMap with LiteLLM configuration
+func (r *ModelAPIReconciler) constructConfigMap(modelapi *agenticv1alpha1.ModelAPI) *corev1.ConfigMap {
+	// Create a basic LiteLLM config that routes to Ollama
+	litellmConfig := `model_list:
+  - model_name: "smollm2:135m"
+    litellm_params:
+      model: "ollama/smollm2:135m"
+      api_base: "http://host.docker.internal:11434"
+      stream_timeout: 600
+
+  - model_name: "llama2"
+    litellm_params:
+      model: "ollama/llama2"
+      api_base: "http://host.docker.internal:11434"
+      stream_timeout: 600
+
+general_settings:
+  completion_model: "smollm2:135m"
+  function_calling: false
+  drop_params: true
+  enable_model_cost_map: false
+
+router_settings:
+  enable_cooldowns: true
+  cooldown_time: 60
+  request_timeout: 600
+`
+
+	configmap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "litellm-config",
+			Namespace: modelapi.Namespace,
+			Labels: map[string]string{
+				"app":      "modelapi",
+				"modelapi": modelapi.Name,
+			},
+		},
+		Data: map[string]string{
+			"config.yaml": litellmConfig,
+		},
+	}
+
+	return configmap
+}
+
 // SetupWithManager sets up the controller with the Manager.
 func (r *ModelAPIReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&agenticv1alpha1.ModelAPI{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
+		Owns(&corev1.ConfigMap{}).
 		Complete(r)
 }

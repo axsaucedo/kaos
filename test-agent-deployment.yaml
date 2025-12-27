@@ -4,9 +4,9 @@ metadata:
   name: agent-config
   namespace: agentic-system
 data:
-  AGENT_NAME: "test-math-agent"
+  AGENT_NAME: "test-echo-agent"
   AGENT_DESCRIPTION: "Test agent for local K8s deployment"
-  AGENT_INSTRUCTIONS: "You are a helpful mathematical assistant."
+  AGENT_INSTRUCTIONS: "You are a helpful assistant with access to echo tools for testing."
   MODEL_API_URL: "http://host.docker.internal:11434/v1"
   MODEL_NAME: "smollm2:135m"
   AGENT_LOG_LEVEL: "INFO"

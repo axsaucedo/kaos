@@ -81,7 +81,7 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// Create or update Deployment
 	deployment := &appsv1.Deployment{}
-	deploymentName := fmt.Sprintf("mcp-%s", mcpserver.Name)
+	deploymentName := fmt.Sprintf("mcpserver-%s", mcpserver.Name)
 	err := r.Get(ctx, types.NamespacedName{Name: deploymentName, Namespace: mcpserver.Namespace}, deployment)
 
 	if err != nil && apierrors.IsNotFound(err) {
@@ -107,7 +107,7 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	// Create or update Service
 	service := &corev1.Service{}
-	serviceName := fmt.Sprintf("mcp-%s", mcpserver.Name)
+	serviceName := fmt.Sprintf("mcpserver-%s", mcpserver.Name)
 	err = r.Get(ctx, types.NamespacedName{Name: serviceName, Namespace: mcpserver.Namespace}, service)
 
 	if err != nil && apierrors.IsNotFound(err) {
@@ -173,7 +173,7 @@ func (r *MCPServerReconciler) constructDeployment(mcpserver *agenticv1alpha1.MCP
 
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("mcp-%s", mcpserver.Name),
+			Name:      fmt.Sprintf("mcpserver-%s", mcpserver.Name),
 			Namespace: mcpserver.Namespace,
 			Labels:    labels,
 		},
@@ -261,7 +261,7 @@ func (r *MCPServerReconciler) constructService(mcpserver *agenticv1alpha1.MCPSer
 
 	service := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      fmt.Sprintf("mcp-%s", mcpserver.Name),
+			Name:      fmt.Sprintf("mcpserver-%s", mcpserver.Name),
 			Namespace: mcpserver.Namespace,
 			Labels:    labels,
 		},
