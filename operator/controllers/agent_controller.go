@@ -196,8 +196,8 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			return ctrl.Result{}, err
 		}
 
-		// Set endpoint for A2A
-		agent.Status.Endpoint = fmt.Sprintf("http://%s.%s.svc.cluster.local:8000/agent/card", serviceName, agent.Namespace)
+		// Set endpoint for A2A (base URL only - clients append paths like /.well-known/agent)
+		agent.Status.Endpoint = fmt.Sprintf("http://%s.%s.svc.cluster.local:8000", serviceName, agent.Namespace)
 	}
 
 	// Update status
@@ -242,7 +242,7 @@ func (r *AgentReconciler) constructDeployment(agent *agenticv1alpha1.Agent, mode
 
 	container := corev1.Container{
 		Name:            "agent",
-		Image:           "agentic-runtime:latest", // Should be available from docker build
+		Image:           "agentic-agent:latest",
 		ImagePullPolicy: corev1.PullIfNotPresent,
 		Ports: []corev1.ContainerPort{
 			{
@@ -340,6 +340,41 @@ func (r *AgentReconciler) constructEnvVars(agent *agenticv1alpha1.Agent, modelap
 		Name:  "MODEL_API_URL",
 		Value: modelapi.Status.Endpoint,
 	})
+
+	// Default MODEL_NAME if not provided in user env vars
+	// Users can override via config.env
+	hasModelName := false
+	if agent.Spec.Config != nil {
+		for _, e := range agent.Spec.Config.Env {
+			if e.Name == "MODEL_NAME" {
+				hasModelName = true
+				break
+			}
+		}
+	}
+	if !hasModelName {
+		env = append(env, corev1.EnvVar{
+			Name:  "MODEL_NAME",
+			Value: "smollm2:135m", // Default model
+		})
+	}
+
+	// Enable debug memory endpoints for testing (can be disabled via AGENT_DEBUG_MEMORY_ENDPOINTS=false)
+	hasDebugMemory := false
+	if agent.Spec.Config != nil {
+		for _, e := range agent.Spec.Config.Env {
+			if e.Name == "AGENT_DEBUG_MEMORY_ENDPOINTS" {
+				hasDebugMemory = true
+				break
+			}
+		}
+	}
+	if !hasDebugMemory {
+		env = append(env, corev1.EnvVar{
+			Name:  "AGENT_DEBUG_MEMORY_ENDPOINTS",
+			Value: "true", // Enable by default for testing
+		})
+	}
 
 	// MCP Servers configuration
 	if len(mcpServers) > 0 {

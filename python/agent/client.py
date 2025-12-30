@@ -60,12 +60,12 @@ class RemoteAgent:
             self.agent_card = AgentCard(
                 name=card_data.get("name", self.name),
                 description=card_data.get("description", ""),
-                url=card_data.get("url", self.card_url),
+                url=self.card_url,  # Use the provided card_url, not the one from the response (which may be localhost)
                 skills=card_data.get("skills", []),
                 capabilities=card_data.get("capabilities", [])
             )
 
-            logger.info(f"Discovered remote agent: {self.name} - {self.agent_card.description}")
+            logger.info(f"Discovered remote agent: {self.name} at {self.card_url} - {self.agent_card.description}")
             return self.agent_card
 
         except httpx.HTTPError as e:

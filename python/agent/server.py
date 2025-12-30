@@ -30,7 +30,7 @@ class AgentServerSettings(BaseSettings):
     # Required settings
     agent_name: str
     model_api_url: str
-    model_name: str
+    model_name: str = "smollm2:135m"  # Default model
 
     # Optional settings with defaults
     agent_description: str = "AI Agent"
@@ -41,6 +41,10 @@ class AgentServerSettings(BaseSettings):
     # Sub-agent configuration (comma-separated list of name:url pairs)
     # Format: "worker-1:http://localhost:8001,worker-2:http://localhost:8002"
     agent_sub_agents: str = ""
+    
+    # Alternative: Kubernetes operator format (PEER_AGENTS comma-separated names)
+    # Individual URLs via PEER_AGENT_<NAME>_CARD_URL env vars
+    peer_agents: str = ""
     
     # Debug settings (only enable in development/testing)
     agent_debug_memory_endpoints: bool = False
@@ -398,6 +402,8 @@ def create_agent_server(settings: AgentServerSettings = None, sub_agents: List[R
     Returns:
         AgentServer instance
     """
+    import os
+    
     if not settings:
         settings = AgentServerSettings()
 
@@ -409,13 +415,29 @@ def create_agent_server(settings: AgentServerSettings = None, sub_agents: List[R
     # Parse sub-agents from settings if not provided directly
     if sub_agents is None:
         sub_agents = []
+        
+        # Method 1: Direct agent_sub_agents format "name:url,name:url"
         if settings.agent_sub_agents:
             for agent_spec in settings.agent_sub_agents.split(","):
                 agent_spec = agent_spec.strip()
                 if ":" in agent_spec:
                     name, url = agent_spec.split(":", 1)
                     sub_agents.append(RemoteAgent(name=name.strip(), card_url=url.strip()))
-                    logger.info(f"Configured sub-agent: {name} -> {url}")
+                    logger.info(f"Configured sub-agent (direct): {name} -> {url}")
+        
+        # Method 2: Kubernetes operator format with PEER_AGENTS and PEER_AGENT_<NAME>_CARD_URL
+        elif settings.peer_agents:
+            for peer_name in settings.peer_agents.split(","):
+                peer_name = peer_name.strip()
+                if peer_name:
+                    # Look for PEER_AGENT_<NAME>_CARD_URL env var
+                    env_name = f"PEER_AGENT_{peer_name.upper().replace('-', '_')}_CARD_URL"
+                    card_url = os.environ.get(env_name)
+                    if card_url:
+                        sub_agents.append(RemoteAgent(name=peer_name, card_url=card_url))
+                        logger.info(f"Configured sub-agent (k8s): {peer_name} -> {card_url}")
+                    else:
+                        logger.warning(f"No URL found for peer agent {peer_name} (expected {env_name})")
 
     agent = Agent(
         name=settings.agent_name,
@@ -436,8 +458,18 @@ def create_agent_server(settings: AgentServerSettings = None, sub_agents: List[R
 
 
 def create_app(settings: AgentServerSettings = None) -> FastAPI:
-    _server = create_agent_server()
+    """Create FastAPI app for uvicorn deployment."""
+    _server = create_agent_server(settings)
     app = _server.create_app()
     logger.info(f"Created Agent FastAPI App")
     return app
+
+
+def get_app() -> FastAPI:
+    """Lazy app factory for uvicorn. Only creates app when called."""
+    return create_app()
+
+
+# For uvicorn: use "agent.server:get_app" with --factory flag
+# Or use "agent.server:app" after setting required env vars
 

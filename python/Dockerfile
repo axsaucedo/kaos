@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
@@ -13,7 +13,9 @@ RUN uv pip compile pyproject.toml -o requirements.txt && \
     uv pip install --system -r requirements.txt
 
 # Copy source code
-COPY . .
+COPY agent/ agent/
+COPY mcptools/ mcptools/
+COPY modelapi/ modelapi/
 
 # Create non-root user
 RUN useradd -m -u 65532 agentic && chown -R agentic:agentic /app
@@ -21,7 +23,10 @@ USER agentic
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:8000/health')" || exit 1
+    CMD python -c "import httpx; httpx.get('http://localhost:8000/health').raise_for_status()" || exit 1
 
-# Run the server (app is created by to_a2a() in agent/server/server.py)
-CMD ["python", "-m", "uvicorn", "agent.server:app", "--host", "0.0.0.0", "--port", "8000"]
+# Expose port
+EXPOSE 8000
+
+# Run the agent server using factory pattern
+CMD ["python", "-m", "uvicorn", "agent.server:get_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
