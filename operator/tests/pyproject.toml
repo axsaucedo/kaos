@@ -23,3 +23,9 @@ packages = ["e2e"]
 dev = [
     "pytest-xdist>=3.8.0",
 ]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+# Parallel execution: use -n 2 --dist loadscope for ~3min runtime
+# Sequential execution (default): ~6min runtime
+# Example: pytest e2e/ -n 2 --dist loadscope

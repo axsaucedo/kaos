@@ -12,15 +12,31 @@ from sh import kubectl
 import yaml
 
 
-# Port allocation counter for unique ports across tests
-_port_counter = 18000
+# Port allocation - use worker-specific ranges for xdist
+def _get_worker_port_base() -> int:
+    """Get base port for current worker (supports pytest-xdist)."""
+    import os
+    worker_id = os.environ.get("PYTEST_XDIST_WORKER", "gw0")
+    # Extract worker number (gw0 -> 0, gw1 -> 1, etc.)
+    try:
+        worker_num = int(worker_id.replace("gw", ""))
+    except ValueError:
+        worker_num = 0
+    # Each worker gets 100 ports starting at 18000 + (worker_num * 100)
+    return 18000 + (worker_num * 100)
+
+
+_port_counters: dict = {}
 
 
 def get_next_port() -> int:
-    """Get next available port for port-forwarding."""
-    global _port_counter
-    port = _port_counter
-    _port_counter += 1
+    """Get next available port for port-forwarding (worker-safe)."""
+    import os
+    worker_id = os.environ.get("PYTEST_XDIST_WORKER", "master")
+    if worker_id not in _port_counters:
+        _port_counters[worker_id] = _get_worker_port_base()
+    port = _port_counters[worker_id]
+    _port_counters[worker_id] += 1
     return port
 
 
@@ -96,10 +112,21 @@ def parallel_port_forwards(namespace: str,
     return [pf for pf, _ in processes]
 
 
-@pytest.fixture(scope="session")
-def shared_namespace() -> Generator[str, None, None]:
-    """Session-scoped fixture that creates a shared test namespace."""
-    namespace = f"test-e2e-session-{int(time.time())}"
+@pytest.fixture(scope="module")
+def shared_namespace(request) -> Generator[str, None, None]:
+    """Module-scoped fixture that creates a test namespace.
+    
+    For pytest-xdist parallel execution, each worker gets its own namespace
+    to avoid conflicts. Using module scope ensures proper isolation per test file.
+    """
+    import os
+    import re
+    # Get worker id for xdist parallel execution
+    worker_id = os.environ.get("PYTEST_XDIST_WORKER", "main")
+    # Include module name for uniqueness (sanitize for K8s naming)
+    module_name = request.module.__name__.split(".")[-1]
+    module_name = re.sub(r"[^a-z0-9]", "", module_name.lower())[:8]
+    namespace = f"e2e-{worker_id}-{module_name}-{int(time.time()) % 10000}"
     kubectl("create", "namespace", namespace)
     yield namespace
     try:
@@ -114,11 +141,11 @@ def test_namespace(shared_namespace: str) -> Generator[str, None, None]:
     yield shared_namespace
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="module")
 def shared_modelapi(shared_namespace: str) -> Generator[str, None, None]:
-    """Session-scoped ModelAPI for tests that use mock_response.
+    """Module-scoped ModelAPI for tests that use mock_response.
     
-    Deploys a single LiteLLM proxy that all mock-based tests can share.
+    Deploys a single LiteLLM proxy that all mock-based tests in the module can share.
     Tests requiring specific ModelAPI configurations should create their own.
     """
     name = "shared-mock-proxy"

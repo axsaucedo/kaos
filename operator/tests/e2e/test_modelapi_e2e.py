@@ -24,7 +24,7 @@ from e2e.conftest import (
 @pytest.mark.asyncio
 async def test_modelapi_proxy_deployment(test_namespace: str):
     """Test ModelAPI Proxy mode deployment and health check."""
-    name = "modelapi-proxy-deploy"
+    name = "proxy-deploy"
     modelapi_spec = create_modelapi_resource(test_namespace, name)
     create_custom_resource(modelapi_spec, test_namespace)
 
@@ -59,7 +59,7 @@ async def test_modelapi_proxy_mock_response(test_namespace: str):
     This validates that LiteLLM's mock_response feature works correctly,
     which enables deterministic testing without requiring a real LLM.
     """
-    name = "modelapi-mock-resp"
+    name = "mock-resp"
     modelapi_spec = create_modelapi_resource(test_namespace, name)
     create_custom_resource(modelapi_spec, test_namespace)
 
@@ -103,7 +103,7 @@ async def test_modelapi_proxy_with_ollama(test_namespace: str):
     This is the ONLY test that actually calls a real LLM model through proxy.
     Requires Ollama running locally with smollm2:135m model.
     """
-    name = "modelapi-ollama-prx"
+    name = "ollama-prx"
     # Create ModelAPI with Ollama backend using new simplified proxyConfig fields
     modelapi_spec = {
         "apiVersion": "ethical.institute/v1alpha1",
@@ -173,7 +173,7 @@ async def test_modelapi_hosted_ollama(test_namespace: str):
     
     Note: This test may take longer as Ollama needs to pull the model.
     """
-    name = "modelapi-hosted"
+    name = "hosted"
     # Create ModelAPI in Hosted mode
     modelapi_spec = {
         "apiVersion": "ethical.institute/v1alpha1",
