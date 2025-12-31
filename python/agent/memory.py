@@ -130,6 +130,27 @@ class LocalMemory:
         """
         return self._sessions.get(session_id)
 
+    async def get_or_create_session(
+        self,
+        session_id: str,
+        app_name: str = "agent",
+        user_id: str = "user"
+    ) -> str:
+        """Get existing session or create a new one with the given ID.
+
+        Args:
+            session_id: The session ID to get or create
+            app_name: Name of the application (used if creating)
+            user_id: User identifier (used if creating)
+
+        Returns:
+            The session ID (same as input)
+        """
+        if session_id not in self._sessions:
+            await self.create_session(app_name, user_id, session_id)
+            logger.debug(f"Created new session for provided ID: {session_id}")
+        return session_id
+
     async def add_event(self, session_id: str, event: MemoryEvent) -> bool:
         """Add an event to a session.
 

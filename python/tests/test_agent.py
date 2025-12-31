@@ -200,6 +200,115 @@ class TestMessageProcessing:
         assert mock_llm.call_count >= 1
         
         logger.info("✓ Message processing with memory works correctly")
+    
+    @pytest.mark.asyncio
+    async def test_message_processing_with_provided_session_id(self):
+        """Test that providing a session_id correctly stores events in that session."""
+        mock_llm = MockModelAPI("session-test")
+        memory = LocalMemory()
+        
+        agent = Agent(
+            name="session-agent",
+            instructions="Test session handling.",
+            model_api=mock_llm,
+            memory=memory
+        )
+        
+        # Use a specific session ID
+        custom_session_id = "my-custom-session-123"
+        
+        # Process first message with custom session ID
+        response_chunks = []
+        async for chunk in agent.process_message(
+            "First message", 
+            session_id=custom_session_id
+        ):
+            response_chunks.append(chunk)
+        
+        response1 = "".join(response_chunks)
+        assert len(response1) > 0
+        
+        # Process second message with same session ID
+        response_chunks = []
+        async for chunk in agent.process_message(
+            "Second message",
+            session_id=custom_session_id
+        ):
+            response_chunks.append(chunk)
+        
+        response2 = "".join(response_chunks)
+        assert len(response2) > 0
+        
+        # Verify session exists with our custom ID
+        sessions = await memory.list_sessions()
+        assert custom_session_id in sessions, f"Custom session ID not found. Sessions: {sessions}"
+        
+        # Get events from that specific session
+        events = await memory.get_session_events(custom_session_id)
+        
+        # Should have 2 user_messages and 2 agent_responses (one for each message)
+        event_types = [e.event_type for e in events]
+        user_message_count = event_types.count("user_message")
+        agent_response_count = event_types.count("agent_response")
+        
+        assert user_message_count == 2, f"Expected 2 user_messages, got {user_message_count}"
+        assert agent_response_count == 2, f"Expected 2 agent_responses, got {agent_response_count}"
+        
+        # Verify both messages are in the events
+        user_events = [e for e in events if e.event_type == "user_message"]
+        user_contents = [e.content for e in user_events]
+        assert "First message" in user_contents
+        assert "Second message" in user_contents
+        
+        # There should only be one session (the custom one we created)
+        assert len(sessions) == 1, f"Expected 1 session, got {len(sessions)}: {sessions}"
+        
+        logger.info("✓ Message processing with provided session_id works correctly")
+    
+    @pytest.mark.asyncio
+    async def test_session_id_retrieved_via_memory_api(self):
+        """Test that session events can be retrieved via memory API after processing."""
+        mock_llm = MockModelAPI("memory-api-test")
+        memory = LocalMemory()
+        
+        agent = Agent(
+            name="memory-agent",
+            instructions="Test memory API retrieval.",
+            model_api=mock_llm,
+            memory=memory
+        )
+        
+        # Use a specific session ID for easy retrieval
+        test_session = "test-session-for-retrieval"
+        test_message = "Test message content for verification"
+        
+        # Process message
+        response_chunks = []
+        async for chunk in agent.process_message(test_message, session_id=test_session):
+            response_chunks.append(chunk)
+        
+        # Retrieve session using memory API
+        session = await memory.get_session(test_session)
+        assert session is not None, "Session should exist"
+        assert session.session_id == test_session
+        
+        # Retrieve events using memory API
+        events = await memory.get_session_events(test_session)
+        assert len(events) >= 2  # At least user_message and agent_response
+        
+        # Filter by event type
+        user_events = await memory.get_session_events(test_session, event_types=["user_message"])
+        assert len(user_events) == 1
+        assert user_events[0].content == test_message
+        
+        agent_events = await memory.get_session_events(test_session, event_types=["agent_response"])
+        assert len(agent_events) == 1
+        
+        # Get conversation context
+        context = await memory.build_conversation_context(test_session)
+        assert test_message in context
+        
+        logger.info("✓ Session events retrieved correctly via memory API")
 
 
 class TestModelAPIClient:

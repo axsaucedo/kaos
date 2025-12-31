@@ -248,9 +248,13 @@ class Agent:
         Yields:
             Content chunks (streaming) or single complete response (non-streaming)
         """
-        # Create session if needed
-        if not session_id:
-            session_id = await self.memory.create_session("agent", "user", session_id)
+        # Get or create session - handles both provided and new session IDs
+        if session_id:
+            # Use provided session ID, creating session if it doesn't exist
+            session_id = await self.memory.get_or_create_session(session_id, "agent", "user")
+        else:
+            # Create new session with auto-generated ID
+            session_id = await self.memory.create_session("agent", "user")
 
         logger.debug(f"Processing message for session {session_id}, streaming={stream}")
 
