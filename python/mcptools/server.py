@@ -22,6 +22,7 @@ class MCPServerSettings(BaseSettings):
     mcp_port: int = 8000
     mcp_tools_string: str = ""
     mcp_log_level: str = "INFO"
+    mcp_access_log: bool = False  # Mute uvicorn access logs by default
 
 
 class MCPServer:
@@ -32,6 +33,7 @@ class MCPServer:
         self._host = settings.mcp_host
         self._port = settings.mcp_port
         self._log_level = settings.mcp_log_level
+        self._access_log = settings.mcp_access_log
         self.mcp = FastMCP("Dynamic MCP Server")
         self.tools_registry: Dict[str, Callable] = {}
 
@@ -114,7 +116,8 @@ class MCPServer:
                 app,
                 host=self._host,
                 port=self._port,
-                log_level=self._log_level.lower()
+                log_level=self._log_level.lower(),
+                access_log=self._access_log
             )
         except Exception as e:
             logger.error(f"Failed to start MCP server: {e}")

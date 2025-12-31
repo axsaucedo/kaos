@@ -53,6 +53,9 @@ class AgentServerSettings(BaseSettings):
     
     # Debug settings (only enable in development/testing)
     agent_debug_memory_endpoints: bool = False
+    
+    # Logging settings
+    agent_access_log: bool = False  # Mute uvicorn access logs by default
 
     class Config:
         env_file = ".env"
@@ -76,17 +79,19 @@ class ChatCompletionRequest(BaseModel):
 class AgentServer:
     """Simple AgentServer following Google ADK patterns."""
 
-    def __init__(self, agent: Agent, port: int = 8000, debug_memory_endpoints: bool = False):
+    def __init__(self, agent: Agent, port: int = 8000, debug_memory_endpoints: bool = False, access_log: bool = False):
         """Initialize AgentServer with an agent (like Google ADK pattern).
 
         Args:
             agent: Agent instance to serve
             port: Port to serve on
             debug_memory_endpoints: Whether to enable /memory/* endpoints (for testing)
+            access_log: Whether to enable uvicorn access logs (default: False)
         """
         self.agent = agent
         self.port = port
         self.debug_memory_endpoints = debug_memory_endpoints
+        self.access_log = access_log
 
         # Create FastAPI app
         self.app = FastAPI(
@@ -401,7 +406,7 @@ class AgentServer:
             host: Host to bind to
         """
         logger.info(f"Starting AgentServer on {host}:{self.port}")
-        uvicorn.run(self.app, host=host, port=self.port)
+        uvicorn.run(self.app, host=host, port=self.port, access_log=self.access_log)
 
 
 def create_agent_server(settings: AgentServerSettings = None, sub_agents: List[RemoteAgent] = None) -> AgentServer:
@@ -471,7 +476,8 @@ def create_agent_server(settings: AgentServerSettings = None, sub_agents: List[R
     server = AgentServer(
         agent, 
         port=settings.agent_port,
-        debug_memory_endpoints=settings.agent_debug_memory_endpoints
+        debug_memory_endpoints=settings.agent_debug_memory_endpoints,
+        access_log=settings.agent_access_log
     )
 
     logger.info(f"Created agent server: {settings.agent_name} with {len(sub_agents)} sub-agents, loop_config={loop_config}")
