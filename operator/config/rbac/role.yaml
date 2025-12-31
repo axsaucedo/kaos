@@ -4,6 +4,28 @@ kind: ClusterRole
 metadata:
   name: agentic-operator
 rules:
+# Leader election requires leases
+- apiGroups:
+  - coordination.k8s.io
+  resources:
+  - leases
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+# Events for leader election notifications
+- apiGroups:
+  - ""
+  resources:
+  - events
+  verbs:
+  - create
+  - patch
+  - update
 - apiGroups:
   - ""
   resources:
