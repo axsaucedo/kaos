@@ -216,6 +216,31 @@ func (r *ModelAPIReconciler) constructDeployment(modelapi *agenticv1alpha1.Model
 		})
 	}
 
+	// Build init containers for Hosted mode (pull the model)
+	initContainers := []corev1.Container{}
+	if modelapi.Spec.Mode == agenticv1alpha1.ModelAPIModeHosted && modelapi.Spec.ServerConfig != nil && modelapi.Spec.ServerConfig.Model != "" {
+		// Init container starts Ollama server, pulls model, then exits
+		// The model is stored in the emptyDir volume shared with main container
+		volumes = append(volumes, corev1.Volume{
+			Name: "ollama-data",
+			VolumeSource: corev1.VolumeSource{
+				EmptyDir: &corev1.EmptyDirVolumeSource{},
+			},
+		})
+		initContainers = append(initContainers, corev1.Container{
+			Name:            "pull-model",
+			Image:           "ollama/ollama:latest",
+			ImagePullPolicy: corev1.PullIfNotPresent,
+			Command:         []string{"/bin/sh", "-c"},
+			Args: []string{
+				fmt.Sprintf("ollama serve & OLLAMA_PID=$! && sleep 5 && ollama pull %s && kill $OLLAMA_PID", modelapi.Spec.ServerConfig.Model),
+			},
+			VolumeMounts: []corev1.VolumeMount{
+				{Name: "ollama-data", MountPath: "/root/.ollama"},
+			},
+		})
+	}
+
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("modelapi-%s", modelapi.Name),
@@ -232,6 +257,7 @@ func (r *ModelAPIReconciler) constructDeployment(modelapi *agenticv1alpha1.Model
 					Labels: labels,
 				},
 				Spec: corev1.PodSpec{
+					InitContainers: initContainers,
 					Containers: []corev1.Container{
 						r.constructContainer(modelapi),
 					},
@@ -302,6 +328,13 @@ func (r *ModelAPIReconciler) constructContainer(modelapi *agenticv1alpha1.ModelA
 		volumeMounts = append(volumeMounts, corev1.VolumeMount{
 			Name:      "litellm-config",
 			MountPath: "/etc/litellm",
+		})
+	}
+	// Add ollama-data volume mount for Hosted mode
+	if modelapi.Spec.Mode == agenticv1alpha1.ModelAPIModeHosted && modelapi.Spec.ServerConfig != nil && modelapi.Spec.ServerConfig.Model != "" {
+		volumeMounts = append(volumeMounts, corev1.VolumeMount{
+			Name:      "ollama-data",
+			MountPath: "/root/.ollama",
 		})
 	}
 
