@@ -229,3 +229,65 @@ This closes:
 - ModelAPI HTTP client
 - All MCPClient connections
 - All RemoteAgent connections
+
+## Multi-Agent System Design
+
+### Sub-Agent Availability and Ordering
+
+When deploying multi-agent systems (e.g., coordinator with workers), agents may start in any order. The framework handles this gracefully:
+
+**Design Principles:**
+
+1. **Graceful Degradation**: If a sub-agent is unavailable during discovery, the coordinator continues to function. The model is informed which agents are unavailable.
+
+2. **Retry on Each Request**: Sub-agent availability is re-checked on each request, allowing recovery when agents become available.
+
+3. **Short Discovery Timeout**: Agent card discovery uses a 5-second timeout (vs 30s for task invocation) since agent cards should respond quickly.
+
+4. **Informative Error Messages**: When delegation fails, the model receives a message like `[Delegation failed: Agent 'worker' is not reachable. Please try an alternative approach.]`
+
+**Example: Coordinator Starts Before Workers**
+
+```python
+# Coordinator created with references to workers that don't exist yet
+worker1 = RemoteAgent(name="worker-1", card_url="http://worker-1:8000")
+worker2 = RemoteAgent(name="worker-2", card_url="http://worker-2:8000")
+
+coordinator = Agent(
+    name="coordinator",
+    model_api=model_api,
+    sub_agents=[worker1, worker2]
+)
+
+# First request - workers not available yet
+# Model receives: "worker-1: (currently unavailable), worker-2: (currently unavailable)"
+# Model can still respond, just can't delegate
+
+# Later, after workers start...
+# Next request - workers discovered and available
+# Model receives: "worker-1: Worker agent, worker-2: Worker agent"
+# Delegation now works
+```
+
+### Memory Events for Delegation
+
+| Event Type | Description |
+|------------|-------------|
+| `delegation_request` | Logged when delegation is attempted |
+| `delegation_response` | Logged when sub-agent responds successfully |
+| `delegation_error` | Logged when delegation fails (agent unavailable or error) |
+
+### RemoteAgent Properties
+
+```python
+remote = RemoteAgent(name="worker", card_url="http://worker:8000")
+
+# Check availability
+if remote.available:
+    response = await remote.invoke("Do something")
+else:
+    print(f"Agent unavailable: {remote.last_error}")
+
+# Force re-discovery
+await remote.discover(retry=True)
+```
