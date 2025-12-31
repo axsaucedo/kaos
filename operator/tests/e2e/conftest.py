@@ -44,8 +44,11 @@ def test_namespace() -> Generator[str, None, None]:
         pass
 
 
-def create_modelapi_resource(namespace: str, name: str = "ollama-proxy") -> Dict[str, Any]:
-    """Create a ModelAPI resource spec for LiteLLM proxy to Ollama.
+def create_modelapi_resource(namespace: str, name: str = "mock-proxy") -> Dict[str, Any]:
+    """Create a ModelAPI resource spec for LiteLLM proxy (supports mock_response).
+
+    This creates a LiteLLM proxy that can be used with mock_response for
+    deterministic testing without requiring a real LLM backend.
 
     Args:
         namespace: Namespace for the resource
@@ -67,7 +70,38 @@ def create_modelapi_resource(namespace: str, name: str = "ollama-proxy") -> Dict
                 "env": [
                     {"name": "OPENAI_API_KEY", "value": "sk-test"},
                     {"name": "LITELLM_LOG", "value": "WARN"},
-                    {"name": "LITELLM_MODEL_LIST", "value": "ollama/smollm2:135m"},
+                    # No OLLAMA_BASE_URL needed - tests use mock_response
+                ]
+            },
+        },
+    }
+
+
+def create_modelapi_hosted_resource(namespace: str, name: str = "ollama-hosted") -> Dict[str, Any]:
+    """Create a ModelAPI resource spec for Hosted mode with Ollama.
+
+    This creates a real Ollama instance for tests that need actual model inference.
+
+    Args:
+        namespace: Namespace for the resource
+        name: Resource name
+
+    Returns:
+        Resource specification
+    """
+    return {
+        "apiVersion": "ethical.institute/v1alpha1",
+        "kind": "ModelAPI",
+        "metadata": {
+            "name": name,
+            "namespace": namespace,
+        },
+        "spec": {
+            "mode": "Proxy",  # Use Proxy mode with Ollama backend for real inference
+            "proxyConfig": {
+                "env": [
+                    {"name": "OPENAI_API_KEY", "value": "sk-test"},
+                    {"name": "LITELLM_LOG", "value": "WARN"},
                     {"name": "OLLAMA_BASE_URL", "value": "http://host.docker.internal:11434"},
                 ]
             },

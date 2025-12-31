@@ -22,7 +22,7 @@ from e2e.conftest import (
 
 def create_agentic_loop_resources(namespace: str):
     """Create resources for deterministic agentic loop testing."""
-    # ModelAPI with LiteLLM (supports mock_response)
+    # ModelAPI with LiteLLM (supports mock_response - no OLLAMA_BASE_URL needed)
     modelapi_spec = {
         "apiVersion": "ethical.institute/v1alpha1",
         "kind": "ModelAPI",
@@ -33,8 +33,7 @@ def create_agentic_loop_resources(namespace: str):
                 "env": [
                     {"name": "OPENAI_API_KEY", "value": "sk-test"},
                     {"name": "LITELLM_LOG", "value": "WARN"},
-                    {"name": "LITELLM_MODEL_LIST", "value": "ollama/smollm2:135m"},
-                    {"name": "OLLAMA_BASE_URL", "value": "http://host.docker.internal:11434"},
+                    # No OLLAMA_BASE_URL - tests use mock_response for determinism
                 ]
             },
         },

@@ -3,9 +3,9 @@
 Tests the agent server running in Kubernetes with the new framework:
 - Health/Ready endpoints
 - Agent card at /.well-known/agent
-- Task invocation with memory verification
+- Task invocation with memory verification (using mock_response)
 - Chat completions (streaming and non-streaming)
-- Multi-agent delegation via chat completions
+- ModelAPI hosted mode with real Ollama inference
 """
 
 import time
@@ -18,6 +18,7 @@ from e2e.conftest import (
     wait_for_deployment,
     port_forward,
     create_modelapi_resource,
+    create_modelapi_hosted_resource,
     create_mcpserver_resource,
     create_agent_resource,
 )
@@ -25,20 +26,20 @@ from e2e.conftest import (
 
 @pytest.mark.asyncio
 async def test_agent_health_discovery_and_invocation(test_namespace: str):
-    """Test complete agent workflow: health, discovery, invocation, memory."""
-    # Create resources
-    modelapi_spec = create_modelapi_resource(test_namespace, "ollama-proxy")
+    """Test complete agent workflow: health, discovery, invocation with mock_response."""
+    # Create resources - using mock proxy (no real LLM needed)
+    modelapi_spec = create_modelapi_resource(test_namespace, "mock-proxy")
     create_custom_resource(modelapi_spec, test_namespace)
     
     agent_spec = create_agent_resource(
         namespace=test_namespace,
-        modelapi_name="ollama-proxy",
+        modelapi_name="mock-proxy",
         mcpserver_names=[],
         agent_name="test-agent",
     )
     create_custom_resource(agent_spec, test_namespace)
 
-    wait_for_deployment(test_namespace, "modelapi-ollama-proxy", timeout=120)
+    wait_for_deployment(test_namespace, "modelapi-mock-proxy", timeout=120)
     wait_for_deployment(test_namespace, "agent-test-agent", timeout=120)
 
     pf_process = port_forward(
@@ -99,19 +100,19 @@ async def test_agent_health_discovery_and_invocation(test_namespace: str):
 
 @pytest.mark.asyncio
 async def test_agent_chat_completions(test_namespace: str):
-    """Test OpenAI-compatible chat completions endpoint."""
-    modelapi_spec = create_modelapi_resource(test_namespace, "ollama-proxy")
+    """Test OpenAI-compatible chat completions endpoint with mock_response."""
+    modelapi_spec = create_modelapi_resource(test_namespace, "mock-proxy")
     create_custom_resource(modelapi_spec, test_namespace)
     
     agent_spec = create_agent_resource(
         namespace=test_namespace,
-        modelapi_name="ollama-proxy",
+        modelapi_name="mock-proxy",
         mcpserver_names=[],
         agent_name="chat-agent",
     )
     create_custom_resource(agent_spec, test_namespace)
 
-    wait_for_deployment(test_namespace, "modelapi-ollama-proxy", timeout=120)
+    wait_for_deployment(test_namespace, "modelapi-mock-proxy", timeout=120)
     wait_for_deployment(test_namespace, "agent-chat-agent", timeout=120)
 
     pf_process = port_forward(
@@ -151,7 +152,7 @@ async def test_agent_chat_completions(test_namespace: str):
 
 @pytest.mark.asyncio
 async def test_modelapi_deployment(test_namespace: str):
-    """Test ModelAPI resource deployment."""
+    """Test ModelAPI resource deployment (mock proxy - no real LLM)."""
     modelapi_spec = create_modelapi_resource(test_namespace, "test-modelapi")
     create_custom_resource(modelapi_spec, test_namespace)
 
@@ -170,6 +171,57 @@ async def test_modelapi_deployment(test_namespace: str):
         async with httpx.AsyncClient() as client:
             response = await client.get("http://localhost:18010/models", timeout=5.0)
             assert response.status_code == 200
+    finally:
+        pf_process.terminate()
+        pf_process.wait(timeout=5)
+
+
+@pytest.mark.asyncio
+async def test_modelapi_with_real_ollama(test_namespace: str):
+    """Test ModelAPI with real Ollama backend (smollm2:135m model).
+    
+    This is the ONLY test that actually calls a real LLM model.
+    Requires Ollama running locally with smollm2:135m model.
+    """
+    # Create ModelAPI with Ollama backend
+    modelapi_spec = create_modelapi_hosted_resource(test_namespace, "ollama-real")
+    create_custom_resource(modelapi_spec, test_namespace)
+
+    wait_for_deployment(test_namespace, "modelapi-ollama-real", timeout=120)
+
+    pf_process = port_forward(
+        namespace=test_namespace,
+        service_name="modelapi-ollama-real",
+        local_port=18020,
+        remote_port=8000,
+    )
+
+    time.sleep(3)
+
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            # Test that LiteLLM can connect to Ollama
+            response = await client.get("http://localhost:18020/health", timeout=10.0)
+            assert response.status_code == 200
+            
+            # Test actual model inference with smollm2
+            response = await client.post(
+                "http://localhost:18020/v1/chat/completions",
+                json={
+                    "model": "ollama/smollm2:135m",
+                    "messages": [{"role": "user", "content": "Say hello"}],
+                    "max_tokens": 20,
+                },
+                timeout=30.0,
+            )
+            assert response.status_code == 200
+            data = response.json()
+            
+            # Verify we got a real response
+            assert "choices" in data
+            assert len(data["choices"]) > 0
+            assert len(data["choices"][0]["message"]["content"]) > 0
+            
     finally:
         pf_process.terminate()
         pf_process.wait(timeout=5)
