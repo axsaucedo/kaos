@@ -43,10 +43,8 @@ spec:
   mode: Proxy
   proxyConfig:
     env:
-    - name: OLLAMA_BASE_URL
+    - name: LITELLM_PROXY_API_BASE
       value: "http://host.docker.internal:11434"
-    - name: LITELLM_MODEL_LIST
-      value: "ollama/smollm2:135m"
 
 ---
 apiVersion: ethical.institute/v1alpha1
@@ -167,7 +165,10 @@ uv run pytest e2e/ -v
 
 See `operator/config/samples/` for example configurations:
 
-1. `1-simple-echo-agent.yaml` - Single agent with echo MCP tool
-2. `2-multi-agent-mcp.yaml` - Coordinator with worker agents
+1. `1-simple-echo-agent.yaml` - Single agent with echo MCP tool (hosted Ollama in-cluster)
+2. `2-multi-agent-mcp.yaml` - Coordinator with worker agents (hosted Ollama in-cluster)
 3. `3-hierarchical-agents.yaml` - Multi-level agent hierarchy with calculator tools
+4. `4-dev-ollama-proxy-agent.yaml` - Development setup with proxy to host Ollama
+
+For local development with Ollama running on your host machine, use sample 4 which uses `LITELLM_PROXY_API_BASE` to connect to `http://host.docker.internal:11434`.
 

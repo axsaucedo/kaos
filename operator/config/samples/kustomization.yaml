@@ -3,6 +3,7 @@
 #   kubectl apply -f 1-simple-echo-agent.yaml
 #   kubectl apply -f 2-multi-agent-mcp.yaml
 #   kubectl apply -f 3-hierarchical-agents.yaml
+#   kubectl apply -f 4-dev-ollama-proxy-agent.yaml
 
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
@@ -11,3 +12,4 @@ resources:
 - 1-simple-echo-agent.yaml
 - 2-multi-agent-mcp.yaml
 - 3-hierarchical-agents.yaml
+- 4-dev-ollama-proxy-agent.yaml

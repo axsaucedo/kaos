@@ -11,24 +11,19 @@ metadata:
     app.kubernetes.io/part-of: agentic-sample-multi
 
 ---
-# ModelAPI: LiteLLM proxy to local Ollama (via Docker Desktop host)
+# ModelAPI: Hosted Ollama with smollm2 model (runs in-cluster)
 apiVersion: ethical.institute/v1alpha1
 kind: ModelAPI
 metadata:
   name: multi-modelapi
   namespace: agentic-multi
 spec:
-  mode: Proxy
-  proxyConfig:
+  mode: Hosted
+  serverConfig:
+    model: "smollm2:135m"
     env:
-    - name: OPENAI_API_KEY
-      value: "sk-test"
-    - name: LITELLM_LOG
-      value: "WARN"
-    - name: LITELLM_MODEL_LIST
-      value: "ollama/smollm2:135m"
-    - name: OLLAMA_BASE_URL
-      value: "http://host.docker.internal:11434"
+    - name: OLLAMA_DEBUG
+      value: "false"
 
 ---
 # MCPServer: Echo tool for all agents

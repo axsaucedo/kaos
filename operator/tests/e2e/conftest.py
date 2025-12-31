@@ -67,10 +67,11 @@ def create_modelapi_resource(namespace: str, name: str = "mock-proxy") -> Dict[s
         "spec": {
             "mode": "Proxy",
             "proxyConfig": {
+                # Simple CLI mode - LiteLLM will accept any model with mock_response
+                "model": "gpt-3.5-turbo",  # Any model name works with mock_response
                 "env": [
                     {"name": "OPENAI_API_KEY", "value": "sk-test"},
                     {"name": "LITELLM_LOG", "value": "WARN"},
-                    # No OLLAMA_BASE_URL needed - tests use mock_response
                 ]
             },
         },
@@ -78,9 +79,9 @@ def create_modelapi_resource(namespace: str, name: str = "mock-proxy") -> Dict[s
 
 
 def create_modelapi_hosted_resource(namespace: str, name: str = "ollama-hosted") -> Dict[str, Any]:
-    """Create a ModelAPI resource spec for Hosted mode with Ollama.
+    """Create a ModelAPI resource spec for Proxy mode with Ollama backend.
 
-    This creates a real Ollama instance for tests that need actual model inference.
+    This creates a LiteLLM proxy to Ollama for tests that need actual model inference.
 
     Args:
         namespace: Namespace for the resource
@@ -97,12 +98,13 @@ def create_modelapi_hosted_resource(namespace: str, name: str = "ollama-hosted")
             "namespace": namespace,
         },
         "spec": {
-            "mode": "Proxy",  # Use Proxy mode with Ollama backend for real inference
+            "mode": "Proxy",
             "proxyConfig": {
+                "apiBase": "http://host.docker.internal:11434",
+                "model": "ollama/smollm2:135m",
                 "env": [
                     {"name": "OPENAI_API_KEY", "value": "sk-test"},
                     {"name": "LITELLM_LOG", "value": "WARN"},
-                    {"name": "OLLAMA_BASE_URL", "value": "http://host.docker.internal:11434"},
                 ]
             },
         },

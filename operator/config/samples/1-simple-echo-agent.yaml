@@ -1,6 +1,6 @@
 ---
 # Sample 1: Simple Echo Agent with MCP Server
-# A single agent with access to an echo MCP tool and a ModelAPI proxy to local Ollama
+# A single agent with access to an echo MCP tool and a hosted Ollama model
 # Deploy: kubectl apply -f 1-simple-echo-agent.yaml
 
 apiVersion: v1
@@ -11,24 +11,19 @@ metadata:
     app.kubernetes.io/part-of: agentic-sample-simple
 
 ---
-# ModelAPI: LiteLLM proxy to local Ollama (via Docker Desktop host)
+# ModelAPI: Hosted Ollama with smollm2 model (runs in-cluster)
 apiVersion: ethical.institute/v1alpha1
 kind: ModelAPI
 metadata:
   name: simple-modelapi
   namespace: agentic-simple
 spec:
-  mode: Proxy
-  proxyConfig:
+  mode: Hosted
+  serverConfig:
+    model: "smollm2:135m"
     env:
-    - name: OPENAI_API_KEY
-      value: "sk-test"
-    - name: LITELLM_LOG
-      value: "WARN"
-    - name: LITELLM_MODEL_LIST
-      value: "ollama/smollm2:135m"
-    - name: OLLAMA_BASE_URL
-      value: "http://host.docker.internal:11434"
+    - name: OLLAMA_DEBUG
+      value: "false"
 
 ---
 # MCPServer: Echo tool for testing

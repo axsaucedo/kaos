@@ -19,6 +19,19 @@ const (
 
 // ProxyConfig defines configuration for LiteLLM proxy mode
 type ProxyConfig struct {
+	// APIBase is the base URL of the backend LLM API to proxy to (e.g., http://host.docker.internal:11434)
+	// +kubebuilder:validation:Optional
+	APIBase string `json:"apiBase,omitempty"`
+
+	// Model is the model identifier to proxy (e.g., ollama/smollm2:135m)
+	// +kubebuilder:validation:Optional
+	Model string `json:"model,omitempty"`
+
+	// ConfigYaml allows providing a custom LiteLLM config (for advanced multi-model routing)
+	// If provided, APIBase and Model are ignored and this config is used instead
+	// +kubebuilder:validation:Optional
+	ConfigYaml string `json:"configYaml,omitempty"`
+
 	// Env variables to pass to the proxy container
 	// +kubebuilder:validation:Optional
 	Env []corev1.EnvVar `json:"env,omitempty"`

@@ -23,6 +23,12 @@ var (
 	setupLog = ctrl.Log.WithName("setup")
 )
 
+// RBAC for leader election - these annotations ensure controller-gen includes
+// leases and events permissions in the generated role.yaml.
+// DO NOT REMOVE - required for leader election to work properly.
+//+kubebuilder:rbac:groups=coordination.k8s.io,resources=leases,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups="",resources=events,verbs=create;patch
+
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(agenticv1alpha1.AddToScheme(scheme))

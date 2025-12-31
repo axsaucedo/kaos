@@ -61,6 +61,15 @@ spec:
               proxyConfig:
                 description: ProxyConfig contains configuration for Proxy mode
                 properties:
+                  apiBase:
+                    description: APIBase is the base URL of the backend LLM API to
+                      proxy to (e.g., http://host.docker.internal:11434)
+                    type: string
+                  configYaml:
+                    description: |-
+                      ConfigYaml allows providing a custom LiteLLM config (for advanced multi-model routing)
+                      If provided, APIBase and Model are ignored and this config is used instead
+                    type: string
                   env:
                     description: Env variables to pass to the proxy container
                     items:
@@ -173,6 +182,9 @@ spec:
                       - name
                       type: object
                     type: array
+                  model:
+                    description: Model is the model identifier to proxy (e.g., ollama/smollm2:135m)
+                    type: string
                 type: object
               serverConfig:
                 description: ServerConfig contains configuration for Hosted mode

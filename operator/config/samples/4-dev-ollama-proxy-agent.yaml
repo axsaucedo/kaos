@@ -1,0 +1,90 @@
+---
+# Sample 4: Development Agent with Ollama Proxy
+# For local development with Ollama running on host machine
+# Uses LiteLLM proxy to connect to host Ollama (via Docker Desktop)
+# Deploy: kubectl apply -f 4-dev-ollama-proxy-agent.yaml
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: agentic-dev
+  labels:
+    app.kubernetes.io/part-of: agentic-sample-dev
+
+---
+# ModelAPI: LiteLLM proxy to host Ollama
+# Uses simple CLI mode - no config file needed
+apiVersion: ethical.institute/v1alpha1
+kind: ModelAPI
+metadata:
+  name: dev-ollama-proxy
+  namespace: agentic-dev
+spec:
+  mode: Proxy
+  proxyConfig:
+    # Simple CLI mode: just specify apiBase and model
+    apiBase: "http://host.docker.internal:11434"
+    model: "ollama/devstral-small-2505"
+    env:
+    - name: OPENAI_API_KEY
+      value: "sk-test"
+    - name: LITELLM_LOG
+      value: "INFO"
+
+---
+# MCPServer: Echo tool for testing
+apiVersion: ethical.institute/v1alpha1
+kind: MCPServer
+metadata:
+  name: dev-echo-mcp
+  namespace: agentic-dev
+spec:
+  type: python-runtime
+  config:
+    mcp: "test-mcp-echo-server"
+    env:
+    - name: LOG_LEVEL
+      value: "INFO"
+  resources:
+    requests:
+      memory: "128Mi"
+      cpu: "100m"
+    limits:
+      memory: "256Mi"
+      cpu: "500m"
+
+---
+# Agent: Development agent with proxy to host Ollama
+apiVersion: ethical.institute/v1alpha1
+kind: Agent
+metadata:
+  name: dev-agent
+  namespace: agentic-dev
+spec:
+  modelAPI: dev-ollama-proxy
+  mcpServers:
+  - dev-echo-mcp
+  config:
+    description: "Development agent for testing with host Ollama"
+    instructions: |
+      You are a helpful assistant with access to an echo tool.
+      Use the echo tool when asked to echo something.
+    env:
+    # Use any model available on host Ollama
+    - name: MODEL_NAME
+      value: "devstral-small-2505"
+    agenticLoop:
+      maxSteps: 10
+      enableTools: true
+      enableDelegation: false
+  agentNetwork:
+    expose: true
+    access: []
+  replicas: 1
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "200m"
+    limits:
+      memory: "512Mi"
+      cpu: "1000m"

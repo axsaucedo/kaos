@@ -80,14 +80,16 @@ func (r *ModelAPIReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 	}
 
-	// Create or update ConfigMap for LiteLLM config (only for Proxy mode)
-	if modelapi.Spec.Mode == agenticv1alpha1.ModelAPIModeProxy {
+	// Create ConfigMap only for Proxy mode when user provides custom configYaml
+	if modelapi.Spec.Mode == agenticv1alpha1.ModelAPIModeProxy && 
+		modelapi.Spec.ProxyConfig != nil && 
+		modelapi.Spec.ProxyConfig.ConfigYaml != "" {
 		configmap := &corev1.ConfigMap{}
-		configmapName := fmt.Sprintf("litellm-config")
+		configmapName := fmt.Sprintf("litellm-config-%s", modelapi.Name)
 		err := r.Get(ctx, types.NamespacedName{Name: configmapName, Namespace: modelapi.Namespace}, configmap)
 
 		if err != nil && apierrors.IsNotFound(err) {
-			// Create new ConfigMap
+			// Create new ConfigMap with user-provided config
 			configmap = r.constructConfigMap(modelapi)
 			if err := controllerutil.SetControllerReference(modelapi, configmap, r.Scheme); err != nil {
 				log.Error(err, "failed to set controller reference for ConfigMap")
@@ -163,8 +165,12 @@ func (r *ModelAPIReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, err
 	}
 
-	// Update status
-	modelapi.Status.Endpoint = fmt.Sprintf("http://%s.%s.svc.cluster.local:8000", serviceName, modelapi.Namespace)
+	// Update status - use correct port based on mode
+	port := 8000
+	if modelapi.Spec.Mode == agenticv1alpha1.ModelAPIModeHosted {
+		port = 11434
+	}
+	modelapi.Status.Endpoint = fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", serviceName, modelapi.Namespace, port)
 
 	// Check deployment readiness
 	if deployment.Status.ReadyReplicas > 0 {
@@ -194,15 +200,17 @@ func (r *ModelAPIReconciler) constructDeployment(modelapi *agenticv1alpha1.Model
 
 	replicas := int32(1)
 
-	// Build volumes list - only add litellm-config for Proxy mode
+	// Build volumes list - only add litellm-config for Proxy mode with custom configYaml
 	volumes := []corev1.Volume{}
-	if modelapi.Spec.Mode == agenticv1alpha1.ModelAPIModeProxy {
+	if modelapi.Spec.Mode == agenticv1alpha1.ModelAPIModeProxy && 
+		modelapi.Spec.ProxyConfig != nil && 
+		modelapi.Spec.ProxyConfig.ConfigYaml != "" {
 		volumes = append(volumes, corev1.Volume{
 			Name: "litellm-config",
 			VolumeSource: corev1.VolumeSource{
 				ConfigMap: &corev1.ConfigMapVolumeSource{
 					LocalObjectReference: corev1.LocalObjectReference{
-						Name: "litellm-config",
+						Name: fmt.Sprintf("litellm-config-%s", modelapi.Name),
 					},
 				},
 			},
@@ -248,20 +256,53 @@ func (r *ModelAPIReconciler) constructContainer(modelapi *agenticv1alpha1.ModelA
 	if modelapi.Spec.Mode == agenticv1alpha1.ModelAPIModeProxy {
 		// LiteLLM Proxy mode
 		image = "litellm/litellm:latest"
-		args = []string{"--config", "/etc/litellm/config.yaml", "--port", "8000"}
 		port = 8000
 		healthPath = "/health"
+
+		// Check if user provided custom configYaml (advanced mode)
+		if modelapi.Spec.ProxyConfig != nil && modelapi.Spec.ProxyConfig.ConfigYaml != "" {
+			// Use config file mode for advanced multi-model routing
+			args = []string{"--config", "/etc/litellm/config.yaml", "--port", "8000"}
+		} else {
+			// Use simple CLI mode - no config file needed
+			// Get model and apiBase from spec or env vars
+			model := "ollama/*"  // Default wildcard to allow any model
+			apiBase := ""
+			
+			if modelapi.Spec.ProxyConfig != nil {
+				if modelapi.Spec.ProxyConfig.Model != "" {
+					model = modelapi.Spec.ProxyConfig.Model
+				}
+				if modelapi.Spec.ProxyConfig.APIBase != "" {
+					apiBase = modelapi.Spec.ProxyConfig.APIBase
+				}
+			}
+			
+			args = []string{"--model", model, "--port", "8000"}
+			if apiBase != "" {
+				args = append(args, "--api_base", apiBase)
+			}
+		}
 
 		// Add user-provided env vars for proxy
 		if modelapi.Spec.ProxyConfig != nil {
 			env = append(env, modelapi.Spec.ProxyConfig.Env...)
 		}
 
-		// Add default proxy env vars
-		env = append(env, corev1.EnvVar{
-			Name:  "LITELLM_LOG",
-			Value: "INFO",
-		})
+		// Add default proxy env vars only if not already set by user
+		hasLiteLLMLog := false
+		for _, e := range env {
+			if e.Name == "LITELLM_LOG" {
+				hasLiteLLMLog = true
+				break
+			}
+		}
+		if !hasLiteLLMLog {
+			env = append(env, corev1.EnvVar{
+				Name:  "LITELLM_LOG",
+				Value: "INFO",
+			})
+		}
 
 	} else {
 		// Ollama Hosted mode
@@ -276,9 +317,11 @@ func (r *ModelAPIReconciler) constructContainer(modelapi *agenticv1alpha1.ModelA
 		}
 	}
 
-	// Build volume mounts - only add litellm-config for Proxy mode
+	// Build volume mounts - only add litellm-config when configYaml is provided
 	volumeMounts := []corev1.VolumeMount{}
-	if modelapi.Spec.Mode == agenticv1alpha1.ModelAPIModeProxy {
+	if modelapi.Spec.Mode == agenticv1alpha1.ModelAPIModeProxy && 
+		modelapi.Spec.ProxyConfig != nil && 
+		modelapi.Spec.ProxyConfig.ConfigYaml != "" {
 		volumeMounts = append(volumeMounts, corev1.VolumeMount{
 			Name:      "litellm-config",
 			MountPath: "/etc/litellm",
@@ -342,6 +385,14 @@ func (r *ModelAPIReconciler) constructService(modelapi *agenticv1alpha1.ModelAPI
 		"modelapi": modelapi.Name,
 	}
 
+	// Use different ports based on mode
+	var port int32 = 8000
+	var targetPort int32 = 8000
+	if modelapi.Spec.Mode == agenticv1alpha1.ModelAPIModeHosted {
+		port = 11434
+		targetPort = 11434
+	}
+
 	service := &corev1.Service{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("modelapi-%s", modelapi.Name),
@@ -353,8 +404,8 @@ func (r *ModelAPIReconciler) constructService(modelapi *agenticv1alpha1.ModelAPI
 			Ports: []corev1.ServicePort{
 				{
 					Name:       "http",
-					Port:       8000,
-					TargetPort: intstr.FromInt(8000),
+					Port:       port,
+					TargetPort: intstr.FromInt(int(targetPort)),
 					Protocol:   corev1.ProtocolTCP,
 				},
 			},
@@ -365,37 +416,17 @@ func (r *ModelAPIReconciler) constructService(modelapi *agenticv1alpha1.ModelAPI
 	return service
 }
 
-// constructConfigMap creates a ConfigMap with LiteLLM configuration
+// constructConfigMap creates a ConfigMap with user-provided LiteLLM configuration
 func (r *ModelAPIReconciler) constructConfigMap(modelapi *agenticv1alpha1.ModelAPI) *corev1.ConfigMap {
-	// Create a basic LiteLLM config that routes to Ollama
-	litellmConfig := `model_list:
-  - model_name: "smollm2:135m"
-    litellm_params:
-      model: "ollama/smollm2:135m"
-      api_base: "http://host.docker.internal:11434"
-      stream_timeout: 600
-
-  - model_name: "llama2"
-    litellm_params:
-      model: "ollama/llama2"
-      api_base: "http://host.docker.internal:11434"
-      stream_timeout: 600
-
-general_settings:
-  completion_model: "smollm2:135m"
-  function_calling: false
-  drop_params: true
-  enable_model_cost_map: false
-
-router_settings:
-  enable_cooldowns: true
-  cooldown_time: 60
-  request_timeout: 600
-`
+	// Use user-provided configYaml directly - no hardcoded models
+	configYaml := ""
+	if modelapi.Spec.ProxyConfig != nil && modelapi.Spec.ProxyConfig.ConfigYaml != "" {
+		configYaml = modelapi.Spec.ProxyConfig.ConfigYaml
+	}
 
 	configmap := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "litellm-config",
+			Name:      fmt.Sprintf("litellm-config-%s", modelapi.Name),
 			Namespace: modelapi.Namespace,
 			Labels: map[string]string{
 				"app":      "modelapi",
@@ -403,7 +434,7 @@ router_settings:
 			},
 		},
 		Data: map[string]string{
-			"config.yaml": litellmConfig,
+			"config.yaml": configYaml,
 		},
 	}
 
