@@ -155,7 +155,11 @@ spec:
         memory: "8Gi"
 ```
 
-The model is pulled on first start, which can take several minutes.
+**How it works:**
+- An init container starts Ollama, pulls the specified model, then exits
+- The model is stored in a shared volume
+- The main Ollama container starts with the model already available
+- First pod startup may take 1-2 minutes depending on model size
 
 ## Spec Fields
 
