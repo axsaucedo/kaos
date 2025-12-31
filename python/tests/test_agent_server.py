@@ -193,9 +193,10 @@ class TestSingleAgentServer:
         logger.info("✓ Single agent workflow complete")
     
     def test_chat_completions_non_streaming(self, single_agent_server):
-        """Test OpenAI-compatible chat completions (non-streaming)."""
+        """Test OpenAI-compatible chat completions (non-streaming) with single and multi-turn."""
         url = single_agent_server["url"]
         
+        # Test 1: Single message
         response = httpx.post(
             f"{url}/v1/chat/completions",
             json={
@@ -218,7 +219,29 @@ class TestSingleAgentServer:
         assert len(data["choices"][0]["message"]["content"]) > 0
         assert data["choices"][0]["finish_reason"] == "stop"
         
-        logger.info("✓ Non-streaming chat completions work")
+        logger.info("✓ Non-streaming chat completions work (single message)")
+        
+        # Test 2: Multi-turn conversation (full message array)
+        response = httpx.post(
+            f"{url}/v1/chat/completions",
+            json={
+                "model": "test-agent",
+                "messages": [
+                    {"role": "user", "content": "My name is Alice"},
+                    {"role": "assistant", "content": "Hello Alice!"},
+                    {"role": "user", "content": "What is my name?"}
+                ],
+                "stream": False
+            },
+            timeout=60.0
+        )
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["object"] == "chat.completion"
+        assert len(data["choices"][0]["message"]["content"]) > 0
+        
+        logger.info("✓ Non-streaming chat completions work (multi-turn)")
     
     def test_chat_completions_streaming(self, single_agent_server):
         """Test OpenAI-compatible chat completions (streaming)."""

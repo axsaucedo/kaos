@@ -8,7 +8,7 @@ Includes agentic loop for tool calling and agent delegation.
 import json
 import re
 import logging
-from typing import List, Dict, Any, Optional, AsyncIterator
+from typing import List, Dict, Any, Optional, AsyncIterator, Union
 import httpx
 from dataclasses import dataclass, field
 
@@ -157,7 +157,9 @@ class Agent:
         self.memory = memory or LocalMemory()
         self.description = description
         self.mcp_clients = mcp_clients or []
-        self.sub_agents = sub_agents or []
+        self.sub_agents: Dict[str, RemoteAgent] = {
+            agent.name: agent for agent in (sub_agents or [])
+        }
         self.loop_config = loop_config or AgenticLoopConfig()
 
         logger.info(f"Agent initialized: {name}")
@@ -198,7 +200,7 @@ class Agent:
     async def _get_agents_description(self) -> str:
         """Get formatted description of all available sub-agents."""
         agents_desc = []
-        for sub_agent in self.sub_agents:
+        for sub_agent in self.sub_agents.values():
             if not sub_agent.agent_card:
                 try:
                     await sub_agent.discover()
@@ -232,7 +234,7 @@ class Agent:
 
     async def process_message(
         self,
-        message: str,
+        message: Union[str, List[Dict[str, str]]],
         session_id: Optional[str] = None,
         stream: bool = False,
         mock_response: Optional[str] = None
@@ -240,7 +242,7 @@ class Agent:
         """Process a message with agentic loop for tool calling and delegation.
 
         Args:
-            message: User message to process
+            message: User message to process - can be a string or OpenAI-style message array
             session_id: Optional session ID (created if not provided)
             stream: Whether to stream the response
             mock_response: Mock response for testing (bypasses LLM call)
@@ -258,16 +260,31 @@ class Agent:
 
         logger.debug(f"Processing message for session {session_id}, streaming={stream}")
 
-        # Log user message
-        user_event = self.memory.create_event("user_message", message)
-        await self.memory.add_event(session_id, user_event)
-
         # Build enhanced system prompt with tools/agents info
         system_prompt = await self._build_system_prompt()
         
-        # Initialize conversation
+        # Initialize conversation with system prompt
         messages = [{"role": "system", "content": system_prompt}]
-        messages.append({"role": "user", "content": message})
+        
+        # Handle both string and array input formats
+        if isinstance(message, str):
+            # Simple string message - log and append
+            user_event = self.memory.create_event("user_message", message)
+            await self.memory.add_event(session_id, user_event)
+            messages.append({"role": "user", "content": message})
+        else:
+            # OpenAI-style message array - append all messages (except system, we use ours)
+            for msg in message:
+                role = msg.get("role", "user")
+                content = msg.get("content", "")
+                if role == "system":
+                    # Skip external system messages, we use our own enhanced one
+                    continue
+                messages.append({"role": role, "content": content})
+                # Log user messages to memory
+                if role == "user":
+                    user_event = self.memory.create_event("user_message", content)
+                    await self.memory.add_event(session_id, user_event)
 
         try:
             # Agentic loop - iterate up to max_steps
@@ -378,38 +395,37 @@ class Agent:
             task: Task to delegate
             session_id: Optional session ID for memory logging
             
+            
         Returns:
             Response from the sub-agent
         """
-        # TODO: Update self.sub_agents to be a dict instead as this woudl allow more efficient
-        #    access across these and easier ability to access available sub_agents
-        for sub_agent in self.sub_agents:
-            if sub_agent.name == agent_name:
-                # Log delegation request
-                if session_id:
-                    delegation_event = self.memory.create_event(
-                        "delegation_request",
-                        {"agent": agent_name, "task": task}
-                    )
-                    await self.memory.add_event(session_id, delegation_event)
-                
-                logger.info(f"Delegating to sub-agent {agent_name}: {task[:50]}...")
-                
-                # Invoke sub-agent
-                response = await sub_agent.invoke(task)
-                
-                # Log delegation response
-                if session_id:
-                    response_event = self.memory.create_event(
-                        "delegation_response",
-                        {"agent": agent_name, "response": response}
-                    )
-                    await self.memory.add_event(session_id, response_event)
-                
-                logger.info(f"Received response from sub-agent {agent_name}")
-                return response
-
-        raise ValueError(f"Sub-agent '{agent_name}' not found")
+        sub_agent = self.sub_agents.get(agent_name)
+        if not sub_agent:
+            raise ValueError(f"Sub-agent '{agent_name}' not found")
+        
+        # Log delegation request
+        if session_id:
+            delegation_event = self.memory.create_event(
+                "delegation_request",
+                {"agent": agent_name, "task": task}
+            )
+            await self.memory.add_event(session_id, delegation_event)
+        
+        logger.info(f"Delegating to sub-agent {agent_name}: {task[:50]}...")
+        
+        # Invoke sub-agent
+        response = await sub_agent.invoke(task)
+        
+        # Log delegation response
+        if session_id:
+            response_event = self.memory.create_event(
+                "delegation_response",
+                {"agent": agent_name, "response": response}
+            )
+            await self.memory.add_event(session_id, response_event)
+        
+        logger.info(f"Received response from sub-agent {agent_name}")
+        return response
 
     def get_agent_card(self, base_url: str) -> AgentCard:
         # Collect available tools
@@ -451,7 +467,7 @@ class Agent:
                     await mcp_client.close()
 
             # Close sub-agents
-            for sub_agent in self.sub_agents:
+            for sub_agent in self.sub_agents.values():
                 await sub_agent.close()
 
             logger.debug(f"Agent {self.name} closed successfully")

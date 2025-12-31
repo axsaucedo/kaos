@@ -201,23 +201,16 @@ class AgentServer:
                         content = msg.get("content", "")
                         return await self._handle_delegation(content, model_name)
 
-                # TODO: Extend such that we process the full list of messages as we 
-                #    support openai compaible endpoints which means that we should be 
-                #    sending the full context as opposed to only a fraction.
-                #    this is aligned with the TODO in the agent (client) which requests
-                #    to extend to also support open ai style array
-                user_content = ""
-                for msg in messages:
-                    if msg.get("role") == "user":
-                        user_content = msg.get("content", "")
-
-                if not user_content:
+                # Validate at least one user message exists
+                has_user_message = any(msg.get("role") == "user" for msg in messages)
+                if not has_user_message:
                     raise HTTPException(status_code=400, detail="No user message found")
 
+                # Pass full messages array to agent for context-aware processing
                 if stream_requested:
-                    return await self._stream_chat_completion(user_content, model_name)
+                    return await self._stream_chat_completion(messages, model_name)
                 else:
-                    return await self._complete_chat_completion(user_content, model_name)
+                    return await self._complete_chat_completion(messages, model_name)
 
             except HTTPException:
                 raise
@@ -290,11 +283,16 @@ class AgentServer:
             logger.error(f"Delegation error: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
-    async def _complete_chat_completion(self, user_message: str, model_name: str) -> JSONResponse:
-        """Handle non-streaming chat completion."""
+    async def _complete_chat_completion(self, messages: list, model_name: str) -> JSONResponse:
+        """Handle non-streaming chat completion.
+        
+        Args:
+            messages: Full OpenAI-style messages array for context
+            model_name: Model name for response
+        """
         # Collect complete response
         response_content = ""
-        async for chunk in self.agent.process_message(user_message, stream=False):
+        async for chunk in self.agent.process_message(messages, stream=False):
             response_content += chunk
 
         return JSONResponse({
@@ -317,8 +315,13 @@ class AgentServer:
             }
         })
 
-    async def _stream_chat_completion(self, user_message: str, model_name: str) -> StreamingResponse:
-        """Handle streaming chat completion with SSE."""
+    async def _stream_chat_completion(self, messages: list, model_name: str) -> StreamingResponse:
+        """Handle streaming chat completion with SSE.
+        
+        Args:
+            messages: Full OpenAI-style messages array for context
+            model_name: Model name for response
+        """
 
         async def generate_stream():
             """Generate SSE stream for OpenAI-compatible streaming."""
@@ -327,7 +330,7 @@ class AgentServer:
                 created_at = int(time.time())
 
                 # Stream response chunks
-                async for chunk in self.agent.process_message(user_message, stream=True):
+                async for chunk in self.agent.process_message(messages, stream=True):
                     if chunk:  # Only send non-empty chunks
                         sse_data = {
                             "id": chat_id,

@@ -88,7 +88,7 @@ class TestAgentCreationAndCard:
     
     @pytest.mark.asyncio
     async def test_agent_with_sub_agents(self):
-        """Test Agent with sub-agents has delegation capability."""
+        """Test Agent with sub-agents has delegation capability and dict access."""
         mock_llm = MockModelAPI("coordinator")
         
         # Create sub-agents
@@ -101,7 +101,13 @@ class TestAgentCreationAndCard:
             sub_agents=[sub_agent1, sub_agent2]
         )
         
+        # Verify sub_agents is a dict with O(1) access
+        assert isinstance(agent.sub_agents, dict)
         assert len(agent.sub_agents) == 2
+        assert "worker-1" in agent.sub_agents
+        assert "worker-2" in agent.sub_agents
+        assert agent.sub_agents["worker-1"] is sub_agent1
+        assert agent.sub_agents["worker-2"] is sub_agent2
         
         # Card should indicate delegation capability
         card = agent.get_agent_card("http://localhost:8000")
@@ -111,7 +117,7 @@ class TestAgentCreationAndCard:
         await sub_agent1.close()
         await sub_agent2.close()
         
-        logger.info("✓ Agent with sub-agents works correctly")
+        logger.info("✓ Agent with sub-agents works correctly (dict access)")
 
 
 class TestMemorySystem:
