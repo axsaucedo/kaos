@@ -42,9 +42,8 @@ metadata:
 spec:
   mode: Proxy
   proxyConfig:
-    env:
-    - name: LITELLM_PROXY_API_BASE
-      value: "http://host.docker.internal:11434"
+    # Wildcard mode: only specify apiBase, proxies any model to backend
+    apiBase: "http://host.docker.internal:11434"
 
 ---
 apiVersion: ethical.institute/v1alpha1
@@ -71,8 +70,9 @@ spec:
     description: "My first agent"
     instructions: "You are a helpful assistant with echo tools."
     env:
+    # Model name with ollama/ prefix for LiteLLM routing
     - name: MODEL_NAME
-      value: "smollm2:135m"
+      value: "ollama/smollm2:135m"
 ```
 
 Apply it:
@@ -170,5 +170,5 @@ See `operator/config/samples/` for example configurations:
 3. `3-hierarchical-agents.yaml` - Multi-level agent hierarchy with calculator tools
 4. `4-dev-ollama-proxy-agent.yaml` - Development setup with proxy to host Ollama
 
-For local development with Ollama running on your host machine, use sample 4 which uses `LITELLM_PROXY_API_BASE` to connect to `http://host.docker.internal:11434`.
+For local development with Ollama running on your host machine, use sample 4 which uses `apiBase: "http://host.docker.internal:11434"` to connect to the host Ollama.
 
