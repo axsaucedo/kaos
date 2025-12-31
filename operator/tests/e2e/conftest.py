@@ -3,11 +3,25 @@
 import time
 import sys
 import subprocess
-from typing import Dict, Any, Generator
+import concurrent.futures
+from typing import Dict, Any, Generator, List, Tuple
 
 import pytest
+import httpx
 from sh import kubectl
 import yaml
+
+
+# Port allocation counter for unique ports across tests
+_port_counter = 18000
+
+
+def get_next_port() -> int:
+    """Get next available port for port-forwarding."""
+    global _port_counter
+    port = _port_counter
+    _port_counter += 1
+    return port
 
 
 def create_custom_resource(body: Dict[str, Any], namespace: str):
@@ -25,23 +39,93 @@ def port_forward(namespace: str, service_name: str, local_port: int, remote_port
     """Start port-forward to a service."""
     process = subprocess.Popen(
         ["kubectl", "port-forward", f"svc/{service_name}", f"{local_port}:{remote_port}", "-n", namespace],
-        stdout=sys.stdout,
-        stderr=sys.stderr,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
-    time.sleep(1)
     return process
 
 
-@pytest.fixture
-def test_namespace() -> Generator[str, None, None]:
-    """Fixture that creates a test namespace and cleans up after test."""
-    namespace = f"test-e2e-{int(time.time())}"
+def wait_for_service_ready(url: str, max_wait: int = 10) -> bool:
+    """Wait for service to be ready by polling health endpoint."""
+    for _ in range(max_wait * 4):  # Check every 0.25s
+        try:
+            response = httpx.get(f"{url}/health", timeout=2.0)
+            if response.status_code == 200:
+                return True
+        except Exception:
+            pass
+        time.sleep(0.25)
+    raise TimeoutError(f"Service not ready at {url} after {max_wait}s")
+
+
+def port_forward_with_wait(namespace: str, service_name: str, local_port: int, 
+                           remote_port: int = 8000) -> subprocess.Popen:
+    """Start port-forward and wait for service to be ready."""
+    process = port_forward(namespace, service_name, local_port, remote_port)
+    # Give process time to establish connection
+    time.sleep(0.5)
+    wait_for_service_ready(f"http://localhost:{local_port}")
+    return process
+
+
+def parallel_port_forwards(namespace: str, 
+                           services: List[Tuple[str, int, int]]) -> List[subprocess.Popen]:
+    """Start multiple port-forwards in parallel.
+    
+    Args:
+        namespace: Kubernetes namespace
+        services: List of (service_name, local_port, remote_port) tuples
+    
+    Returns:
+        List of Popen processes
+    """
+    processes = []
+    # Start all port-forwards
+    for service_name, local_port, remote_port in services:
+        pf = port_forward(namespace, service_name, local_port, remote_port)
+        processes.append((pf, f"http://localhost:{local_port}"))
+    
+    # Wait briefly for processes to start
+    time.sleep(0.5)
+    
+    # Wait for all services to be ready in parallel
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        futures = [executor.submit(wait_for_service_ready, url) for _, url in processes]
+        concurrent.futures.wait(futures)
+    
+    return [pf for pf, _ in processes]
+
+
+@pytest.fixture(scope="session")
+def shared_namespace() -> Generator[str, None, None]:
+    """Session-scoped fixture that creates a shared test namespace."""
+    namespace = f"test-e2e-session-{int(time.time())}"
     kubectl("create", "namespace", namespace)
     yield namespace
     try:
-        kubectl("delete", "namespace", namespace)
+        kubectl("delete", "namespace", namespace, "--wait=false")
     except Exception:
         pass
+
+
+@pytest.fixture
+def test_namespace(shared_namespace: str) -> Generator[str, None, None]:
+    """Fixture that provides the shared namespace for tests."""
+    yield shared_namespace
+
+
+@pytest.fixture(scope="session")
+def shared_modelapi(shared_namespace: str) -> Generator[str, None, None]:
+    """Session-scoped ModelAPI for tests that use mock_response.
+    
+    Deploys a single LiteLLM proxy that all mock-based tests can share.
+    Tests requiring specific ModelAPI configurations should create their own.
+    """
+    name = "shared-mock-proxy"
+    modelapi_spec = create_modelapi_resource(shared_namespace, name)
+    create_custom_resource(modelapi_spec, shared_namespace)
+    wait_for_deployment(shared_namespace, f"modelapi-{name}", timeout=120)
+    yield name
 
 
 def create_modelapi_resource(namespace: str, name: str = "mock-proxy") -> Dict[str, Any]:

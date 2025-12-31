@@ -14,39 +14,27 @@ import httpx
 from e2e.conftest import (
     create_custom_resource,
     wait_for_deployment,
-    port_forward,
-    create_modelapi_resource,
+    port_forward_with_wait,
+    parallel_port_forwards,
+    get_next_port,
 )
 
 
-def create_multi_agent_resources(namespace: str):
+def create_multi_agent_resources(namespace: str, modelapi_name: str, suffix: str = ""):
     """Create resources for multi-agent cluster."""
-    # ModelAPI with LiteLLM (supports mock_response - no OLLAMA_BASE_URL needed)
-    modelapi_spec = {
-        "apiVersion": "ethical.institute/v1alpha1",
-        "kind": "ModelAPI",
-        "metadata": {"name": "multi-agent-api", "namespace": namespace},
-        "spec": {
-            "mode": "Proxy",
-            "proxyConfig": {
-                "env": [
-                    {"name": "OPENAI_API_KEY", "value": "sk-test"},
-                    {"name": "LITELLM_LOG", "value": "WARN"},
-                    # No OLLAMA_BASE_URL - tests use mock_response for determinism
-                ]
-            },
-        },
-    }
+    worker1_name = f"multi-w1{suffix}"
+    worker2_name = f"multi-w2{suffix}"
+    coord_name = f"multi-coord{suffix}"
     
     worker_1_spec = {
         "apiVersion": "ethical.institute/v1alpha1",
         "kind": "Agent",
-        "metadata": {"name": "worker-1", "namespace": namespace},
+        "metadata": {"name": worker1_name, "namespace": namespace},
         "spec": {
-            "modelAPI": "multi-agent-api",
+            "modelAPI": modelapi_name,
             "config": {
                 "description": "Worker agent 1",
-                "instructions": "You are worker-1. Always mention 'worker-1' in responses. Be brief.",
+                "instructions": f"You are {worker1_name}. Always mention '{worker1_name}' in responses. Be brief.",
                 "env": [
                     {"name": "AGENT_LOG_LEVEL", "value": "INFO"},
                     {"name": "MODEL_NAME", "value": "smollm2:135m"},
@@ -64,12 +52,12 @@ def create_multi_agent_resources(namespace: str):
     worker_2_spec = {
         "apiVersion": "ethical.institute/v1alpha1",
         "kind": "Agent",
-        "metadata": {"name": "worker-2", "namespace": namespace},
+        "metadata": {"name": worker2_name, "namespace": namespace},
         "spec": {
-            "modelAPI": "multi-agent-api",
+            "modelAPI": modelapi_name,
             "config": {
                 "description": "Worker agent 2",
-                "instructions": "You are worker-2. Always mention 'worker-2' in responses. Be brief.",
+                "instructions": f"You are {worker2_name}. Always mention '{worker2_name}' in responses. Be brief.",
                 "env": [
                     {"name": "AGENT_LOG_LEVEL", "value": "INFO"},
                     {"name": "MODEL_NAME", "value": "smollm2:135m"},
@@ -87,12 +75,12 @@ def create_multi_agent_resources(namespace: str):
     coordinator_spec = {
         "apiVersion": "ethical.institute/v1alpha1",
         "kind": "Agent",
-        "metadata": {"name": "coordinator", "namespace": namespace},
+        "metadata": {"name": coord_name, "namespace": namespace},
         "spec": {
-            "modelAPI": "multi-agent-api",
+            "modelAPI": modelapi_name,
             "config": {
                 "description": "Coordinator agent",
-                "instructions": "You are the coordinator. You manage worker-1 and worker-2.",
+                "instructions": f"You are the coordinator. You manage {worker1_name} and {worker2_name}.",
                 "env": [
                     {"name": "AGENT_LOG_LEVEL", "value": "INFO"},
                     {"name": "MODEL_NAME", "value": "smollm2:135m"},
@@ -100,7 +88,7 @@ def create_multi_agent_resources(namespace: str):
             },
             "agentNetwork": {
                 "expose": True,
-                "access": ["worker-1", "worker-2"],  # This configures sub-agents
+                "access": [worker1_name, worker2_name],
             },
             "replicas": 1,
             "resources": {
@@ -111,45 +99,47 @@ def create_multi_agent_resources(namespace: str):
     }
     
     return {
-        "modelapi": modelapi_spec,
-        "coordinator": coordinator_spec,
-        "worker-1": worker_1_spec,
-        "worker-2": worker_2_spec,
+        "coordinator": (coordinator_spec, coord_name),
+        "worker-1": (worker_1_spec, worker1_name),
+        "worker-2": (worker_2_spec, worker2_name),
     }
 
 
 @pytest.mark.asyncio
-async def test_multi_agent_deployment_and_discovery(test_namespace: str):
+async def test_multi_agent_deployment_and_discovery(test_namespace: str, shared_modelapi: str):
     """Test all agents deploy and are discoverable."""
-    resources = create_multi_agent_resources(test_namespace)
-    
-    # Create ModelAPI first
-    create_custom_resource(resources["modelapi"], test_namespace)
-    wait_for_deployment(test_namespace, "modelapi-multi-agent-api", timeout=120)
+    resources = create_multi_agent_resources(test_namespace, shared_modelapi, "-disc")
     
     # Create workers first (so coordinator can discover them)
-    for agent_name in ["worker-1", "worker-2"]:
-        create_custom_resource(resources[agent_name], test_namespace)
-        wait_for_deployment(test_namespace, f"agent-{agent_name}", timeout=120)
+    for agent_key in ["worker-1", "worker-2"]:
+        spec, name = resources[agent_key]
+        create_custom_resource(spec, test_namespace)
+        wait_for_deployment(test_namespace, f"agent-{name}", timeout=120)
     
     # Create coordinator last
-    create_custom_resource(resources["coordinator"], test_namespace)
-    wait_for_deployment(test_namespace, "agent-coordinator", timeout=120)
+    coord_spec, coord_name = resources["coordinator"]
+    create_custom_resource(coord_spec, test_namespace)
+    wait_for_deployment(test_namespace, f"agent-{coord_name}", timeout=120)
     
-    # Test discovery for each agent
-    agent_ports = {"coordinator": 18100, "worker-1": 18101, "worker-2": 18102}
-    pf_processes = []
+    # Get unique ports for each agent
+    _, w1_name = resources["worker-1"]
+    _, w2_name = resources["worker-2"]
     
-    for agent_name, port in agent_ports.items():
-        pf = port_forward(
-            namespace=test_namespace,
-            service_name=f"agent-{agent_name}",
-            local_port=port,
-            remote_port=8000,
-        )
-        pf_processes.append(pf)
+    coord_port = get_next_port()
+    w1_port = get_next_port()
+    w2_port = get_next_port()
     
-    time.sleep(2)
+    agent_ports = {coord_name: coord_port, w1_name: w1_port, w2_name: w2_port}
+    
+    # Start all port-forwards in parallel
+    pf_processes = parallel_port_forwards(
+        test_namespace,
+        [
+            (f"agent-{coord_name}", coord_port, 8000),
+            (f"agent-{w1_name}", w1_port, 8000),
+            (f"agent-{w2_name}", w2_port, 8000),
+        ]
+    )
     
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
@@ -167,7 +157,7 @@ async def test_multi_agent_deployment_and_discovery(test_namespace: str):
                 assert "message_processing" in card["capabilities"]
             
             # Coordinator should have delegation capability
-            response = await client.get(f"http://localhost:18100/.well-known/agent")
+            response = await client.get(f"http://localhost:{coord_port}/.well-known/agent")
             card = response.json()
             assert "task_delegation" in card["capabilities"]
     
@@ -178,51 +168,49 @@ async def test_multi_agent_deployment_and_discovery(test_namespace: str):
 
 
 @pytest.mark.asyncio
-async def test_multi_agent_delegation_with_memory(test_namespace: str):
+async def test_multi_agent_delegation_with_memory(test_namespace: str, shared_modelapi: str):
     """Test coordinator delegates to workers and memory is tracked."""
-    resources = create_multi_agent_resources(test_namespace)
+    resources = create_multi_agent_resources(test_namespace, shared_modelapi, "-mem")
     
-    # Deploy resources
-    create_custom_resource(resources["modelapi"], test_namespace)
-    wait_for_deployment(test_namespace, "modelapi-multi-agent-api", timeout=120)
+    # Deploy workers first
+    for agent_key in ["worker-1", "worker-2"]:
+        spec, name = resources[agent_key]
+        create_custom_resource(spec, test_namespace)
+        wait_for_deployment(test_namespace, f"agent-{name}", timeout=120)
     
-    for agent_name in ["worker-1", "worker-2"]:
-        create_custom_resource(resources[agent_name], test_namespace)
-        wait_for_deployment(test_namespace, f"agent-{agent_name}", timeout=120)
+    # Deploy coordinator
+    coord_spec, coord_name = resources["coordinator"]
+    create_custom_resource(coord_spec, test_namespace)
+    wait_for_deployment(test_namespace, f"agent-{coord_name}", timeout=120)
     
-    create_custom_resource(resources["coordinator"], test_namespace)
-    wait_for_deployment(test_namespace, "agent-coordinator", timeout=120)
+    _, w1_name = resources["worker-1"]
     
     # Port forward to coordinator and worker-1
-    pf_coordinator = port_forward(
-        namespace=test_namespace,
-        service_name="agent-coordinator",
-        local_port=18200,
-        remote_port=8000,
-    )
-    pf_worker1 = port_forward(
-        namespace=test_namespace,
-        service_name="agent-worker-1",
-        local_port=18201,
-        remote_port=8000,
-    )
+    coord_port = get_next_port()
+    w1_port = get_next_port()
     
-    time.sleep(2)
+    pf_processes = parallel_port_forwards(
+        test_namespace,
+        [
+            (f"agent-{coord_name}", coord_port, 8000),
+            (f"agent-{w1_name}", w1_port, 8000),
+        ]
+    )
     
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             # Get worker-1's initial memory count
-            response = await client.get("http://localhost:18201/memory/events")
+            response = await client.get(f"http://localhost:{w1_port}/memory/events")
             initial_count = response.json()["total"]
             
             # Delegate via chat completions
             task_id = f"K8S_DELEGATE_{int(time.time())}"
             response = await client.post(
-                "http://localhost:18200/v1/chat/completions",
+                f"http://localhost:{coord_port}/v1/chat/completions",
                 json={
-                    "model": "coordinator",
+                    "model": coord_name,
                     "messages": [
-                        {"role": "delegate", "content": f"worker-1: Process task {task_id}"}
+                        {"role": "delegate", "content": f"{w1_name}: Process task {task_id}"}
                     ]
                 }
             )
@@ -237,7 +225,7 @@ async def test_multi_agent_delegation_with_memory(test_namespace: str):
             assert len(data["choices"][0]["message"]["content"]) > 0
             
             # Verify coordinator memory has delegation events
-            response = await client.get("http://localhost:18200/memory/events")
+            response = await client.get(f"http://localhost:{coord_port}/memory/events")
             coord_memory = response.json()
             
             delegation_reqs = [e for e in coord_memory["events"] if e["event_type"] == "delegation_request"]
@@ -248,7 +236,7 @@ async def test_multi_agent_delegation_with_memory(test_namespace: str):
             assert any(task_id in str(e["content"]) for e in delegation_reqs)
             
             # Verify worker-1 received the task
-            response = await client.get("http://localhost:18201/memory/events")
+            response = await client.get(f"http://localhost:{w1_port}/memory/events")
             worker_memory = response.json()
             
             assert worker_memory["total"] > initial_count
@@ -258,40 +246,36 @@ async def test_multi_agent_delegation_with_memory(test_namespace: str):
             assert any(task_id in str(e["content"]) for e in user_msgs)
     
     finally:
-        pf_coordinator.terminate()
-        pf_coordinator.wait(timeout=5)
-        pf_worker1.terminate()
-        pf_worker1.wait(timeout=5)
+        for pf in pf_processes:
+            pf.terminate()
+            pf.wait(timeout=5)
 
 
 @pytest.mark.asyncio
-async def test_multi_agent_process_independently(test_namespace: str):
+async def test_multi_agent_process_independently(test_namespace: str, shared_modelapi: str):
     """Test each agent processes tasks independently with memory isolation."""
-    resources = create_multi_agent_resources(test_namespace)
+    resources = create_multi_agent_resources(test_namespace, shared_modelapi, "-iso")
     
-    # Deploy resources
-    create_custom_resource(resources["modelapi"], test_namespace)
-    wait_for_deployment(test_namespace, "modelapi-multi-agent-api", timeout=120)
+    # Deploy workers
+    for agent_key in ["worker-1", "worker-2"]:
+        spec, name = resources[agent_key]
+        create_custom_resource(spec, test_namespace)
+        wait_for_deployment(test_namespace, f"agent-{name}", timeout=120)
     
-    for agent_name in ["worker-1", "worker-2"]:
-        create_custom_resource(resources[agent_name], test_namespace)
-        wait_for_deployment(test_namespace, f"agent-{agent_name}", timeout=120)
+    _, w1_name = resources["worker-1"]
+    _, w2_name = resources["worker-2"]
     
     # Port forward to workers
-    pf_w1 = port_forward(
-        namespace=test_namespace,
-        service_name="agent-worker-1",
-        local_port=18300,
-        remote_port=8000,
-    )
-    pf_w2 = port_forward(
-        namespace=test_namespace,
-        service_name="agent-worker-2",
-        local_port=18301,
-        remote_port=8000,
-    )
+    w1_port = get_next_port()
+    w2_port = get_next_port()
     
-    time.sleep(2)
+    pf_processes = parallel_port_forwards(
+        test_namespace,
+        [
+            (f"agent-{w1_name}", w1_port, 8000),
+            (f"agent-{w2_name}", w2_port, 8000),
+        ]
+    )
     
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
@@ -301,24 +285,24 @@ async def test_multi_agent_process_independently(test_namespace: str):
             
             # Invoke worker-1
             response = await client.post(
-                "http://localhost:18300/agent/invoke",
+                f"http://localhost:{w1_port}/agent/invoke",
                 json={"task": f"Process task {task1_id}"}
             )
             assert response.status_code == 200
             
             # Invoke worker-2
             response = await client.post(
-                "http://localhost:18301/agent/invoke",
+                f"http://localhost:{w2_port}/agent/invoke",
                 json={"task": f"Process task {task2_id}"}
             )
             assert response.status_code == 200
             
             # Verify memory isolation
-            response = await client.get("http://localhost:18300/memory/events")
+            response = await client.get(f"http://localhost:{w1_port}/memory/events")
             w1_memory = response.json()
             w1_content = " ".join(str(e["content"]) for e in w1_memory["events"])
             
-            response = await client.get("http://localhost:18301/memory/events")
+            response = await client.get(f"http://localhost:{w2_port}/memory/events")
             w2_memory = response.json()
             w2_content = " ".join(str(e["content"]) for e in w2_memory["events"])
             
@@ -329,7 +313,6 @@ async def test_multi_agent_process_independently(test_namespace: str):
             assert task1_id not in w2_content
     
     finally:
-        pf_w1.terminate()
-        pf_w1.wait(timeout=5)
-        pf_w2.terminate()
-        pf_w2.wait(timeout=5)
+        for pf in pf_processes:
+            pf.terminate()
+            pf.wait(timeout=5)

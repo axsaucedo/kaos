@@ -14,39 +14,21 @@ import httpx
 from e2e.conftest import (
     create_custom_resource,
     wait_for_deployment,
-    port_forward,
-    create_modelapi_resource,
-    create_agent_resource,
+    port_forward_with_wait,
+    parallel_port_forwards,
+    get_next_port,
 )
 
 
-def create_agentic_loop_resources(namespace: str):
-    """Create resources for deterministic agentic loop testing."""
-    # ModelAPI with LiteLLM proxy to Ollama (for actual inference)
-    modelapi_spec = {
-        "apiVersion": "ethical.institute/v1alpha1",
-        "kind": "ModelAPI",
-        "metadata": {"name": "mock-api", "namespace": namespace},
-        "spec": {
-            "mode": "Proxy",
-            "proxyConfig": {
-                "apiBase": "http://host.docker.internal:11434",
-                "model": "ollama/smollm2:135m",
-                "env": [
-                    {"name": "OPENAI_API_KEY", "value": "sk-test"},
-                    {"name": "LITELLM_LOG", "value": "WARN"},
-                ]
-            },
-        },
-    }
-    
-    # Worker agent with basic config
-    worker_spec = {
+def create_agentic_loop_worker(namespace: str, modelapi_name: str, suffix: str = ""):
+    """Create worker agent spec for agentic loop testing."""
+    name = f"loop-worker{suffix}"
+    return {
         "apiVersion": "ethical.institute/v1alpha1",
         "kind": "Agent",
-        "metadata": {"name": "worker-loop", "namespace": namespace},
+        "metadata": {"name": name, "namespace": namespace},
         "spec": {
-            "modelAPI": "mock-api",
+            "modelAPI": modelapi_name,
             "config": {
                 "description": "Worker for agentic loop tests",
                 "instructions": "You are a worker. Process tasks and respond briefly.",
@@ -67,18 +49,21 @@ def create_agentic_loop_resources(namespace: str):
                 "limits": {"memory": "512Mi", "cpu": "1000m"},
             },
         },
-    }
-    
-    # Coordinator agent with delegation enabled
-    coordinator_spec = {
+    }, name
+
+
+def create_agentic_loop_coordinator(namespace: str, modelapi_name: str, worker_name: str, suffix: str = ""):
+    """Create coordinator agent spec for agentic loop testing."""
+    name = f"loop-coord{suffix}"
+    return {
         "apiVersion": "ethical.institute/v1alpha1",
         "kind": "Agent",
-        "metadata": {"name": "coordinator-loop", "namespace": namespace},
+        "metadata": {"name": name, "namespace": namespace},
         "spec": {
-            "modelAPI": "mock-api",
+            "modelAPI": modelapi_name,
             "config": {
                 "description": "Coordinator for agentic loop tests",
-                "instructions": "You are a coordinator. You can delegate tasks to worker-loop.",
+                "instructions": f"You are a coordinator. You can delegate tasks to {worker_name}.",
                 "agenticLoop": {
                     "maxSteps": 5,
                     "enableTools": True,
@@ -91,7 +76,7 @@ def create_agentic_loop_resources(namespace: str):
             },
             "agentNetwork": {
                 "expose": True,
-                "access": ["worker-loop"],  # Can delegate to worker
+                "access": [worker_name],
             },
             "replicas": 1,
             "resources": {
@@ -99,48 +84,34 @@ def create_agentic_loop_resources(namespace: str):
                 "limits": {"memory": "512Mi", "cpu": "1000m"},
             },
         },
-    }
-    
-    return {
-        "modelapi": modelapi_spec,
-        "worker": worker_spec,
-        "coordinator": coordinator_spec,
-    }
+    }, name
 
 
 @pytest.mark.asyncio
-async def test_agentic_loop_config_applied(test_namespace: str):
+async def test_agentic_loop_config_applied(test_namespace: str, shared_modelapi: str):
     """Test that agentic loop configuration is applied from CRD."""
-    resources = create_agentic_loop_resources(test_namespace)
+    worker_spec, worker_name = create_agentic_loop_worker(test_namespace, shared_modelapi, "-cfg")
     
-    # Deploy ModelAPI and worker
-    create_custom_resource(resources["modelapi"], test_namespace)
-    wait_for_deployment(test_namespace, "modelapi-mock-api", timeout=120)
+    create_custom_resource(worker_spec, test_namespace)
+    wait_for_deployment(test_namespace, f"agent-{worker_name}", timeout=120)
     
-    create_custom_resource(resources["worker"], test_namespace)
-    wait_for_deployment(test_namespace, "agent-worker-loop", timeout=120)
-    
-    # Port forward to worker
-    pf_worker = port_forward(
+    port = get_next_port()
+    pf_worker = port_forward_with_wait(
         namespace=test_namespace,
-        service_name="agent-worker-loop",
-        local_port=18400,
+        service_name=f"agent-{worker_name}",
+        local_port=port,
         remote_port=8000,
     )
     
-    time.sleep(2)
-    
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            # Check health
-            response = await client.get("http://localhost:18400/health")
+            response = await client.get(f"http://localhost:{port}/health")
             assert response.status_code == 200
             
-            # Check agent card has correct config
-            response = await client.get("http://localhost:18400/.well-known/agent")
+            response = await client.get(f"http://localhost:{port}/.well-known/agent")
             assert response.status_code == 200
             card = response.json()
-            assert card["name"] == "worker-loop"
+            assert card["name"] == worker_name
             
     finally:
         pf_worker.terminate()
@@ -148,57 +119,49 @@ async def test_agentic_loop_config_applied(test_namespace: str):
 
 
 @pytest.mark.asyncio
-async def test_delegation_with_memory_verification(test_namespace: str):
+async def test_delegation_with_memory_verification(test_namespace: str, shared_modelapi: str):
     """Test coordinator delegates to worker and memory is tracked."""
-    resources = create_agentic_loop_resources(test_namespace)
-    
-    # Deploy resources
-    create_custom_resource(resources["modelapi"], test_namespace)
-    wait_for_deployment(test_namespace, "modelapi-mock-api", timeout=120)
+    worker_spec, worker_name = create_agentic_loop_worker(test_namespace, shared_modelapi, "-del")
+    coord_spec, coord_name = create_agentic_loop_coordinator(test_namespace, shared_modelapi, worker_name, "-del")
     
     # Deploy worker first
-    create_custom_resource(resources["worker"], test_namespace)
-    wait_for_deployment(test_namespace, "agent-worker-loop", timeout=120)
+    create_custom_resource(worker_spec, test_namespace)
+    wait_for_deployment(test_namespace, f"agent-{worker_name}", timeout=120)
     
     # Deploy coordinator
-    create_custom_resource(resources["coordinator"], test_namespace)
-    wait_for_deployment(test_namespace, "agent-coordinator-loop", timeout=120)
+    create_custom_resource(coord_spec, test_namespace)
+    wait_for_deployment(test_namespace, f"agent-{coord_name}", timeout=120)
     
-    # Port forward to both
-    pf_coord = port_forward(
-        namespace=test_namespace,
-        service_name="agent-coordinator-loop",
-        local_port=18500,
-        remote_port=8000,
+    # Port forward to both in parallel
+    coord_port = get_next_port()
+    worker_port = get_next_port()
+    pf_processes = parallel_port_forwards(
+        test_namespace,
+        [
+            (f"agent-{coord_name}", coord_port, 8000),
+            (f"agent-{worker_name}", worker_port, 8000),
+        ]
     )
-    pf_worker = port_forward(
-        namespace=test_namespace,
-        service_name="agent-worker-loop",
-        local_port=18501,
-        remote_port=8000,
-    )
-    
-    time.sleep(3)
     
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             # Verify both are healthy
-            for port in [18500, 18501]:
+            for port in [coord_port, worker_port]:
                 response = await client.get(f"http://localhost:{port}/health")
                 assert response.status_code == 200
             
             # Get worker's initial memory count
-            response = await client.get("http://localhost:18501/memory/events")
+            response = await client.get(f"http://localhost:{worker_port}/memory/events")
             initial_worker_count = response.json()["total"]
             
             # Send delegation request via role: "delegate"
             task_id = f"LOOP_TASK_{int(time.time())}"
             response = await client.post(
-                "http://localhost:18500/v1/chat/completions",
+                f"http://localhost:{coord_port}/v1/chat/completions",
                 json={
-                    "model": "coordinator-loop",
+                    "model": coord_name,
                     "messages": [
-                        {"role": "delegate", "content": f"worker-loop: Process task {task_id}"}
+                        {"role": "delegate", "content": f"{worker_name}: Process task {task_id}"}
                     ]
                 }
             )
@@ -209,7 +172,7 @@ async def test_delegation_with_memory_verification(test_namespace: str):
             assert len(data["choices"][0]["message"]["content"]) > 0
             
             # Verify coordinator memory has delegation events
-            response = await client.get("http://localhost:18500/memory/events")
+            response = await client.get(f"http://localhost:{coord_port}/memory/events")
             coord_memory = response.json()
             event_types = [e["event_type"] for e in coord_memory["events"]]
             
@@ -221,7 +184,7 @@ async def test_delegation_with_memory_verification(test_namespace: str):
             assert any(task_id in str(e["content"]) for e in delegation_reqs)
             
             # Verify worker received the task
-            response = await client.get("http://localhost:18501/memory/events")
+            response = await client.get(f"http://localhost:{worker_port}/memory/events")
             worker_memory = response.json()
             
             assert worker_memory["total"] > initial_worker_count, "Worker should have new events"
@@ -232,43 +195,48 @@ async def test_delegation_with_memory_verification(test_namespace: str):
                 f"Task {task_id} not found in worker messages"
     
     finally:
-        pf_coord.terminate()
-        pf_coord.wait(timeout=5)
-        pf_worker.terminate()
-        pf_worker.wait(timeout=5)
+        for pf in pf_processes:
+            pf.terminate()
+            pf.wait(timeout=5)
 
 
 @pytest.mark.asyncio
 async def test_agent_processes_with_memory_events(test_namespace: str):
-    """Test that agent processing creates correct memory events."""
-    resources = create_agentic_loop_resources(test_namespace)
+    """Test that agent processing creates correct memory events.
     
-    # Deploy ModelAPI and worker
-    create_custom_resource(resources["modelapi"], test_namespace)
-    wait_for_deployment(test_namespace, "modelapi-mock-api", timeout=120)
+    This test uses a separate ModelAPI with Ollama backend since it
+    actually invokes the model (not using mock_response).
+    """
+    # Create a ModelAPI with Ollama backend for actual inference
+    from e2e.conftest import create_modelapi_hosted_resource
+    modelapi_name = "loop-ollama-mem"
+    modelapi_spec = create_modelapi_hosted_resource(test_namespace, modelapi_name)
+    create_custom_resource(modelapi_spec, test_namespace)
+    wait_for_deployment(test_namespace, f"modelapi-{modelapi_name}", timeout=120)
     
-    create_custom_resource(resources["worker"], test_namespace)
-    wait_for_deployment(test_namespace, "agent-worker-loop", timeout=120)
+    worker_spec, worker_name = create_agentic_loop_worker(test_namespace, modelapi_name, "-mem")
     
-    pf_worker = port_forward(
+    create_custom_resource(worker_spec, test_namespace)
+    wait_for_deployment(test_namespace, f"agent-{worker_name}", timeout=120)
+    
+    port = get_next_port()
+    pf_worker = port_forward_with_wait(
         namespace=test_namespace,
-        service_name="agent-worker-loop",
-        local_port=18600,
+        service_name=f"agent-{worker_name}",
+        local_port=port,
         remote_port=8000,
     )
-    
-    time.sleep(2)
     
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             # Clear memory by noting initial count
-            response = await client.get("http://localhost:18600/memory/events")
+            response = await client.get(f"http://localhost:{port}/memory/events")
             initial_count = response.json()["total"]
             
             # Send a simple message
             unique_id = f"MSG_{int(time.time())}"
             response = await client.post(
-                "http://localhost:18600/agent/invoke",
+                f"http://localhost:{port}/agent/invoke",
                 json={"task": f"Echo back this ID: {unique_id}"}
             )
             
@@ -277,7 +245,7 @@ async def test_agent_processes_with_memory_events(test_namespace: str):
             assert result["status"] == "completed"
             
             # Check memory events
-            response = await client.get("http://localhost:18600/memory/events")
+            response = await client.get(f"http://localhost:{port}/memory/events")
             memory = response.json()
             
             assert memory["total"] > initial_count
@@ -297,33 +265,28 @@ async def test_agent_processes_with_memory_events(test_namespace: str):
 
 
 @pytest.mark.asyncio
-async def test_coordinator_has_delegation_capability(test_namespace: str):
+async def test_coordinator_has_delegation_capability(test_namespace: str, shared_modelapi: str):
     """Test that coordinator with sub-agents has delegation capability in agent card."""
-    resources = create_agentic_loop_resources(test_namespace)
+    worker_spec, worker_name = create_agentic_loop_worker(test_namespace, shared_modelapi, "-cap")
+    coord_spec, coord_name = create_agentic_loop_coordinator(test_namespace, shared_modelapi, worker_name, "-cap")
     
-    # Deploy resources
-    create_custom_resource(resources["modelapi"], test_namespace)
-    wait_for_deployment(test_namespace, "modelapi-mock-api", timeout=120)
+    create_custom_resource(worker_spec, test_namespace)
+    wait_for_deployment(test_namespace, f"agent-{worker_name}", timeout=120)
     
-    create_custom_resource(resources["worker"], test_namespace)
-    wait_for_deployment(test_namespace, "agent-worker-loop", timeout=120)
+    create_custom_resource(coord_spec, test_namespace)
+    wait_for_deployment(test_namespace, f"agent-{coord_name}", timeout=120)
     
-    create_custom_resource(resources["coordinator"], test_namespace)
-    wait_for_deployment(test_namespace, "agent-coordinator-loop", timeout=120)
-    
-    pf_coord = port_forward(
+    port = get_next_port()
+    pf_coord = port_forward_with_wait(
         namespace=test_namespace,
-        service_name="agent-coordinator-loop",
-        local_port=18700,
+        service_name=f"agent-{coord_name}",
+        local_port=port,
         remote_port=8000,
     )
     
-    time.sleep(2)
-    
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
-            # Get agent card
-            response = await client.get("http://localhost:18700/.well-known/agent")
+            response = await client.get(f"http://localhost:{port}/.well-known/agent")
             assert response.status_code == 200
             card = response.json()
             

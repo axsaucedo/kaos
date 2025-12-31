@@ -18,3 +18,8 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["e2e"]
+
+[dependency-groups]
+dev = [
+    "pytest-xdist>=3.8.0",
+]

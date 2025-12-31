@@ -7,19 +7,16 @@ Tests the agent server running in Kubernetes with the new framework:
 - Chat completions (streaming and non-streaming)
 """
 
-import time
-import subprocess
 import pytest
 import httpx
 
 from e2e.conftest import (
     create_custom_resource,
     wait_for_deployment,
-    port_forward,
-    create_modelapi_resource,
+    port_forward_with_wait,
     create_modelapi_hosted_resource,
-    create_mcpserver_resource,
     create_agent_resource,
+    get_next_port,
 )
 
 
@@ -27,29 +24,33 @@ from e2e.conftest import (
 async def test_agent_health_discovery_and_invocation(test_namespace: str):
     """Test complete agent workflow: health, discovery, invocation with actual Ollama."""
     # Create resources - using Ollama for actual model inference
-    modelapi_spec = create_modelapi_hosted_resource(test_namespace, "ollama-proxy")
+    # Use unique names to allow parallel test execution
+    modelapi_name = "base-ollama-proxy"
+    agent_name = "base-test-agent"
+    
+    modelapi_spec = create_modelapi_hosted_resource(test_namespace, modelapi_name)
     create_custom_resource(modelapi_spec, test_namespace)
     
     agent_spec = create_agent_resource(
         namespace=test_namespace,
-        modelapi_name="ollama-proxy",
+        modelapi_name=modelapi_name,
         mcpserver_names=[],
-        agent_name="test-agent",
+        agent_name=agent_name,
     )
     create_custom_resource(agent_spec, test_namespace)
 
-    wait_for_deployment(test_namespace, "modelapi-ollama-proxy", timeout=120)
-    wait_for_deployment(test_namespace, "agent-test-agent", timeout=120)
+    wait_for_deployment(test_namespace, f"modelapi-{modelapi_name}", timeout=120)
+    wait_for_deployment(test_namespace, f"agent-{agent_name}", timeout=120)
 
-    pf_process = port_forward(
+    port = get_next_port()
+    pf_process = port_forward_with_wait(
         namespace=test_namespace,
-        service_name="agent-test-agent",
-        local_port=18000,
+        service_name=f"agent-{agent_name}",
+        local_port=port,
         remote_port=8000,
     )
 
-    time.sleep(2)
-    agent_url = "http://localhost:18000"
+    agent_url = f"http://localhost:{port}"
 
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
@@ -98,38 +99,36 @@ async def test_agent_health_discovery_and_invocation(test_namespace: str):
 
 
 @pytest.mark.asyncio
-async def test_agent_chat_completions(test_namespace: str):
+async def test_agent_chat_completions(test_namespace: str, shared_modelapi: str):
     """Test OpenAI-compatible chat completions endpoint with mock_response."""
-    modelapi_spec = create_modelapi_resource(test_namespace, "mock-proxy")
-    create_custom_resource(modelapi_spec, test_namespace)
+    # Use shared ModelAPI for mock-based tests
+    agent_name = "base-chat-agent"
     
     agent_spec = create_agent_resource(
         namespace=test_namespace,
-        modelapi_name="mock-proxy",
+        modelapi_name=shared_modelapi,
         mcpserver_names=[],
-        agent_name="chat-agent",
+        agent_name=agent_name,
     )
     create_custom_resource(agent_spec, test_namespace)
 
-    wait_for_deployment(test_namespace, "modelapi-mock-proxy", timeout=120)
-    wait_for_deployment(test_namespace, "agent-chat-agent", timeout=120)
+    wait_for_deployment(test_namespace, f"agent-{agent_name}", timeout=120)
 
-    pf_process = port_forward(
+    port = get_next_port()
+    pf_process = port_forward_with_wait(
         namespace=test_namespace,
-        service_name="agent-chat-agent",
-        local_port=18001,
+        service_name=f"agent-{agent_name}",
+        local_port=port,
         remote_port=8000,
     )
-
-    time.sleep(2)
 
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             # Test non-streaming
             response = await client.post(
-                "http://localhost:18001/v1/chat/completions",
+                f"http://localhost:{port}/v1/chat/completions",
                 json={
-                    "model": "chat-agent",
+                    "model": agent_name,
                     "messages": [{"role": "user", "content": "Say OK"}],
                     "stream": False
                 },

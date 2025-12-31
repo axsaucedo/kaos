@@ -4,47 +4,48 @@ Tests:
 - ModelAPI Proxy mode with mock_response (no backend needed)
 - ModelAPI Proxy mode with real Ollama backend
 - ModelAPI Hosted mode with Ollama
+
+NOTE: These tests do NOT use shared_modelapi fixture because they test
+specific ModelAPI configurations and functionality.
 """
 
-import time
-import subprocess
 import pytest
 import httpx
 
 from e2e.conftest import (
     create_custom_resource,
     wait_for_deployment,
-    port_forward,
+    port_forward_with_wait,
     create_modelapi_resource,
-    create_modelapi_hosted_resource,
+    get_next_port,
 )
 
 
 @pytest.mark.asyncio
 async def test_modelapi_proxy_deployment(test_namespace: str):
     """Test ModelAPI Proxy mode deployment and health check."""
-    modelapi_spec = create_modelapi_resource(test_namespace, "test-proxy")
+    name = "modelapi-proxy-deploy"
+    modelapi_spec = create_modelapi_resource(test_namespace, name)
     create_custom_resource(modelapi_spec, test_namespace)
 
-    wait_for_deployment(test_namespace, "modelapi-test-proxy", timeout=120)
+    wait_for_deployment(test_namespace, f"modelapi-{name}", timeout=120)
 
-    pf_process = port_forward(
+    port = get_next_port()
+    pf_process = port_forward_with_wait(
         namespace=test_namespace,
-        service_name="modelapi-test-proxy",
-        local_port=18030,
+        service_name=f"modelapi-{name}",
+        local_port=port,
         remote_port=8000,
     )
-
-    time.sleep(2)
 
     try:
         async with httpx.AsyncClient() as client:
             # Health check
-            response = await client.get("http://localhost:18030/health", timeout=10.0)
+            response = await client.get(f"http://localhost:{port}/health", timeout=10.0)
             assert response.status_code == 200
             
             # Models endpoint
-            response = await client.get("http://localhost:18030/models", timeout=10.0)
+            response = await client.get(f"http://localhost:{port}/models", timeout=10.0)
             assert response.status_code == 200
     finally:
         pf_process.terminate()
@@ -58,25 +59,25 @@ async def test_modelapi_proxy_mock_response(test_namespace: str):
     This validates that LiteLLM's mock_response feature works correctly,
     which enables deterministic testing without requiring a real LLM.
     """
-    modelapi_spec = create_modelapi_resource(test_namespace, "mock-test")
+    name = "modelapi-mock-resp"
+    modelapi_spec = create_modelapi_resource(test_namespace, name)
     create_custom_resource(modelapi_spec, test_namespace)
 
-    wait_for_deployment(test_namespace, "modelapi-mock-test", timeout=120)
+    wait_for_deployment(test_namespace, f"modelapi-{name}", timeout=120)
 
-    pf_process = port_forward(
+    port = get_next_port()
+    pf_process = port_forward_with_wait(
         namespace=test_namespace,
-        service_name="modelapi-mock-test",
-        local_port=18031,
+        service_name=f"modelapi-{name}",
+        local_port=port,
         remote_port=8000,
     )
-
-    time.sleep(2)
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             # Test mock_response - LiteLLM returns this string without calling any backend
             response = await client.post(
-                "http://localhost:18031/v1/chat/completions",
+                f"http://localhost:{port}/v1/chat/completions",
                 json={
                     "model": "anything",
                     "messages": [{"role": "user", "content": "test"}],
@@ -102,12 +103,13 @@ async def test_modelapi_proxy_with_ollama(test_namespace: str):
     This is the ONLY test that actually calls a real LLM model through proxy.
     Requires Ollama running locally with smollm2:135m model.
     """
+    name = "modelapi-ollama-prx"
     # Create ModelAPI with Ollama backend using new simplified proxyConfig fields
     modelapi_spec = {
         "apiVersion": "ethical.institute/v1alpha1",
         "kind": "ModelAPI",
         "metadata": {
-            "name": "ollama-proxy",
+            "name": name,
             "namespace": test_namespace,
         },
         "spec": {
@@ -123,26 +125,25 @@ async def test_modelapi_proxy_with_ollama(test_namespace: str):
     }
     create_custom_resource(modelapi_spec, test_namespace)
 
-    wait_for_deployment(test_namespace, "modelapi-ollama-proxy", timeout=120)
+    wait_for_deployment(test_namespace, f"modelapi-{name}", timeout=120)
 
-    pf_process = port_forward(
+    port = get_next_port()
+    pf_process = port_forward_with_wait(
         namespace=test_namespace,
-        service_name="modelapi-ollama-proxy",
-        local_port=18032,
+        service_name=f"modelapi-{name}",
+        local_port=port,
         remote_port=8000,
     )
-
-    time.sleep(3)
 
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             # Test health
-            response = await client.get("http://localhost:18032/health", timeout=10.0)
+            response = await client.get(f"http://localhost:{port}/health", timeout=10.0)
             assert response.status_code == 200
             
             # Test actual model inference with smollm2
             response = await client.post(
-                "http://localhost:18032/v1/chat/completions",
+                f"http://localhost:{port}/v1/chat/completions",
                 json={
                     "model": "ollama/smollm2:135m",
                     "messages": [{"role": "user", "content": "Say hello"}],
@@ -172,12 +173,13 @@ async def test_modelapi_hosted_ollama(test_namespace: str):
     
     Note: This test may take longer as Ollama needs to pull the model.
     """
+    name = "modelapi-hosted"
     # Create ModelAPI in Hosted mode
     modelapi_spec = {
         "apiVersion": "ethical.institute/v1alpha1",
         "kind": "ModelAPI",
         "metadata": {
-            "name": "hosted-ollama",
+            "name": name,
             "namespace": test_namespace,
         },
         "spec": {
@@ -193,21 +195,26 @@ async def test_modelapi_hosted_ollama(test_namespace: str):
     create_custom_resource(modelapi_spec, test_namespace)
 
     # Hosted mode uses Ollama on port 11434
-    wait_for_deployment(test_namespace, "modelapi-hosted-ollama", timeout=180)
+    wait_for_deployment(test_namespace, f"modelapi-{name}", timeout=180)
 
+    port = get_next_port()
+    # For hosted mode, we need a custom wait since it doesn't have /health on port 11434
+    from e2e.conftest import port_forward
+    import time
+    
     pf_process = port_forward(
         namespace=test_namespace,
-        service_name="modelapi-hosted-ollama",
-        local_port=18033,
+        service_name=f"modelapi-{name}",
+        local_port=port,
         remote_port=11434,  # Ollama port
     )
 
-    time.sleep(5)
+    time.sleep(3)  # Ollama needs more time to start
 
     try:
         async with httpx.AsyncClient(timeout=120.0) as client:
             # Test Ollama health (root endpoint returns version info)
-            response = await client.get("http://localhost:18033/", timeout=30.0)
+            response = await client.get(f"http://localhost:{port}/", timeout=30.0)
             assert response.status_code == 200
             
     finally:
