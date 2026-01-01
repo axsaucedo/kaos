@@ -16,36 +16,35 @@ spec:
   
   # Required: Server configuration
   config:
-    # Option 1: PyPI package name
-    # TODO: Update to "tools.fromPackage" instead of "mcp"
-    mcp: "test-mcp-echo-server"
-    
-    # Option 2: Dynamic Python tools
-    # TODO: Update to "tools.fromString" instead of "toolString"
-    # TODO: Add also "tools.fromSecretKeyRef"
-    toolsString: |
-      def echo(text: str) -> str:
-          """Echo the input text."""
-          return f"Echo: {text}"
+    # Tools configuration (one of the following)
+    tools:
+      # Option 1: PyPI package name
+      fromPackage: "test-mcp-echo-server"
       
-      def add(a: int, b: int) -> int:
-          """Add two numbers."""
-          return a + b
+      # Option 2: Dynamic Python tools defined inline
+      fromString: |
+        def echo(text: str) -> str:
+            """Echo the input text."""
+            return f"Echo: {text}"
+        
+        def add(a: int, b: int) -> int:
+            """Add two numbers."""
+            return a + b
+      
+      # Option 3: Tools from a Secret
+      fromSecretKeyRef:
+        name: my-tools-secret
+        key: tools.py
     
     # Environment variables
     env:
     - name: LOG_LEVEL
       value: "INFO"
   
-  # Advanced: We also provide a podSpec override section
-  #   this allows you for custom overrides like images, etc
-  # TODO: Add podspec override to allow for people to add overrides (eg image override, volume mounts, etc) - should use merge strategy, and this overides take prescedence
+  # Optional: PodSpec override using strategic merge patch
   podSpec:
     containers:
-    # Resource requirements
-    # TODO: resources should be for podspec level
-    - name: model-api
-      image: <your-custom-image>
+    - name: mcp-server  # Must match generated container name
       resources:
         requests:
           memory: "128Mi"
@@ -57,14 +56,13 @@ spec:
 status:
   phase: Ready           # Pending, Ready, Failed
   ready: true
-  endpoint: "http://my-mcp.my-namespace.svc.cluster.local"
+  endpoint: "http://mcpserver-my-mcp.my-namespace.svc.cluster.local:8000"
   availableTools:
   - "echo"
   - "add"
   message: ""
 ```
 
-# TODO: Update 
 ## Spec Fields
 
 ### type (required)
@@ -78,38 +76,40 @@ Runtime type for the MCP server:
 
 ### config (required)
 
-#### config.mcp
+#### config.tools
+
+Tools configuration - use one of the following options:
+
+##### tools.fromPackage
 
 PyPI package name to run as MCP server:
 
 ```yaml
 config:
-  mcp: "test-mcp-echo-server"
+  tools:
+    fromPackage: "test-mcp-echo-server"
 ```
 
 The package is installed via pip and executed. It must expose MCP-compatible endpoints.
 
-Available packages:
-- `test-mcp-echo-server` - Simple echo tool for testing
-- Custom packages that implement MCP protocol
-
-#### config.toolsString
+##### tools.fromString
 
 Dynamic Python tools defined inline:
 
 ```yaml
 config:
-  toolsString: |
-    def greet(name: str) -> str:
-        """Greet a person by name."""
-        return f"Hello, {name}!"
-    
-    def calculate(expression: str) -> str:
-        """Evaluate a math expression."""
-        try:
-            return str(eval(expression))
-        except Exception as e:
-            return f"Error: {e}"
+  tools:
+    fromString: |
+      def greet(name: str) -> str:
+          """Greet a person by name."""
+          return f"Hello, {name}!"
+      
+      def calculate(expression: str) -> str:
+          """Evaluate a math expression."""
+          try:
+              return str(eval(expression))
+          except Exception as e:
+              return f"Error: {e}"
 ```
 
 **Requirements:**
@@ -117,7 +117,19 @@ config:
 - Functions must have docstrings (used as descriptions)
 - Supported types: `str`, `int`, `dict`, `list`
 
-**Security Note:** `toolsString` uses `exec()` to define functions. Only use with trusted input.
+**Security Note:** `fromString` uses `exec()` to define functions. Only use with trusted input.
+
+##### tools.fromSecretKeyRef
+
+Load tools from a Kubernetes Secret:
+
+```yaml
+config:
+  tools:
+    fromSecretKeyRef:
+      name: my-tools-secret
+      key: tools.py
+```
 
 #### config.env
 
@@ -135,26 +147,28 @@ config:
         key: api-key
 ```
 
-### resources (optional)
+### podSpec (optional)
 
-Resource requirements:
+Override the generated pod spec using Kubernetes strategic merge patch.
 
 ```yaml
-resources:
-  requests:
-    memory: "128Mi"
-    cpu: "100m"
-  limits:
-    memory: "512Mi"
-    cpu: "1000m"
+spec:
+  podSpec:
+    containers:
+    - name: mcp-server  # Must match the generated container name
+      resources:
+        requests:
+          memory: "256Mi"
+          cpu: "100m"
 ```
 
 ## Container Images
 
 | Tool Source | Image | Command |
 |-------------|-------|---------|
-| `mcp` (package) | `python:3.12-slim` | `pip install <package> && uvx <package>` |
-| `toolsString` | `agentic-agent:latest` | `python -m mcptools.server` |
+| `tools.fromPackage` | `python:3.12-slim` | `pip install <package> && <package>` |
+| `tools.fromString` | `agentic-agent:latest` | `python -m mcptools.server` |
+| `tools.fromSecretKeyRef` | `agentic-agent:latest` | `python -m mcptools.server` |
 
 ## Status Fields
 
@@ -178,7 +192,8 @@ metadata:
 spec:
   type: python-runtime
   config:
-    mcp: "test-mcp-echo-server"
+    tools:
+      fromPackage: "test-mcp-echo-server"
 ```
 
 ### Calculator Tool (Dynamic)
@@ -191,30 +206,28 @@ metadata:
 spec:
   type: python-runtime
   config:
-    toolsString: |
-      def add(a: int, b: int) -> int:
-          """Add two numbers together."""
-          return a + b
-      
-      def subtract(a: int, b: int) -> int:
-          """Subtract b from a."""
-          return a - b
-      
-      def multiply(a: int, b: int) -> int:
-          """Multiply two numbers."""
-          return a * b
-      
-      def divide(a: int, b: int) -> str:
-          """Divide a by b."""
-          if b == 0:
-              return "Error: Division by zero"
-          return str(a / b)
-  resources:
-    requests:
-      memory: "128Mi"
+    tools:
+      fromString: |
+        def add(a: int, b: int) -> int:
+            """Add two numbers together."""
+            return a + b
+        
+        def subtract(a: int, b: int) -> int:
+            """Subtract b from a."""
+            return a - b
+        
+        def multiply(a: int, b: int) -> int:
+            """Multiply two numbers."""
+            return a * b
+        
+        def divide(a: int, b: int) -> str:
+            """Divide a by b."""
+            if b == 0:
+                return "Error: Division by zero"
+            return str(a / b)
 ```
 
-### String Utilities
+### String Utilities with Resources
 
 ```yaml
 apiVersion: ethical.institute/v1alpha1
@@ -224,25 +237,28 @@ metadata:
 spec:
   type: python-runtime
   config:
-    toolsString: |
-      def uppercase(text: str) -> str:
-          """Convert text to uppercase."""
-          return text.upper()
-      
-      def lowercase(text: str) -> str:
-          """Convert text to lowercase."""
-          return text.lower()
-      
-      def reverse(text: str) -> str:
-          """Reverse the text."""
-          return text[::-1]
-      
-      def word_count(text: str) -> int:
-          """Count words in text."""
-          return len(text.split())
+    tools:
+      fromString: |
+        def uppercase(text: str) -> str:
+            """Convert text to uppercase."""
+            return text.upper()
+        
+        def lowercase(text: str) -> str:
+            """Convert text to lowercase."""
+            return text.lower()
+        
+        def reverse(text: str) -> str:
+            """Reverse the text."""
+            return text[::-1]
+  podSpec:
+    containers:
+    - name: mcp-server
+      resources:
+        requests:
+          memory: "128Mi"
 ```
 
-### External API Tool
+### External API Tool with Secret
 
 ```yaml
 apiVersion: ethical.institute/v1alpha1
@@ -252,21 +268,22 @@ metadata:
 spec:
   type: python-runtime
   config:
-    toolsString: |
-      import os
-      import urllib.request
-      import json
-      
-      def get_weather(city: str) -> str:
-          """Get current weather for a city."""
-          api_key = os.environ.get("WEATHER_API_KEY", "")
-          url = f"https://api.weather.com/v1/current?city={city}&key={api_key}"
-          try:
-              with urllib.request.urlopen(url) as response:
-                  data = json.loads(response.read())
-                  return f"{city}: {data['temp']}°C, {data['conditions']}"
-          except Exception as e:
-              return f"Error: {e}"
+    tools:
+      fromString: |
+        import os
+        import urllib.request
+        import json
+        
+        def get_weather(city: str) -> str:
+            """Get current weather for a city."""
+            api_key = os.environ.get("WEATHER_API_KEY", "")
+            url = f"https://api.weather.com/v1/current?city={city}&key={api_key}"
+            try:
+                with urllib.request.urlopen(url) as response:
+                    data = json.loads(response.read())
+                    return f"{city}: {data['temp']}Â°C, {data['conditions']}"
+            except Exception as e:
+                return f"Error: {e}"
     
     env:
     - name: WEATHER_API_KEY
@@ -298,10 +315,9 @@ spec:
 ```
 
 The operator:
-1. Waits for MCPServers to be Ready
-2. Sets `MCP_SERVERS=echo-tools,calculator`
-3. Sets `MCP_SERVER_ECHO_TOOLS_URL=http://echo-tools:80`
-4. Sets `MCP_SERVER_CALCULATOR_URL=http://calculator:80`
+1. Waits for MCPServers to be Ready (if `waitForDependencies: true`)
+2. Sets `MCP_SERVERS=[echo-tools, calculator]`
+3. Sets `MCP_SERVER_<NAME>_URL=http://mcpserver-<name>:8000`
 
 ## HTTP Endpoints
 
@@ -310,42 +326,22 @@ MCPServer exposes:
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/health` | GET | Liveness probe |
-| `/ready` | GET | Readiness probe (includes tool list) |
+| `/ready` | GET | Readiness probe |
 | `/mcp/tools` | GET | List available tools |
 | `/mcp/tools` | POST | Execute a tool |
 
 ### Tool Listing
 
 ```bash
-curl http://my-mcp:80/mcp/tools
-```
-
-```json
-{
-  "tools": [
-    {
-      "name": "echo",
-      "description": "Echo the input text.",
-      "parameters": {
-        "text": {"type": "string"}
-      }
-    }
-  ]
-}
+curl http://mcpserver-my-mcp:8000/mcp/tools
 ```
 
 ### Tool Execution
 
 ```bash
-curl -X POST http://my-mcp:80/mcp/tools \
+curl -X POST http://mcpserver-my-mcp:8000/mcp/tools \
   -H "Content-Type: application/json" \
   -d '{"tool": "echo", "arguments": {"text": "Hello"}}'
-```
-
-```json
-{
-  "result": "Echo: Hello"
-}
 ```
 
 ## Troubleshooting
@@ -355,12 +351,12 @@ curl -X POST http://my-mcp:80/mcp/tools \
 Check pod logs:
 
 ```bash
-kubectl logs -l app=my-mcp -n my-namespace
+kubectl logs -l mcpserver=my-mcp -n my-namespace
 ```
 
 Common causes:
-- Invalid `toolsString` Python syntax
-- Package not found (for `mcp` option)
+- Invalid `fromString` Python syntax
+- Package not found (for `fromPackage` option)
 - Missing dependencies
 
 ### Tools Not Discovered by Agent
@@ -374,11 +370,11 @@ kubectl get mcpserver my-mcp -n my-namespace
 Test endpoint manually:
 
 ```bash
-kubectl exec -it deploy/my-agent -n my-namespace -- \
-  curl http://my-mcp/mcp/tools
+kubectl exec -it deploy/agent-my-agent -n my-namespace -- \
+  curl http://mcpserver-my-mcp:8000/mcp/tools
 ```
 
-### toolsString Syntax Errors
+### fromString Syntax Errors
 
 Test your Python code locally:
 

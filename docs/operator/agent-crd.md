@@ -19,6 +19,9 @@ spec:
   - echo-tools
   - calculator-tools
   
+  # Optional: Wait for dependencies to be ready (default: true)
+  waitForDependencies: true
+  
   # Optional: Agent configuration
   config:
     # Human-readable description for humans and other agents for a2a delegation
@@ -29,44 +32,28 @@ spec:
       You are a helpful assistant.
       Be concise and accurate.
     
-    # Agentic loop configuration
-    # TODO: rename to just have reasoningLoopMaxSteps: as we don't need the rest
-    # TODO: Remove the enableTools and the enableDelegation as this is redundant, also in the python code we should remove as both are just dictionaries so the cost of checking if there are no tools is minimal and just avoid requiring any env vars would reduce complexity
-    agenticLoop:
-      maxSteps: 5          # Max reasoning iterations (1-20)
-      enableTools: true    # Enable tool calling
-      enableDelegation: true  # Enable agent delegation
+    # Max reasoning loop iterations (1-20, default: 5)
+    reasoningLoopMaxSteps: 5
     
     # Additional environment variables
     env:
     - name: MODEL_NAME
-      value: "smollm2:135m"
+      value: "ollama/smollm2:135m"
     - name: CUSTOM_VAR
       value: "custom-value"
   
   # Optional: Agent-to-Agent networking
   agentNetwork:
-    # TODO: ENsure that expose is true by default
-    # Create Service for A2A discovery (default true)
-    #     this exposes an agent card at the ./well-known path
+    # Create Service for A2A discovery (default: true)
     expose: true           
     access:                # Sub-agents this agent can delegate to
     - worker-1
     - worker-2
   
-  # TODO: Remove this replicas as we have this avaialbel in the podspec
-  # Optional: Replica count
-  replicas: 1
-  
-  # Advanced: We also provide a podSpec override section
-  #   this allows you for custom overrides like images, etc
-  # TODO: Add podspec override to allow for people to add overrides (eg image override, volume mounts, etc) - should use merge strategy, and this overides take prescedence
+  # Optional: PodSpec override using strategic merge patch
   podSpec:
     containers:
-    # TODO: resources should be for podspec level
     - name: agent
-      image: <your-custom-image>
-      # Resource requirements
       resources:
         requests:
           memory: "256Mi"
@@ -78,11 +65,9 @@ spec:
 status:
   phase: Ready             # Pending, Ready, Failed, Waiting
   ready: true
-  observedReplicas: 1
-  endpoint: "http://my-agent.my-namespace.svc.cluster.local"
+  endpoint: "http://agent-my-agent.my-namespace.svc.cluster.local:8000"
   linkedResources:
     modelAPI: my-modelapi
-    mcpServers: "echo-tools,calculator-tools"
   message: ""
 ```
 
@@ -157,24 +142,16 @@ config:
     3. Cite your sources
 ```
 
-# TODO: As outlied above to update as outlined above
-#### config.agenticLoop
+#### config.reasoningLoopMaxSteps
 
-Configuration for the reasoning loop:
+Maximum number of reasoning loop iterations:
 
 ```yaml
 config:
-  agenticLoop:
-    maxSteps: 10           # Allow more iterations for complex tasks
-    enableTools: true      # Agent can call MCP tools
-    enableDelegation: true # Agent can delegate to sub-agents
+  reasoningLoopMaxSteps: 10  # Default: 5, Range: 1-20
 ```
 
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `maxSteps` | int | 5 | Max reasoning iterations (1-20) |
-| `enableTools` | bool | true | Enable tool calling |
-| `enableDelegation` | bool | true | Enable agent delegation |
+The reasoning loop runs tool calls and delegations until the model produces a final response or max steps is reached.
 
 #### config.env
 
@@ -198,7 +175,7 @@ Agent-to-Agent networking configuration.
 
 #### agentNetwork.expose
 
-Create a Kubernetes Service for this agent:
+Create a Kubernetes Service for this agent (default: true):
 
 ```yaml
 agentNetwork:
@@ -206,7 +183,7 @@ agentNetwork:
 ```
 
 When `true`, creates a Service that exposes:
-- Port 80 → Container port 8000
+- Port 8000
 - Endpoints: `/health`, `/ready`, `/.well-known/agent`, `/agent/invoke`, `/v1/chat/completions`
 
 #### agentNetwork.access
@@ -215,7 +192,6 @@ List of agent names this agent can delegate to:
 
 ```yaml
 agentNetwork:
-  expose: true
   access:
   - worker-1
   - worker-2
@@ -223,42 +199,38 @@ agentNetwork:
 
 The operator automatically:
 1. Finds the referenced Agent resources
-2. Waits for them to be Ready
-3. Sets `PEER_AGENTS=worker-1,worker-2`
-4. Sets `PEER_AGENT_WORKER_1_CARD_URL=http://worker-1...`
-5. Sets `PEER_AGENT_WORKER_2_CARD_URL=http://worker-2...`
+2. Sets `PEER_AGENTS=worker-1,worker-2`
+3. Sets `PEER_AGENT_WORKER_1_CARD_URL=http://agent-worker-1...`
+4. Sets `PEER_AGENT_WORKER_2_CARD_URL=http://agent-worker-2...`
 
-# TODO: remove as outlined above in favour of podspec
-### replicas (optional)
+### podSpec (optional)
 
-Number of agent pod replicas:
+Override the generated pod spec using Kubernetes strategic merge patch.
 
 ```yaml
 spec:
-  replicas: 3
+  podSpec:
+    containers:
+    - name: agent  # Must match the generated container name
+      resources:
+        requests:
+          memory: "256Mi"
+          cpu: "100m"
+        limits:
+          memory: "512Mi"
+    tolerations:
+    - key: "gpu"
+      operator: "Exists"
+    nodeSelector:
+      accelerator: "nvidia"
 ```
 
-Default: 1
+**Strategic Merge Behavior:**
+- Container fields are merged by name (container `name` must be `agent`)
+- New fields are added, existing fields are overwritten
+- Useful for: resources, tolerations, nodeSelector, volumes, securityContext
 
-Note: Memory is per-pod and not shared between replicas.
-
-# TODO: remove as outlined above in favour of podspec
-### resources (optional)
-
-Kubernetes resource requirements:
-
-```yaml
-spec:
-  resources:
-    requests:
-      memory: "256Mi"
-      cpu: "200m"
-    limits:
-      memory: "1Gi"
-      cpu: "2000m"
-```
-
-# TODO: Add section on new podspec and how override works
+**Note:** Replicas cannot be set via podSpec; it's a deployment-level setting (currently fixed at 1).
 
 ## Status Fields
 
@@ -266,7 +238,6 @@ spec:
 |-------|------|-------------|
 | `phase` | string | Current phase: Pending, Ready, Failed, Waiting |
 | `ready` | bool | Whether agent is ready to serve |
-| `observedReplicas` | int | Current replica count |
 | `endpoint` | string | Service URL for A2A communication |
 | `linkedResources` | map | References to dependencies |
 | `message` | string | Additional status information |
@@ -285,8 +256,6 @@ spec:
   config:
     description: "A simple chat agent"
     instructions: "You are a helpful assistant."
-  agentNetwork:
-    expose: true
 ```
 
 ### Agent with Tools
@@ -306,11 +275,7 @@ spec:
     instructions: |
       You have access to a calculator and web search.
       Use them when appropriate.
-    agenticLoop:
-      maxSteps: 5
-      enableTools: true
-  agentNetwork:
-    expose: true
+    reasoningLoopMaxSteps: 10
 ```
 
 ### Coordinator with Workers
@@ -328,40 +293,50 @@ spec:
       You coordinate worker agents.
       Delegate research to researcher.
       Delegate analysis to analyst.
-    agenticLoop:
-      maxSteps: 10
-      enableDelegation: true
+    reasoningLoopMaxSteps: 10
   agentNetwork:
-    expose: true
     access:
     - researcher
     - analyst
 ```
 
-### High-Availability Agent
+### Agent with Resource Limits
 
 ```yaml
 apiVersion: ethical.institute/v1alpha1
 kind: Agent
 metadata:
-  name: ha-agent
+  name: resource-agent
 spec:
   modelAPI: ollama
-  replicas: 3
-  resources:
-    requests:
-      memory: "512Mi"
-      cpu: "500m"
-    limits:
-      memory: "2Gi"
-      cpu: "2000m"
   config:
-    description: "High-availability agent"
-  agentNetwork:
-    expose: true
+    description: "Agent with custom resources"
+  podSpec:
+    containers:
+    - name: agent
+      resources:
+        requests:
+          memory: "512Mi"
+          cpu: "500m"
+        limits:
+          memory: "2Gi"
+          cpu: "2000m"
 ```
 
-# TODO: update docs with waitfordependencies attribute
+### Agent without Waiting for Dependencies
+
+```yaml
+apiVersion: ethical.institute/v1alpha1
+kind: Agent
+metadata:
+  name: eager-agent
+spec:
+  modelAPI: ollama
+  waitForDependencies: false  # Start immediately
+  config:
+    description: "Agent that handles unavailable dependencies gracefully"
+```
+
 ## Troubleshooting
 
 ### Agent Stuck in Pending
@@ -373,14 +348,24 @@ kubectl describe agent my-agent -n my-namespace
 Common causes:
 - ModelAPI not Ready
 - MCPServer not Ready
-- Peer agent not Ready
+
+### Agent Stuck in Waiting
+
+The agent is waiting for dependencies. Check:
+
+```bash
+kubectl get modelapi -n my-namespace
+kubectl get mcpserver -n my-namespace
+```
+
+Set `waitForDependencies: false` to allow the agent to start without waiting.
 
 ### Agent Stuck in Failed
 
 Check pod logs:
 
 ```bash
-kubectl logs -l app=my-agent -n my-namespace
+kubectl logs -l agent=my-agent -n my-namespace
 ```
 
 Common causes:
@@ -394,9 +379,9 @@ Verify peer agent is accessible:
 
 ```bash
 # Check if service exists
-kubectl get svc worker-1 -n my-namespace
+kubectl get svc agent-worker-1 -n my-namespace
 
 # Check agent card endpoint
-kubectl exec -it deploy/coordinator -n my-namespace -- \
-  curl http://worker-1/.well-known/agent
+kubectl exec -it deploy/agent-coordinator -n my-namespace -- \
+  curl http://agent-worker-1:8000/.well-known/agent
 ```

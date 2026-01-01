@@ -16,27 +16,24 @@ spec:
   
   # For Proxy mode: LiteLLM configuration
   proxyConfig:
-    # Backend API URL (optional)
-    # TODO: Make optional;  
+    # Backend API URL (optional - enables wildcard mode if set without model)
     apiBase: "http://host.docker.internal:11434"
     
-    # Specific model - This sets single model CLI Litellm setup
-    # If not set, it expects a configfile below or sets automatic wildcard as below
-    # See: https://docs.litellm.ai/docs/providers/openai
-    model: "gpt-3.5-turbo"
+    # Specific model (optional - enables single model mode)
+    model: "ollama/smollm2:135m"
     
-    # You can provide a full configYaml from string to load your config
-    # The config below is the wildcard setup that is provided by default
-    # TODO: rename to configYaml.fromString
-    # TODO: add also configYaml.fromSecretKeyRef
-    # TODO: If no apiBase provided and none above then no deafult config
-    configYaml: |
-      # This is an example on how an ollama can be proxied in docker desktop
-      model_list:
-        - model_name: "*"
-          litellm_params:
-            model: "ollama/*"
-            api_base: "http://host.docker.internal:11434"
+    # Full config YAML (optional - for advanced multi-model routing)
+    configYaml:
+      fromString: |
+        model_list:
+          - model_name: "*"
+            litellm_params:
+              model: "ollama/*"
+              api_base: "http://host.docker.internal:11434"
+      # Or load from secret:
+      # fromSecretKeyRef:
+      #   name: litellm-config
+      #   key: config.yaml
     
     # Environment variables
     env:
@@ -47,25 +44,19 @@ spec:
           key: openai-key
   
   # For Hosted mode: Ollama configuration
-  # TODO: Update to hostedConfig
-  serverConfig:
-    # Model to pull and serve; this is loaded in an initContainer
+  hostedConfig:
+    # Model to pull and serve (loaded in an initContainer)
     model: "smollm2:135m"
     
     # Environment variables
     env:
     - name: OLLAMA_DEBUG
       value: "false"
-    
-  # Advanced: We also provide a podSpec override section
-  #   this allows you for custom overrides like images, etc
-  # TODO: Add podspec override to allow for people to add overrides (eg image override, volume mounts, etc) - should use merge strategy, and this overides take prescedence
+  
+  # Optional: PodSpec override using strategic merge patch
   podSpec:
     containers:
-    # Resource requirements
-    # TODO: resources should be for podspec level
-    - name: mcp-server
-      image: <your-custom-image>
+    - name: model-api  # Must match generated container name
       resources:
         requests:
           memory: "2Gi"
@@ -77,7 +68,7 @@ spec:
 status:
   phase: Ready           # Pending, Ready, Failed
   ready: true
-  endpoint: "http://my-modelapi.my-namespace.svc.cluster.local:8000"
+  endpoint: "http://modelapi-my-modelapi.my-namespace.svc.cluster.local:8000"
   message: ""
 ```
 
@@ -92,7 +83,7 @@ Uses LiteLLM to proxy requests to external LLM backends.
 
 #### Wildcard Mode (Recommended for Development)
 
-Proxies any model to the backend:
+Proxies any model to the backend (set `apiBase` without `model`):
 
 ```yaml
 spec:
@@ -107,17 +98,18 @@ Agents can request any model:
 - `ollama/llama2`
 - `ollama/mistral`
 
-#### CLI Mode (Single Model)
+#### Mock Mode (For Testing)
 
-Proxies a specific model only:
+Set `model` without `apiBase` for mock testing:
 
 ```yaml
 spec:
   mode: Proxy
   proxyConfig:
-    apiBase: "http://host.docker.internal:11434"
-    model: "ollama/smollm2:135m"
+    model: "gpt-3.5-turbo"  # Model name only, no backend
 ```
+
+Supports `mock_response` in request body for deterministic tests.
 
 #### Config File Mode (Advanced)
 
@@ -127,18 +119,19 @@ Full control over LiteLLM configuration:
 spec:
   mode: Proxy
   proxyConfig:
-    configYaml: |
-      model_list:
-        - model_name: "gpt-4"
-          litellm_params:
-            model: "azure/gpt-4"
-            api_base: "https://my-azure.openai.azure.com"
-            api_key: "os.environ/AZURE_API_KEY"
-        
-        - model_name: "claude"
-          litellm_params:
-            model: "claude-3-sonnet-20240229"
-            api_key: "os.environ/ANTHROPIC_API_KEY"
+    configYaml:
+      fromString: |
+        model_list:
+          - model_name: "gpt-4"
+            litellm_params:
+              model: "azure/gpt-4"
+              api_base: "https://my-azure.openai.azure.com"
+              api_key: "os.environ/AZURE_API_KEY"
+          
+          - model_name: "claude"
+            litellm_params:
+              model: "claude-3-sonnet-20240229"
+              api_key: "os.environ/ANTHROPIC_API_KEY"
     
     env:
     - name: AZURE_API_KEY
@@ -163,13 +156,8 @@ Runs Ollama in-cluster with the specified model.
 ```yaml
 spec:
   mode: Hosted
-  serverConfig:
+  hostedConfig:
     model: "smollm2:135m"
-    resources:
-      requests:
-        memory: "2Gi"
-      limits:
-        memory: "8Gi"
 ```
 
 **How it works:**
@@ -191,7 +179,7 @@ spec:
 
 #### proxyConfig.apiBase
 
-Backend LLM API URL:
+Backend LLM API URL (optional):
 
 ```yaml
 proxyConfig:
@@ -199,6 +187,8 @@ proxyConfig:
   # apiBase: "http://ollama.ollama.svc:11434"  # In-cluster Ollama
   # apiBase: "https://api.openai.com"           # OpenAI
 ```
+
+When set without `model`, enables wildcard mode.
 
 #### proxyConfig.model
 
@@ -210,20 +200,25 @@ proxyConfig:
   model: "ollama/smollm2:135m"
 ```
 
-When omitted, wildcard mode is used.
+When set without `apiBase`, enables mock testing mode.
 
 #### proxyConfig.configYaml
 
-Full LiteLLM configuration YAML:
+Full LiteLLM configuration:
 
 ```yaml
 proxyConfig:
-  configYaml: |
-    model_list:
-      - model_name: "*"
-        litellm_params:
-          model: "ollama/*"
-          api_base: "http://ollama:11434"
+  configYaml:
+    fromString: |
+      model_list:
+        - model_name: "*"
+          litellm_params:
+            model: "ollama/*"
+            api_base: "http://ollama:11434"
+    # Or from secret:
+    # fromSecretKeyRef:
+    #   name: litellm-config
+    #   key: config.yaml
 ```
 
 When provided, `apiBase` and `model` are ignored.
@@ -242,44 +237,47 @@ proxyConfig:
         key: openai
 ```
 
-### serverConfig (for Hosted mode)
+### hostedConfig (for Hosted mode)
 
-#### serverConfig.model
+#### hostedConfig.model
 
 Ollama model to pull and serve:
 
 ```yaml
-serverConfig:
+hostedConfig:
   model: "smollm2:135m"
   # model: "llama2"
   # model: "mistral"
 ```
 
-#### serverConfig.env
+#### hostedConfig.env
 
 Environment variables for Ollama:
 
 ```yaml
-serverConfig:
+hostedConfig:
   env:
   - name: OLLAMA_DEBUG
     value: "true"
 ```
 
-#### serverConfig.resources
+### podSpec (optional)
 
-Resource requirements (important for GPU models):
+Override the generated pod spec using Kubernetes strategic merge patch:
 
 ```yaml
-serverConfig:
-  resources:
-    requests:
-      memory: "4Gi"
-      cpu: "2000m"
-    limits:
-      memory: "16Gi"
-      cpu: "8000m"
-      nvidia.com/gpu: "1"  # For GPU acceleration
+spec:
+  podSpec:
+    containers:
+    - name: model-api  # Must match the generated container name
+      resources:
+        requests:
+          memory: "4Gi"
+          cpu: "2000m"
+        limits:
+          memory: "16Gi"
+          cpu: "8000m"
+          nvidia.com/gpu: "1"  # For GPU acceleration
 ```
 
 ## Status Fields
@@ -315,11 +313,27 @@ metadata:
   name: ollama
 spec:
   mode: Hosted
-  serverConfig:
+  hostedConfig:
     model: "smollm2:135m"
-    resources:
-      requests:
-        memory: "2Gi"
+  podSpec:
+    containers:
+    - name: model-api
+      resources:
+        requests:
+          memory: "2Gi"
+```
+
+### Mock Testing Mode
+
+```yaml
+apiVersion: ethical.institute/v1alpha1
+kind: ModelAPI
+metadata:
+  name: mock-api
+spec:
+  mode: Proxy
+  proxyConfig:
+    model: "gpt-3.5-turbo"
 ```
 
 ### OpenAI Proxy
@@ -352,17 +366,18 @@ metadata:
 spec:
   mode: Proxy
   proxyConfig:
-    configYaml: |
-      model_list:
-        - model_name: "fast"
-          litellm_params:
-            model: "ollama/smollm2:135m"
-            api_base: "http://ollama:11434"
-        
-        - model_name: "smart"
-          litellm_params:
-            model: "gpt-4o"
-            api_key: "os.environ/OPENAI_API_KEY"
+    configYaml:
+      fromString: |
+        model_list:
+          - model_name: "fast"
+            litellm_params:
+              model: "ollama/smollm2:135m"
+              api_base: "http://ollama:11434"
+          
+          - model_name: "smart"
+            litellm_params:
+              model: "gpt-4o"
+              api_key: "os.environ/OPENAI_API_KEY"
     
     env:
     - name: OPENAI_API_KEY
@@ -379,8 +394,8 @@ spec:
 Check pod status:
 
 ```bash
-kubectl get pods -l app=my-modelapi -n my-namespace
-kubectl describe pod -l app=my-modelapi -n my-namespace
+kubectl get pods -l modelapi=my-modelapi -n my-namespace
+kubectl describe pod -l modelapi=my-modelapi -n my-namespace
 ```
 
 Common causes:
@@ -393,8 +408,8 @@ Common causes:
 Verify endpoint is accessible:
 
 ```bash
-kubectl exec -it deploy/my-agent -n my-namespace -- \
-  curl http://my-modelapi:8000/health
+kubectl exec -it deploy/agent-my-agent -n my-namespace -- \
+  curl http://modelapi-my-modelapi:8000/health
 ```
 
 ### Model Not Available (Hosted Mode)
@@ -402,7 +417,7 @@ kubectl exec -it deploy/my-agent -n my-namespace -- \
 Check if model is still downloading:
 
 ```bash
-kubectl logs -l app=my-modelapi -n my-namespace
+kubectl logs -l modelapi=my-modelapi -n my-namespace -c pull-model
 ```
 
 The model is pulled on startup; large models can take 10+ minutes.
