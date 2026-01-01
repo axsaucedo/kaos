@@ -24,9 +24,8 @@ spec:
   mode: Proxy
   proxyConfig:
     # Wildcard mode: only specify apiBase, no model
-    # This proxies ANY model request to the backend (e.g., ollama/smollm2:135m, ollama/llama2, etc.)
+    # This proxies ANY model request to the backend
     apiBase: "http://host.docker.internal:11434"
-    # model: not specified - enables wildcard routing
     env:
     - name: OPENAI_API_KEY
       value: "sk-test"
@@ -43,21 +42,14 @@ metadata:
 spec:
   type: python-runtime
   config:
-    mcp: "test-mcp-echo-server"
+    tools:
+      fromPackage: "test-mcp-echo-server"
     env:
     - name: LOG_LEVEL
       value: "INFO"
-  resources:
-    requests:
-      memory: "128Mi"
-      cpu: "100m"
-    limits:
-      memory: "256Mi"
-      cpu: "500m"
 
 ---
 # Agent: Development agent with proxy to host Ollama
-# Can use any model available on the host Ollama instance
 apiVersion: ethical.institute/v1alpha1
 kind: Agent
 metadata:
@@ -72,22 +64,9 @@ spec:
     instructions: |
       You are a helpful assistant with access to an echo tool.
       Use the echo tool when asked to echo something.
+    reasoningLoopMaxSteps: 10
     env:
-    # Specify which Ollama model to use (with ollama/ prefix for LiteLLM)
     - name: MODEL_NAME
       value: "ollama/smollm2:135m"
-    agenticLoop:
-      maxSteps: 10
-      enableTools: true
-      enableDelegation: false
   agentNetwork:
-    expose: true
     access: []
-  replicas: 1
-  resources:
-    requests:
-      memory: "256Mi"
-      cpu: "200m"
-    limits:
-      memory: "512Mi"
-      cpu: "1000m"

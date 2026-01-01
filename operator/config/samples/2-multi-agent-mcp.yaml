@@ -19,7 +19,7 @@ metadata:
   namespace: agentic-multi
 spec:
   mode: Hosted
-  serverConfig:
+  hostedConfig:
     model: "smollm2:135m"
     env:
     - name: OLLAMA_DEBUG
@@ -35,17 +35,11 @@ metadata:
 spec:
   type: python-runtime
   config:
-    mcp: "test-mcp-echo-server"
+    tools:
+      fromPackage: "test-mcp-echo-server"
     env:
     - name: LOG_LEVEL
       value: "INFO"
-  resources:
-    requests:
-      memory: "128Mi"
-      cpu: "100m"
-    limits:
-      memory: "256Mi"
-      cpu: "500m"
 
 ---
 # Agent: Coordinator - orchestrates worker agents
@@ -65,26 +59,14 @@ spec:
       You can delegate tasks to worker-1 and worker-2.
       Use worker-1 for general tasks and worker-2 for specialized tasks.
       You also have access to an echo tool for testing.
+    reasoningLoopMaxSteps: 10
     env:
     - name: MODEL_NAME
       value: "smollm2:135m"
-    agenticLoop:
-      maxSteps: 10
-      enableTools: true
-      enableDelegation: true
   agentNetwork:
-    expose: true
     access:
     - worker-1
     - worker-2
-  replicas: 1
-  resources:
-    requests:
-      memory: "256Mi"
-      cpu: "200m"
-    limits:
-      memory: "512Mi"
-      cpu: "1000m"
 
 ---
 # Agent: Worker 1 - general purpose worker
@@ -104,24 +86,12 @@ spec:
       You can be delegated tasks from the coordinator.
       You have access to an echo tool for testing.
       Process tasks and return results clearly.
+    reasoningLoopMaxSteps: 5
     env:
     - name: MODEL_NAME
       value: "smollm2:135m"
-    agenticLoop:
-      maxSteps: 5
-      enableTools: true
-      enableDelegation: false
   agentNetwork:
-    expose: true
     access: []
-  replicas: 1
-  resources:
-    requests:
-      memory: "256Mi"
-      cpu: "200m"
-    limits:
-      memory: "512Mi"
-      cpu: "1000m"
 
 ---
 # Agent: Worker 2 - specialized worker
@@ -141,21 +111,9 @@ spec:
       You can be delegated tasks from the coordinator.
       You have access to an echo tool for testing.
       Focus on detailed analysis and specialized processing.
+    reasoningLoopMaxSteps: 5
     env:
     - name: MODEL_NAME
       value: "smollm2:135m"
-    agenticLoop:
-      maxSteps: 5
-      enableTools: true
-      enableDelegation: false
   agentNetwork:
-    expose: true
     access: []
-  replicas: 1
-  resources:
-    requests:
-      memory: "256Mi"
-      cpu: "200m"
-    limits:
-      memory: "512Mi"
-      cpu: "1000m"

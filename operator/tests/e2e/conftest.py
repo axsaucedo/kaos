@@ -264,14 +264,12 @@ def create_mcpserver_resource(namespace: str, name: str = "echo-server") -> Dict
         "spec": {
             "type": "python-runtime",
             "config": {
-                "mcp": "test-mcp-echo-server",
+                "tools": {
+                    "fromPackage": "test-mcp-echo-server",
+                },
                 "env": [
                     {"name": "LOG_LEVEL", "value": "INFO"},
                 ],
-            },
-            "resources": {
-                "requests": {"memory": "128Mi", "cpu": "100m"},
-                "limits": {"memory": "256Mi", "cpu": "500m"},
             },
         },
     }
@@ -280,7 +278,7 @@ def create_mcpserver_resource(namespace: str, name: str = "echo-server") -> Dict
 def create_agent_resource(namespace: str, modelapi_name: str, mcpserver_names: list,
                          agent_name: str = "echo-agent", 
                          sub_agents: list = None,
-                         agentic_loop: dict = None) -> Dict[str, Any]:
+                         reasoning_loop_max_steps: int = None) -> Dict[str, Any]:
     """Create an Agent resource.
 
     Args:
@@ -289,7 +287,7 @@ def create_agent_resource(namespace: str, modelapi_name: str, mcpserver_names: l
         mcpserver_names: List of MCPServer names to connect to
         agent_name: Agent resource name
         sub_agents: List of sub-agent names for delegation
-        agentic_loop: Agentic loop config dict with maxSteps, enableTools, enableDelegation
+        reasoning_loop_max_steps: Max reasoning loop steps
 
     Returns:
         Resource specification
@@ -303,9 +301,9 @@ def create_agent_resource(namespace: str, modelapi_name: str, mcpserver_names: l
         ],
     }
     
-    # Add agentic loop config if provided
-    if agentic_loop:
-        config["agenticLoop"] = agentic_loop
+    # Add reasoning loop max steps if provided
+    if reasoning_loop_max_steps is not None:
+        config["reasoningLoopMaxSteps"] = reasoning_loop_max_steps
     
     return {
         "apiVersion": "ethical.institute/v1alpha1",
@@ -319,13 +317,7 @@ def create_agent_resource(namespace: str, modelapi_name: str, mcpserver_names: l
             "mcpServers": mcpserver_names,
             "config": config,
             "agentNetwork": {
-                "expose": True,
                 "access": sub_agents or [],
-            },
-            "replicas": 1,
-            "resources": {
-                "requests": {"memory": "256Mi", "cpu": "200m"},
-                "limits": {"memory": "512Mi", "cpu": "1000m"},
             },
         },
     }

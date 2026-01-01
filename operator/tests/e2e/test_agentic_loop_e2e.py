@@ -32,22 +32,13 @@ def create_agentic_loop_worker(namespace: str, modelapi_name: str, suffix: str =
             "config": {
                 "description": "Worker for agentic loop tests",
                 "instructions": "You are a worker. Process tasks and respond briefly.",
-                "agenticLoop": {
-                    "maxSteps": 3,
-                    "enableTools": True,
-                    "enableDelegation": False,
-                },
+                "reasoningLoopMaxSteps": 3,
                 "env": [
                     {"name": "AGENT_LOG_LEVEL", "value": "DEBUG"},
                     {"name": "MODEL_NAME", "value": "smollm2:135m"},
                 ],
             },
-            "agentNetwork": {"expose": True, "access": []},
-            "replicas": 1,
-            "resources": {
-                "requests": {"memory": "256Mi", "cpu": "200m"},
-                "limits": {"memory": "512Mi", "cpu": "1000m"},
-            },
+            "agentNetwork": {"access": []},
         },
     }, name
 
@@ -64,24 +55,14 @@ def create_agentic_loop_coordinator(namespace: str, modelapi_name: str, worker_n
             "config": {
                 "description": "Coordinator for agentic loop tests",
                 "instructions": f"You are a coordinator. You can delegate tasks to {worker_name}.",
-                "agenticLoop": {
-                    "maxSteps": 5,
-                    "enableTools": True,
-                    "enableDelegation": True,
-                },
+                "reasoningLoopMaxSteps": 5,
                 "env": [
                     {"name": "AGENT_LOG_LEVEL", "value": "DEBUG"},
                     {"name": "MODEL_NAME", "value": "smollm2:135m"},
                 ],
             },
             "agentNetwork": {
-                "expose": True,
                 "access": [worker_name],
-            },
-            "replicas": 1,
-            "resources": {
-                "requests": {"memory": "256Mi", "cpu": "200m"},
-                "limits": {"memory": "512Mi", "cpu": "1000m"},
             },
         },
     }, name
@@ -325,10 +306,9 @@ async def test_wait_for_dependencies_false(test_namespace: str, shared_modelapi:
             "config": {
                 "description": "Agent that doesn't wait for dependencies",
                 "instructions": "You are a test agent.",
-                "agenticLoop": {"maxSteps": 3},
+                "reasoningLoopMaxSteps": 3,
             },
-            "agentNetwork": {"expose": True, "access": []},
-            "replicas": 1,
+            "agentNetwork": {"access": []},
         },
     }
     

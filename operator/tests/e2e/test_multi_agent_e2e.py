@@ -40,12 +40,7 @@ def create_multi_agent_resources(namespace: str, modelapi_name: str, suffix: str
                     {"name": "MODEL_NAME", "value": "smollm2:135m"},
                 ],
             },
-            "agentNetwork": {"expose": True, "access": []},
-            "replicas": 1,
-            "resources": {
-                "requests": {"memory": "256Mi", "cpu": "200m"},
-                "limits": {"memory": "512Mi", "cpu": "1000m"},
-            },
+            "agentNetwork": {"access": []},
         },
     }
     
@@ -63,12 +58,7 @@ def create_multi_agent_resources(namespace: str, modelapi_name: str, suffix: str
                     {"name": "MODEL_NAME", "value": "smollm2:135m"},
                 ],
             },
-            "agentNetwork": {"expose": True, "access": []},
-            "replicas": 1,
-            "resources": {
-                "requests": {"memory": "256Mi", "cpu": "200m"},
-                "limits": {"memory": "512Mi", "cpu": "1000m"},
-            },
+            "agentNetwork": {"access": []},
         },
     }
     
@@ -87,13 +77,7 @@ def create_multi_agent_resources(namespace: str, modelapi_name: str, suffix: str
                 ],
             },
             "agentNetwork": {
-                "expose": True,
                 "access": [worker1_name, worker2_name],
-            },
-            "replicas": 1,
-            "resources": {
-                "requests": {"memory": "256Mi", "cpu": "200m"},
-                "limits": {"memory": "512Mi", "cpu": "1000m"},
             },
         },
     }
