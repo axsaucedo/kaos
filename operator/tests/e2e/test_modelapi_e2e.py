@@ -184,7 +184,7 @@ async def test_modelapi_hosted_ollama(test_namespace: str):
         },
         "spec": {
             "mode": "Hosted",
-            "serverConfig": {
+            "hostedConfig": {
                 "model": "smollm2:135m",
                 "env": [
                     {"name": "OLLAMA_DEBUG", "value": "false"},

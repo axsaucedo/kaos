@@ -444,6 +444,18 @@ model_list:
 litellm_settings:
   drop_params: true
 `, modelapi.Spec.ProxyConfig.APIBase)
+		} else if modelapi.Spec.ProxyConfig.Model != "" {
+			// Model specified without apiBase - generate minimal config for mock testing
+			// This allows mock_response to work without a real backend
+			configYaml = fmt.Sprintf(`# Auto-generated config for mock/test mode
+model_list:
+  - model_name: "%s"
+    litellm_params:
+      model: "%s"
+
+litellm_settings:
+  drop_params: true
+`, modelapi.Spec.ProxyConfig.Model, modelapi.Spec.ProxyConfig.Model)
 		}
 	}
 
