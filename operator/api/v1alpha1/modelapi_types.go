@@ -17,6 +17,19 @@ const (
 
 // +kubebuilder:object:generate=true
 
+// ConfigYamlSource defines the source of LiteLLM config YAML
+type ConfigYamlSource struct {
+	// FromString is the config YAML as a literal string
+	// +kubebuilder:validation:Optional
+	FromString string `json:"fromString,omitempty"`
+
+	// FromSecretKeyRef is a reference to a Secret key containing the config YAML
+	// +kubebuilder:validation:Optional
+	FromSecretKeyRef *corev1.SecretKeySelector `json:"fromSecretKeyRef,omitempty"`
+}
+
+// +kubebuilder:object:generate=true
+
 // ProxyConfig defines configuration for LiteLLM proxy mode
 type ProxyConfig struct {
 	// APIBase is the base URL of the backend LLM API to proxy to (e.g., http://host.docker.internal:11434)
@@ -30,7 +43,7 @@ type ProxyConfig struct {
 	// ConfigYaml allows providing a custom LiteLLM config (for advanced multi-model routing)
 	// If provided, APIBase and Model are ignored and this config is used instead
 	// +kubebuilder:validation:Optional
-	ConfigYaml string `json:"configYaml,omitempty"`
+	ConfigYaml *ConfigYamlSource `json:"configYaml,omitempty"`
 
 	// Env variables to pass to the proxy container
 	// +kubebuilder:validation:Optional
@@ -39,18 +52,14 @@ type ProxyConfig struct {
 
 // +kubebuilder:object:generate=true
 
-// ServerConfig defines configuration for vLLM hosted mode
-type ServerConfig struct {
-	// Model is the HuggingFace model ID or path
+// HostedConfig defines configuration for Ollama hosted mode
+type HostedConfig struct {
+	// Model is the Ollama model to run (e.g., smollm2:135m)
 	Model string `json:"model"`
 
-	// Env variables to pass to the vLLM server
+	// Env variables to pass to the Ollama server
 	// +kubebuilder:validation:Optional
 	Env []corev1.EnvVar `json:"env,omitempty"`
-
-	// Resources defines compute resources for the server
-	// +kubebuilder:validation:Optional
-	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
 }
 
 // +kubebuilder:object:generate=true
@@ -65,9 +74,13 @@ type ModelAPISpec struct {
 	// +kubebuilder:validation:Optional
 	ProxyConfig *ProxyConfig `json:"proxyConfig,omitempty"`
 
-	// ServerConfig contains configuration for Hosted mode
+	// HostedConfig contains configuration for Hosted mode (replaces serverConfig)
 	// +kubebuilder:validation:Optional
-	ServerConfig *ServerConfig `json:"serverConfig,omitempty"`
+	HostedConfig *HostedConfig `json:"hostedConfig,omitempty"`
+
+	// PodSpec allows overriding the generated pod spec using strategic merge patch
+	// +kubebuilder:validation:Optional
+	PodSpec *corev1.PodSpec `json:"podSpec,omitempty"`
 }
 
 // +kubebuilder:object:generate=true

@@ -218,7 +218,7 @@ func (r *ModelAPIReconciler) constructDeployment(modelapi *agenticv1alpha1.Model
 
 	// Build init containers for Hosted mode (pull the model)
 	initContainers := []corev1.Container{}
-	if modelapi.Spec.Mode == agenticv1alpha1.ModelAPIModeHosted && modelapi.Spec.ServerConfig != nil && modelapi.Spec.ServerConfig.Model != "" {
+	if modelapi.Spec.Mode == agenticv1alpha1.ModelAPIModeHosted && modelapi.Spec.HostedConfig != nil && modelapi.Spec.HostedConfig.Model != "" {
 		// Init container starts Ollama server, pulls model, then exits
 		// The model is stored in the emptyDir volume shared with main container
 		volumes = append(volumes, corev1.Volume{
@@ -233,7 +233,7 @@ func (r *ModelAPIReconciler) constructDeployment(modelapi *agenticv1alpha1.Model
 			ImagePullPolicy: corev1.PullIfNotPresent,
 			Command:         []string{"/bin/sh", "-c"},
 			Args: []string{
-				fmt.Sprintf("ollama serve & OLLAMA_PID=$! && sleep 5 && ollama pull %s && kill $OLLAMA_PID", modelapi.Spec.ServerConfig.Model),
+				fmt.Sprintf("ollama serve & OLLAMA_PID=$! && sleep 5 && ollama pull %s && kill $OLLAMA_PID", modelapi.Spec.HostedConfig.Model),
 			},
 			VolumeMounts: []corev1.VolumeMount{
 				{Name: "ollama-data", MountPath: "/root/.ollama"},
@@ -317,8 +317,8 @@ func (r *ModelAPIReconciler) constructContainer(modelapi *agenticv1alpha1.ModelA
 		healthPath = "/"
 
 		// Add user-provided env vars for hosted
-		if modelapi.Spec.ServerConfig != nil {
-			env = append(env, modelapi.Spec.ServerConfig.Env...)
+		if modelapi.Spec.HostedConfig != nil {
+			env = append(env, modelapi.Spec.HostedConfig.Env...)
 		}
 	}
 
@@ -331,7 +331,7 @@ func (r *ModelAPIReconciler) constructContainer(modelapi *agenticv1alpha1.ModelA
 		})
 	}
 	// Add ollama-data volume mount for Hosted mode
-	if modelapi.Spec.Mode == agenticv1alpha1.ModelAPIModeHosted && modelapi.Spec.ServerConfig != nil && modelapi.Spec.ServerConfig.Model != "" {
+	if modelapi.Spec.Mode == agenticv1alpha1.ModelAPIModeHosted && modelapi.Spec.HostedConfig != nil && modelapi.Spec.HostedConfig.Model != "" {
 		volumeMounts = append(volumeMounts, corev1.VolumeMount{
 			Name:      "ollama-data",
 			MountPath: "/root/.ollama",
@@ -378,11 +378,6 @@ func (r *ModelAPIReconciler) constructContainer(modelapi *agenticv1alpha1.ModelA
 			TimeoutSeconds:      5,
 			FailureThreshold:    3,
 		},
-	}
-
-	// Add resource requests if specified
-	if modelapi.Spec.ServerConfig != nil && modelapi.Spec.ServerConfig.Resources != nil {
-		container.Resources = *modelapi.Spec.ServerConfig.Resources
 	}
 
 	return container
@@ -433,9 +428,9 @@ func (r *ModelAPIReconciler) constructConfigMap(modelapi *agenticv1alpha1.ModelA
 	configYaml := ""
 
 	if modelapi.Spec.ProxyConfig != nil {
-		if modelapi.Spec.ProxyConfig.ConfigYaml != "" {
+		if modelapi.Spec.ProxyConfig.ConfigYaml != nil && modelapi.Spec.ProxyConfig.ConfigYaml.FromString != "" {
 			// Use user-provided configYaml directly
-			configYaml = modelapi.Spec.ProxyConfig.ConfigYaml
+			configYaml = modelapi.Spec.ProxyConfig.ConfigYaml.FromString
 		} else if modelapi.Spec.ProxyConfig.APIBase != "" {
 			// Generate wildcard config for proxying any model to the apiBase
 			// This allows requests like "ollama/smollm2:135m" to be forwarded to the backend
