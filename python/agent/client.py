@@ -66,6 +66,8 @@ class AgentCard:
 class RemoteAgent:
     """Remote agent client for A2A protocol with graceful degradation."""
 
+    # TODO: Differenciate the timeouts for chat responses vs agentcard (as latter is vshort)
+    # TODO: expose these timeouts as config and further as CRD configurations
     TIMEOUT = 5.0  # Short timeout - agent cards and invocations should be fast
 
     def __init__(self, name: str, card_url: str = None, agent_card_url: str = None):
