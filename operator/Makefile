@@ -1,12 +1,10 @@
-.PHONY: help build docker-build deploy generate manifests test clean
+.PHONY: help build docker-build deploy generate manifests test clean envtest
 
 # Configuration
 IMG ?= agentic-operator:latest
 CONTROLLER_GEN ?= $(shell which controller-gen || echo "$(shell pwd)/bin/controller-gen")
 CRD_OPTIONS ?= "crd:generateEmbeddedObjectMeta=true"
-
-# Paths
-ENVTEST ?= $(shell pwd)/bin/setup-envtest
+SETUP_ENVTEST ?= $(shell which setup-envtest)
 
 help:
 	@echo "Operator build targets:"
@@ -40,13 +38,14 @@ generate:
 manifests:
 	$(CONTROLLER_GEN) $(CRD_OPTIONS) rbac:roleName=agentic-operator paths="./..." output:crd:artifacts:config=config/crd/bases
 
+# Install envtest binary (one-time setup)
+envtest:
+	@test -n "$(SETUP_ENVTEST)" || { echo "Installing setup-envtest..."; go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest; }
+	$(SETUP_ENVTEST) use 1.28 --bin-dir $(shell pwd)/bin
+
 # Run tests
 test: generate manifests envtest
-	KUBEBUILDER_ASSETS=$(shell $(ENVTEST) use 1.24 -p path) go test ./... -coverprofile cover.out
-
-# Envtest setup
-envtest:
-	test -s $(ENVTEST) || { mkdir -p $(dir $(ENVTEST)); curl -Ss -L https://go.kubebuilder.io/tools/setup-envtest | bash -s -- latest -p path > $(ENVTEST); }
+	KUBEBUILDER_ASSETS="$(shell $(SETUP_ENVTEST) use 1.28 --bin-dir $(shell pwd)/bin -p path)" go test ./... -coverprofile cover.out -v
 
 # Clean artifacts
 clean:
