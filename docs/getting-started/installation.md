@@ -8,13 +8,55 @@
 - Docker (for building images)
 
 ### Optional
+- Helm v3.6+ (for Helm installation)
 - Ollama (for local LLM development)
 - Go 1.21+ (for operator development)
 - Python 3.12+ (for agent framework development)
 
 ## Operator Installation
 
-### Option 1: Deploy from Repository
+### Option 1: Helm (Recommended)
+
+Helm provides the most flexible installation with configurable values:
+
+```bash
+# Clone repository
+git clone https://github.com/your-org/agentic-kubernetes-operator.git
+cd agentic-kubernetes-operator/operator
+
+# Install with default values
+helm install agentic-operator chart/ -n agentic-system --create-namespace
+
+# Or customize installation
+helm install agentic-operator chart/ -n agentic-system --create-namespace \
+  --set controllerManager.manager.image.repository=your-registry/agentic-operator \
+  --set controllerManager.manager.image.tag=v1.0.0 \
+  --set controllerManager.replicas=2
+```
+
+#### Helm Values
+
+Key configurable values in `chart/values.yaml`:
+
+| Value | Description | Default |
+|-------|-------------|---------|
+| `controllerManager.manager.image.repository` | Operator image repository | `agentic-operator` |
+| `controllerManager.manager.image.tag` | Operator image tag | `latest` |
+| `controllerManager.replicas` | Number of operator replicas | `1` |
+| `controllerManager.manager.resources` | Resource limits/requests | See values.yaml |
+| `defaultImages.agentRuntime` | Default agent container image | `agentic-agent:latest` |
+| `defaultImages.mcpServer` | Default MCP server image | `agentic-mcp-server:latest` |
+
+#### Generate Helm Chart
+
+To regenerate the Helm chart from kustomize manifests:
+
+```bash
+cd operator
+make helm
+```
+
+### Option 2: Deploy from Repository (Kustomize)
 
 ```bash
 # Clone repository
@@ -25,7 +67,7 @@ cd agentic-kubernetes-operator/operator
 make deploy
 ```
 
-### Option 2: Deploy CRDs Only (Local Development)
+### Option 3: Deploy CRDs Only (Local Development)
 
 For development, you can run the operator locally:
 
@@ -38,7 +80,7 @@ make install
 make run
 ```
 
-### Option 3: Manual Installation
+### Option 4: Manual Installation
 
 ```bash
 # Apply CRDs
@@ -141,6 +183,21 @@ spec:
 Note: Hosted mode pulls the model on first start, which can take several minutes.
 
 ## Uninstallation
+
+### Helm Installation
+
+```bash
+# Remove all custom resources first
+kubectl delete agents,mcpservers,modelapis --all-namespaces --all
+
+# Uninstall Helm release
+helm uninstall agentic-operator -n agentic-system
+
+# Delete namespace (optional)
+kubectl delete namespace agentic-system
+```
+
+### Kustomize Installation
 
 ```bash
 # Remove all custom resources first

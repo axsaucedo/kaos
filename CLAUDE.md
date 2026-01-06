@@ -352,6 +352,9 @@ cd operator && go build -o bin/manager main.go
 # Generate CRDs after changes
 cd operator && make generate && make manifests
 
+# Generate Helm chart from kustomize
+cd operator && make helm
+
 # Run operator locally (scale down deployed operator first)
 kubectl scale deployment agentic-operator-controller-manager -n agentic-system --replicas=0
 cd operator && ./bin/manager
@@ -365,6 +368,29 @@ cd operator && make test
 # Run E2E tests (14 tests, parallel by default)
 cd operator/tests && source .venv/bin/activate && make test
 ```
+
+### Helm Chart
+
+The operator includes a Helm chart in `operator/chart/` generated from kustomize manifests.
+
+```bash
+# Install with Helm
+helm install agentic-operator operator/chart/ -n agentic-system --create-namespace
+
+# Customize installation
+helm install agentic-operator operator/chart/ -n agentic-system --create-namespace \
+  --set controllerManager.manager.image.tag=v1.0.0 \
+  --set controllerManager.replicas=2
+
+# Uninstall
+helm uninstall agentic-operator -n agentic-system
+```
+
+Key values in `chart/values.yaml`:
+- `controllerManager.manager.image.repository/tag` - Operator image
+- `controllerManager.replicas` - Number of replicas
+- `controllerManager.manager.resources` - Resource limits
+- `defaultImages.*` - Default images for agents/MCP servers
 
 ---
 

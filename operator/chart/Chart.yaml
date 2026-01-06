@@ -1,0 +1,19 @@
+apiVersion: v2
+name: agentic-operator
+description: Kubernetes operator for managing AI agents with A2A protocol support
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - kubernetes
+  - operator
+  - ai
+  - agents
+  - a2a
+  - mcp
+home: https://github.com/EthicalML/agentic-kubernetes-operator
+sources:
+  - https://github.com/EthicalML/agentic-kubernetes-operator
+maintainers:
+  - name: EthicalML
+    url: https://github.com/EthicalML

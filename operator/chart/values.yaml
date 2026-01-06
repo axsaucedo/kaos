@@ -1,0 +1,54 @@
+# Agentic Operator Helm Values
+# Override these values to customize your installation
+
+# Controller Manager settings
+controllerManager:
+  manager:
+    args:
+    - --leader-elect
+    containerSecurityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+        - ALL
+      readOnlyRootFilesystem: true
+    image:
+      repository: agentic-operator
+      tag: latest
+    imagePullPolicy: IfNotPresent
+    resources:
+      limits:
+        cpu: 500m
+        memory: 128Mi
+      requests:
+        cpu: 100m
+        memory: 64Mi
+    # Extra environment variables for the operator
+    env: []
+    # - name: LOG_LEVEL
+    #   value: debug
+  nodeSelector: {}
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+  replicas: 1
+  tolerations: []
+  topologySpreadConstraints: []
+
+# Kubernetes cluster domain
+kubernetesClusterDomain: cluster.local
+
+# Service Account settings
+serviceAccount:
+  annotations: {}
+  automount: true
+  create: true
+  name: ""
+
+# Default images for managed resources (agents, MCP servers)
+# These can be overridden per-resource in CRD specs
+defaultImages:
+  agentRuntime: agentic-agent:latest
+  mcpServer: agentic-mcp-server:latest
+  litellm: ghcr.io/berriai/litellm:main-latest
+  ollama: ollama/ollama:latest
