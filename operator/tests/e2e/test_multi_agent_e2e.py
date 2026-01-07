@@ -1,6 +1,6 @@
 """End-to-end tests for multi-agent system in Kubernetes.
 
-Tests multi-agent deployment and delegation:
+Tests multi-agent deployment and delegation via Gateway API:
 - Multiple agents deployed and discoverable
 - Coordinator with sub-agents configuration
 - Delegation via chat completions with role: "delegate"
@@ -14,9 +14,8 @@ import httpx
 from e2e.conftest import (
     create_custom_resource,
     wait_for_deployment,
-    port_forward_with_wait,
-    parallel_port_forwards,
-    get_next_port,
+    wait_for_resource_ready,
+    gateway_url,
 )
 
 
@@ -76,9 +75,7 @@ def create_multi_agent_resources(namespace: str, modelapi_name: str, suffix: str
                     {"name": "MODEL_NAME", "value": "ollama/smollm2:135m"},
                 ],
             },
-            "agentNetwork": {
-                "access": [worker1_name, worker2_name],
-            },
+            "agentNetwork": {"access": [worker1_name, worker2_name]},
         },
     }
     
@@ -94,7 +91,7 @@ async def test_multi_agent_deployment_and_discovery(test_namespace: str, shared_
     """Test all agents deploy and are discoverable."""
     resources = create_multi_agent_resources(test_namespace, shared_modelapi, "-disc")
     
-    # Create workers first (so coordinator can discover them)
+    # Create workers first
     for agent_key in ["worker-1", "worker-2"]:
         spec, name = resources[agent_key]
         create_custom_resource(spec, test_namespace)
@@ -105,50 +102,34 @@ async def test_multi_agent_deployment_and_discovery(test_namespace: str, shared_
     create_custom_resource(coord_spec, test_namespace)
     wait_for_deployment(test_namespace, f"agent-{coord_name}", timeout=120)
     
-    # Get unique ports for each agent
     _, w1_name = resources["worker-1"]
     _, w2_name = resources["worker-2"]
     
-    coord_port = get_next_port()
-    w1_port = get_next_port()
-    w2_port = get_next_port()
+    # Wait for all to be accessible via Gateway
+    for name in [coord_name, w1_name, w2_name]:
+        wait_for_resource_ready(gateway_url(test_namespace, "agent", name))
     
-    agent_ports = {coord_name: coord_port, w1_name: w1_port, w2_name: w2_port}
-    
-    # Start all port-forwards in parallel
-    pf_processes = parallel_port_forwards(
-        test_namespace,
-        [
-            (f"agent-{coord_name}", coord_port, 8000),
-            (f"agent-{w1_name}", w1_port, 8000),
-            (f"agent-{w2_name}", w2_port, 8000),
-        ]
-    )
-    
-    try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            for agent_name, port in agent_ports.items():
-                # Health
-                response = await client.get(f"http://localhost:{port}/health")
-                assert response.status_code == 200
-                assert response.json()["status"] == "healthy"
-                
-                # Agent card
-                response = await client.get(f"http://localhost:{port}/.well-known/agent")
-                assert response.status_code == 200
-                card = response.json()
-                assert card["name"] == agent_name
-                assert "message_processing" in card["capabilities"]
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        for name in [coord_name, w1_name, w2_name]:
+            url = gateway_url(test_namespace, "agent", name)
             
-            # Coordinator should have delegation capability
-            response = await client.get(f"http://localhost:{coord_port}/.well-known/agent")
+            # Health
+            response = await client.get(f"{url}/health")
+            assert response.status_code == 200
+            assert response.json()["status"] == "healthy"
+            
+            # Agent card
+            response = await client.get(f"{url}/.well-known/agent")
+            assert response.status_code == 200
             card = response.json()
-            assert "task_delegation" in card["capabilities"]
-    
-    finally:
-        for pf in pf_processes:
-            pf.terminate()
-            pf.wait(timeout=5)
+            assert card["name"] == name
+            assert "message_processing" in card["capabilities"]
+        
+        # Coordinator should have delegation capability
+        coord_url = gateway_url(test_namespace, "agent", coord_name)
+        response = await client.get(f"{coord_url}/.well-known/agent")
+        card = response.json()
+        assert "task_delegation" in card["capabilities"]
 
 
 @pytest.mark.asyncio
@@ -169,70 +150,53 @@ async def test_multi_agent_delegation_with_memory(test_namespace: str, shared_mo
     
     _, w1_name = resources["worker-1"]
     
-    # Port forward to coordinator and worker-1
-    coord_port = get_next_port()
-    w1_port = get_next_port()
+    coord_url = gateway_url(test_namespace, "agent", coord_name)
+    w1_url = gateway_url(test_namespace, "agent", w1_name)
     
-    pf_processes = parallel_port_forwards(
-        test_namespace,
-        [
-            (f"agent-{coord_name}", coord_port, 8000),
-            (f"agent-{w1_name}", w1_port, 8000),
-        ]
-    )
+    wait_for_resource_ready(coord_url)
+    wait_for_resource_ready(w1_url)
     
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            # Get worker-1's initial memory count
-            response = await client.get(f"http://localhost:{w1_port}/memory/events")
-            initial_count = response.json()["total"]
-            
-            # Delegate via chat completions
-            task_id = f"K8S_DELEGATE_{int(time.time())}"
-            response = await client.post(
-                f"http://localhost:{coord_port}/v1/chat/completions",
-                json={
-                    "model": coord_name,
-                    "messages": [
-                        {"role": "delegate", "content": f"{w1_name}: Process task {task_id}"}
-                    ]
-                }
-            )
-            
-            if response.status_code != 200:
-                print(f"DEBUG: Delegation failed with status {response.status_code}")
-                print(f"DEBUG: Response body: {response.text}")
-            
-            assert response.status_code == 200, f"Delegation failed: {response.text}"
-            data = response.json()
-            assert "choices" in data
-            assert len(data["choices"][0]["message"]["content"]) > 0
-            
-            # Verify coordinator memory has delegation events
-            response = await client.get(f"http://localhost:{coord_port}/memory/events")
-            coord_memory = response.json()
-            
-            delegation_reqs = [e for e in coord_memory["events"] if e["event_type"] == "delegation_request"]
-            delegation_resps = [e for e in coord_memory["events"] if e["event_type"] == "delegation_response"]
-            
-            assert len(delegation_reqs) >= 1
-            assert len(delegation_resps) >= 1
-            assert any(task_id in str(e["content"]) for e in delegation_reqs)
-            
-            # Verify worker-1 received the task
-            response = await client.get(f"http://localhost:{w1_port}/memory/events")
-            worker_memory = response.json()
-            
-            assert worker_memory["total"] > initial_count
-            
-            # Check worker has the task in its memory
-            user_msgs = [e for e in worker_memory["events"] if e["event_type"] == "user_message"]
-            assert any(task_id in str(e["content"]) for e in user_msgs)
-    
-    finally:
-        for pf in pf_processes:
-            pf.terminate()
-            pf.wait(timeout=5)
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        # Get worker-1's initial memory count
+        response = await client.get(f"{w1_url}/memory/events")
+        initial_count = response.json()["total"]
+        
+        # Delegate via chat completions
+        task_id = f"K8S_DELEGATE_{int(time.time())}"
+        response = await client.post(
+            f"{coord_url}/v1/chat/completions",
+            json={
+                "model": coord_name,
+                "messages": [
+                    {"role": "delegate", "content": f"{w1_name}: Process task {task_id}"}
+                ]
+            }
+        )
+        
+        assert response.status_code == 200, f"Delegation failed: {response.text}"
+        data = response.json()
+        assert "choices" in data
+        assert len(data["choices"][0]["message"]["content"]) > 0
+        
+        # Verify coordinator memory has delegation events
+        response = await client.get(f"{coord_url}/memory/events")
+        coord_memory = response.json()
+        
+        delegation_reqs = [e for e in coord_memory["events"] if e["event_type"] == "delegation_request"]
+        delegation_resps = [e for e in coord_memory["events"] if e["event_type"] == "delegation_response"]
+        
+        assert len(delegation_reqs) >= 1
+        assert len(delegation_resps) >= 1
+        assert any(task_id in str(e["content"]) for e in delegation_reqs)
+        
+        # Verify worker-1 received the task
+        response = await client.get(f"{w1_url}/memory/events")
+        worker_memory = response.json()
+        
+        assert worker_memory["total"] > initial_count
+        
+        user_msgs = [e for e in worker_memory["events"] if e["event_type"] == "user_message"]
+        assert any(task_id in str(e["content"]) for e in user_msgs)
 
 
 @pytest.mark.asyncio
@@ -249,54 +213,42 @@ async def test_multi_agent_process_independently(test_namespace: str, shared_mod
     _, w1_name = resources["worker-1"]
     _, w2_name = resources["worker-2"]
     
-    # Port forward to workers
-    w1_port = get_next_port()
-    w2_port = get_next_port()
+    w1_url = gateway_url(test_namespace, "agent", w1_name)
+    w2_url = gateway_url(test_namespace, "agent", w2_name)
     
-    pf_processes = parallel_port_forwards(
-        test_namespace,
-        [
-            (f"agent-{w1_name}", w1_port, 8000),
-            (f"agent-{w2_name}", w2_port, 8000),
-        ]
-    )
+    wait_for_resource_ready(w1_url)
+    wait_for_resource_ready(w2_url)
     
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            # Send unique tasks
-            task1_id = f"W1_TASK_{int(time.time())}"
-            task2_id = f"W2_TASK_{int(time.time())}"
-            
-            # Invoke worker-1
-            response = await client.post(
-                f"http://localhost:{w1_port}/agent/invoke",
-                json={"task": f"Process task {task1_id}"}
-            )
-            assert response.status_code == 200
-            
-            # Invoke worker-2
-            response = await client.post(
-                f"http://localhost:{w2_port}/agent/invoke",
-                json={"task": f"Process task {task2_id}"}
-            )
-            assert response.status_code == 200
-            
-            # Verify memory isolation
-            response = await client.get(f"http://localhost:{w1_port}/memory/events")
-            w1_memory = response.json()
-            w1_content = " ".join(str(e["content"]) for e in w1_memory["events"])
-            
-            response = await client.get(f"http://localhost:{w2_port}/memory/events")
-            w2_memory = response.json()
-            w2_content = " ".join(str(e["content"]) for e in w2_memory["events"])
-            
-            # Each worker should have its own task, not the other's
-            assert task1_id in w1_content
-            assert task2_id not in w1_content
-            assert task2_id in w2_content
-            assert task1_id not in w2_content
-    
-    finally:
-        for pf in pf_processes:
-            pf.terminate()
-            pf.wait(timeout=5)
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        # Send unique tasks
+        task1_id = f"W1_TASK_{int(time.time())}"
+        task2_id = f"W2_TASK_{int(time.time())}"
+        
+        # Invoke worker-1
+        response = await client.post(
+            f"{w1_url}/agent/invoke",
+            json={"task": f"Process task {task1_id}"}
+        )
+        assert response.status_code == 200
+        
+        # Invoke worker-2
+        response = await client.post(
+            f"{w2_url}/agent/invoke",
+            json={"task": f"Process task {task2_id}"}
+        )
+        assert response.status_code == 200
+        
+        # Verify memory isolation
+        response = await client.get(f"{w1_url}/memory/events")
+        w1_memory = response.json()
+        w1_content = " ".join(str(e["content"]) for e in w1_memory["events"])
+        
+        response = await client.get(f"{w2_url}/memory/events")
+        w2_memory = response.json()
+        w2_content = " ".join(str(e["content"]) for e in w2_memory["events"])
+        
+        # Each worker should have its own task, not the other's
+        assert task1_id in w1_content
+        assert task2_id not in w1_content
+        assert task2_id in w2_content
+        assert task1_id not in w2_content

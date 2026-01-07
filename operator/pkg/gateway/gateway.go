@@ -74,6 +74,9 @@ func constructHTTPRoute(params HTTPRouteParams, config Config) *gatewayv1.HTTPRo
 	port := gatewayv1.PortNumber(params.ServicePort)
 	gwNamespace := gatewayv1.Namespace(config.GatewayNamespace)
 
+	// URL rewrite to strip the path prefix
+	rewritePath := "/"
+
 	return &gatewayv1.HTTPRoute{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      HTTPRouteName(params.ResourceType, params.ResourceName),
@@ -96,6 +99,17 @@ func constructHTTPRoute(params HTTPRouteParams, config Config) *gatewayv1.HTTPRo
 							Path: &gatewayv1.HTTPPathMatch{
 								Type:  &pathPrefix,
 								Value: &pathValue,
+							},
+						},
+					},
+					Filters: []gatewayv1.HTTPRouteFilter{
+						{
+							Type: gatewayv1.HTTPRouteFilterURLRewrite,
+							URLRewrite: &gatewayv1.HTTPURLRewriteFilter{
+								Path: &gatewayv1.HTTPPathModifier{
+									Type:            gatewayv1.PrefixMatchHTTPPathModifier,
+									ReplacePrefixMatch: &rewritePath,
+								},
 							},
 						},
 					},

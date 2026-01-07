@@ -1,43 +1,41 @@
-"""Pytest configuration and fixtures for E2E tests."""
+"""Pytest configuration and fixtures for E2E tests.
 
+Uses Gateway API for routing - all requests go through the agentic-gateway.
+"""
+
+import os
 import time
-import sys
 import subprocess
-import concurrent.futures
-from typing import Dict, Any, Generator, List, Tuple
+import tempfile
+import fcntl
+from typing import Dict, Any, Generator
 
 import pytest
 import httpx
-from sh import kubectl
+from sh import kubectl, helm, ErrorReturnCode
 import yaml
 
 
-# Port allocation - use worker-specific ranges for xdist
-def _get_worker_port_base() -> int:
-    """Get base port for current worker (supports pytest-xdist)."""
-    import os
-    worker_id = os.environ.get("PYTEST_XDIST_WORKER", "gw0")
-    # Extract worker number (gw0 -> 0, gw1 -> 1, etc.)
-    try:
-        worker_num = int(worker_id.replace("gw", ""))
-    except ValueError:
-        worker_num = 0
-    # Each worker gets 100 ports starting at 18000 + (worker_num * 100)
-    return 18000 + (worker_num * 100)
+# Gateway configuration
+GATEWAY_URL = "http://localhost:80"
+CHART_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../chart"))
+RELEASE_NAME = "agentic-e2e"
+OPERATOR_NAMESPACE = "agentic-e2e-system"
+LOCK_FILE = os.path.join(tempfile.gettempdir(), "agentic-e2e-operator.lock")
 
 
-_port_counters: dict = {}
-
-
-def get_next_port() -> int:
-    """Get next available port for port-forwarding (worker-safe)."""
-    import os
-    worker_id = os.environ.get("PYTEST_XDIST_WORKER", "master")
-    if worker_id not in _port_counters:
-        _port_counters[worker_id] = _get_worker_port_base()
-    port = _port_counters[worker_id]
-    _port_counters[worker_id] += 1
-    return port
+def gateway_url(namespace: str, resource_type: str, resource_name: str) -> str:
+    """Get the Gateway URL for a resource.
+    
+    Args:
+        namespace: Kubernetes namespace
+        resource_type: One of 'agent', 'modelapi', 'mcp'
+        resource_name: Name of the resource
+        
+    Returns:
+        Full Gateway URL for the resource
+    """
+    return f"{GATEWAY_URL}/{namespace}/{resource_type}/{resource_name}"
 
 
 def create_custom_resource(body: Dict[str, Any], namespace: str):
@@ -47,18 +45,12 @@ def create_custom_resource(body: Dict[str, Any], namespace: str):
 
 
 def wait_for_deployment(namespace: str, name: str, timeout: int = 300):
-    """Wait for deployment to exist and be ready.
-    
-    First polls for the deployment to exist (operator may take time to create it),
-    then waits for the rollout to complete.
-    """
-    import time
+    """Wait for deployment to exist and be ready."""
     start_time = time.time()
     
-    # Poll for deployment existence first (operator may take time to create it)
+    # Poll for deployment existence first
     while time.time() - start_time < timeout:
         try:
-            # Check if deployment exists
             result = kubectl("get", "deployment", name, "-n", namespace, 
                            "-o", "jsonpath={.metadata.name}", _ok_code=[0, 1])
             if name in str(result):
@@ -67,25 +59,15 @@ def wait_for_deployment(namespace: str, name: str, timeout: int = 300):
             pass
         time.sleep(1)
     
-    # Now wait for rollout
+    # Wait for rollout
     remaining_timeout = max(10, timeout - int(time.time() - start_time))
     kubectl("rollout", "status", f"deployment/{name}", "-n", namespace, 
             "--timeout", f"{remaining_timeout}s")
 
 
-def port_forward(namespace: str, service_name: str, local_port: int, remote_port: int = 8000) -> subprocess.Popen:
-    """Start port-forward to a service."""
-    process = subprocess.Popen(
-        ["kubectl", "port-forward", f"svc/{service_name}", f"{local_port}:{remote_port}", "-n", namespace],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    return process
-
-
-def wait_for_service_ready(url: str, max_wait: int = 10) -> bool:
-    """Wait for service to be ready by polling health endpoint."""
-    for _ in range(max_wait * 4):  # Check every 0.25s
+def wait_for_resource_ready(url: str, max_wait: int = 30) -> bool:
+    """Wait for a resource to be accessible via Gateway."""
+    for _ in range(max_wait * 4):
         try:
             response = httpx.get(f"{url}/health", timeout=2.0)
             if response.status_code == 200:
@@ -93,59 +75,117 @@ def wait_for_service_ready(url: str, max_wait: int = 10) -> bool:
         except Exception:
             pass
         time.sleep(0.25)
-    raise TimeoutError(f"Service not ready at {url} after {max_wait}s")
+    raise TimeoutError(f"Resource not ready at {url} after {max_wait}s")
 
 
-def port_forward_with_wait(namespace: str, service_name: str, local_port: int, 
-                           remote_port: int = 8000) -> subprocess.Popen:
-    """Start port-forward and wait for service to be ready."""
-    process = port_forward(namespace, service_name, local_port, remote_port)
-    # Give process time to establish connection
-    time.sleep(0.5)
-    wait_for_service_ready(f"http://localhost:{local_port}")
-    return process
-
-
-def parallel_port_forwards(namespace: str, 
-                           services: List[Tuple[str, int, int]]) -> List[subprocess.Popen]:
-    """Start multiple port-forwards in parallel.
+def _install_operator():
+    """Install operator with Gateway API enabled via Helm.
     
-    Args:
-        namespace: Kubernetes namespace
-        services: List of (service_name, local_port, remote_port) tuples
-    
-    Returns:
-        List of Popen processes
+    Uses file locking to ensure only one xdist worker installs.
     """
-    processes = []
-    # Start all port-forwards
-    for service_name, local_port, remote_port in services:
-        pf = port_forward(namespace, service_name, local_port, remote_port)
-        processes.append((pf, f"http://localhost:{local_port}"))
+    # Use file lock to coordinate across xdist workers
+    lock_fd = open(LOCK_FILE, 'w')
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        
+        # Check if already installed (by another worker)
+        try:
+            result = kubectl("get", "deployment", "-n", OPERATOR_NAMESPACE,
+                           "-l", f"app.kubernetes.io/instance={RELEASE_NAME}",
+                           "-o", "jsonpath={.items[0].metadata.name}", _ok_code=[0, 1])
+            if "controller-manager" in str(result):
+                # Already installed, just wait for Gateway
+                for _ in range(30):
+                    try:
+                        result = kubectl("get", "gateway", "agentic-gateway", "-n", OPERATOR_NAMESPACE,
+                                       "-o", "jsonpath={.status.conditions[?(@.type=='Programmed')].status}")
+                        if "True" in str(result):
+                            return
+                    except Exception:
+                        pass
+                    time.sleep(1)
+                return
+        except Exception:
+            pass
+        
+        # Create namespace
+        try:
+            kubectl("create", "namespace", OPERATOR_NAMESPACE)
+        except ErrorReturnCode:
+            pass
+        
+        # Install CRDs with server-side apply
+        crd_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../config/crd/bases"))
+        kubectl("apply", "--server-side", "-f", crd_path)
+        
+        # Install operator with Gateway API enabled
+        helm(
+            "upgrade", "--install", RELEASE_NAME, CHART_PATH,
+            "--namespace", OPERATOR_NAMESPACE,
+            "--set", "controllerManager.manager.image.repository=agentic-operator",
+            "--set", "controllerManager.manager.image.tag=latest",
+            "--set", "gatewayAPI.enabled=true",
+            "--set", "gatewayAPI.createGateway=true",
+            "--set", "gatewayAPI.gatewayClassName=envoy-gateway",
+            "--skip-crds",
+            "--wait", "--timeout", "120s"
+        )
+        
+        # Wait for Gateway to be ready
+        for _ in range(30):
+            try:
+                result = kubectl("get", "gateway", "agentic-gateway", "-n", OPERATOR_NAMESPACE,
+                               "-o", "jsonpath={.status.conditions[?(@.type=='Programmed')].status}")
+                if "True" in str(result):
+                    return
+            except Exception:
+                pass
+            time.sleep(1)
+    finally:
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        lock_fd.close()
+
+
+def _uninstall_operator():
+    """Uninstall operator - called only when all workers are done.
     
-    # Wait briefly for processes to start
-    time.sleep(0.5)
+    Note: With xdist parallel execution, we don't uninstall automatically
+    since other workers may still need the operator. Manual cleanup via
+    'make clean' is recommended after test runs.
+    """
+    # Only uninstall if running without xdist (single worker)
+    if os.environ.get("PYTEST_XDIST_WORKER"):
+        return  # Skip cleanup in parallel mode
     
-    # Wait for all services to be ready in parallel
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        futures = [executor.submit(wait_for_service_ready, url) for _, url in processes]
-        concurrent.futures.wait(futures)
+    try:
+        helm("uninstall", RELEASE_NAME, "-n", OPERATOR_NAMESPACE, _ok_code=[0, 1])
+    except Exception:
+        pass
+    try:
+        kubectl("delete", "namespace", OPERATOR_NAMESPACE, "--wait=false", _ok_code=[0, 1])
+    except Exception:
+        pass
+
+
+@pytest.fixture(scope="session")
+def gateway_setup():
+    """Session-scoped fixture that installs operator with Gateway API.
     
-    return [pf for pf, _ in processes]
+    This runs once per test session and ensures:
+    1. Operator is installed with Gateway API enabled
+    2. Gateway is ready to accept routes
+    3. Cleanup happens at end of session
+    """
+    _install_operator()
+    yield GATEWAY_URL
+    _uninstall_operator()
 
 
 @pytest.fixture(scope="module")
-def shared_namespace(request) -> Generator[str, None, None]:
-    """Module-scoped fixture that creates a test namespace.
-    
-    For pytest-xdist parallel execution, each worker gets its own namespace
-    to avoid conflicts. Using module scope ensures proper isolation per test file.
-    """
-    import os
+def shared_namespace(request, gateway_setup) -> Generator[str, None, None]:
+    """Module-scoped fixture that creates a test namespace."""
     import re
-    # Get worker id for xdist parallel execution
     worker_id = os.environ.get("PYTEST_XDIST_WORKER", "main")
-    # Include module name for uniqueness (sanitize for K8s naming)
     module_name = request.module.__name__.split(".")[-1]
     module_name = re.sub(r"[^a-z0-9]", "", module_name.lower())[:8]
     namespace = f"e2e-{worker_id}-{module_name}-{int(time.time()) % 10000}"
@@ -165,43 +205,28 @@ def test_namespace(shared_namespace: str) -> Generator[str, None, None]:
 
 @pytest.fixture(scope="module")
 def shared_modelapi(shared_namespace: str) -> Generator[str, None, None]:
-    """Module-scoped ModelAPI for tests that use mock_response.
-    
-    Deploys a single LiteLLM proxy that all mock-based tests in the module can share.
-    Tests requiring specific ModelAPI configurations should create their own.
-    """
+    """Module-scoped ModelAPI for tests that use mock_response."""
     name = "shared-mock-proxy"
     modelapi_spec = create_modelapi_resource(shared_namespace, name)
     create_custom_resource(modelapi_spec, shared_namespace)
     wait_for_deployment(shared_namespace, f"modelapi-{name}", timeout=120)
+    
+    # Wait for HTTPRoute to be ready
+    url = gateway_url(shared_namespace, "modelapi", name)
+    wait_for_resource_ready(url, max_wait=30)
     yield name
 
 
 def create_modelapi_resource(namespace: str, name: str = "mock-proxy") -> Dict[str, Any]:
-    """Create a ModelAPI resource spec for LiteLLM proxy (supports mock_response).
-
-    This creates a LiteLLM proxy that can be used with mock_response for
-    deterministic testing without requiring a real LLM backend.
-
-    Args:
-        namespace: Namespace for the resource
-        name: Resource name
-
-    Returns:
-        Resource specification
-    """
+    """Create a ModelAPI resource spec for LiteLLM proxy (supports mock_response)."""
     return {
         "apiVersion": "ethical.institute/v1alpha1",
         "kind": "ModelAPI",
-        "metadata": {
-            "name": name,
-            "namespace": namespace,
-        },
+        "metadata": {"name": name, "namespace": namespace},
         "spec": {
             "mode": "Proxy",
             "proxyConfig": {
-                # Simple CLI mode - LiteLLM will accept any model with mock_response
-                "model": "gpt-3.5-turbo",  # Any model name works with mock_response
+                "model": "gpt-3.5-turbo",
                 "env": [
                     {"name": "OPENAI_API_KEY", "value": "sk-test"},
                     {"name": "LITELLM_LOG", "value": "WARN"},
@@ -212,24 +237,11 @@ def create_modelapi_resource(namespace: str, name: str = "mock-proxy") -> Dict[s
 
 
 def create_modelapi_hosted_resource(namespace: str, name: str = "ollama-hosted") -> Dict[str, Any]:
-    """Create a ModelAPI resource spec for Proxy mode with Ollama backend.
-
-    This creates a LiteLLM proxy to Ollama for tests that need actual model inference.
-
-    Args:
-        namespace: Namespace for the resource
-        name: Resource name
-
-    Returns:
-        Resource specification
-    """
+    """Create a ModelAPI resource spec for Proxy mode with Ollama backend."""
     return {
         "apiVersion": "ethical.institute/v1alpha1",
         "kind": "ModelAPI",
-        "metadata": {
-            "name": name,
-            "namespace": namespace,
-        },
+        "metadata": {"name": name, "namespace": namespace},
         "spec": {
             "mode": "Proxy",
             "proxyConfig": {
@@ -245,31 +257,16 @@ def create_modelapi_hosted_resource(namespace: str, name: str = "ollama-hosted")
 
 
 def create_mcpserver_resource(namespace: str, name: str = "echo-server") -> Dict[str, Any]:
-    """Create an MCPServer resource for test-mcp-echo-server.
-
-    Args:
-        namespace: Namespace for the resource
-        name: Resource name
-
-    Returns:
-        Resource specification
-    """
+    """Create an MCPServer resource for test-mcp-echo-server."""
     return {
         "apiVersion": "ethical.institute/v1alpha1",
         "kind": "MCPServer",
-        "metadata": {
-            "name": name,
-            "namespace": namespace,
-        },
+        "metadata": {"name": name, "namespace": namespace},
         "spec": {
             "type": "python-runtime",
             "config": {
-                "tools": {
-                    "fromPackage": "test-mcp-echo-server",
-                },
-                "env": [
-                    {"name": "LOG_LEVEL", "value": "INFO"},
-                ],
+                "tools": {"fromPackage": "test-mcp-echo-server"},
+                "env": [{"name": "LOG_LEVEL", "value": "INFO"}],
             },
         },
     }
@@ -279,45 +276,65 @@ def create_agent_resource(namespace: str, modelapi_name: str, mcpserver_names: l
                          agent_name: str = "echo-agent", 
                          sub_agents: list = None,
                          reasoning_loop_max_steps: int = None) -> Dict[str, Any]:
-    """Create an Agent resource.
-
-    Args:
-        namespace: Namespace for the resource
-        modelapi_name: Name of ModelAPI resource to reference
-        mcpserver_names: List of MCPServer names to connect to
-        agent_name: Agent resource name
-        sub_agents: List of sub-agent names for delegation
-        reasoning_loop_max_steps: Max reasoning loop steps
-
-    Returns:
-        Resource specification
-    """
+    """Create an Agent resource."""
     config = {
         "description": "E2E test echo agent",
-        "instructions": "You are a helpful test assistant. You have access to an echo tool for testing.",
+        "instructions": "You are a helpful test assistant.",
         "env": [
             {"name": "AGENT_LOG_LEVEL", "value": "INFO"},
             {"name": "MODEL_NAME", "value": "ollama/smollm2:135m"},
         ],
     }
     
-    # Add reasoning loop max steps if provided
     if reasoning_loop_max_steps is not None:
         config["reasoningLoopMaxSteps"] = reasoning_loop_max_steps
     
     return {
         "apiVersion": "ethical.institute/v1alpha1",
         "kind": "Agent",
-        "metadata": {
-            "name": agent_name,
-            "namespace": namespace,
-        },
+        "metadata": {"name": agent_name, "namespace": namespace},
         "spec": {
             "modelAPI": modelapi_name,
             "mcpServers": mcpserver_names,
             "config": config,
-            "agentNetwork": {
-                "access": sub_agents or [],
-            },
+            "agentNetwork": {"access": sub_agents or []},
         },
     }
+
+
+# Legacy port-forward helpers for tests that need direct service access
+def get_next_port() -> int:
+    """Get next available port for port-forwarding."""
+    worker_id = os.environ.get("PYTEST_XDIST_WORKER", "master")
+    base = 18000 + (int(worker_id.replace("gw", "0").replace("main", "0").replace("master", "0")) * 100)
+    if not hasattr(get_next_port, "_counters"):
+        get_next_port._counters = {}
+    if worker_id not in get_next_port._counters:
+        get_next_port._counters[worker_id] = base
+    port = get_next_port._counters[worker_id]
+    get_next_port._counters[worker_id] += 1
+    return port
+
+
+def port_forward(namespace: str, service_name: str, local_port: int, remote_port: int = 8000) -> subprocess.Popen:
+    """Start port-forward to a service (legacy, prefer Gateway)."""
+    return subprocess.Popen(
+        ["kubectl", "port-forward", f"svc/{service_name}", f"{local_port}:{remote_port}", "-n", namespace],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+
+
+def port_forward_with_wait(namespace: str, service_name: str, local_port: int, 
+                           remote_port: int = 8000) -> subprocess.Popen:
+    """Start port-forward and wait for service to be ready (legacy)."""
+    process = port_forward(namespace, service_name, local_port, remote_port)
+    time.sleep(0.5)
+    for _ in range(40):
+        try:
+            response = httpx.get(f"http://localhost:{local_port}/health", timeout=2.0)
+            if response.status_code == 200:
+                return process
+        except Exception:
+            pass
+        time.sleep(0.25)
+    raise TimeoutError(f"Service not ready after 10s")
