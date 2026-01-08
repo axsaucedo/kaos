@@ -69,6 +69,24 @@ make clean             # Clean up test resources
 
 **Note**: Tests auto-install operator via Helm with Gateway API enabled. No manual operator start needed.
 
+### KIND E2E Tests (Isolated Cluster)
+
+Run E2E tests in an isolated KIND cluster with local registry:
+
+```bash
+# Create KIND cluster with Gateway API (one-time)
+make kind-create
+
+# Run full E2E test suite in KIND
+make kind-e2e
+
+# Delete KIND cluster
+make kind-delete
+```
+
+The `kind-e2e` target builds images, pushes to local registry, and runs tests.
+This is the same setup used in GitHub Actions CI.
+
 ## Dependencies
 - Ollama running locally with `smollm2:135m` model
 - Docker Desktop with Kubernetes enabled
