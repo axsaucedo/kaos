@@ -354,9 +354,14 @@ make kind-delete
 
 The `kind-e2e` target:
 1. Creates the KIND cluster if it doesn't exist
-2. Builds all Docker images
+2. Builds all Docker images (including pulling external LiteLLM/Ollama images)
 3. Pushes images to the local KIND registry
 4. Runs E2E tests with the correct image references
+
+**Note:** KIND clusters require additional configuration for Gateway API LoadBalancer
+support. Some tests that rely on Gateway routing may need MetalLB or NodePort
+configuration to work correctly in KIND. On Docker Desktop, LoadBalancer is
+natively supported.
 
 ### Custom Helm Values for CI
 
