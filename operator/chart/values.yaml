@@ -51,7 +51,7 @@ defaultImages:
   agentRuntime: agentic-agent:latest
   mcpServer: agentic-mcp-server:latest
   litellm: ghcr.io/berriai/litellm:main-latest
-  ollama: ollama/ollama:latest
+  ollama: alpine/ollama:latest
 
 # Gateway API integration (optional)
 # When enabled, HTTPRoutes are created for Agent, ModelAPI, and MCPServer resources

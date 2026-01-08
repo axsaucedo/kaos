@@ -236,7 +236,7 @@ func (r *ModelAPIReconciler) constructDeployment(modelapi *agenticv1alpha1.Model
 	initContainers := []corev1.Container{}
 	ollamaImage := os.Getenv("DEFAULT_OLLAMA_IMAGE")
 	if ollamaImage == "" {
-		ollamaImage = "ollama/ollama:latest"
+		ollamaImage = "alpine/ollama:latest"
 	}
 	if modelapi.Spec.Mode == agenticv1alpha1.ModelAPIModeHosted && modelapi.Spec.HostedConfig != nil && modelapi.Spec.HostedConfig.Model != "" {
 		// Init container starts Ollama server, pulls model, then exits
@@ -347,7 +347,7 @@ func (r *ModelAPIReconciler) constructContainer(modelapi *agenticv1alpha1.ModelA
 		// Ollama Hosted mode
 		image = os.Getenv("DEFAULT_OLLAMA_IMAGE")
 		if image == "" {
-			image = "ollama/ollama:latest"
+			image = "alpine/ollama:latest"
 		}
 		args = []string{}
 		port = 11434
