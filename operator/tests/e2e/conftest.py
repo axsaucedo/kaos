@@ -119,17 +119,29 @@ def _install_operator():
         kubectl("apply", "--server-side", "-f", crd_path)
         
         # Install operator with Gateway API enabled
-        helm(
+        helm_args = [
             "upgrade", "--install", RELEASE_NAME, CHART_PATH,
             "--namespace", OPERATOR_NAMESPACE,
-            "--set", "controllerManager.manager.image.repository=agentic-operator",
-            "--set", "controllerManager.manager.image.tag=latest",
+        ]
+        # Support custom values file for CI (e.g., KIND registry images)
+        # Values file must come before --set flags so --set can override if needed
+        values_file = os.environ.get("HELM_VALUES_FILE")
+        if values_file and os.path.exists(values_file):
+            helm_args.extend(["-f", values_file])
+        else:
+            # Default to local images for Docker Desktop
+            helm_args.extend([
+                "--set", "controllerManager.manager.image.repository=agentic-operator",
+                "--set", "controllerManager.manager.image.tag=latest",
+            ])
+        helm_args.extend([
             "--set", "gatewayAPI.enabled=true",
             "--set", "gatewayAPI.createGateway=true",
             "--set", "gatewayAPI.gatewayClassName=envoy-gateway",
             "--skip-crds",
             "--wait", "--timeout", "120s"
-        )
+        ])
+        helm(*helm_args)
         
         # Wait for Gateway to be ready
         for _ in range(30):
