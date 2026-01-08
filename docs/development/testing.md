@@ -342,7 +342,7 @@ The workflow:
 You can run the same E2E tests locally using KIND:
 
 ```bash
-# Create KIND cluster with Gateway API and registry (one-time setup)
+# Create KIND cluster with Gateway API, MetalLB, and registry (one-time setup)
 make kind-create
 
 # Run E2E tests in KIND
@@ -352,16 +352,21 @@ make kind-e2e
 make kind-delete
 ```
 
-The `kind-e2e` target:
-1. Creates the KIND cluster if it doesn't exist
-2. Builds all Docker images (including pulling external LiteLLM/Ollama images)
-3. Pushes images to the local KIND registry
-4. Runs E2E tests with the correct image references
+The `kind-create` target:
+1. Creates KIND cluster with local Docker registry
+2. Installs Gateway API CRDs and Envoy Gateway
+3. Creates the GatewayClass for Envoy Gateway
+4. Installs MetalLB for LoadBalancer support
 
-**Note:** KIND clusters require additional configuration for Gateway API LoadBalancer
-support. Some tests that rely on Gateway routing may need MetalLB or NodePort
-configuration to work correctly in KIND. On Docker Desktop, LoadBalancer is
-natively supported.
+The `kind-e2e` target:
+1. Builds all Docker images (including pulling external LiteLLM/Ollama images)
+2. Pushes images to the local KIND registry (localhost:5001)
+3. Pre-installs the operator to create the Gateway
+4. Sets up port-forwarding to the Gateway for host access
+5. Runs all 14 E2E tests in parallel
+
+**Note:** On macOS, the script uses `kubectl port-forward` because Docker's bridge
+network is not directly accessible from the host. The tests use port 8888 locally.
 
 ### Custom Helm Values for CI
 
