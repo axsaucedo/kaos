@@ -1,0 +1,101 @@
+name: E2E Tests
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  KIND_CLUSTER_NAME: agentic-e2e
+  REGISTRY_NAME: kind-registry
+  REGISTRY_PORT: 5001
+
+jobs:
+  e2e-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: operator/go.mod
+          cache-dependency-path: operator/go.sum
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Create KIND cluster with registry
+        uses: helm/kind-action@v1
+        with:
+          cluster_name: ${{ env.KIND_CLUSTER_NAME }}
+          registry: true
+          registry_name: ${{ env.REGISTRY_NAME }}
+          registry_port: ${{ env.REGISTRY_PORT }}
+
+      - name: Install Gateway API and Envoy Gateway
+        run: ./hack/install-gateway.sh
+
+      - name: Build and push images
+        env:
+          LOCAL_REGISTRY: localhost:${{ env.REGISTRY_PORT }}
+        run: |
+          docker build -t ${LOCAL_REGISTRY}/agentic-operator:latest operator/
+          docker build -t ${LOCAL_REGISTRY}/agentic-agent:latest python/
+          docker build -t ${LOCAL_REGISTRY}/agentic-mcp-server:latest python/
+          docker push ${LOCAL_REGISTRY}/agentic-operator:latest
+          docker push ${LOCAL_REGISTRY}/agentic-agent:latest
+          docker push ${LOCAL_REGISTRY}/agentic-mcp-server:latest
+
+      - name: Create Helm values for KIND registry
+        env:
+          LOCAL_REGISTRY: localhost:${{ env.REGISTRY_PORT }}
+        run: |
+          cat > /tmp/e2e-values.yaml << EOF
+          controllerManager:
+            manager:
+              image:
+                repository: ${LOCAL_REGISTRY}/agentic-operator
+                tag: latest
+              imagePullPolicy: Always
+          defaultImages:
+            agentRuntime: ${LOCAL_REGISTRY}/agentic-agent:latest
+            mcpServer: ${LOCAL_REGISTRY}/agentic-mcp-server:latest
+          EOF
+          sed -i 's/^          //' /tmp/e2e-values.yaml
+
+      - name: Install Python test dependencies
+        run: |
+          cd operator/tests
+          uv venv
+          uv pip install -e ".[dev]"
+
+      - name: Run E2E tests
+        run: |
+          cd operator/tests
+          source .venv/bin/activate
+          export HELM_VALUES_FILE=/tmp/e2e-values.yaml
+          make test
+
+      - name: Collect logs on failure
+        if: failure()
+        run: |
+          echo "=== Cluster Info ==="
+          kubectl cluster-info
+          echo "=== All Namespaces ==="
+          kubectl get ns
+          echo "=== Operator Logs ==="
+          kubectl logs -n agentic-e2e-system -l app.kubernetes.io/name=agentic-operator --tail=100 || true
+          echo "=== All Pods ==="
+          kubectl get pods -A
+          echo "=== Events ==="
+          kubectl get events -A --sort-by='.lastTimestamp' | tail -50
