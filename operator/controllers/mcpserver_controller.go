@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/go-logr/logr"
@@ -229,11 +230,17 @@ func (r *MCPServerReconciler) constructPythonContainer(mcpserver *agenticv1alpha
 	var image string
 	var command []string
 
+	// Get default MCP server image from environment
+	defaultMcpImage := os.Getenv("DEFAULT_MCP_SERVER_IMAGE")
+	if defaultMcpImage == "" {
+		defaultMcpImage = "agentic-agent:latest"
+	}
+
 	// Check if using tools config
 	if mcpserver.Spec.Config.Tools != nil {
 		if mcpserver.Spec.Config.Tools.FromString != "" {
 			// Use the agentic-agent image with MCP_TOOLS_STRING
-			image = "agentic-agent:latest"
+			image = defaultMcpImage
 			command = []string{"python", "-m", "mcptools.server"}
 			env = append(env, corev1.EnvVar{
 				Name:  "MCP_TOOLS_STRING",
@@ -241,7 +248,7 @@ func (r *MCPServerReconciler) constructPythonContainer(mcpserver *agenticv1alpha
 			})
 		} else if mcpserver.Spec.Config.Tools.FromSecretKeyRef != nil {
 			// Use the agentic-agent image with MCP_TOOLS_STRING from secret
-			image = "agentic-agent:latest"
+			image = defaultMcpImage
 			command = []string{"python", "-m", "mcptools.server"}
 			env = append(env, corev1.EnvVar{
 				Name: "MCP_TOOLS_STRING",

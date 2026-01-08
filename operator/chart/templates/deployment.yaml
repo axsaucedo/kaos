@@ -30,6 +30,14 @@ spec:
         env:
         - name: KUBERNETES_CLUSTER_DOMAIN
           value: {{ quote .Values.kubernetesClusterDomain }}
+        - name: DEFAULT_AGENT_IMAGE
+          value: {{ quote .Values.defaultImages.agentRuntime }}
+        - name: DEFAULT_MCP_SERVER_IMAGE
+          value: {{ quote .Values.defaultImages.mcpServer }}
+        - name: DEFAULT_LITELLM_IMAGE
+          value: {{ quote .Values.defaultImages.litellm }}
+        - name: DEFAULT_OLLAMA_IMAGE
+          value: {{ quote .Values.defaultImages.ollama }}
         {{- if .Values.gatewayAPI.enabled }}
         - name: GATEWAY_API_ENABLED
           value: "true"

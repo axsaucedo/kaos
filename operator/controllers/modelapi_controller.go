@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
@@ -233,6 +234,10 @@ func (r *ModelAPIReconciler) constructDeployment(modelapi *agenticv1alpha1.Model
 
 	// Build init containers for Hosted mode (pull the model)
 	initContainers := []corev1.Container{}
+	ollamaImage := os.Getenv("DEFAULT_OLLAMA_IMAGE")
+	if ollamaImage == "" {
+		ollamaImage = "ollama/ollama:latest"
+	}
 	if modelapi.Spec.Mode == agenticv1alpha1.ModelAPIModeHosted && modelapi.Spec.HostedConfig != nil && modelapi.Spec.HostedConfig.Model != "" {
 		// Init container starts Ollama server, pulls model, then exits
 		// The model is stored in the emptyDir volume shared with main container
@@ -244,7 +249,7 @@ func (r *ModelAPIReconciler) constructDeployment(modelapi *agenticv1alpha1.Model
 		})
 		initContainers = append(initContainers, corev1.Container{
 			Name:            "pull-model",
-			Image:           "ollama/ollama:latest",
+			Image:           ollamaImage,
 			ImagePullPolicy: corev1.PullIfNotPresent,
 			Command:         []string{"/bin/sh", "-c"},
 			Args: []string{
@@ -306,7 +311,10 @@ func (r *ModelAPIReconciler) constructContainer(modelapi *agenticv1alpha1.ModelA
 
 	if modelapi.Spec.Mode == agenticv1alpha1.ModelAPIModeProxy {
 		// LiteLLM Proxy mode - always uses config file
-		image = "litellm/litellm:latest"
+		image = os.Getenv("DEFAULT_LITELLM_IMAGE")
+		if image == "" {
+			image = "ghcr.io/berriai/litellm:main-latest"
+		}
 		port = 8000
 		healthPath = "/health"
 
@@ -337,7 +345,10 @@ func (r *ModelAPIReconciler) constructContainer(modelapi *agenticv1alpha1.ModelA
 
 	} else {
 		// Ollama Hosted mode
-		image = "ollama/ollama:latest"
+		image = os.Getenv("DEFAULT_OLLAMA_IMAGE")
+		if image == "" {
+			image = "ollama/ollama:latest"
+		}
 		args = []string{}
 		port = 11434
 		healthPath = "/"

@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/go-logr/logr"
@@ -265,9 +266,15 @@ func (r *AgentReconciler) constructDeployment(agent *agenticv1alpha1.Agent, mode
 	// Build environment variables
 	env := r.constructEnvVars(agent, modelapi, mcpServers, peerAgents)
 
+	// Get agent image from environment or use default
+	agentImage := os.Getenv("DEFAULT_AGENT_IMAGE")
+	if agentImage == "" {
+		agentImage = "agentic-agent:latest"
+	}
+
 	container := corev1.Container{
 		Name:            "agent",
-		Image:           "agentic-agent:latest",
+		Image:           agentImage,
 		ImagePullPolicy: corev1.PullIfNotPresent,
 		Ports: []corev1.ContainerPort{
 			{
