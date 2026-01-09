@@ -78,3 +78,8 @@ kind-delete:
 
 kind-e2e: kind-create
 	@./hack/run-e2e-tests.sh
+
+# Update KIND E2E values file with current versions
+update-kind-values:
+	@echo "Updating hack/kind-e2e-values.yaml..."
+	@./hack/update-kind-e2e-values.sh

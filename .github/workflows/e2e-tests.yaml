@@ -49,44 +49,31 @@ jobs:
         env:
           LOCAL_REGISTRY: localhost:${{ env.REGISTRY_PORT }}
         run: |
+          # Image versions (must match hack/kind-e2e-values.yaml)
+          OPERATOR_TAG="dev"
+          AGENT_TAG="dev"
+          LITELLM_VERSION="v1.56.5"
+          OLLAMA_TAG="latest"
+          
           # Build project images
-          docker build -t ${LOCAL_REGISTRY}/agentic-operator:latest operator/
-          docker build -t ${LOCAL_REGISTRY}/agentic-agent:latest python/
-          docker tag ${LOCAL_REGISTRY}/agentic-agent:latest ${LOCAL_REGISTRY}/agentic-mcp-server:latest
-          docker push ${LOCAL_REGISTRY}/agentic-operator:latest
-          docker push ${LOCAL_REGISTRY}/agentic-agent:latest
-          docker push ${LOCAL_REGISTRY}/agentic-mcp-server:latest
+          docker build -t ${LOCAL_REGISTRY}/agentic-operator:${OPERATOR_TAG} operator/
+          docker build -t ${LOCAL_REGISTRY}/agentic-agent:${AGENT_TAG} python/
+          docker tag ${LOCAL_REGISTRY}/agentic-agent:${AGENT_TAG} ${LOCAL_REGISTRY}/agentic-mcp-server:${AGENT_TAG}
+          docker push ${LOCAL_REGISTRY}/agentic-operator:${OPERATOR_TAG}
+          docker push ${LOCAL_REGISTRY}/agentic-agent:${AGENT_TAG}
+          docker push ${LOCAL_REGISTRY}/agentic-mcp-server:${AGENT_TAG}
           
-          # Pull and push external images to local registry
-          docker pull ghcr.io/berriai/litellm:main-latest
-          docker tag ghcr.io/berriai/litellm:main-latest ${LOCAL_REGISTRY}/litellm:latest
-          docker push ${LOCAL_REGISTRY}/litellm:latest
+          # Build minimal LiteLLM image from our Dockerfile
+          docker build -t ${LOCAL_REGISTRY}/litellm:${LITELLM_VERSION} -f hack/Dockerfile.litellm hack/
+          docker push ${LOCAL_REGISTRY}/litellm:${LITELLM_VERSION}
           
-          docker pull alpine/ollama:latest
-          docker tag alpine/ollama:latest ${LOCAL_REGISTRY}/ollama:latest
-          docker push ${LOCAL_REGISTRY}/ollama:latest
+          # Pull and push Ollama image (alpine/ollama only has 'latest' tag)
+          docker pull alpine/ollama:${OLLAMA_TAG}
+          docker tag alpine/ollama:${OLLAMA_TAG} ${LOCAL_REGISTRY}/ollama:${OLLAMA_TAG}
+          docker push ${LOCAL_REGISTRY}/ollama:${OLLAMA_TAG}
 
       - name: Install MetalLB for LoadBalancer support
         run: ./hack/install-metallb.sh
-
-      - name: Create Helm values for KIND registry
-        env:
-          LOCAL_REGISTRY: localhost:${{ env.REGISTRY_PORT }}
-        run: |
-          cat > /tmp/e2e-values.yaml << EOF
-          controllerManager:
-            manager:
-              image:
-                repository: ${LOCAL_REGISTRY}/agentic-operator
-                tag: latest
-              imagePullPolicy: Always
-          defaultImages:
-            agentRuntime: ${LOCAL_REGISTRY}/agentic-agent:latest
-            mcpServer: ${LOCAL_REGISTRY}/agentic-mcp-server:latest
-            litellm: ${LOCAL_REGISTRY}/litellm:latest
-            ollama: ${LOCAL_REGISTRY}/ollama:latest
-          EOF
-          sed -i 's/^          //' /tmp/e2e-values.yaml
 
       - name: Install Python test dependencies
         run: |
@@ -98,7 +85,7 @@ jobs:
         run: |
           cd operator/tests
           source .venv/bin/activate
-          export HELM_VALUES_FILE=/tmp/e2e-values.yaml
+          export HELM_VALUES_FILE=${{ github.workspace }}/hack/kind-e2e-values.yaml
           make test
 
       - name: Collect logs on failure
