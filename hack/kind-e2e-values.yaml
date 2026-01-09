@@ -1,0 +1,24 @@
+# Helm values for KIND E2E testing
+# This file is used by hack/run-e2e-tests.sh to configure the operator
+# with images from the local KIND registry.
+#
+# To update image versions, edit this file or run:
+#   make update-kind-values
+#
+# Image version conventions:
+#   - agentic-*: Use 'dev' tag for local builds
+#   - litellm: Use specific version matching Dockerfile.litellm
+#   - ollama: alpine/ollama only has 'latest' tag
+
+controllerManager:
+  manager:
+    image:
+      repository: localhost:5001/agentic-operator
+      tag: dev
+    imagePullPolicy: Always
+
+defaultImages:
+  agentRuntime: localhost:5001/agentic-agent:dev
+  mcpServer: localhost:5001/agentic-mcp-server:dev
+  litellm: localhost:5001/litellm:v1.56.5
+  ollama: localhost:5001/ollama:latest
