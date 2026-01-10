@@ -7,6 +7,7 @@ Tests the agentic loop via Gateway API:
 - Agentic loop configuration via CRD
 """
 
+import os
 import time
 import pytest
 import httpx
@@ -159,6 +160,10 @@ async def test_delegation_with_memory_verification(test_namespace: str, shared_m
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(
+    os.environ.get("CI") == "true",
+    reason="Requires Ollama running on host (not available in CI)"
+)
 async def test_agent_processes_with_memory_events(test_namespace: str):
     """Test that agent processing creates correct memory events."""
     # Create a ModelAPI with Ollama backend for actual inference

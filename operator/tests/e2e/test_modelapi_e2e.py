@@ -9,6 +9,7 @@ NOTE: These tests do NOT use shared_modelapi fixture because they test
 specific ModelAPI configurations and functionality.
 """
 
+import os
 import time
 import pytest
 import httpx
@@ -78,6 +79,10 @@ async def test_modelapi_proxy_mock_response(test_namespace: str):
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(
+    os.environ.get("CI") == "true",
+    reason="Requires Ollama running on host (not available in CI)"
+)
 async def test_modelapi_proxy_with_ollama(test_namespace: str):
     """Test ModelAPI Proxy mode with real Ollama backend."""
     name = "ollama-prx"
