@@ -67,3 +67,6 @@ dist/
 CLAUDE.md
 TASKS.md
 COPILOT_SESSION.md
+
+# Generated KIND E2E values (created by hack/update-kind-e2e-values.sh)
+hack/kind-e2e-values.yaml
