@@ -1,4 +1,4 @@
-.PHONY: help build docker-build docker-build-operator docker-build-runtime docker-build-mcp-servers test deploy clean kind-e2e kind-create kind-delete
+.PHONY: help build docker-build docker-build-operator docker-build-runtime docker-build-mcp-servers test deploy clean kind-e2e kind-create kind-delete kind-clean generate-kind-values
 
 # KIND cluster configuration
 KIND_CLUSTER_NAME ?= agentic-e2e
@@ -79,7 +79,11 @@ kind-delete:
 kind-e2e: kind-create
 	@./hack/run-e2e-tests.sh
 
-# Update KIND E2E values file with current versions
-update-kind-values:
-	@echo "Updating hack/kind-e2e-values.yaml..."
+# Generate KIND E2E values file (not checked in - generated at build time)
+generate-kind-values:
 	@./hack/update-kind-e2e-values.sh
+
+# Clean generated KIND E2E values file
+kind-clean:
+	@rm -f hack/kind-e2e-values.yaml
+	@echo "Cleaned hack/kind-e2e-values.yaml"
