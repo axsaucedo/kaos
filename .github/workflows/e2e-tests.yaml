@@ -11,6 +11,11 @@ env:
   KIND_CLUSTER_NAME: agentic-e2e
   REGISTRY_NAME: kind-registry
   REGISTRY_PORT: 5001
+  # Image versions - single source of truth (also set in hack/build-push-images.sh)
+  OPERATOR_TAG: dev
+  AGENT_TAG: dev
+  LITELLM_VERSION: v1.56.5
+  OLLAMA_TAG: latest
 
 jobs:
   e2e-tests:
@@ -54,29 +59,20 @@ jobs:
           uv venv
           uv pip install -e ".[dev]"
 
-      - name: Run E2E tests
+      - name: Generate Helm values and build images
         env:
           REGISTRY: localhost:${{ env.REGISTRY_PORT }}
-          REGISTRY_PORT: ${{ env.REGISTRY_PORT }}
         run: |
-          # Generate Helm values file (uses env vars for versions)
+          # Generate Helm values file using shared script
           ./hack/update-kind-e2e-values.sh
           
-          # Build and push images using the same logic as run-e2e-tests.sh
-          echo "Building and pushing images..."
-          docker build -t ${REGISTRY}/agentic-operator:${OPERATOR_TAG:-dev} operator/
-          docker build -t ${REGISTRY}/agentic-agent:${AGENT_TAG:-dev} python/
-          docker tag ${REGISTRY}/agentic-agent:${AGENT_TAG:-dev} ${REGISTRY}/agentic-mcp-server:${AGENT_TAG:-dev}
-          docker build -t ${REGISTRY}/litellm:${LITELLM_VERSION:-v1.56.5} -f hack/Dockerfile.litellm hack/
-          docker pull alpine/ollama:${OLLAMA_TAG:-latest}
-          docker tag alpine/ollama:${OLLAMA_TAG:-latest} ${REGISTRY}/ollama:${OLLAMA_TAG:-latest}
-          
-          docker push ${REGISTRY}/agentic-operator:${OPERATOR_TAG:-dev}
-          docker push ${REGISTRY}/agentic-agent:${AGENT_TAG:-dev}
-          docker push ${REGISTRY}/agentic-mcp-server:${AGENT_TAG:-dev}
-          docker push ${REGISTRY}/litellm:${LITELLM_VERSION:-v1.56.5}
-          docker push ${REGISTRY}/ollama:${OLLAMA_TAG:-latest}
-          
+          # Build and push all images using shared script
+          ./hack/build-push-images.sh
+
+      - name: Install operator and run E2E tests
+        env:
+          REGISTRY: localhost:${{ env.REGISTRY_PORT }}
+        run: |
           # Install operator
           echo "Installing operator..."
           kubectl create namespace agentic-e2e-system
