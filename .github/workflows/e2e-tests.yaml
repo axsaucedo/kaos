@@ -9,13 +9,13 @@ on:
 
 env:
   KIND_CLUSTER_NAME: agentic-e2e
-  REGISTRY_NAME: kind-registry
-  REGISTRY_PORT: 5001
   # Image versions - single source of truth (also set in hack/build-push-images.sh)
   OPERATOR_TAG: dev
   AGENT_TAG: dev
   LITELLM_VERSION: v1.56.5
   OLLAMA_TAG: latest
+  # Use a fake registry prefix - images are loaded via kind load, not pulled
+  REGISTRY: kind-local
 
 jobs:
   e2e-tests:
@@ -39,13 +39,10 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v4
 
-      - name: Create KIND cluster with registry
+      - name: Create KIND cluster
         uses: helm/kind-action@v1
         with:
           cluster_name: ${{ env.KIND_CLUSTER_NAME }}
-          registry: true
-          registry_name: ${{ env.REGISTRY_NAME }}
-          registry_port: ${{ env.REGISTRY_PORT }}
 
       - name: Install Gateway API and Envoy Gateway
         run: ./hack/install-gateway.sh
@@ -59,19 +56,18 @@ jobs:
           uv venv
           uv pip install -e ".[dev]"
 
-      - name: Generate Helm values and build images
+      - name: Build images and load into KIND
         env:
-          REGISTRY: localhost:${{ env.REGISTRY_PORT }}
+          USE_KIND_LOAD: "true"
+          IMAGE_PULL_POLICY: "Never"
         run: |
           # Generate Helm values file using shared script
           ./hack/update-kind-e2e-values.sh
           
-          # Build and push all images using shared script
+          # Build images and load into KIND cluster (no registry needed)
           ./hack/build-push-images.sh
 
       - name: Install operator and run E2E tests
-        env:
-          REGISTRY: localhost:${{ env.REGISTRY_PORT }}
         run: |
           # Install operator
           echo "Installing operator..."
