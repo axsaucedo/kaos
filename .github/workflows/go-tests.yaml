@@ -14,7 +14,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  test:
+  go-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -26,6 +26,11 @@ jobs:
         with:
           go-version-file: operator/go.mod
           cache-dependency-path: operator/go.sum
+
+      - name: Install tools
+        run: |
+          go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest
+          go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
 
       - name: Run Go tests
         working-directory: operator
