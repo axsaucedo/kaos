@@ -45,33 +45,6 @@ jobs:
       - name: Install Gateway API and Envoy Gateway
         run: ./hack/install-gateway.sh
 
-      - name: Build and push images
-        env:
-          LOCAL_REGISTRY: localhost:${{ env.REGISTRY_PORT }}
-        run: |
-          # Image versions (must match hack/kind-e2e-values.yaml)
-          OPERATOR_TAG="dev"
-          AGENT_TAG="dev"
-          LITELLM_VERSION="v1.56.5"
-          OLLAMA_TAG="latest"
-          
-          # Build project images
-          docker build -t ${LOCAL_REGISTRY}/agentic-operator:${OPERATOR_TAG} operator/
-          docker build -t ${LOCAL_REGISTRY}/agentic-agent:${AGENT_TAG} python/
-          docker tag ${LOCAL_REGISTRY}/agentic-agent:${AGENT_TAG} ${LOCAL_REGISTRY}/agentic-mcp-server:${AGENT_TAG}
-          docker push ${LOCAL_REGISTRY}/agentic-operator:${OPERATOR_TAG}
-          docker push ${LOCAL_REGISTRY}/agentic-agent:${AGENT_TAG}
-          docker push ${LOCAL_REGISTRY}/agentic-mcp-server:${AGENT_TAG}
-          
-          # Build minimal LiteLLM image from our Dockerfile
-          docker build -t ${LOCAL_REGISTRY}/litellm:${LITELLM_VERSION} -f hack/Dockerfile.litellm hack/
-          docker push ${LOCAL_REGISTRY}/litellm:${LITELLM_VERSION}
-          
-          # Pull and push Ollama image (alpine/ollama only has 'latest' tag)
-          docker pull alpine/ollama:${OLLAMA_TAG}
-          docker tag alpine/ollama:${OLLAMA_TAG} ${LOCAL_REGISTRY}/ollama:${OLLAMA_TAG}
-          docker push ${LOCAL_REGISTRY}/ollama:${OLLAMA_TAG}
-
       - name: Install MetalLB for LoadBalancer support
         run: ./hack/install-metallb.sh
 
@@ -82,10 +55,63 @@ jobs:
           uv pip install -e ".[dev]"
 
       - name: Run E2E tests
+        env:
+          REGISTRY: localhost:${{ env.REGISTRY_PORT }}
+          REGISTRY_PORT: ${{ env.REGISTRY_PORT }}
         run: |
+          # Generate Helm values file (uses env vars for versions)
+          ./hack/update-kind-e2e-values.sh
+          
+          # Build and push images using the same logic as run-e2e-tests.sh
+          echo "Building and pushing images..."
+          docker build -t ${REGISTRY}/agentic-operator:${OPERATOR_TAG:-dev} operator/
+          docker build -t ${REGISTRY}/agentic-agent:${AGENT_TAG:-dev} python/
+          docker tag ${REGISTRY}/agentic-agent:${AGENT_TAG:-dev} ${REGISTRY}/agentic-mcp-server:${AGENT_TAG:-dev}
+          docker build -t ${REGISTRY}/litellm:${LITELLM_VERSION:-v1.56.5} -f hack/Dockerfile.litellm hack/
+          docker pull alpine/ollama:${OLLAMA_TAG:-latest}
+          docker tag alpine/ollama:${OLLAMA_TAG:-latest} ${REGISTRY}/ollama:${OLLAMA_TAG:-latest}
+          
+          docker push ${REGISTRY}/agentic-operator:${OPERATOR_TAG:-dev}
+          docker push ${REGISTRY}/agentic-agent:${AGENT_TAG:-dev}
+          docker push ${REGISTRY}/agentic-mcp-server:${AGENT_TAG:-dev}
+          docker push ${REGISTRY}/litellm:${LITELLM_VERSION:-v1.56.5}
+          docker push ${REGISTRY}/ollama:${OLLAMA_TAG:-latest}
+          
+          # Install operator
+          echo "Installing operator..."
+          kubectl create namespace agentic-e2e-system
+          kubectl apply --server-side -f operator/config/crd/bases
+          helm upgrade --install agentic-e2e operator/chart \
+              --namespace agentic-e2e-system \
+              -f hack/kind-e2e-values.yaml \
+              --set gatewayAPI.enabled=true \
+              --set gatewayAPI.createGateway=true \
+              --set gatewayAPI.gatewayClassName=envoy-gateway \
+              --skip-crds \
+              --wait --timeout 120s
+          
+          # Wait for Gateway
+          echo "Waiting for Gateway..."
+          for i in {1..30}; do
+              STATUS=$(kubectl get gateway agentic-gateway -n agentic-e2e-system -o jsonpath='{.status.conditions[?(@.type=="Programmed")].status}' 2>/dev/null || echo "")
+              if [ "$STATUS" = "True" ]; then
+                  echo "Gateway is programmed!"
+                  break
+              fi
+              sleep 2
+          done
+          
+          # Start port-forward
+          GATEWAY_SVC=$(kubectl get svc -n envoy-gateway-system -l "gateway.envoyproxy.io/owning-gateway-name=agentic-gateway" -o jsonpath='{.items[0].metadata.name}')
+          kubectl port-forward -n envoy-gateway-system "svc/${GATEWAY_SVC}" 8888:80 &
+          sleep 5
+          
+          # Run tests
           cd operator/tests
           source .venv/bin/activate
           export HELM_VALUES_FILE=${{ github.workspace }}/hack/kind-e2e-values.yaml
+          export GATEWAY_URL=http://localhost:8888
+          export OPERATOR_MANAGED_EXTERNALLY=1
           make test
 
       - name: Collect logs on failure
