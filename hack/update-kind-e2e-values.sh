@@ -1,18 +1,19 @@
 #!/bin/bash
-# Updates the hack/kind-e2e-values.yaml file with specified image versions.
+# Generates the hack/kind-e2e-values.yaml file with specified image versions.
+# This file is NOT checked in - it's generated at build time.
 # Usage: ./hack/update-kind-e2e-values.sh [--operator-tag TAG] [--agent-tag TAG] [--litellm-version VER] [--ollama-version VER]
 set -o errexit
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VALUES_FILE="${SCRIPT_DIR}/kind-e2e-values.yaml"
 
-# Default versions
-OPERATOR_TAG="dev"
-AGENT_TAG="dev"
-LITELLM_VERSION="v1.56.5"
+# Default versions (single source of truth)
+OPERATOR_TAG="${OPERATOR_TAG:-dev}"
+AGENT_TAG="${AGENT_TAG:-dev}"
+LITELLM_VERSION="${LITELLM_VERSION:-v1.56.5}"
 # alpine/ollama only has 'latest' tag
-OLLAMA_TAG="latest"
-REGISTRY="localhost:5001"
+OLLAMA_TAG="${OLLAMA_TAG:-latest}"
+REGISTRY="${REGISTRY:-localhost:5001}"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
