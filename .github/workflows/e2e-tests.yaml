@@ -18,6 +18,7 @@ on:
 env:
   KIND_CLUSTER_NAME: agentic-e2e
   CI: true
+  KIND_CLUSTER: true
 
 jobs:
   e2e-tests:

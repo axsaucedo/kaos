@@ -114,6 +114,8 @@ export HELM_VALUES_FILE="${HELM_VALUES_FILE}"
 export GATEWAY_URL="http://localhost:8888"
 # Tell conftest.py that we handle operator lifecycle externally
 export OPERATOR_MANAGED_EXTERNALLY=1
+# Tell tests we're running in KIND (skip host-dependent tests)
+export KIND_CLUSTER=true
 echo "Using Gateway URL: ${GATEWAY_URL}"
 
 # Clean up any leftover test namespaces from previous runs
