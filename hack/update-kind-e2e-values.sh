@@ -14,6 +14,8 @@ LITELLM_VERSION="${LITELLM_VERSION:-v1.56.5}"
 # alpine/ollama only has 'latest' tag
 OLLAMA_TAG="${OLLAMA_TAG:-latest}"
 REGISTRY="${REGISTRY:-localhost:5001}"
+# Image pull policy: Never for kind load, Always/IfNotPresent for registry
+IMAGE_PULL_POLICY="${IMAGE_PULL_POLICY:-IfNotPresent}"
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -23,6 +25,7 @@ while [[ $# -gt 0 ]]; do
         --litellm-version) LITELLM_VERSION="$2"; shift 2 ;;
         --ollama-tag) OLLAMA_TAG="$2"; shift 2 ;;
         --registry) REGISTRY="$2"; shift 2 ;;
+        --image-pull-policy) IMAGE_PULL_POLICY="$2"; shift 2 ;;
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
 done
@@ -45,13 +48,15 @@ controllerManager:
     image:
       repository: ${REGISTRY}/agentic-operator
       tag: ${OPERATOR_TAG}
-    imagePullPolicy: Always
+    imagePullPolicy: ${IMAGE_PULL_POLICY}
 
 defaultImages:
   agentRuntime: ${REGISTRY}/agentic-agent:${AGENT_TAG}
   mcpServer: ${REGISTRY}/agentic-mcp-server:${AGENT_TAG}
   litellm: ${REGISTRY}/litellm:${LITELLM_VERSION}
   ollama: ${REGISTRY}/ollama:${OLLAMA_TAG}
+
+defaultImagePullPolicy: ${IMAGE_PULL_POLICY}
 EOF
 
 echo "Updated ${VALUES_FILE} with:"
@@ -59,3 +64,4 @@ echo "  operator: ${REGISTRY}/agentic-operator:${OPERATOR_TAG}"
 echo "  agent: ${REGISTRY}/agentic-agent:${AGENT_TAG}"
 echo "  litellm: ${REGISTRY}/litellm:${LITELLM_VERSION}"
 echo "  ollama: ${REGISTRY}/ollama:${OLLAMA_TAG}"
+echo "  imagePullPolicy: ${IMAGE_PULL_POLICY}"
