@@ -2,10 +2,10 @@
 .PHONY: test test-seq clean
 
 test:
-	python -m pytest e2e/ -v -n 4 --dist loadscope
+	uv run pytest e2e/ -v -n $(NPROC) --dist loadscope
 
 test-seq:
-	python -m pytest e2e/ -v
+	uv run pytest e2e/ -v
 
 clean:
 	@echo "Cleaning up test resources..."
