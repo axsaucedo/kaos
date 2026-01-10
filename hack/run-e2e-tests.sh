@@ -23,31 +23,7 @@ HELM_VALUES_FILE="${SCRIPT_DIR}/kind-e2e-values.yaml"
 
 echo ""
 echo "=== Building and pushing images to local registry ==="
-
-# Build and push operator
-echo "Building operator image..."
-docker build -t "${REGISTRY}/agentic-operator:${OPERATOR_TAG}" "${PROJECT_ROOT}/operator/"
-docker push "${REGISTRY}/agentic-operator:${OPERATOR_TAG}"
-
-# Build and push agent runtime
-echo "Building agent runtime image..."
-docker build -t "${REGISTRY}/agentic-agent:${AGENT_TAG}" "${PROJECT_ROOT}/python/"
-docker push "${REGISTRY}/agentic-agent:${AGENT_TAG}"
-
-# Tag same image for MCP server (they use the same base)
-docker tag "${REGISTRY}/agentic-agent:${AGENT_TAG}" "${REGISTRY}/agentic-mcp-server:${AGENT_TAG}"
-docker push "${REGISTRY}/agentic-mcp-server:${AGENT_TAG}"
-
-# Build minimal LiteLLM image from our Dockerfile
-echo "Building minimal LiteLLM image..."
-docker build -t "${REGISTRY}/litellm:${LITELLM_VERSION}" -f "${SCRIPT_DIR}/Dockerfile.litellm" "${SCRIPT_DIR}"
-docker push "${REGISTRY}/litellm:${LITELLM_VERSION}"
-
-# Pull and push Ollama image (using alpine/ollama for smaller size)
-echo "Pulling and pushing Ollama image..."
-docker pull "alpine/ollama:${OLLAMA_TAG}"
-docker tag "alpine/ollama:${OLLAMA_TAG}" "${REGISTRY}/ollama:${OLLAMA_TAG}"
-docker push "${REGISTRY}/ollama:${OLLAMA_TAG}"
+"${SCRIPT_DIR}/build-push-images.sh"
 
 echo ""
 echo "=== Setting up test environment ==="
