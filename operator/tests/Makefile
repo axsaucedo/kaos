@@ -2,7 +2,8 @@
 .PHONY: test test-seq clean
 
 test:
-	uv run pytest e2e/ -v -n $(nproc --all) --dist loadscope
+	JOBS="$(nproc --all 2>/dev/null || true)"; JOBS="${JOBS:-4}"
+	uv run pytest e2e/ -v -n $JOBS --dist loadscope
 
 test-seq:
 	uv run pytest e2e/ -v
