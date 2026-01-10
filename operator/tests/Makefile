@@ -2,10 +2,13 @@
 .PHONY: test test-seq clean
 
 test:
-	uv run pytest e2e/ -v -n 2 --dist loadscope
+	# Running in single line to ensure env var is reflected correctly
+	#     This is required as github actions has empty nproc output
+	JOBS="$$(nproc --all 2>/dev/null || true)"; JOBS="$${JOBS:-2}"; \
+	uv run pytest e2e/ -v -s --log-cli-level=DEBUG -n "$$JOBS" --dist loadscope
 
 test-seq:
-	uv run pytest e2e/ -v
+	uv run pytest e2e/ -v -s --log-cli-level=DEBUG
 
 clean:
 	@echo "Cleaning up test resources..."
