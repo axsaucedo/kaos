@@ -81,7 +81,7 @@ jobs:
               --set gatewayAPI.gatewayClassName=envoy-gateway \
               --skip-crds \
               --wait --timeout 120s
-          
+
           # Wait for Gateway
           echo "Waiting for Gateway..."
           for i in {1..30}; do
@@ -104,7 +104,7 @@ jobs:
           export HELM_VALUES_FILE=${{ github.workspace }}/hack/kind-e2e-values.yaml
           export GATEWAY_URL=http://localhost:8888
           export OPERATOR_MANAGED_EXTERNALLY=1
-          make test
+          source .venv/bin/activate && make test
 
       - name: Collect logs on failure
         if: failure()
