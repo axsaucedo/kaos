@@ -193,7 +193,8 @@ async def test_agent_processes_with_memory_events(test_namespace: str):
     worker_url = gateway_url(test_namespace, "agent", worker_name)
     wait_for_resource_ready(worker_url)
     
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    # Use longer timeout for Hosted Ollama which can be slow on first inference
+    async with httpx.AsyncClient(timeout=120.0) as client:
         # Note initial count
         response = await client.get(f"{worker_url}/memory/events")
         initial_count = response.json()["total"]

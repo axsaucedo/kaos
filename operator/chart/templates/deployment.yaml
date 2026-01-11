@@ -30,17 +30,9 @@ spec:
         env:
         - name: KUBERNETES_CLUSTER_DOMAIN
           value: {{ quote .Values.kubernetesClusterDomain }}
-        - name: DEFAULT_AGENT_TIMEOUT
-          value: {{ quote .Values.gateway.defaultTimeouts.agent }}
-        - name: DEFAULT_MODELAPI_TIMEOUT
-          value: {{ quote .Values.gateway.defaultTimeouts.modelAPI }}
-        - name: DEFAULT_MCP_TIMEOUT
-          value: {{ quote .Values.gateway.defaultTimeouts.mcp }}
-        {{- if .Values.gatewayAPI.enabled }}
         envFrom:
         - configMapRef:
-            name: agentic-operator-gateway-config
-        {{- end }}
+            name: agentic-operator-config
         image: {{ .Values.controllerManager.manager.image.repository }}:{{ .Values.controllerManager.manager.image.tag
           | default .Chart.AppVersion }}
         imagePullPolicy: {{ .Values.controllerManager.manager.imagePullPolicy }}

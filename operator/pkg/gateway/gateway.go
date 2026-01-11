@@ -40,9 +40,9 @@ func GetConfig() Config {
 		Enabled:                os.Getenv("GATEWAY_API_ENABLED") == "true",
 		GatewayName:            os.Getenv("GATEWAY_NAME"),
 		GatewayNamespace:       os.Getenv("GATEWAY_NAMESPACE"),
-		DefaultAgentTimeout:    getEnvOrDefault("DEFAULT_AGENT_TIMEOUT", defaultAgentTimeout),
-		DefaultModelAPITimeout: getEnvOrDefault("DEFAULT_MODELAPI_TIMEOUT", defaultModelAPITimeout),
-		DefaultMCPTimeout:      getEnvOrDefault("DEFAULT_MCP_TIMEOUT", defaultMCPTimeout),
+		DefaultAgentTimeout:    getEnvOrDefault("GATEWAY_DEFAULT_AGENT_TIMEOUT", defaultAgentTimeout),
+		DefaultModelAPITimeout: getEnvOrDefault("GATEWAY_DEFAULT_MODELAPI_TIMEOUT", defaultModelAPITimeout),
+		DefaultMCPTimeout:      getEnvOrDefault("GATEWAY_DEFAULT_MCP_TIMEOUT", defaultMCPTimeout),
 	}
 }
 

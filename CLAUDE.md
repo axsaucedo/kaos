@@ -275,20 +275,37 @@ spec:
 - ModelAPI: 120s (LLM inference can take time)
 - MCPServer: 30s (tool calls are typically fast)
 
-**Operator Environment Variables:**
+**Operator Configuration Environment Variables:**
+All operator configuration is managed via the `agentic-operator-config` ConfigMap, which sets the following env vars:
+
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `DEFAULT_AGENT_TIMEOUT` | Default timeout for Agent HTTPRoutes | `120s` |
-| `DEFAULT_MODELAPI_TIMEOUT` | Default timeout for ModelAPI HTTPRoutes | `120s` |
-| `DEFAULT_MCP_TIMEOUT` | Default timeout for MCPServer HTTPRoutes | `30s` |
+| `DEFAULT_AGENT_IMAGE` | Default agent container image | `agentic-agent:latest` |
+| `DEFAULT_MCP_SERVER_IMAGE` | Default MCP server image | `agentic-agent:latest` |
+| `DEFAULT_LITELLM_IMAGE` | Default LiteLLM proxy image | `ghcr.io/berriai/litellm:main-latest` |
+| `DEFAULT_OLLAMA_IMAGE` | Default Ollama image | `alpine/ollama:latest` |
+| `GATEWAY_API_ENABLED` | Enable Gateway API integration | `false` |
+| `GATEWAY_NAME` | Name of the Gateway resource | `agentic-gateway` |
+| `GATEWAY_NAMESPACE` | Namespace of the Gateway | Release namespace |
+| `GATEWAY_DEFAULT_AGENT_TIMEOUT` | Default timeout for Agent HTTPRoutes | `120s` |
+| `GATEWAY_DEFAULT_MODELAPI_TIMEOUT` | Default timeout for ModelAPI HTTPRoutes | `120s` |
+| `GATEWAY_DEFAULT_MCP_TIMEOUT` | Default timeout for MCPServer HTTPRoutes | `30s` |
 
 These can be set via Helm values:
 ```yaml
+defaultImages:
+  agentRuntime: "agentic-agent:latest"
+  mcpServer: "agentic-agent:latest"
+  litellm: "ghcr.io/berriai/litellm:main-latest"
+  ollama: "alpine/ollama:latest"
 gateway:
   defaultTimeouts:
     agent: "120s"
     modelAPI: "120s"
     mcp: "30s"
+gatewayAPI:
+  enabled: true
+  gatewayName: "agentic-gateway"
 ```
 
 ### Controller Environment Variables
