@@ -3,8 +3,15 @@ Agent client implementation following Google ADK patterns.
 
 Clean, simple implementation with proper streaming support and tool integration.
 Includes agentic loop for tool calling and agent delegation.
+
+Key design principles:
+- Agent decides when to delegate/call tools based on model response
+- Server only routes requests, never interprets delegation
+- DEBUG_MOCK_RESPONSES env var for testing (array of responses for agentic loop)
+- RemoteAgent.invoke() uses /v1/chat/completions with full context
 """
 
+import os
 import json
 import re
 import logging
@@ -37,6 +44,28 @@ Wait for the agent's response before providing your final answer.
 """
 
 
+def get_mock_responses() -> Optional[List[str]]:
+    """Get mock responses from DEBUG_MOCK_RESPONSES env var.
+    
+    Format: JSON array of strings, e.g.:
+    ["first response", "second response"]
+    
+    Supports multiline responses in the JSON array.
+    """
+    mock_env = os.environ.get("DEBUG_MOCK_RESPONSES")
+    if not mock_env:
+        return None
+    try:
+        responses = json.loads(mock_env)
+        if isinstance(responses, list):
+            return responses
+        # Single string - wrap in list
+        return [responses]
+    except json.JSONDecodeError:
+        # Treat as single plain text response
+        return [mock_env]
+
+
 @dataclass
 class AgenticLoopConfig:
     """Configuration for the agentic reasoning loop."""
@@ -64,11 +93,14 @@ class AgentCard:
 
 
 class RemoteAgent:
-    """Remote agent client for A2A protocol with graceful degradation."""
+    """Remote agent client for A2A protocol with graceful degradation.
+    
+    Uses /v1/chat/completions for invocation to pass full context.
+    The role "task-delegation" indicates this is a delegated task.
+    """
 
-    # TODO: Differenciate the timeouts for chat responses vs agentcard (as latter is vshort)
-    # TODO: expose these timeouts as config and further as CRD configurations
-    TIMEOUT = 5.0  # Short timeout - agent cards and invocations should be fast
+    DISCOVERY_TIMEOUT = 5.0  # Short timeout for agent card discovery
+    INVOKE_TIMEOUT = 60.0    # Longer timeout for actual invocations
 
     def __init__(self, name: str, card_url: str = None, agent_card_url: str = None):
         url = card_url or agent_card_url
@@ -78,13 +110,14 @@ class RemoteAgent:
         self.card_url = url.rstrip('/')
         self.agent_card: Optional[AgentCard] = None
         self._active = False
-        self._client = httpx.AsyncClient(timeout=self.TIMEOUT)
+        self._discovery_client = httpx.AsyncClient(timeout=self.DISCOVERY_TIMEOUT)
+        self._invoke_client = httpx.AsyncClient(timeout=self.INVOKE_TIMEOUT)
         logger.info(f"RemoteAgent initialized: {name} -> {url}")
 
     async def _init(self) -> bool:
         """Fetch agent card and activate. Returns True if successful."""
         try:
-            response = await self._client.get(f"{self.card_url}/.well-known/agent")
+            response = await self._discovery_client.get(f"{self.card_url}/.well-known/agent")
             response.raise_for_status()
             data = response.json()
             self.agent_card = AgentCard(
@@ -102,27 +135,44 @@ class RemoteAgent:
             logger.warning(f"RemoteAgent {self.name} init failed: {type(e).__name__}: {e}")
             return False
 
-    async def invoke(self, task: str) -> str:
-        """Invoke agent. Re-inits if inactive. Raises RuntimeError on failure."""
+    async def invoke(self, messages: List[Dict[str, str]]) -> str:
+        """Invoke agent with full message context via /v1/chat/completions.
+        
+        Args:
+            messages: List of messages providing context. The last message 
+                     should have role "task-delegation" with the delegated task.
+                     
+        Returns:
+            The agent's response content.
+            
+        Raises:
+            RuntimeError: If agent is unavailable or invocation fails.
+        """
         if not self._active:
             if not await self._init():
                 raise RuntimeError(f"Agent {self.name} unavailable at {self.card_url}")
 
         try:
-            response = await self._client.post(
-                f"{self.card_url}/agent/invoke",
-                json={"task": task}
+            response = await self._invoke_client.post(
+                f"{self.card_url}/v1/chat/completions",
+                json={
+                    "model": self.name,
+                    "messages": messages,
+                    "stream": False
+                }
             )
             response.raise_for_status()
-            return response.json().get("response", "")
+            data = response.json()
+            return data["choices"][0]["message"]["content"]
         except Exception as e:
             self._active = False
             raise RuntimeError(f"Agent {self.name}: {type(e).__name__}: {e}")
 
     async def close(self):
-        """Close HTTP client."""
+        """Close HTTP clients."""
         try:
-            await self._client.aclose()
+            await self._discovery_client.aclose()
+            await self._invoke_client.aclose()
         except Exception:
             pass
 
@@ -234,8 +284,7 @@ class Agent:
         self,
         message: Union[str, List[Dict[str, str]]],
         session_id: Optional[str] = None,
-        stream: bool = False,
-        mock_response: Optional[str] = None
+        stream: bool = False
     ) -> AsyncIterator[str]:
         """Process a message with agentic loop for tool calling and delegation.
 
@@ -243,10 +292,13 @@ class Agent:
             message: User message to process - can be a string or OpenAI-style message array
             session_id: Optional session ID (created if not provided)
             stream: Whether to stream the response
-            mock_response: Mock response for testing (bypasses LLM call)
 
         Yields:
             Content chunks (streaming) or single complete response (non-streaming)
+            
+        Note:
+            For testing, set DEBUG_MOCK_RESPONSES env var to a JSON array of responses
+            that will be used instead of calling the model API.
         """
         # Get or create session - handles both provided and new session IDs
         if session_id:
@@ -278,21 +330,35 @@ class Agent:
                 if role == "system":
                     # Skip external system messages, we use our own enhanced one
                     continue
-                messages.append({"role": role, "content": content})
-                # Log user messages to memory
-                if role == "user":
-                    user_event = self.memory.create_event("user_message", content)
-                    await self.memory.add_event(session_id, user_event)
+                    
+                # Handle task-delegation role: log it specially but convert to user for model
+                if role == "task-delegation":
+                    # Log as delegation task received
+                    delegation_event = self.memory.create_event("task_delegation_received", content)
+                    await self.memory.add_event(session_id, delegation_event)
+                    # Convert to user role for the model
+                    messages.append({"role": "user", "content": content})
+                else:
+                    messages.append({"role": role, "content": content})
+                    # Log user messages to memory
+                    if role == "user":
+                        user_event = self.memory.create_event("user_message", content)
+                        await self.memory.add_event(session_id, user_event)
+
+        # Get mock responses if configured
+        mock_responses = get_mock_responses()
+        mock_step = 0
 
         try:
             # Agentic loop - iterate up to max_steps
             for step in range(self.loop_config.max_steps):
                 logger.debug(f"Agentic loop step {step + 1}/{self.loop_config.max_steps}")
                 
-                # Get model response
-                if mock_response and step == 0:
-                    # Use mock response for first step (for testing)
-                    content = mock_response
+                # Get model response (or mock if configured)
+                if mock_responses and mock_step < len(mock_responses):
+                    content = mock_responses[mock_step]
+                    mock_step += 1
+                    logger.debug(f"Using mock response {mock_step}: {content[:50]}...")
                 else:
                     response = await self.model_api.complete(messages)
                     content = response["choices"][0]["message"]["content"]
@@ -334,9 +400,12 @@ class Agent:
                     task = delegation.get("task")
                     
                     try:
-                        # Delegate to sub-agent (this logs events internally)
+                        # Build context messages for sub-agent (exclude system prompt)
+                        context_messages = [m for m in messages if m.get("role") != "system"]
+                        
+                        # Delegate to sub-agent with context
                         delegation_result = await self.delegate_to_sub_agent(
-                            agent_name, task, session_id
+                            agent_name, task, context_messages, session_id
                         )
                         
                         # Add to conversation and continue loop
@@ -383,8 +452,24 @@ class Agent:
                 return await mcp_client.call_tool(tool_name, args)
         raise ValueError(f"Tool '{tool_name}' not found in any tool client")
 
-    async def delegate_to_sub_agent(self, agent_name: str, task: str, session_id: Optional[str] = None) -> str:
-        """Delegate a task to a sub-agent. Re-inits inactive agents automatically."""
+    async def delegate_to_sub_agent(
+        self, 
+        agent_name: str, 
+        task: str, 
+        context_messages: List[Dict[str, str]] = None,
+        session_id: Optional[str] = None
+    ) -> str:
+        """Delegate a task to a sub-agent with context.
+        
+        Args:
+            agent_name: Name of the sub-agent to delegate to
+            task: The task description to delegate
+            context_messages: Previous conversation context (excluding system prompt)
+            session_id: Optional session ID for memory tracking
+            
+        Returns:
+            The sub-agent's response
+        """
         sub_agent = self.sub_agents.get(agent_name)
         if not sub_agent:
             raise ValueError(f"Sub-agent '{agent_name}' not found. Available: {list(self.sub_agents.keys())}")
@@ -395,8 +480,18 @@ class Agent:
                 "delegation_request", {"agent": agent_name, "task": task}
             ))
         
+        # Build messages for the sub-agent
+        # Include context (if any) plus the delegated task with special role
+        messages = []
+        if context_messages:
+            # Include relevant context but limit to avoid too much history
+            messages.extend(context_messages[-6:])  # Last 6 messages of context
+        
+        # Add the delegated task with task-delegation role
+        messages.append({"role": "task-delegation", "content": task})
+        
         try:
-            response = await sub_agent.invoke(task)
+            response = await sub_agent.invoke(messages)
             
             if session_id:
                 await self.memory.add_event(session_id, self.memory.create_event(

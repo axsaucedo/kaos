@@ -185,8 +185,8 @@ class AgentServer:
         async def chat_completions(request: Request):
             """OpenAI-compatible chat completions endpoint (streaming + non-streaming).
             
-            Supports special role 'delegate' for sub-agent delegation:
-            {"role": "delegate", "content": "worker-1: Process this task"}
+            The agent decides when to delegate or call tools based on model response.
+            Server only routes requests to the agent for processing.
             """
             try:
                 body = await request.json()
@@ -198,18 +198,16 @@ class AgentServer:
                 model_name = body.get("model", "agent")
                 stream_requested = body.get("stream", False)
 
-                # Check for delegation request (role: "delegate")
-                for msg in messages:
-                    if msg.get("role") == "delegate":
-                        content = msg.get("content", "")
-                        return await self._handle_delegation(content, model_name)
+                # Validate at least one user or task-delegation message exists
+                has_valid_message = any(
+                    msg.get("role") in ["user", "task-delegation"] 
+                    for msg in messages
+                )
+                if not has_valid_message:
+                    raise HTTPException(status_code=400, detail="No user or task-delegation message found")
 
-                # Validate at least one user message exists
-                has_user_message = any(msg.get("role") == "user" for msg in messages)
-                if not has_user_message:
-                    raise HTTPException(status_code=400, detail="No user message found")
-
-                # Pass full messages array to agent for context-aware processing
+                # Pass full messages array to agent for processing
+                # Agent handles tool calls and delegations based on model response
                 if stream_requested:
                     return await self._stream_chat_completion(messages, model_name)
                 else:
@@ -220,71 +218,6 @@ class AgentServer:
             except Exception as e:
                 logger.error(f"Chat completion error: {e}")
                 raise HTTPException(status_code=500, detail=str(e))
-
-    async def _handle_delegation(self, content: str, model_name: str) -> JSONResponse:
-        """Handle delegation request via chat completions.
-        
-        Args:
-            content: Format "agent_name: task" (e.g., "worker-1: Process this data")
-            model_name: Model name for response
-            
-        Returns:
-            OpenAI-compatible chat completion response
-        """
-        # Parse content: "agent_name: task"
-        if ":" not in content:
-            raise HTTPException(
-                status_code=400, 
-                detail="Delegate content must be in format 'agent_name: task'"
-            )
-        
-        agent_name, task = content.split(":", 1)
-        agent_name = agent_name.strip()
-        task = task.strip()
-        
-        if not agent_name or not task:
-            raise HTTPException(
-                status_code=400, 
-                detail="Both agent name and task are required"
-            )
-        
-        try:
-            # Create session for tracking
-            session_id = await self.agent.memory.create_session("agent", "delegation")
-            
-            # Delegate to sub-agent
-            response = await self.agent.delegate_to_sub_agent(
-                agent_name=agent_name,
-                task=task,
-                session_id=session_id
-            )
-            
-            # Return OpenAI-compatible response
-            return JSONResponse({
-                "id": f"chatcmpl-{uuid.uuid4().hex}",
-                "object": "chat.completion",
-                "created": int(time.time()),
-                "model": model_name,
-                "choices": [{
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": response
-                    },
-                    "finish_reason": "stop"
-                }],
-                "usage": {
-                    "prompt_tokens": 0,
-                    "completion_tokens": 0,
-                    "total_tokens": 0
-                }
-            })
-            
-        except ValueError as e:
-            raise HTTPException(status_code=404, detail=str(e))
-        except Exception as e:
-            logger.error(f"Delegation error: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
 
     async def _complete_chat_completion(self, messages: list, model_name: str) -> JSONResponse:
         """Handle non-streaming chat completion.
