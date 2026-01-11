@@ -1,5 +1,15 @@
 # Agentic Kubernetes Operator - Project Documentation
 
+## Commit Guidelines
+Use conventional commits with brief, functional descriptions:
+- `feat(scope): add feature` - New functionality
+- `fix(scope): fix issue` - Bug fixes
+- `refactor(scope): change implementation` - Code changes without new features
+- `test(scope): update tests` - Test changes
+- `docs: update documentation` - Documentation only
+
+Keep commits atomic and easy to review. Group related changes logically.
+
 ## Overview
 Custom Agent Runtime framework (replacing Google ADK) for Kubernetes-native AI agents.
 
@@ -171,16 +181,27 @@ The agent implements a reasoning loop that:
 - `/v1/chat/completions` - OpenAI-compatible endpoint with delegation support
 - `/memory/events` and `/memory/sessions` - Debug endpoints (when enabled)
 
-### Delegation via Chat Completions
-Use `role: "delegate"` in messages to delegate to sub-agents:
-```json
-{
-  "model": "coordinator",
-  "messages": [
-    {"role": "delegate", "content": "worker-1: Process this task"}
-  ]
-}
+### Deterministic Testing with DEBUG_MOCK_RESPONSES
+Set `DEBUG_MOCK_RESPONSES` env var to bypass model API and use mock responses:
+```bash
+# Single response
+DEBUG_MOCK_RESPONSES='["Hello from mock"]'
+
+# Multi-step agentic loop (tool call then final response)
+DEBUG_MOCK_RESPONSES='["```tool_call\n{\"tool\": \"echo\", \"arguments\": {\"msg\": \"hi\"}}\n```", "Tool returned: hi"]'
+
+# Delegation flow (coordinator delegates to worker)
+DEBUG_MOCK_RESPONSES='["```delegate\n{\"agent\": \"worker-1\", \"task\": \"Process data\"}\n```", "Worker completed the task."]'
 ```
+
+This enables deterministic E2E tests for tool calling and delegation flows.
+
+### Internal Delegation Protocol
+When an agent delegates to a sub-agent:
+1. The delegating agent calls `RemoteAgent.invoke()` with messages array
+2. The last message has `role: "task-delegation"` with the delegated task
+3. The sub-agent logs this as `task_delegation_received` in memory
+4. The `task-delegation` role is converted to `user` role for the model
 
 ### AgentServerSettings Environment Variables
 | Variable | Description |
@@ -196,6 +217,7 @@ Use `role: "delegate"` in messages to delegate to sub-agents:
 | `AGENT_DEBUG_MEMORY_ENDPOINTS` | Enable `/memory/*` endpoints |
 | `AGENT_ACCESS_LOG` | Enable uvicorn access logs (default: false) |
 | `AGENTIC_LOOP_MAX_STEPS` | Max reasoning steps (default: 5) |
+| `DEBUG_MOCK_RESPONSES` | JSON array of mock responses for testing |
 
 ### MCPServer Environment Variables
 | Variable | Description |
@@ -498,7 +520,23 @@ Key values in `chart/values.yaml`:
 
 ## Deterministic Testing with Mock Responses
 
-LiteLLM supports `mock_response` in the request body for deterministic testing:
+### Option 1: Agent-Level Mock (DEBUG_MOCK_RESPONSES)
+Set `DEBUG_MOCK_RESPONSES` env var on the Agent to bypass model API entirely:
+```yaml
+spec:
+  config:
+    env:
+    - name: DEBUG_MOCK_RESPONSES
+      value: '["```delegate\n{\"agent\": \"worker\", \"task\": \"process data\"}\n```", "Task completed."]'
+```
+
+This is the recommended approach for E2E testing of:
+- Tool calling flows (mock response contains tool_call block)
+- Agent delegation flows (mock response contains delegate block)
+- Memory event chains across multiple agents
+
+### Option 2: LiteLLM Mock Response (API-Level)
+LiteLLM also supports `mock_response` in the request body:
 
 ```bash
 curl http://localhost:4000/v1/chat/completions \
@@ -510,10 +548,7 @@ curl http://localhost:4000/v1/chat/completions \
   }'
 ```
 
-This enables deterministic E2E tests that verify:
-- Tool calling flows (mock response contains tool_call block)
-- Agent delegation flows (mock response contains delegate block)
-- Memory event chains across multiple agents
+This is useful for testing LiteLLM proxy behavior directly.
 
 ---
 
