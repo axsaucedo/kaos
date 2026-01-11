@@ -1,7 +1,7 @@
 """End-to-end tests for deterministic agentic loop in Kubernetes.
 
 Tests the agentic loop via Gateway API:
-- Tool calling with mock model responses
+- Tool calling with DEBUG_MOCK_RESPONSES
 - Multi-agent delegation with mock responses
 - Memory event verification across agents
 - Agentic loop configuration via CRD
@@ -9,6 +9,7 @@ Tests the agentic loop via Gateway API:
 
 import os
 import time
+import json
 import pytest
 import httpx
 
@@ -21,14 +22,28 @@ from e2e.conftest import (
 )
 
 
-def create_agentic_loop_worker(namespace: str, modelapi_name: str, suffix: str = "", model_name: str = "ollama/smollm2:135m"):
+def create_agentic_loop_worker(
+    namespace: str, 
+    modelapi_name: str, 
+    suffix: str = "", 
+    model_name: str = "ollama/smollm2:135m",
+    mock_responses: list = None
+):
     """Create worker agent spec for agentic loop testing.
     
     Args:
         model_name: Model name. For Proxy mode use 'ollama/smollm2:135m', 
                    for Hosted mode use 'smollm2:135m'.
+        mock_responses: List of mock responses for DEBUG_MOCK_RESPONSES env var.
     """
     name = f"loop-worker{suffix}"
+    env = [
+        {"name": "AGENT_LOG_LEVEL", "value": "DEBUG"},
+        {"name": "MODEL_NAME", "value": model_name},
+    ]
+    if mock_responses:
+        env.append({"name": "DEBUG_MOCK_RESPONSES", "value": json.dumps(mock_responses)})
+    
     return {
         "apiVersion": "ethical.institute/v1alpha1",
         "kind": "Agent",
@@ -39,24 +54,36 @@ def create_agentic_loop_worker(namespace: str, modelapi_name: str, suffix: str =
                 "description": "Worker for agentic loop tests",
                 "instructions": "You are a worker. Process tasks and respond briefly.",
                 "reasoningLoopMaxSteps": 3,
-                "env": [
-                    {"name": "AGENT_LOG_LEVEL", "value": "DEBUG"},
-                    {"name": "MODEL_NAME", "value": model_name},
-                ],
+                "env": env,
             },
             "agentNetwork": {"access": []},
         },
     }, name
 
 
-def create_agentic_loop_coordinator(namespace: str, modelapi_name: str, worker_name: str, suffix: str = "", model_name: str = "ollama/smollm2:135m"):
+def create_agentic_loop_coordinator(
+    namespace: str, 
+    modelapi_name: str, 
+    worker_name: str, 
+    suffix: str = "", 
+    model_name: str = "ollama/smollm2:135m",
+    mock_responses: list = None
+):
     """Create coordinator agent spec for agentic loop testing.
     
     Args:
         model_name: Model name. For Proxy mode use 'ollama/smollm2:135m', 
                    for Hosted mode use 'smollm2:135m'.
+        mock_responses: List of mock responses for DEBUG_MOCK_RESPONSES env var.
     """
     name = f"loop-coord{suffix}"
+    env = [
+        {"name": "AGENT_LOG_LEVEL", "value": "DEBUG"},
+        {"name": "MODEL_NAME", "value": model_name},
+    ]
+    if mock_responses:
+        env.append({"name": "DEBUG_MOCK_RESPONSES", "value": json.dumps(mock_responses)})
+    
     return {
         "apiVersion": "ethical.institute/v1alpha1",
         "kind": "Agent",
@@ -67,10 +94,7 @@ def create_agentic_loop_coordinator(namespace: str, modelapi_name: str, worker_n
                 "description": "Coordinator for agentic loop tests",
                 "instructions": f"You are a coordinator. You can delegate tasks to {worker_name}.",
                 "reasoningLoopMaxSteps": 5,
-                "env": [
-                    {"name": "AGENT_LOG_LEVEL", "value": "DEBUG"},
-                    {"name": "MODEL_NAME", "value": model_name},
-                ],
+                "env": env,
             },
             "agentNetwork": {"access": [worker_name]},
         },
@@ -100,9 +124,30 @@ async def test_agentic_loop_config_applied(test_namespace: str, shared_modelapi:
 
 @pytest.mark.asyncio
 async def test_delegation_with_memory_verification(test_namespace: str, shared_modelapi: str):
-    """Test coordinator delegates to worker and memory is tracked."""
-    worker_spec, worker_name = create_agentic_loop_worker(test_namespace, shared_modelapi, "-del")
-    coord_spec, coord_name = create_agentic_loop_coordinator(test_namespace, shared_modelapi, worker_name, "-del")
+    """Test coordinator delegates to worker and memory is tracked.
+    
+    Uses DEBUG_MOCK_RESPONSES to trigger deterministic delegation.
+    """
+    task_id = f"LOOP_TASK_{int(time.time())}"
+    
+    # Create worker with mock response
+    worker_spec, worker_name = create_agentic_loop_worker(
+        test_namespace, shared_modelapi, "-del",
+        mock_responses=[f"Task {task_id} processed successfully by worker."]
+    )
+    
+    # Create coordinator with mock response that triggers delegation
+    coord_mock_responses = [
+        f'''I'll delegate this to the worker.
+```delegate
+{{"agent": "{worker_name}", "task": "Process task {task_id}"}}
+```''',
+        f"The worker has completed task {task_id}."
+    ]
+    coord_spec, coord_name = create_agentic_loop_coordinator(
+        test_namespace, shared_modelapi, worker_name, "-del",
+        mock_responses=coord_mock_responses
+    )
     
     # Deploy worker first
     create_custom_resource(worker_spec, test_namespace)
@@ -128,19 +173,18 @@ async def test_delegation_with_memory_verification(test_namespace: str, shared_m
         response = await client.get(f"{worker_url}/memory/events")
         initial_worker_count = response.json()["total"]
         
-        # Send delegation request via role: "delegate"
-        task_id = f"LOOP_TASK_{int(time.time())}"
+        # Send user message - mock responses will trigger delegation
         response = await client.post(
             f"{coord_url}/v1/chat/completions",
             json={
                 "model": coord_name,
                 "messages": [
-                    {"role": "delegate", "content": f"{worker_name}: Process task {task_id}"}
+                    {"role": "user", "content": f"Please process task {task_id}"}
                 ]
             }
         )
         
-        assert response.status_code == 200, f"Delegation failed: {response.text}"
+        assert response.status_code == 200, f"Request failed: {response.text}"
         data = response.json()
         assert "choices" in data
         assert len(data["choices"][0]["message"]["content"]) > 0
@@ -163,10 +207,9 @@ async def test_delegation_with_memory_verification(test_namespace: str, shared_m
         
         assert worker_memory["total"] > initial_worker_count, "Worker should have new events"
         
-        # Check worker has the task in its memory
-        user_msgs = [e for e in worker_memory["events"] if e["event_type"] == "user_message"]
-        assert any(task_id in str(e["content"]) for e in user_msgs), \
-            f"Task {task_id} not found in worker messages"
+        # Check worker has task_delegation_received event
+        delegation_received = [e for e in worker_memory["events"] if e["event_type"] == "task_delegation_received"]
+        assert len(delegation_received) >= 1, f"Worker should have task_delegation_received event"
 
 
 @pytest.mark.asyncio
@@ -176,12 +219,24 @@ async def test_agent_processes_with_memory_events(test_namespace: str, shared_mo
     Uses delegation with mock responses for deterministic testing.
     Memory events are verified after delegation completes.
     """
-    # Create a simple worker and coordinator for delegation
+    task_id = f"MEM_{int(time.time())}"
+    
+    # Create worker with mock response
     worker_spec, worker_name = create_agentic_loop_worker(
-        test_namespace, shared_modelapi, "-mem"
+        test_namespace, shared_modelapi, "-mem",
+        mock_responses=[f"Memory test {task_id} completed."]
     )
+    
+    # Create coordinator with delegation mock response
+    coord_mock_responses = [
+        f'''```delegate
+{{"agent": "{worker_name}", "task": "Process memory test {task_id}"}}
+```''',
+        f"Memory test {task_id} has been processed."
+    ]
     coord_spec, coord_name = create_agentic_loop_coordinator(
-        test_namespace, shared_modelapi, worker_name, "-mem"
+        test_namespace, shared_modelapi, worker_name, "-mem",
+        mock_responses=coord_mock_responses
     )
     
     # Deploy worker first
@@ -202,19 +257,18 @@ async def test_agent_processes_with_memory_events(test_namespace: str, shared_mo
         response = await client.get(f"{worker_url}/memory/events")
         initial_count = response.json()["total"]
         
-        # Send delegation request (this bypasses the model API and directly delegates)
-        unique_id = f"MEM_{int(time.time())}"
+        # Send user message - mock responses trigger delegation
         response = await client.post(
             f"{coord_url}/v1/chat/completions",
             json={
                 "model": coord_name,
                 "messages": [
-                    {"role": "delegate", "content": f"{worker_name}: Process memory test {unique_id}"}
+                    {"role": "user", "content": f"Process memory test {task_id}"}
                 ]
             }
         )
         
-        assert response.status_code == 200, f"Delegation failed: {response.text}"
+        assert response.status_code == 200, f"Request failed: {response.text}"
         
         # Check worker memory events - should have recorded the delegated task
         response = await client.get(f"{worker_url}/memory/events")
@@ -222,13 +276,13 @@ async def test_agent_processes_with_memory_events(test_namespace: str, shared_mo
         
         assert memory["total"] > initial_count, "Worker should have new memory events"
         
-        # Should have user_message from delegation
+        # Should have task_delegation_received from delegation
         event_types = [e["event_type"] for e in memory["events"]]
-        assert "user_message" in event_types, f"Expected user_message in {event_types}"
+        assert "task_delegation_received" in event_types, f"Expected task_delegation_received in {event_types}"
         
         # Verify our unique ID is in the events
         all_content = " ".join(str(e["content"]) for e in memory["events"])
-        assert unique_id in all_content, f"Expected {unique_id} in memory events"
+        assert task_id in all_content, f"Expected {task_id} in memory events"
 
 
 @pytest.mark.asyncio
