@@ -53,8 +53,6 @@ The agentic loop is the reasoning mechanism that enables agents to use tools and
 @dataclass
 class AgenticLoopConfig:
     max_steps: int = 5          # Maximum loop iterations
-    enable_tools: bool = True   # Parse and execute tool calls
-    enable_delegation: bool = True  # Parse and execute delegations
 ```
 
 ### max_steps
@@ -69,20 +67,6 @@ Prevents infinite loops. When reached, returns message:
 - Tool-using tasks: 5 steps (default)
 - Complex multi-step tasks: 10+ steps
 
-### enable_tools
-
-When `True`:
-- Tool descriptions added to system prompt
-- Response parsed for `tool_call` blocks
-- Tools executed and results fed back
-
-### enable_delegation
-
-When `True`:
-- Sub-agent descriptions added to system prompt
-- Response parsed for `delegate` blocks
-- Sub-agents invoked and responses fed back
-
 ## System Prompt Construction
 
 The agent builds an enhanced system prompt:
@@ -91,12 +75,12 @@ The agent builds an enhanced system prompt:
 async def _build_system_prompt(self) -> str:
     parts = [self.instructions]
     
-    if self.loop_config.enable_tools and self.mcp_clients:
+    if self.mcp_clients:
         tools_info = await self._get_tools_description()
         parts.append("\n## Available Tools\n" + tools_info)
         parts.append(TOOLS_INSTRUCTIONS)
     
-    if self.loop_config.enable_delegation and self.sub_agents:
+    if self.sub_agents:
         agents_info = await self._get_agents_description()
         parts.append("\n## Available Agents for Delegation\n" + agents_info)
         parts.append(AGENT_INSTRUCTIONS)
@@ -200,18 +184,23 @@ events = await agent.memory.get_session_events(session_id)
 
 ## Testing with Mock Responses
 
-Use `mock_response` to test loop behavior deterministically:
+Set `DEBUG_MOCK_RESPONSES` environment variable to test loop behavior deterministically:
 
-```python
+```bash
 # Test tool calling
-mock = '''I'll use the echo tool.
+export DEBUG_MOCK_RESPONSES='["I will use the echo tool.\n\n```tool_call\n{\"tool\": \"echo\", \"arguments\": {\"text\": \"hello\"}}\n```", "The echo returned: hello"]'
 
-```tool_call
-{"tool": "echo", "arguments": {"text": "hello"}}
-```'''
+# Test delegation
+export DEBUG_MOCK_RESPONSES='["I will delegate to the researcher.\n\n```delegate\n{\"agent\": \"researcher\", \"task\": \"Find quantum computing info\"}\n```", "Based on the research, quantum computing uses qubits."]'
+```
 
-async for response in agent.process_message("Echo hello", mock_response=mock):
-    print(response)
+For Kubernetes E2E tests, configure via the Agent CRD:
+```yaml
+spec:
+  config:
+    env:
+    - name: DEBUG_MOCK_RESPONSES
+      value: '["```delegate\n{\"agent\": \"worker\", \"task\": \"process data\"}\n```", "Done."]'
 ```
 
 ## Best Practices

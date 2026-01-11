@@ -224,21 +224,20 @@ You should see events like:
 }
 ```
 
-## Direct Delegation via API
+## Deterministic Testing with Mock Responses
 
-You can also delegate directly using the `role: "delegate"` feature:
+For testing, use `DEBUG_MOCK_RESPONSES` to control model responses:
 
-```bash
-curl http://localhost:8000/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "coordinator",
-    "messages": [{
-      "role": "delegate",
-      "content": "researcher: What are the latest developments in AI?"
-    }]
-  }'
+```yaml
+# In the coordinator Agent spec
+spec:
+  config:
+    env:
+    - name: DEBUG_MOCK_RESPONSES
+      value: '["```delegate\n{\"agent\": \"researcher\", \"task\": \"Research AI developments\"}\n```", "Based on the research: AI is advancing rapidly."]'
 ```
+
+This forces the coordinator to delegate to the researcher, enabling deterministic E2E tests.
 
 ## Adding Tools to Workers
 

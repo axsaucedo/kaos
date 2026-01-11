@@ -148,9 +148,23 @@ response = await model_api.complete(messages)
 
 Mock responses enable deterministic testing without calling the actual LLM.
 
+### Environment Variable Method (Recommended)
+
+For Agent-level testing, use `DEBUG_MOCK_RESPONSES` environment variable:
+
+```bash
+# Single response
+export DEBUG_MOCK_RESPONSES='["Hello from mock"]'
+
+# Multi-step agentic loop
+export DEBUG_MOCK_RESPONSES='["```tool_call\n{\"tool\": \"echo\", \"arguments\": {}}\n```", "Done."]'
+```
+
+This bypasses the ModelAPI entirely and is the recommended approach for E2E testing.
+
 ### LiteLLM Mock Feature
 
-LiteLLM servers support `mock_response` in the request body:
+LiteLLM servers also support `mock_response` in the request body (useful for direct API testing):
 
 ```python
 # This works with LiteLLM-based servers
@@ -159,36 +173,6 @@ response = await model_api.complete(
     mock_response="This is a mock response"
 )
 # response["choices"][0]["message"]["content"] == "This is a mock response"
-```
-
-### Testing Tool Calls
-
-```python
-mock = '''I'll use the calculator.
-
-```tool_call
-{"tool": "calculate", "arguments": {"expression": "2+2"}}
-```'''
-
-response = await model_api.complete(
-    messages=[{"role": "user", "content": "Calculate 2+2"}],
-    mock_response=mock
-)
-```
-
-### Testing Delegation
-
-```python
-mock = '''I'll delegate this to the researcher.
-
-```delegate
-{"agent": "researcher", "task": "Find information about AI"}
-```'''
-
-response = await model_api.complete(
-    messages=[{"role": "user", "content": "Research AI"}],
-    mock_response=mock
-)
 ```
 
 ## Error Handling

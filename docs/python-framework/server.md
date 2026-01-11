@@ -171,22 +171,17 @@ data: {"id":"chatcmpl-abc123","object":"chat.completion.chunk","choices":[{"delt
 data: [DONE]
 ```
 
-### Delegation via Chat Completions
+### Agent Delegation
 
-Use `role: "delegate"` to delegate to sub-agents:
+Delegation happens automatically via the agentic loop when the model's response contains a `delegate` block:
 
-```bash
-curl -X POST http://localhost:8000/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "coordinator",
-    "messages": [
-      {"role": "delegate", "content": "worker-1: Process this data"}
-    ]
-  }'
+```
+```delegate
+{"agent": "worker-1", "task": "Process this data"}
+```
 ```
 
-Format: `"agent_name: task description"`
+The agent parses this and invokes the sub-agent via `/v1/chat/completions`. For deterministic testing, use `DEBUG_MOCK_RESPONSES` environment variable to control model responses.
 
 ### Debug Endpoints
 

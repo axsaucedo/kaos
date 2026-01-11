@@ -122,8 +122,8 @@ Maximum iterations are controlled by `agenticLoop.maxSteps` (default: 5).
 Agents can discover and invoke each other using the A2A protocol:
 
 1. **Discovery**: Agents expose `/.well-known/agent` endpoint with capabilities
-2. **Invocation**: Agents call `/agent/invoke` on peer agents
-3. **Delegation**: Via agentic loop or explicit `role: "delegate"` messages
+2. **Invocation**: Agents call `/v1/chat/completions` on peer agents
+3. **Delegation**: Via agentic loop when model response contains a `delegate` block
 
 The operator automatically configures peer agent URLs based on `agentNetwork.access`.
 
