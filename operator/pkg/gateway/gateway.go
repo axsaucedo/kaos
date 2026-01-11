@@ -21,15 +21,37 @@ type Config struct {
 	Enabled          bool
 	GatewayName      string
 	GatewayNamespace string
+	// Default timeouts for each resource type (Gateway API Duration format)
+	DefaultAgentTimeout    string
+	DefaultModelAPITimeout string
+	DefaultMCPTimeout      string
 }
+
+// Default timeout values (used when env vars are not set)
+const (
+	defaultAgentTimeout    = "120s" // Agents may do multi-step reasoning
+	defaultModelAPITimeout = "120s" // LLM inference can take time
+	defaultMCPTimeout      = "30s"  // Tool calls are typically fast
+)
 
 // GetConfig reads Gateway API configuration from environment variables
 func GetConfig() Config {
 	return Config{
-		Enabled:          os.Getenv("GATEWAY_API_ENABLED") == "true",
-		GatewayName:      os.Getenv("GATEWAY_NAME"),
-		GatewayNamespace: os.Getenv("GATEWAY_NAMESPACE"),
+		Enabled:                os.Getenv("GATEWAY_API_ENABLED") == "true",
+		GatewayName:            os.Getenv("GATEWAY_NAME"),
+		GatewayNamespace:       os.Getenv("GATEWAY_NAMESPACE"),
+		DefaultAgentTimeout:    getEnvOrDefault("GATEWAY_DEFAULT_AGENT_TIMEOUT", defaultAgentTimeout),
+		DefaultModelAPITimeout: getEnvOrDefault("GATEWAY_DEFAULT_MODELAPI_TIMEOUT", defaultModelAPITimeout),
+		DefaultMCPTimeout:      getEnvOrDefault("GATEWAY_DEFAULT_MCP_TIMEOUT", defaultMCPTimeout),
 	}
+}
+
+// getEnvOrDefault returns the value of an environment variable or a default value
+func getEnvOrDefault(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
 }
 
 // ResourceType identifies the type of agentic resource
@@ -65,6 +87,24 @@ type HTTPRouteParams struct {
 	ServiceName  string
 	ServicePort  int32
 	Labels       map[string]string
+	// Timeout is the request timeout for the HTTPRoute (Gateway API Duration format, e.g., "30s", "1m")
+	// If empty, a default timeout is applied based on resource type.
+	Timeout string
+}
+
+// DefaultTimeout returns the default timeout for a resource type from config
+func DefaultTimeout(resourceType ResourceType) string {
+	config := GetConfig()
+	switch resourceType {
+	case ResourceTypeModelAPI:
+		return config.DefaultModelAPITimeout
+	case ResourceTypeAgent:
+		return config.DefaultAgentTimeout
+	case ResourceTypeMCP:
+		return config.DefaultMCPTimeout
+	default:
+		return config.DefaultMCPTimeout
+	}
 }
 
 // constructHTTPRoute creates an HTTPRoute for a resource (internal helper)
@@ -76,6 +116,53 @@ func constructHTTPRoute(params HTTPRouteParams, config Config) *gatewayv1.HTTPRo
 
 	// URL rewrite to strip the path prefix
 	rewritePath := "/"
+
+	// Determine timeout - use provided value or default
+	timeout := params.Timeout
+	if timeout == "" {
+		timeout = DefaultTimeout(params.ResourceType)
+	}
+
+	// Build the HTTPRoute rule
+	rule := gatewayv1.HTTPRouteRule{
+		Matches: []gatewayv1.HTTPRouteMatch{
+			{
+				Path: &gatewayv1.HTTPPathMatch{
+					Type:  &pathPrefix,
+					Value: &pathValue,
+				},
+			},
+		},
+		Filters: []gatewayv1.HTTPRouteFilter{
+			{
+				Type: gatewayv1.HTTPRouteFilterURLRewrite,
+				URLRewrite: &gatewayv1.HTTPURLRewriteFilter{
+					Path: &gatewayv1.HTTPPathModifier{
+						Type:               gatewayv1.PrefixMatchHTTPPathModifier,
+						ReplacePrefixMatch: &rewritePath,
+					},
+				},
+			},
+		},
+		BackendRefs: []gatewayv1.HTTPBackendRef{
+			{
+				BackendRef: gatewayv1.BackendRef{
+					BackendObjectReference: gatewayv1.BackendObjectReference{
+						Name: gatewayv1.ObjectName(params.ServiceName),
+						Port: &port,
+					},
+				},
+			},
+		},
+	}
+
+	// Add timeout if not "0s" (which means use gateway default)
+	if timeout != "0s" && timeout != "" {
+		requestTimeout := gatewayv1.Duration(timeout)
+		rule.Timeouts = &gatewayv1.HTTPRouteTimeouts{
+			Request: &requestTimeout,
+		}
+	}
 
 	return &gatewayv1.HTTPRoute{
 		ObjectMeta: metav1.ObjectMeta{
@@ -92,39 +179,7 @@ func constructHTTPRoute(params HTTPRouteParams, config Config) *gatewayv1.HTTPRo
 					},
 				},
 			},
-			Rules: []gatewayv1.HTTPRouteRule{
-				{
-					Matches: []gatewayv1.HTTPRouteMatch{
-						{
-							Path: &gatewayv1.HTTPPathMatch{
-								Type:  &pathPrefix,
-								Value: &pathValue,
-							},
-						},
-					},
-					Filters: []gatewayv1.HTTPRouteFilter{
-						{
-							Type: gatewayv1.HTTPRouteFilterURLRewrite,
-							URLRewrite: &gatewayv1.HTTPURLRewriteFilter{
-								Path: &gatewayv1.HTTPPathModifier{
-									Type:            gatewayv1.PrefixMatchHTTPPathModifier,
-									ReplacePrefixMatch: &rewritePath,
-								},
-							},
-						},
-					},
-					BackendRefs: []gatewayv1.HTTPBackendRef{
-						{
-							BackendRef: gatewayv1.BackendRef{
-								BackendObjectReference: gatewayv1.BackendObjectReference{
-									Name: gatewayv1.ObjectName(params.ServiceName),
-									Port: &port,
-								},
-							},
-						},
-					},
-				},
-			},
+			Rules: []gatewayv1.HTTPRouteRule{rule},
 		},
 	}
 }

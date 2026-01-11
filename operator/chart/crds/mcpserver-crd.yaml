@@ -255,6 +255,19 @@ spec:
                         type: string
                     type: object
                 type: object
+              gatewayRoute:
+                description: GatewayRoute configures Gateway API routing (timeout, etc.)
+                properties:
+                  timeout:
+                    description: |-
+                      Timeout specifies the request timeout for the HTTPRoute.
+                      This is a Gateway API Duration string (e.g., "30s", "1m", "5m").
+                      If not specified, defaults to "60s" for ModelAPI (to accommodate LLM inference)
+                      and "30s" for Agent and MCPServer.
+                      Set to "0s" to disable timeout (use Gateway's default).
+                    pattern: ^([0-9]+(h|m|s|ms)){1,4}$
+                    type: string
+                type: object
               podSpec:
                 description: PodSpec allows overriding the generated pod spec using
                   strategic merge patch

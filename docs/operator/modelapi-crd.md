@@ -52,7 +52,7 @@ spec:
     env:
     - name: OLLAMA_DEBUG
       value: "false"
-  
+
   # Optional: PodSpec override using strategic merge patch
   podSpec:
     containers:
@@ -278,6 +278,34 @@ spec:
           memory: "16Gi"
           cpu: "8000m"
           nvidia.com/gpu: "1"  # For GPU acceleration
+```
+
+### gatewayRoute (optional)
+
+Configure Gateway API routing, including request timeout:
+
+```yaml
+spec:
+  gatewayRoute:
+    # Request timeout for the HTTPRoute (Gateway API Duration format)
+    # Default: "120s" for ModelAPI, "120s" for Agent, "30s" for MCPServer
+    # Set to "0s" to use Gateway's default timeout
+    timeout: "120s"
+```
+
+This is especially useful for LLM inference which can take longer than typical HTTP timeouts:
+
+```yaml
+apiVersion: ethical.institute/v1alpha1
+kind: ModelAPI
+metadata:
+  name: ollama-proxy
+spec:
+  mode: Proxy
+  proxyConfig:
+    apiBase: "http://ollama.default:11434"
+  gatewayRoute:
+    timeout: "5m"  # 5 minutes for slow inference
 ```
 
 ## Status Fields

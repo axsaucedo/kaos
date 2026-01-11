@@ -1,7 +1,3 @@
-# Agentic Operator Helm Values
-# Override these values to customize your installation
-
-# Controller Manager settings
 controllerManager:
   manager:
     args:
@@ -23,10 +19,6 @@ controllerManager:
       requests:
         cpu: 100m
         memory: 64Mi
-    # Extra environment variables for the operator
-    env: []
-    # - name: LOG_LEVEL
-    #   value: debug
   nodeSelector: {}
   podSecurityContext:
     runAsNonRoot: true
@@ -34,46 +26,42 @@ controllerManager:
   replicas: 1
   tolerations: []
   topologySpreadConstraints: []
-
-# Kubernetes cluster domain
 kubernetesClusterDomain: cluster.local
-
-# Service Account settings
 serviceAccount:
   annotations: {}
   automount: true
   create: true
   name: ""
-
-# Default images for managed resources (agents, MCP servers)
-# These can be overridden per-resource in CRD specs
+# Default images for operator-managed resources
+# These are used when no image is specified in the CRD
 defaultImages:
-  agentRuntime: agentic-agent:latest
-  mcpServer: agentic-mcp-server:latest
-  litellm: ghcr.io/berriai/litellm:main-latest
-  ollama: alpine/ollama:latest
-
-# Gateway API integration (optional)
-# When enabled, HTTPRoutes are created for Agent, ModelAPI, and MCPServer resources
+  # Agent runtime image for Agent CRD
+  agentRuntime: "agentic-agent:latest"
+  # MCP server image for MCPServer CRD
+  mcpServer: "agentic-agent:latest"
+  # LiteLLM proxy image for ModelAPI CRD (Proxy mode)
+  litellm: "ghcr.io/berriai/litellm:main-latest"
+  # Ollama image for ModelAPI CRD (Hosted mode)
+  ollama: "alpine/ollama:latest"
+# Gateway API configuration
+gateway:
+  # Default timeouts for HTTPRoute resources (Gateway API Duration format)
+  # These can be overridden per-resource using spec.gatewayRoute.timeout
+  defaultTimeouts:
+    # Agent timeout - agents may do multi-step reasoning
+    agent: "120s"
+    # ModelAPI timeout - LLM inference can take time
+    modelAPI: "120s"
+    # MCP timeout - tool calls are typically fast
+    mcp: "30s"
+# Gateway API integration (requires Gateway API CRDs to be installed)
 gatewayAPI:
-  # Enable Gateway API integration (default: false)
+  # Enable Gateway API integration for external routing
   enabled: false
-  
-  # Reference an existing Gateway by name (required if enabled and createGateway is false)
-  gatewayName: ""
-  
-  # Namespace where the Gateway is located (defaults to operator namespace if empty)
-  gatewayNamespace: ""
-  
-  # Create a basic Gateway resource (requires gatewayClassName)
+  # Gateway resource settings (only used if createGateway is true)
   createGateway: false
-  
-  # GatewayClass name (required if createGateway is true)
-  # Common values: "istio", "nginx", "envoy-gateway", "traefik"
-  gatewayClassName: ""
-  
-  # Port for the Gateway listener (default: 80)
+  gatewayName: "agentic-gateway"
+  gatewayNamespace: ""  # Defaults to release namespace
+  gatewayClassName: ""  # Required if createGateway is true (e.g., "envoy")
   listenerPort: 80
-  
-  # Protocol for the Gateway listener (default: HTTP)
-  listenerProtocol: HTTP
+  listenerProtocol: "HTTP"

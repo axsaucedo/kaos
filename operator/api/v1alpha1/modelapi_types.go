@@ -78,6 +78,10 @@ type ModelAPISpec struct {
 	// +kubebuilder:validation:Optional
 	HostedConfig *HostedConfig `json:"hostedConfig,omitempty"`
 
+	// GatewayRoute configures Gateway API routing (timeout, etc.)
+	// +kubebuilder:validation:Optional
+	GatewayRoute *GatewayRoute `json:"gatewayRoute,omitempty"`
+
 	// PodSpec allows overriding the generated pod spec using strategic merge patch
 	// +kubebuilder:validation:Optional
 	PodSpec *corev1.PodSpec `json:"podSpec,omitempty"`

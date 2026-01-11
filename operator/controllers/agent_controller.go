@@ -219,6 +219,10 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		agent.Status.Endpoint = fmt.Sprintf("http://%s.%s.svc.cluster.local:8000", serviceName, agent.Namespace)
 
 		// Create HTTPRoute if Gateway API is enabled
+		timeout := ""
+		if agent.Spec.GatewayRoute != nil && agent.Spec.GatewayRoute.Timeout != "" {
+			timeout = agent.Spec.GatewayRoute.Timeout
+		}
 		if err := gateway.ReconcileHTTPRoute(ctx, r.Client, r.Scheme, agent, gateway.HTTPRouteParams{
 			ResourceType: gateway.ResourceTypeAgent,
 			ResourceName: agent.Name,
@@ -226,6 +230,7 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			ServiceName:  serviceName,
 			ServicePort:  8000,
 			Labels:       map[string]string{"app": "agent", "agent": agent.Name},
+			Timeout:      timeout,
 		}, log); err != nil {
 			log.Error(err, "failed to reconcile HTTPRoute")
 		}

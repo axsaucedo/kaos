@@ -86,7 +86,7 @@ async def test_modelapi_proxy_with_hosted_backend(test_namespace: str):
     2. A Proxy ModelAPI (LiteLLM) that routes to the Hosted backend
     
     This validates the full proxy chain without requiring external services.
-    Uses port-forward instead of Gateway to avoid gateway timeouts on inference.
+    Uses Gateway API with custom timeout to allow for LLM inference time.
     """
     # Step 1: Create the Hosted backend (Ollama in-cluster)
     backend_name = "proxy-backend"
@@ -112,6 +112,7 @@ async def test_modelapi_proxy_with_hosted_backend(test_namespace: str):
     
     # Step 2: Create the Proxy that points to the Hosted backend
     # The Hosted ModelAPI service is at: modelapi-{backend_name}.{namespace}:11434
+    # Configure gatewayRoute.timeout to 120s to allow for LLM inference
     proxy_name = "proxy-chain"
     proxy_spec = {
         "apiVersion": "ethical.institute/v1alpha1",
@@ -124,45 +125,41 @@ async def test_modelapi_proxy_with_hosted_backend(test_namespace: str):
                 "model": "ollama/smollm2:135m",
                 "env": [{"name": "OPENAI_API_KEY", "value": "sk-test"}]
             },
+            "gatewayRoute": {
+                "timeout": "120s",
+            },
         },
     }
     create_custom_resource(proxy_spec, test_namespace)
     
     wait_for_deployment(test_namespace, f"modelapi-{proxy_name}", timeout=120)
     
-    # Use port-forward to access the proxy directly (avoids Gateway timeout issues)
-    port = get_next_port()
-    pf = port_forward(test_namespace, f"modelapi-{proxy_name}", port, 8000)
-    time.sleep(3)
+    # Use Gateway API URL with the extended timeout configured in the CRD
+    proxy_url = gateway_url(test_namespace, "modelapi", proxy_name)
+    wait_for_resource_ready(proxy_url, health_path="/health/liveliness")
     
-    try:
-        proxy_url = f"http://localhost:{port}"
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        # Test proxy health
+        response = await client.get(f"{proxy_url}/health/liveliness", timeout=10.0)
+        assert response.status_code == 200
         
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            # Test proxy health
-            response = await client.get(f"{proxy_url}/health/liveliness", timeout=10.0)
-            assert response.status_code == 200
-            
-            # Test actual model inference through the proxy chain
-            response = await client.post(
-                f"{proxy_url}/v1/chat/completions",
-                json={
-                    "model": "ollama/smollm2:135m",
-                    "messages": [{"role": "user", "content": "Say hello"}],
-                    "max_tokens": 20,
-                },
-                timeout=90.0,
-            )
-            assert response.status_code == 200
-            data = response.json()
-            
-            # Verify we got a real response from Ollama through the proxy
-            assert "choices" in data
-            assert len(data["choices"]) > 0
-            assert len(data["choices"][0]["message"]["content"]) > 0
-    finally:
-        pf.terminate()
-        pf.wait(timeout=5)
+        # Test actual model inference through the proxy chain via Gateway
+        response = await client.post(
+            f"{proxy_url}/v1/chat/completions",
+            json={
+                "model": "ollama/smollm2:135m",
+                "messages": [{"role": "user", "content": "Say hello"}],
+                "max_tokens": 20,
+            },
+            timeout=90.0,
+        )
+        assert response.status_code == 200
+        data = response.json()
+        
+        # Verify we got a real response from Ollama through the proxy
+        assert "choices" in data
+        assert len(data["choices"]) > 0
+        assert len(data["choices"][0]["message"]["content"]) > 0
 
 
 @pytest.mark.asyncio

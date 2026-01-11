@@ -162,6 +162,19 @@ spec:
           cpu: "100m"
 ```
 
+### gatewayRoute (optional)
+
+Configure Gateway API routing, including request timeout:
+
+```yaml
+spec:
+  gatewayRoute:
+    # Request timeout for the HTTPRoute (Gateway API Duration format)
+    # Default: "30s" for MCPServer (tool calls are typically fast)
+    # Set to "0s" to use Gateway's default timeout
+    timeout: "30s"
+```
+
 ## Container Images
 
 | Tool Source | Image | Command |

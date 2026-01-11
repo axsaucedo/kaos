@@ -45,7 +45,16 @@ Key configurable values in `chart/values.yaml`:
 | `controllerManager.replicas` | Number of operator replicas | `1` |
 | `controllerManager.manager.resources` | Resource limits/requests | See values.yaml |
 | `defaultImages.agentRuntime` | Default agent container image | `agentic-agent:latest` |
-| `defaultImages.mcpServer` | Default MCP server image | `agentic-mcp-server:latest` |
+| `defaultImages.mcpServer` | Default MCP server image | `agentic-agent:latest` |
+| `defaultImages.litellm` | Default LiteLLM proxy image | `ghcr.io/berriai/litellm:main-latest` |
+| `defaultImages.ollama` | Default Ollama image | `alpine/ollama:latest` |
+| `gateway.defaultTimeouts.agent` | Default timeout for Agent HTTPRoutes | `120s` |
+| `gateway.defaultTimeouts.modelAPI` | Default timeout for ModelAPI HTTPRoutes | `120s` |
+| `gateway.defaultTimeouts.mcp` | Default timeout for MCPServer HTTPRoutes | `30s` |
+| `gatewayAPI.enabled` | Enable Gateway API integration | `false` |
+| `gatewayAPI.createGateway` | Create a Gateway resource | `false` |
+| `gatewayAPI.gatewayName` | Name of the Gateway resource | `agentic-gateway` |
+| `gatewayAPI.gatewayClassName` | GatewayClass to use (required if createGateway) | `""` |
 
 #### Generate Helm Chart
 

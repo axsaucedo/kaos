@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: agentic-operator-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+data:
+  # Default images for operator-managed resources
+  DEFAULT_AGENT_IMAGE: {{ .Values.defaultImages.agentRuntime | quote }}
+  DEFAULT_MCP_SERVER_IMAGE: {{ .Values.defaultImages.mcpServer | quote }}
+  DEFAULT_LITELLM_IMAGE: {{ .Values.defaultImages.litellm | quote }}
+  DEFAULT_OLLAMA_IMAGE: {{ .Values.defaultImages.ollama | quote }}
+  # Gateway API configuration
+  {{- if .Values.gatewayAPI.enabled }}
+  GATEWAY_API_ENABLED: "true"
+  GATEWAY_NAME: {{ .Values.gatewayAPI.gatewayName | default "agentic-gateway" | quote }}
+  GATEWAY_NAMESPACE: {{ .Values.gatewayAPI.gatewayNamespace | default .Release.Namespace | quote }}
+  {{- else }}
+  GATEWAY_API_ENABLED: "false"
+  {{- end }}
+  # Gateway default timeouts (Gateway API Duration format)
+  GATEWAY_DEFAULT_AGENT_TIMEOUT: {{ .Values.gateway.defaultTimeouts.agent | quote }}
+  GATEWAY_DEFAULT_MODELAPI_TIMEOUT: {{ .Values.gateway.defaultTimeouts.modelAPI | quote }}
+  GATEWAY_DEFAULT_MCP_TIMEOUT: {{ .Values.gateway.defaultTimeouts.mcp | quote }}

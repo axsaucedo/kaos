@@ -81,7 +81,6 @@ rules:
   - get
   - patch
   - update
-{{- if .Values.gatewayAPI.enabled }}
 - apiGroups:
   - gateway.networking.k8s.io
   resources:
@@ -94,4 +93,3 @@ rules:
   - patch
   - update
   - watch
-{{- end }}

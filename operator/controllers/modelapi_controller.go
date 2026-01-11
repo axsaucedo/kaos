@@ -178,6 +178,10 @@ func (r *ModelAPIReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	modelapi.Status.Endpoint = fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", serviceName, modelapi.Namespace, port)
 
 	// Create HTTPRoute if Gateway API is enabled
+	timeout := ""
+	if modelapi.Spec.GatewayRoute != nil && modelapi.Spec.GatewayRoute.Timeout != "" {
+		timeout = modelapi.Spec.GatewayRoute.Timeout
+	}
 	if err := gateway.ReconcileHTTPRoute(ctx, r.Client, r.Scheme, modelapi, gateway.HTTPRouteParams{
 		ResourceType: gateway.ResourceTypeModelAPI,
 		ResourceName: modelapi.Name,
@@ -185,6 +189,7 @@ func (r *ModelAPIReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		ServiceName:  serviceName,
 		ServicePort:  int32(port),
 		Labels:       map[string]string{"app": "modelapi", "modelapi": modelapi.Name},
+		Timeout:      timeout,
 	}, log); err != nil {
 		log.Error(err, "failed to reconcile HTTPRoute")
 	}

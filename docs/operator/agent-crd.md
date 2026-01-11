@@ -232,6 +232,19 @@ spec:
 
 **Note:** Replicas cannot be set via podSpec; it's a deployment-level setting (currently fixed at 1).
 
+### gatewayRoute (optional)
+
+Configure Gateway API routing, including request timeout:
+
+```yaml
+spec:
+  gatewayRoute:
+    # Request timeout for the HTTPRoute (Gateway API Duration format)
+    # Default: "120s" for Agent (to allow multi-step reasoning)
+    # Set to "0s" to use Gateway's default timeout
+    timeout: "120s"
+```
+
 ## Status Fields
 
 | Field | Type | Description |

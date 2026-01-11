@@ -101,9 +101,11 @@ kind-e2e: kind-create
 	@./hack/run-e2e-tests.sh
 
 # Run E2E tests (parallel) - requires existing cluster
+# Cap at 4 workers to avoid "out of pty devices" errors on high-CPU machines
 e2e-test:
 	@cd tests && \
-	JOBS="$$(nproc --all 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"; \
+	CPUS="$$(nproc --all 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"; \
+	JOBS="$$(( CPUS > 4 ? 4 : CPUS ))"; \
 	uv run pytest e2e/ -v -n "$$JOBS" --dist loadscope
 
 # Run E2E tests sequentially - requires existing cluster

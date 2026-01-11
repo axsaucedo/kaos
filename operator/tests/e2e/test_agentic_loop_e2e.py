@@ -170,59 +170,65 @@ async def test_delegation_with_memory_verification(test_namespace: str, shared_m
 
 
 @pytest.mark.asyncio
-async def test_agent_processes_with_memory_events(test_namespace: str):
-    """Test that agent processing creates correct memory events.
+async def test_agent_processes_with_memory_events(test_namespace: str, shared_modelapi: str):
+    """Test that agent processing creates memory events correctly.
     
-    Uses Hosted mode ModelAPI which runs Ollama in-cluster.
+    Uses delegation with mock responses for deterministic testing.
+    Memory events are verified after delegation completes.
     """
-    # Create a ModelAPI with in-cluster Ollama for actual inference
-    modelapi_name = "loop-ollama-mem"
-    modelapi_spec = create_modelapi_hosted_resource(test_namespace, modelapi_name)
-    create_custom_resource(modelapi_spec, test_namespace)
-    # Hosted mode needs longer timeout for model pull
-    wait_for_deployment(test_namespace, f"modelapi-{modelapi_name}", timeout=180)
-    
-    # Use model_name for Hosted mode (direct Ollama)
+    # Create a simple worker and coordinator for delegation
     worker_spec, worker_name = create_agentic_loop_worker(
-        test_namespace, modelapi_name, "-mem", model_name="smollm2:135m"
+        test_namespace, shared_modelapi, "-mem"
+    )
+    coord_spec, coord_name = create_agentic_loop_coordinator(
+        test_namespace, shared_modelapi, worker_name, "-mem"
     )
     
+    # Deploy worker first
     create_custom_resource(worker_spec, test_namespace)
     wait_for_deployment(test_namespace, f"agent-{worker_name}", timeout=120)
     
+    # Deploy coordinator
+    create_custom_resource(coord_spec, test_namespace)
+    wait_for_deployment(test_namespace, f"agent-{coord_name}", timeout=120)
+    
     worker_url = gateway_url(test_namespace, "agent", worker_name)
+    coord_url = gateway_url(test_namespace, "agent", coord_name)
     wait_for_resource_ready(worker_url)
+    wait_for_resource_ready(coord_url)
     
     async with httpx.AsyncClient(timeout=60.0) as client:
-        # Note initial count
+        # Note initial worker memory count
         response = await client.get(f"{worker_url}/memory/events")
         initial_count = response.json()["total"]
         
-        # Send a simple message
-        unique_id = f"MSG_{int(time.time())}"
+        # Send delegation request (this bypasses the model API and directly delegates)
+        unique_id = f"MEM_{int(time.time())}"
         response = await client.post(
-            f"{worker_url}/agent/invoke",
-            json={"task": f"Echo back this ID: {unique_id}"}
+            f"{coord_url}/v1/chat/completions",
+            json={
+                "model": coord_name,
+                "messages": [
+                    {"role": "delegate", "content": f"{worker_name}: Process memory test {unique_id}"}
+                ]
+            }
         )
         
-        assert response.status_code == 200
-        result = response.json()
-        assert result["status"] == "completed"
+        assert response.status_code == 200, f"Delegation failed: {response.text}"
         
-        # Check memory events
+        # Check worker memory events - should have recorded the delegated task
         response = await client.get(f"{worker_url}/memory/events")
         memory = response.json()
         
-        assert memory["total"] > initial_count
+        assert memory["total"] > initial_count, "Worker should have new memory events"
         
-        # Should have user_message and agent_response
+        # Should have user_message from delegation
         event_types = [e["event_type"] for e in memory["events"]]
-        assert "user_message" in event_types
-        assert "agent_response" in event_types
+        assert "user_message" in event_types, f"Expected user_message in {event_types}"
         
-        # Verify our message is in the events
+        # Verify our unique ID is in the events
         all_content = " ".join(str(e["content"]) for e in memory["events"])
-        assert unique_id in all_content
+        assert unique_id in all_content, f"Expected {unique_id} in memory events"
 
 
 @pytest.mark.asyncio

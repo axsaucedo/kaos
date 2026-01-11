@@ -30,22 +30,9 @@ spec:
         env:
         - name: KUBERNETES_CLUSTER_DOMAIN
           value: {{ quote .Values.kubernetesClusterDomain }}
-        - name: DEFAULT_AGENT_IMAGE
-          value: {{ quote .Values.defaultImages.agentRuntime }}
-        - name: DEFAULT_MCP_SERVER_IMAGE
-          value: {{ quote .Values.defaultImages.mcpServer }}
-        - name: DEFAULT_LITELLM_IMAGE
-          value: {{ quote .Values.defaultImages.litellm }}
-        - name: DEFAULT_OLLAMA_IMAGE
-          value: {{ quote .Values.defaultImages.ollama }}
-        {{- if .Values.gatewayAPI.enabled }}
-        - name: GATEWAY_API_ENABLED
-          value: "true"
-        - name: GATEWAY_NAME
-          value: {{ .Values.gatewayAPI.gatewayName | default "agentic-gateway" | quote }}
-        - name: GATEWAY_NAMESPACE
-          value: {{ .Values.gatewayAPI.gatewayNamespace | default .Release.Namespace | quote }}
-        {{- end }}
+        envFrom:
+        - configMapRef:
+            name: agentic-operator-config
         image: {{ .Values.controllerManager.manager.image.repository }}:{{ .Values.controllerManager.manager.image.tag
           | default .Chart.AppVersion }}
         imagePullPolicy: {{ .Values.controllerManager.manager.imagePullPolicy }}

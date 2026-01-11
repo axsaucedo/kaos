@@ -82,6 +82,47 @@ helm install agentic-operator ./operator/chart \
 | `gatewayAPI.createGateway` | `false` | Create a Gateway resource |
 | `gatewayAPI.gatewayClassName` | Required if createGateway | GatewayClass to use |
 | `gatewayAPI.listenerPort` | `80` | Port for HTTP listener |
+| `gateway.defaultTimeouts.agent` | `120s` | Default timeout for Agent HTTPRoutes |
+| `gateway.defaultTimeouts.modelAPI` | `120s` | Default timeout for ModelAPI HTTPRoutes |
+| `gateway.defaultTimeouts.mcp` | `30s` | Default timeout for MCPServer HTTPRoutes |
+
+## Request Timeouts
+
+The operator configures request timeouts on HTTPRoutes to prevent long-running requests from timing out prematurely. Timeouts can be configured at two levels:
+
+### Global Defaults (Helm Values)
+
+Set default timeouts for all resources of each type:
+
+```yaml
+gateway:
+  defaultTimeouts:
+    agent: "120s"      # Agents may do multi-step reasoning
+    modelAPI: "120s"   # LLM inference can take time
+    mcp: "30s"         # Tool calls are typically fast
+```
+
+These values are passed to the operator via environment variables:
+- `GATEWAY_DEFAULT_AGENT_TIMEOUT`
+- `GATEWAY_DEFAULT_MODELAPI_TIMEOUT`
+- `GATEWAY_DEFAULT_MCP_TIMEOUT`
+
+### Per-Resource Override
+
+Override the timeout for a specific resource using `spec.gatewayRoute.timeout`:
+
+```yaml
+apiVersion: ethical.institute/v1alpha1
+kind: Agent
+metadata:
+  name: long-running-agent
+spec:
+  modelAPI: my-model
+  gatewayRoute:
+    timeout: "300s"  # 5 minutes for this specific agent
+```
+
+This works for all CRD types (Agent, ModelAPI, MCPServer).
 
 ### Using Existing Gateway
 
@@ -201,7 +242,7 @@ kubectl logs -n agentic-system deployment/agentic-operator-controller-manager | 
 
 Verify Gateway API is enabled:
 ```bash
-kubectl get configmap -n agentic-system agentic-operator-gateway-config -o yaml
+kubectl get configmap -n agentic-system agentic-operator-config -o yaml
 ```
 
 ### 404 Errors
