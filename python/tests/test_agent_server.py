@@ -323,23 +323,25 @@ class TestMultiAgentCluster:
         
         logger.info("✓ All agents process independently with memory")
     
-    def test_delegation_via_chat_completions(self, multi_agent_cluster):
-        """Test delegation using chat completions with role: delegate."""
+    def test_delegation_via_agent_decision(self, multi_agent_cluster):
+        """Test delegation happens when model decides to delegate.
+        
+        With the new design, delegation occurs when the model's response
+        contains a ```delegate block, not via special roles.
+        This test verifies basic invocation works - delegation testing
+        is better done via DEBUG_MOCK_RESPONSES in E2E tests.
+        """
         coord_url = multi_agent_cluster["urls"]["coordinator"]
-        worker_url = multi_agent_cluster["urls"]["worker-1"]
         
-        # Get worker's initial event count
-        initial_memory = httpx.get(f"{worker_url}/memory/events").json()
-        initial_count = initial_memory["total"]
-        
-        # Delegate via chat completions
-        task_id = f"DELEGATE_{int(time.time())}"
+        # Send a user message - the model may or may not delegate
+        # We're testing the infrastructure works, not forcing delegation
+        task_id = f"TASK_{int(time.time())}"
         response = httpx.post(
             f"{coord_url}/v1/chat/completions",
             json={
                 "model": "coordinator",
                 "messages": [
-                    {"role": "delegate", "content": f"worker-1: Process delegation task {task_id}"}
+                    {"role": "user", "content": f"Please respond with task ID {task_id}. Be brief."}
                 ]
             },
             timeout=60.0
@@ -350,51 +352,40 @@ class TestMultiAgentCluster:
         assert "choices" in data
         assert len(data["choices"][0]["message"]["content"]) > 0
         
-        # Verify coordinator's memory has delegation events
+        # Verify coordinator's memory has the interaction
         coord_memory = httpx.get(f"{coord_url}/memory/events").json()
-        delegation_reqs = [e for e in coord_memory["events"] if e["event_type"] == "delegation_request"]
-        delegation_resps = [e for e in coord_memory["events"] if e["event_type"] == "delegation_response"]
-        
-        assert len(delegation_reqs) >= 1
-        assert len(delegation_resps) >= 1
-        assert any(task_id in str(e["content"]) for e in delegation_reqs)
-        
-        # Verify worker received the task
-        worker_memory = httpx.get(f"{worker_url}/memory/events").json()
-        assert worker_memory["total"] > initial_count
-        
-        new_events = worker_memory["events"][initial_count:]
-        user_msgs = [e for e in new_events if e["event_type"] == "user_message"]
+        user_msgs = [e for e in coord_memory["events"] if e["event_type"] == "user_message"]
         assert any(task_id in str(e["content"]) for e in user_msgs)
         
-        logger.info("✓ Delegation via chat completions works with memory verification")
+        logger.info("✓ Agent processes messages correctly")
     
-    def test_delegation_to_both_workers(self, multi_agent_cluster):
-        """Test delegating to both workers and verify memory isolation."""
-        coord_url = multi_agent_cluster["urls"]["coordinator"]
+    def test_agents_independent_processing(self, multi_agent_cluster):
+        """Test workers process independently with memory isolation."""
+        w1_url = multi_agent_cluster["urls"]["worker-1"]
+        w2_url = multi_agent_cluster["urls"]["worker-2"]
         
         task1_id = f"W1_{int(time.time())}"
         task2_id = f"W2_{int(time.time())}"
         
-        # Delegate to worker-1
+        # Direct invocation to worker-1
         resp1 = httpx.post(
-            f"{coord_url}/v1/chat/completions",
-            json={"model": "coordinator", "messages": [{"role": "delegate", "content": f"worker-1: Task {task1_id}"}]},
+            f"{w1_url}/agent/invoke",
+            json={"task": f"Process task {task1_id}. Be brief."},
             timeout=60.0
         )
         assert resp1.status_code == 200
         
-        # Delegate to worker-2
+        # Direct invocation to worker-2
         resp2 = httpx.post(
-            f"{coord_url}/v1/chat/completions",
-            json={"model": "coordinator", "messages": [{"role": "delegate", "content": f"worker-2: Task {task2_id}"}]},
+            f"{w2_url}/agent/invoke",
+            json={"task": f"Process task {task2_id}. Be brief."},
             timeout=60.0
         )
         assert resp2.status_code == 200
         
         # Verify each worker only has its task
-        w1_memory = httpx.get(f"{multi_agent_cluster['urls']['worker-1']}/memory/events").json()
-        w2_memory = httpx.get(f"{multi_agent_cluster['urls']['worker-2']}/memory/events").json()
+        w1_memory = httpx.get(f"{w1_url}/memory/events").json()
+        w2_memory = httpx.get(f"{w2_url}/memory/events").json()
         
         w1_content = " ".join(str(e["content"]) for e in w1_memory["events"])
         w2_content = " ".join(str(e["content"]) for e in w2_memory["events"])
@@ -404,7 +395,7 @@ class TestMultiAgentCluster:
         assert task2_id in w2_content
         assert task1_id not in w2_content  # Memory isolation
         
-        logger.info("✓ Delegation to both workers with memory isolation")
+        logger.info("✓ Workers process independently with memory isolation")
     
     @pytest.mark.asyncio
     async def test_remote_agent_discovery_and_invocation(self, multi_agent_cluster):
@@ -419,8 +410,10 @@ class TestMultiAgentCluster:
         assert remote.agent_card.name == "worker-1"
         assert "message_processing" in remote.agent_card.capabilities
         
-        # Invoke
-        response = await remote.invoke("Say hello from remote. Be brief.")
+        # Invoke - now takes messages list with task-delegation role
+        response = await remote.invoke([
+            {"role": "task-delegation", "content": "Say hello from remote. Be brief."}
+        ])
         assert len(response) > 0
         
         await remote.close()
@@ -430,38 +423,6 @@ class TestMultiAgentCluster:
 
 class TestErrorHandling:
     """Tests for error handling scenarios."""
-    
-    def test_delegation_to_nonexistent_agent(self, multi_agent_cluster):
-        """Test delegation to non-existent agent returns 404."""
-        coord_url = multi_agent_cluster["urls"]["coordinator"]
-        
-        response = httpx.post(
-            f"{coord_url}/v1/chat/completions",
-            json={
-                "model": "coordinator",
-                "messages": [{"role": "delegate", "content": "nonexistent: Some task"}]
-            },
-            timeout=30.0
-        )
-        
-        assert response.status_code == 404
-        logger.info("✓ Non-existent agent returns 404")
-    
-    def test_invalid_delegation_format(self, multi_agent_cluster):
-        """Test invalid delegation format returns 400."""
-        coord_url = multi_agent_cluster["urls"]["coordinator"]
-        
-        response = httpx.post(
-            f"{coord_url}/v1/chat/completions",
-            json={
-                "model": "coordinator",
-                "messages": [{"role": "delegate", "content": "no colon here"}]
-            },
-            timeout=30.0
-        )
-        
-        assert response.status_code == 400
-        logger.info("✓ Invalid delegation format returns 400")
     
     def test_missing_messages(self, single_agent_server):
         """Test missing messages returns error."""
@@ -475,3 +436,16 @@ class TestErrorHandling:
         
         assert response.status_code in [400, 422]
         logger.info("✓ Missing messages returns error")
+    
+    def test_empty_messages_returns_error(self, single_agent_server):
+        """Test empty messages array returns error."""
+        url = single_agent_server["url"]
+        
+        response = httpx.post(
+            f"{url}/v1/chat/completions",
+            json={"model": "test-agent", "messages": [], "stream": False},
+            timeout=30.0
+        )
+        
+        assert response.status_code == 400
+        logger.info("✓ Empty messages returns error")

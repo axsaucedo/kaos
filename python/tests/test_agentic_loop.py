@@ -182,6 +182,7 @@ class TestAgenticLoopDelegation:
             'capabilities': ['task_execution']
         })()
         mock_remote._active = True
+        # invoke now takes messages list, not just task string
         mock_remote.invoke = AsyncMock(return_value="Data processed")
         
         agent = Agent(
@@ -197,8 +198,13 @@ class TestAgenticLoopDelegation:
         async for chunk in agent.process_message("Process the data"):
             result.append(chunk)
         
-        # Verify delegation occurred
-        mock_remote.invoke.assert_called_once_with("Process this data")
+        # Verify delegation occurred - invoke now receives messages list
+        mock_remote.invoke.assert_called_once()
+        call_args = mock_remote.invoke.call_args[0][0]  # First positional arg
+        assert isinstance(call_args, list)
+        # Last message should be task-delegation with the task
+        assert call_args[-1]["role"] == "task-delegation"
+        assert "Process this data" in call_args[-1]["content"]
         
         # Verify model was called twice
         assert mock_model.call_count == 2
@@ -309,12 +315,15 @@ class TestSystemPromptBuilding:
         logger.info("✓ System prompt includes agents")
 
 
-class TestMockResponseParameter:
-    """Tests for the mock_response parameter in process_message."""
+class TestMockResponseEnvVar:
+    """Tests for the DEBUG_MOCK_RESPONSES environment variable."""
     
     @pytest.mark.asyncio
-    async def test_mock_response_bypasses_model(self):
-        """Test that mock_response bypasses the actual model call."""
+    async def test_mock_responses_env_var_bypasses_model(self):
+        """Test that DEBUG_MOCK_RESPONSES env var bypasses the actual model call."""
+        import os
+        import json
+        
         mock_model = MockModelAPI(responses=["This should not appear"])
         memory = LocalMemory()
         
@@ -324,19 +333,70 @@ class TestMockResponseParameter:
             memory=memory
         )
         
-        result = []
-        async for chunk in agent.process_message("Hello", mock_response="Mocked response"):
-            result.append(chunk)
+        # Set mock responses via env var
+        os.environ["DEBUG_MOCK_RESPONSES"] = json.dumps(["Mocked response from env"])
         
-        response = "".join(result)
+        try:
+            result = []
+            async for chunk in agent.process_message("Hello"):
+                result.append(chunk)
+            
+            response = "".join(result)
+            
+            # Should get mock response
+            assert "Mocked response from env" in response
+            
+            logger.info("✓ Mock response env var works")
+        finally:
+            # Clean up
+            del os.environ["DEBUG_MOCK_RESPONSES"]
+    
+    @pytest.mark.asyncio
+    async def test_mock_responses_array_for_agentic_loop(self):
+        """Test that DEBUG_MOCK_RESPONSES array supports multi-step agentic loop."""
+        import os
+        import json
         
-        # Should get mock response
-        assert "Mocked response" in response
+        mock_model = MockModelAPI(responses=["Fallback"])
+        mock_mcp = MockMCPClient(tools={
+            "calculator": ("Add two numbers", {"sum": 8})
+        })
+        memory = LocalMemory()
         
-        # Model should NOT be called (mock_response is used first)
-        # Note: it gets called 0 times if mock_response provides final answer
+        agent = Agent(
+            name="mock-test",
+            model_api=mock_model,
+            mcp_clients=[mock_mcp],
+            memory=memory,
+            loop_config=AgenticLoopConfig(max_steps=5)
+        )
         
-        logger.info("✓ Mock response parameter works")
+        # Set mock responses for tool call then final response
+        mock_responses = [
+            '''```tool_call
+{"tool": "calculator", "arguments": {"a": 5, "b": 3}}
+```''',
+            "The result is 8."
+        ]
+        os.environ["DEBUG_MOCK_RESPONSES"] = json.dumps(mock_responses)
+        
+        try:
+            result = []
+            async for chunk in agent.process_message("What is 5 + 3?"):
+                result.append(chunk)
+            
+            response = "".join(result)
+            
+            # Should get final response after tool call
+            assert "8" in response
+            
+            # Tool should have been called
+            assert len(mock_mcp.call_log) == 1
+            
+            logger.info("✓ Mock response array works for agentic loop")
+        finally:
+            # Clean up
+            del os.environ["DEBUG_MOCK_RESPONSES"]
 
 
 class TestMemoryEventTracking:
