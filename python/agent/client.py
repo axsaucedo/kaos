@@ -1,5 +1,5 @@
 """
-Agent client implementation following Google ADK patterns.
+Agent client implementation for OpenAI-compatible API.
 
 Clean, simple implementation with proper streaming support and tool integration.
 Includes agentic loop for tool calling and agent delegation.
@@ -7,20 +7,19 @@ Includes agentic loop for tool calling and agent delegation.
 Key design principles:
 - Agent decides when to delegate/call tools based on model response
 - Server only routes requests, never interprets delegation
-- DEBUG_MOCK_RESPONSES env var for testing (array of responses for agentic loop)
-- RemoteAgent.invoke() uses /v1/chat/completions with full context
+- DEBUG_MOCK_RESPONSES env var handled by ModelAPI for testing
+- RemoteAgent.process_message() uses /v1/chat/completions
 """
 
-import os
 import json
 import re
 import logging
 from typing import List, Dict, Any, Optional, AsyncIterator, Union
 import httpx
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from modelapi.client import ModelAPI
-from agent.memory import LocalMemory, MemoryEvent
+from agent.memory import LocalMemory
 from mcptools.client import MCPClient
 
 logger = logging.getLogger(__name__)
@@ -44,37 +43,17 @@ Wait for the agent's response before providing your final answer.
 """
 
 
-def get_mock_responses() -> Optional[List[str]]:
-    """Get mock responses from DEBUG_MOCK_RESPONSES env var.
-    
-    Format: JSON array of strings, e.g.:
-    ["first response", "second response"]
-    
-    Supports multiline responses in the JSON array.
-    """
-    mock_env = os.environ.get("DEBUG_MOCK_RESPONSES")
-    if not mock_env:
-        return None
-    try:
-        responses = json.loads(mock_env)
-        if isinstance(responses, list):
-            return responses
-        # Single string - wrap in list
-        return [responses]
-    except json.JSONDecodeError:
-        # Treat as single plain text response
-        return [mock_env]
-
-
 @dataclass
 class AgenticLoopConfig:
     """Configuration for the agentic reasoning loop."""
+
     max_steps: int = 5  # Maximum reasoning steps to prevent infinite loops
 
 
 @dataclass
 class AgentCard:
     """Agent discovery card for A2A protocol."""
+
     name: str
     description: str
     url: str
@@ -88,30 +67,35 @@ class AgentCard:
             "description": self.description,
             "url": self.url,
             "skills": self.skills,
-            "capabilities": self.capabilities
+            "capabilities": self.capabilities,
         }
 
 
 class RemoteAgent:
     """Remote agent client for A2A protocol with graceful degradation.
-    
+
     Uses /v1/chat/completions for invocation to pass full context.
     The role "task-delegation" indicates this is a delegated task.
     """
 
     DISCOVERY_TIMEOUT = 5.0  # Short timeout for agent card discovery
-    INVOKE_TIMEOUT = 60.0    # Longer timeout for actual invocations
+    REQUEST_TIMEOUT = 60.0  # Longer timeout for actual requests
 
-    def __init__(self, name: str, card_url: str = None, agent_card_url: str = None):
+    def __init__(
+        self,
+        name: str,
+        card_url: Optional[str] = None,
+        agent_card_url: Optional[str] = None,
+    ):
         url = card_url or agent_card_url
         if not url:
             raise ValueError("card_url is required")
         self.name = name
-        self.card_url = url.rstrip('/')
+        self.card_url = url.rstrip("/")
         self.agent_card: Optional[AgentCard] = None
         self._active = False
         self._discovery_client = httpx.AsyncClient(timeout=self.DISCOVERY_TIMEOUT)
-        self._invoke_client = httpx.AsyncClient(timeout=self.INVOKE_TIMEOUT)
+        self._request_client = httpx.AsyncClient(timeout=self.REQUEST_TIMEOUT)
         logger.info(f"RemoteAgent initialized: {name} -> {url}")
 
     async def _init(self) -> bool:
@@ -125,7 +109,7 @@ class RemoteAgent:
                 description=data.get("description", ""),
                 url=self.card_url,
                 skills=data.get("skills", []),
-                capabilities=data.get("capabilities", [])
+                capabilities=data.get("capabilities", []),
             )
             self._active = True
             logger.info(f"RemoteAgent {self.name} active: {self.agent_card.description}")
@@ -135,31 +119,32 @@ class RemoteAgent:
             logger.warning(f"RemoteAgent {self.name} init failed: {type(e).__name__}: {e}")
             return False
 
-    async def invoke(self, messages: List[Dict[str, str]]) -> str:
-        """Invoke agent with full message context via /v1/chat/completions.
-        
+    async def process_message(
+        self,
+        messages: List[Dict[str, str]],
+        session_id: Optional[str] = None,
+    ) -> str:
+        """Process messages via remote agent's /v1/chat/completions.
+
         Args:
-            messages: List of messages providing context. The last message 
+            messages: List of messages providing context. The last message
                      should have role "task-delegation" with the delegated task.
-                     
+            session_id: Optional session ID for tracking (not currently used by remote).
+
         Returns:
             The agent's response content.
-            
+
         Raises:
-            RuntimeError: If agent is unavailable or invocation fails.
+            RuntimeError: If agent is unavailable or request fails.
         """
         if not self._active:
             if not await self._init():
                 raise RuntimeError(f"Agent {self.name} unavailable at {self.card_url}")
 
         try:
-            response = await self._invoke_client.post(
+            response = await self._request_client.post(
                 f"{self.card_url}/v1/chat/completions",
-                json={
-                    "model": self.name,
-                    "messages": messages,
-                    "stream": False
-                }
+                json={"model": self.name, "messages": messages, "stream": False},
             )
             response.raise_for_status()
             data = response.json()
@@ -172,13 +157,13 @@ class RemoteAgent:
         """Close HTTP clients."""
         try:
             await self._discovery_client.aclose()
-            await self._invoke_client.aclose()
+            await self._request_client.aclose()
         except Exception:
             pass
 
 
 class Agent:
-    """Simple Agent class following Google ADK patterns with agentic loop support."""
+    """Agent class with agentic loop support for tool calling and delegation."""
 
     def __init__(
         self,
@@ -186,11 +171,11 @@ class Agent:
         model_api: ModelAPI,
         instructions: str = "You are a helpful agent",
         description: str = "Agent",
-        memory: LocalMemory = None,
-        mcp_clients: List[MCPClient] = None,
-        sub_agents: List[RemoteAgent] = None,
-        loop_config: AgenticLoopConfig = None):
-
+        memory: Optional[LocalMemory] = None,
+        mcp_clients: Optional[List[MCPClient]] = None,
+        sub_agents: Optional[List[RemoteAgent]] = None,
+        loop_config: Optional[AgenticLoopConfig] = None,
+    ):
         self.name = name
         self.instructions = instructions
         self.model_api = model_api
@@ -211,21 +196,21 @@ class Agent:
     async def _build_system_prompt(self) -> str:
         """Build enhanced system prompt with tools and agents info."""
         parts = [self.instructions]
-        
+
         # Add tools info if available
         if self.mcp_clients:
             tools_info = await self._get_tools_description()
             if tools_info:
                 parts.append("\n## Available Tools\n" + tools_info)
                 parts.append(TOOLS_INSTRUCTIONS)
-        
+
         # Add agents info if available
         if self.sub_agents:
             agents_info = await self._get_agents_description()
             if agents_info:
                 parts.append("\n## Available Agents for Delegation\n" + agents_info)
                 parts.append(AGENT_INSTRUCTIONS)
-        
+
         return "\n".join(parts)
 
     async def _get_tools_description(self) -> str:
@@ -236,23 +221,27 @@ class Agent:
                 await mcp_client._init()
             for tool in mcp_client.get_tools():
                 params_str = json.dumps(tool.parameters, indent=2) if tool.parameters else "{}"
-                tools_desc.append(f"- **{tool.name}**: {tool.description}\n  Parameters: {params_str}")
+                tools_desc.append(
+                    f"- **{tool.name}**: {tool.description}\n  Parameters: {params_str}"
+                )
         return "\n".join(tools_desc)
 
     async def _get_agents_description(self) -> str:
         """Get formatted description of all sub-agents, attempting init for inactive ones."""
         available = []
         unavailable = []
-        
+
         for sub_agent in self.sub_agents.values():
             if not sub_agent._active:
                 await sub_agent._init()
-            
+
             if sub_agent._active and sub_agent.agent_card:
-                available.append(f"- **{sub_agent.agent_card.name}**: {sub_agent.agent_card.description}")
+                available.append(
+                    f"- **{sub_agent.agent_card.name}**: {sub_agent.agent_card.description}"
+                )
             else:
                 unavailable.append(f"- **{sub_agent.name}**: (unavailable)")
-        
+
         parts = available
         if unavailable:
             parts.append("\n**Unavailable agents:**")
@@ -261,7 +250,7 @@ class Agent:
 
     def _parse_tool_call(self, content: str) -> Optional[Dict[str, Any]]:
         """Extract tool call JSON from model response."""
-        match = re.search(r'```tool_call\s*\n({.*?})\s*\n```', content, re.DOTALL)
+        match = re.search(r"```tool_call\s*\n({.*?})\s*\n```", content, re.DOTALL)
         if match:
             try:
                 return json.loads(match.group(1))
@@ -271,7 +260,7 @@ class Agent:
 
     def _parse_delegation(self, content: str) -> Optional[Dict[str, Any]]:
         """Extract delegation JSON from model response."""
-        match = re.search(r'```delegate\s*\n({.*?})\s*\n```', content, re.DOTALL)
+        match = re.search(r"```delegate\s*\n({.*?})\s*\n```", content, re.DOTALL)
         if match:
             try:
                 return json.loads(match.group(1))
@@ -279,12 +268,11 @@ class Agent:
                 logger.warning(f"Failed to parse delegation JSON: {e}")
         return None
 
-
     async def process_message(
         self,
         message: Union[str, List[Dict[str, str]]],
         session_id: Optional[str] = None,
-        stream: bool = False
+        stream: bool = False,
     ) -> AsyncIterator[str]:
         """Process a message with agentic loop for tool calling and delegation.
 
@@ -295,7 +283,7 @@ class Agent:
 
         Yields:
             Content chunks (streaming) or single complete response (non-streaming)
-            
+
         Note:
             For testing, set DEBUG_MOCK_RESPONSES env var to a JSON array of responses
             that will be used instead of calling the model API.
@@ -312,10 +300,10 @@ class Agent:
 
         # Build enhanced system prompt with tools/agents info
         system_prompt = await self._build_system_prompt()
-        
+
         # Initialize conversation with system prompt
         messages = [{"role": "system", "content": system_prompt}]
-        
+
         # Handle both string and array input formats
         if isinstance(message, str):
             # Simple string message - log and append
@@ -330,7 +318,7 @@ class Agent:
                 if role == "system":
                     # Skip external system messages, we use our own enhanced one
                     continue
-                    
+
                 # Handle task-delegation role: log it specially but convert to user for model
                 if role == "task-delegation":
                     # Log as delegation task received
@@ -345,84 +333,92 @@ class Agent:
                         user_event = self.memory.create_event("user_message", content)
                         await self.memory.add_event(session_id, user_event)
 
-        # Get mock responses if configured
-        mock_responses = get_mock_responses()
-        mock_step = 0
-
         try:
             # Agentic loop - iterate up to max_steps
             for step in range(self.loop_config.max_steps):
                 logger.debug(f"Agentic loop step {step + 1}/{self.loop_config.max_steps}")
-                
-                # Get model response (or mock if configured)
-                if mock_responses and mock_step < len(mock_responses):
-                    content = mock_responses[mock_step]
-                    mock_step += 1
-                    logger.debug(f"Using mock response {mock_step}: {content[:50]}...")
-                else:
-                    response = await self.model_api.complete(messages)
-                    content = response["choices"][0]["message"]["content"]
-                
+
+                # Get model response (mock responses handled by ModelAPI)
+                content = await self.model_api.process_message(messages, stream=False)
+
                 # Check for tool call
                 tool_call = self._parse_tool_call(content)
                 if tool_call:
                     # Log tool call
                     tool_event = self.memory.create_event("tool_call", tool_call)
                     await self.memory.add_event(session_id, tool_event)
-                    
+
                     # Execute tool
                     try:
-                        tool_name = tool_call.get("tool")
+                        tool_name = tool_call.get("tool", "")
                         tool_args = tool_call.get("arguments", {})
+                        if not tool_name:
+                            raise ValueError("Tool name not specified")
                         tool_result = await self.execute_tool(tool_name, tool_args)
-                        
+
                         # Log tool result
-                        result_event = self.memory.create_event("tool_result", {
-                            "tool": tool_name, "result": tool_result
-                        })
+                        result_event = self.memory.create_event(
+                            "tool_result", {"tool": tool_name, "result": tool_result}
+                        )
                         await self.memory.add_event(session_id, result_event)
-                        
+
                         # Add to conversation and continue loop
                         messages.append({"role": "assistant", "content": content})
-                        messages.append({"role": "user", "content": f"Tool result: {json.dumps(tool_result)}"})
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": f"Tool result: {json.dumps(tool_result)}",
+                            }
+                        )
                         continue
-                        
+
                     except Exception as e:
                         error_msg = f"Tool execution failed: {str(e)}"
                         messages.append({"role": "assistant", "content": content})
                         messages.append({"role": "user", "content": error_msg})
                         continue
-                
+
                 # Check for delegation
                 delegation = self._parse_delegation(content)
                 if delegation:
-                    agent_name = delegation.get("agent")
-                    task = delegation.get("task")
-                    
+                    agent_name = delegation.get("agent", "")
+                    task = delegation.get("task", "")
+
+                    if not agent_name or not task:
+                        error_msg = "Invalid delegation: missing 'agent' or 'task'"
+                        messages.append({"role": "assistant", "content": content})
+                        messages.append({"role": "user", "content": error_msg})
+                        continue
+
                     try:
                         # Build context messages for sub-agent (exclude system prompt)
                         context_messages = [m for m in messages if m.get("role") != "system"]
-                        
+
                         # Delegate to sub-agent with context
                         delegation_result = await self.delegate_to_sub_agent(
                             agent_name, task, context_messages, session_id
                         )
-                        
+
                         # Add to conversation and continue loop
                         messages.append({"role": "assistant", "content": content})
-                        messages.append({"role": "user", "content": f"Agent response: {delegation_result}"})
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": f"Agent response: {delegation_result}",
+                            }
+                        )
                         continue
-                        
+
                     except ValueError as e:
                         error_msg = f"Delegation failed: {str(e)}"
                         messages.append({"role": "assistant", "content": content})
                         messages.append({"role": "user", "content": error_msg})
                         continue
-                
+
                 # No tool call or delegation - this is the final response
                 response_event = self.memory.create_event("agent_response", content)
                 await self.memory.add_event(session_id, response_event)
-                
+
                 if stream:
                     # For streaming, yield word by word (simplified)
                     for word in content.split():
@@ -430,7 +426,7 @@ class Agent:
                 else:
                     yield content
                 return
-            
+
             # Max steps reached
             max_steps_msg = f"Reached maximum reasoning steps ({self.loop_config.max_steps})"
             logger.warning(max_steps_msg)
@@ -453,60 +449,70 @@ class Agent:
         raise ValueError(f"Tool '{tool_name}' not found in any tool client")
 
     async def delegate_to_sub_agent(
-        self, 
-        agent_name: str, 
-        task: str, 
-        context_messages: List[Dict[str, str]] = None,
-        session_id: Optional[str] = None
+        self,
+        agent_name: str,
+        task: str,
+        context_messages: Optional[List[Dict[str, str]]] = None,
+        session_id: Optional[str] = None,
     ) -> str:
         """Delegate a task to a sub-agent with context.
-        
+
         Args:
             agent_name: Name of the sub-agent to delegate to
             task: The task description to delegate
             context_messages: Previous conversation context (excluding system prompt)
             session_id: Optional session ID for memory tracking
-            
+
         Returns:
             The sub-agent's response
         """
         sub_agent = self.sub_agents.get(agent_name)
         if not sub_agent:
-            raise ValueError(f"Sub-agent '{agent_name}' not found. Available: {list(self.sub_agents.keys())}")
-        
+            raise ValueError(
+                f"Sub-agent '{agent_name}' not found. Available: {list(self.sub_agents.keys())}"
+            )
+
         # Log delegation request
         if session_id:
-            await self.memory.add_event(session_id, self.memory.create_event(
-                "delegation_request", {"agent": agent_name, "task": task}
-            ))
-        
+            await self.memory.add_event(
+                session_id,
+                self.memory.create_event("delegation_request", {"agent": agent_name, "task": task}),
+            )
+
         # Build messages for the sub-agent
         # Include context (if any) plus the delegated task with special role
-        messages = []
+        messages: List[Dict[str, str]] = []
         if context_messages:
             # Include relevant context but limit to avoid too much history
             messages.extend(context_messages[-6:])  # Last 6 messages of context
-        
+
         # Add the delegated task with task-delegation role
         messages.append({"role": "task-delegation", "content": task})
-        
+
         try:
-            response = await sub_agent.invoke(messages)
-            
+            response = await sub_agent.process_message(messages, session_id=session_id)
+
             if session_id:
-                await self.memory.add_event(session_id, self.memory.create_event(
-                    "delegation_response", {"agent": agent_name, "response": response}
-                ))
+                await self.memory.add_event(
+                    session_id,
+                    self.memory.create_event(
+                        "delegation_response",
+                        {"agent": agent_name, "response": response},
+                    ),
+                )
             return response
-            
+
         except RuntimeError as e:
             error_msg = str(e)
             logger.warning(f"Delegation to {agent_name} failed: {error_msg}")
-            
+
             if session_id:
-                await self.memory.add_event(session_id, self.memory.create_event(
-                    "delegation_error", {"agent": agent_name, "error": error_msg}
-                ))
+                await self.memory.add_event(
+                    session_id,
+                    self.memory.create_event(
+                        "delegation_error", {"agent": agent_name, "error": error_msg}
+                    ),
+                )
             return f"[Delegation failed: {error_msg}]"
 
     def get_agent_card(self, base_url: str) -> AgentCard:
@@ -515,11 +521,13 @@ class Agent:
         for mcp_client in self.mcp_clients:
             tools = mcp_client.get_tools()
             for tool in tools:
-                skills.append({
-                    "name": tool.name,
-                    "description": tool.description,
-                    "parameters": tool.parameters
-                })
+                skills.append(
+                    {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": tool.parameters,
+                    }
+                )
 
         # Collect sub-agent capabilities
         capabilities = ["message_processing", "task_execution"]  # Basic capabilities
@@ -533,19 +541,19 @@ class Agent:
             description=self.description,  # Use the actual description
             url=base_url,
             skills=skills,
-            capabilities=capabilities
+            capabilities=capabilities,
         )
 
     async def close(self):
         """Close all connections and cleanup resources."""
         try:
             # Close model client
-            if hasattr(self.model_api, 'close'):
+            if hasattr(self.model_api, "close"):
                 await self.model_api.close()
 
             # Close tool clients
             for mcp_client in self.mcp_clients:
-                if hasattr(mcp_client, 'close'):
+                if hasattr(mcp_client, "close"):
                     await mcp_client.close()
 
             # Close sub-agents
@@ -556,4 +564,3 @@ class Agent:
 
         except Exception as e:
             logger.warning(f"Error closing Agent {self.name}: {e}")
-
