@@ -21,6 +21,7 @@ dev = [
     "pytest-cov>=4.0.0",
     "python-dotenv>=1.0.0",
     "test-mcp-echo-server>=0.1.0",
+    "black>=24.0.0",
 ]
 
 [build-system]
@@ -29,3 +30,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["server", "mcptools", "modelapi", "agent", "tests"]
+
+[tool.black]
+line-length = 100
+target-version = ["py312"]
