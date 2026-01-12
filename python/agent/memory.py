@@ -8,7 +8,7 @@ Provides session management, event logging, and context building for agents.
 import uuid
 import logging
 from typing import Dict, Any, List, Optional, Union
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class MemoryEvent:
     """Represents a single event in agent session memory."""
+
     event_id: str
     timestamp: datetime
     event_type: str  # "user_message", "agent_response", "tool_call", "reasoning"
@@ -30,7 +31,7 @@ class MemoryEvent:
             "timestamp": self.timestamp.isoformat(),
             "event_type": self.event_type,
             "content": self.content,
-            "metadata": self.metadata
+            "metadata": self.metadata,
         }
 
     @classmethod
@@ -41,13 +42,14 @@ class MemoryEvent:
             timestamp=datetime.fromisoformat(data["timestamp"]),
             event_type=data["event_type"],
             content=data["content"],
-            metadata=data["metadata"]
+            metadata=data["metadata"],
         )
 
 
 @dataclass
 class SessionMemory:
     """Represents a complete session with all its events."""
+
     session_id: str
     user_id: str
     app_name: str
@@ -63,7 +65,7 @@ class SessionMemory:
             "app_name": self.app_name,
             "events": [event.to_dict() for event in self.events],
             "created_at": self.created_at.isoformat(),
-            "updated_at": self.updated_at.isoformat()
+            "updated_at": self.updated_at.isoformat(),
         }
 
 
@@ -81,13 +83,12 @@ class LocalMemory:
         self.max_sessions = max_sessions
         self.max_events_per_session = max_events_per_session
 
-        logger.info(f"LocalMemory initialized: max_sessions={max_sessions}, max_events_per_session={max_events_per_session}")
+        logger.info(
+            f"LocalMemory initialized: max_sessions={max_sessions}, max_events_per_session={max_events_per_session}"
+        )
 
     async def create_session(
-        self,
-        app_name: str,
-        user_id: str,
-        session_id: Optional[str] = None
+        self, app_name: str, user_id: str, session_id: Optional[str] = None
     ) -> str:
         """Create a new session.
 
@@ -102,14 +103,14 @@ class LocalMemory:
         if not session_id:
             session_id = f"session_{uuid.uuid4().hex[:12]}"
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         session = SessionMemory(
             session_id=session_id,
             user_id=user_id,
             app_name=app_name,
             events=[],
             created_at=now,
-            updated_at=now
+            updated_at=now,
         )
 
         # Cleanup old sessions if needed
@@ -131,10 +132,7 @@ class LocalMemory:
         return self._sessions.get(session_id)
 
     async def get_or_create_session(
-        self,
-        session_id: str,
-        app_name: str = "agent",
-        user_id: str = "user"
+        self, session_id: str, app_name: str = "agent", user_id: str = "user"
     ) -> str:
         """Get existing session or create a new one with the given ID.
 
@@ -170,11 +168,13 @@ class LocalMemory:
         await self._cleanup_events_if_needed(session)
 
         session.events.append(event)
-        session.updated_at = datetime.utcnow()
+        session.updated_at = datetime.now(timezone.utc)
         logger.debug(f"Added {event.event_type} event to session {session_id}")
         return True
 
-    async def get_session_events(self, session_id: str, event_types: Optional[List[str]] = None) -> List[MemoryEvent]:
+    async def get_session_events(
+        self, session_id: str, event_types: Optional[List[str]] = None
+    ) -> List[MemoryEvent]:
         """Get events for a session, optionally filtered by type.
 
         Args:
@@ -213,10 +213,7 @@ class LocalMemory:
         return "\n".join(context_lines)
 
     def create_event(
-        self,
-        event_type: str,
-        content: Any,
-        metadata: Optional[Dict[str, Any]] = None
+        self, event_type: str, content: Any, metadata: Optional[Dict[str, Any]] = None
     ) -> MemoryEvent:
         """Create a memory event.
 
@@ -230,10 +227,10 @@ class LocalMemory:
         """
         return MemoryEvent(
             event_id=f"event_{uuid.uuid4().hex[:8]}",
-            timestamp=datetime.utcnow(),
+            timestamp=datetime.now(timezone.utc),
             event_type=event_type,
             content=content,
-            metadata=metadata or {}
+            metadata=metadata or {},
         )
 
     async def list_sessions(self, user_id: Optional[str] = None) -> List[str]:
@@ -274,7 +271,9 @@ class LocalMemory:
         return {
             "total_sessions": len(self._sessions),
             "total_events": total_events,
-            "avg_events_per_session": int(total_events / len(self._sessions)) if self._sessions else 0
+            "avg_events_per_session": (
+                int(total_events / len(self._sessions)) if self._sessions else 0
+            ),
         }
 
     async def cleanup_old_sessions(self, max_age_hours: int = 24) -> int:
@@ -286,7 +285,7 @@ class LocalMemory:
         Returns:
             Number of sessions cleaned up
         """
-        cutoff_time = datetime.utcnow() - timedelta(hours=max_age_hours)
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
         sessions_to_delete = []
 
         for session_id, session in self._sessions.items():
@@ -308,10 +307,7 @@ class LocalMemory:
             sessions_to_remove = max(1, self.max_sessions // 10)
 
             # Sort by updated_at to find oldest
-            sorted_sessions = sorted(
-                self._sessions.items(),
-                key=lambda x: x[1].updated_at
-            )
+            sorted_sessions = sorted(self._sessions.items(), key=lambda x: x[1].updated_at)
 
             for session_id, _ in sorted_sessions[:sessions_to_remove]:
                 del self._sessions[session_id]
@@ -327,7 +323,9 @@ class LocalMemory:
 
             session.events = session.events[-events_to_keep:]
 
-            logger.debug(f"Cleaned up {removed_count} oldest events from session {session.session_id}")
+            logger.debug(
+                f"Cleaned up {removed_count} oldest events from session {session.session_id}"
+            )
 
 
 # Backwards compatibility - this is the main class to use
