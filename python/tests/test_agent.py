@@ -8,7 +8,7 @@ Focuses on meaningful integration between components.
 import pytest
 import logging
 from unittest.mock import Mock, AsyncMock
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 from agent.client import Agent, RemoteAgent, AgentCard
 from agent.memory import LocalMemory
@@ -26,17 +26,22 @@ class MockModelAPI(ModelAPI):
         self.call_count = 0
         self.model = "mock"
         self.api_base = "mock://localhost"
-        self._mock_responses: List[str] = []
-        self._mock_step = 0
+        self._mock_responses: Optional[List[str]] = None  # Not used in this mock
 
-    async def process_message(self, messages: List[Dict], stream: bool = False) -> str:
-        """Return a mock response based on the name."""
+    async def process_message(self, messages: List[Dict], stream: bool = False):
+        """Return a mock response based on the name.
+
+        Returns str if stream=False, AsyncIterator[str] if stream=True.
+        """
         self.call_count += 1
         user_msg = next((m["content"] for m in messages if m["role"] == "user"), "")
-        return f"[{self.name}] Response to: {user_msg}"
+        content = f"[{self.name}] Response to: {user_msg}"
+        if stream:
+            return self._yield_content(content)
+        return content
 
-    async def process_message_stream(self, messages: List[Dict]):
-        content = await self.process_message(messages)
+    async def _yield_content(self, content: str):
+        """Yield content as streaming chunks."""
         for word in content.split():
             yield word + " "
 

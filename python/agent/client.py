@@ -14,7 +14,7 @@ Key design principles:
 import json
 import re
 import logging
-from typing import List, Dict, Any, Optional, AsyncIterator, Union
+from typing import List, Dict, Any, Optional, AsyncIterator, Union, cast
 import httpx
 from dataclasses import dataclass
 
@@ -339,7 +339,8 @@ class Agent:
                 logger.debug(f"Agentic loop step {step + 1}/{self.loop_config.max_steps}")
 
                 # Get model response (mock responses handled by ModelAPI)
-                content = await self.model_api.process_message(messages, stream=False)
+                # stream=False always returns str, cast for type checker
+                content = cast(str, await self.model_api.process_message(messages, stream=False))
 
                 # Check for tool call
                 tool_call = self._parse_tool_call(content)

@@ -8,7 +8,7 @@ Uses DEBUG_MOCK_RESPONSES env var for deterministic testing.
 import json
 import logging
 import os
-from typing import Dict, List, Optional, AsyncIterator
+from typing import Dict, List, Optional, AsyncIterator, Union
 from dataclasses import dataclass
 import httpx
 
@@ -61,7 +61,6 @@ class ModelAPI:
         self.api_base = api_base.rstrip("/")  # Clean trailing slash
         self.api_key = api_key
         self._mock_responses = get_mock_responses()
-        self._mock_step = 0
 
         # Build headers
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
@@ -78,54 +77,43 @@ class ModelAPI:
         if self._mock_responses:
             logger.info(f"ModelAPI using mock responses ({len(self._mock_responses)} configured)")
 
+    def _pop_mock_response(self) -> Optional[str]:
+        """Pop and return the next mock response, or None if no mocks available."""
+        if self._mock_responses:
+            return self._mock_responses.pop(0)
+        return None
+
     async def process_message(
         self,
         messages: List[Dict[str, str]],
         stream: bool = False,
-    ) -> str:
-        """Process messages and return response content (non-streaming).
+    ) -> Union[str, AsyncIterator[str]]:
+        """Process messages and return response.
 
         Args:
             messages: OpenAI-format messages
-            stream: Ignored - for API compatibility only
+            stream: If True, returns AsyncIterator[str]; if False, returns str
 
         Returns:
-            Response content string
+            str if stream=False, AsyncIterator[str] if stream=True
         """
         # Check for mock response
-        if self._mock_responses and self._mock_step < len(self._mock_responses):
-            content = self._mock_responses[self._mock_step]
-            self._mock_step += 1
-            logger.debug(f"Using mock response {self._mock_step}: {content[:50]}...")
-            return content
+        mock_content = self._pop_mock_response()
+        if mock_content is not None:
+            logger.debug(f"Using mock response: {mock_content[:50]}...")
+            if stream:
+                return self._yield_mock_response(mock_content)
+            return mock_content
 
         # Call real API
+        if stream:
+            return self._stream_response(messages)
         return await self._complete_response(messages)
 
-    async def process_message_stream(
-        self,
-        messages: List[Dict[str, str]],
-    ) -> AsyncIterator[str]:
-        """Process messages with streaming response.
-
-        Args:
-            messages: OpenAI-format messages
-
-        Yields:
-            Response content chunks
-        """
-        # Check for mock response
-        if self._mock_responses and self._mock_step < len(self._mock_responses):
-            content = self._mock_responses[self._mock_step]
-            self._mock_step += 1
-            logger.debug(f"Using mock response {self._mock_step}: {content[:50]}...")
-            for word in content.split():
-                yield word + " "
-            return
-
-        # Call real API
-        async for chunk in self._stream_response(messages):
-            yield chunk
+    async def _yield_mock_response(self, content: str) -> AsyncIterator[str]:
+        """Yield mock response as streaming chunks."""
+        for word in content.split():
+            yield word + " "
 
     async def _complete_response(self, messages: List[Dict[str, str]]) -> str:
         """Non-streaming completion - returns content string."""

@@ -13,7 +13,7 @@ import logging
 import time
 import httpx
 from multiprocessing import Process
-from typing import Optional
+from typing import Optional, List
 from unittest.mock import AsyncMock
 
 from agent.client import Agent, RemoteAgent, AgenticLoopConfig
@@ -30,21 +30,26 @@ class MockModelAPI(ModelAPI):
 
     def __init__(self, responses: Optional[list] = None):
         """Initialize with a list of responses to return in sequence."""
-        self.responses = responses or ["Default mock response"]
+        self.responses = list(responses) if responses else ["Default mock response"]
         self.call_count = 0
         self.model = "mock"
         self.api_base = "mock://localhost"
         self.client = None  # Not used
+        self._mock_responses: Optional[List[str]] = None  # Not used in mock
 
-    async def process_message(self, messages, stream=False) -> str:
-        """Return next response from the list."""
+    async def process_message(self, messages, stream=False):
+        """Return next response from the list.
+
+        Returns str if stream=False, AsyncIterator[str] if stream=True.
+        """
         content = self.responses[min(self.call_count, len(self.responses) - 1)]
         self.call_count += 1
+        if stream:
+            return self._yield_content(content)
         return content
 
-    async def process_message_stream(self, messages):
-        """Return next response as a stream."""
-        content = await self.process_message(messages)
+    async def _yield_content(self, content: str):
+        """Yield content as streaming chunks."""
         for word in content.split():
             yield word + " "
 
