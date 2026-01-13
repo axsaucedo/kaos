@@ -309,14 +309,6 @@ class AgentServer:
             },
         )
 
-    def create_app(self) -> FastAPI:
-        """Create FastAPI app (like Google ADK pattern).
-
-        Returns:
-            FastAPI application
-        """
-        return self.app
-
     def run(self, host: str = "0.0.0.0"):
         """Run the server.
 
@@ -406,10 +398,9 @@ def create_agent_server(
 
 def create_app(settings: Optional[AgentServerSettings] = None) -> FastAPI:
     """Create FastAPI app for uvicorn deployment."""
-    _server = create_agent_server(settings)
-    app = _server.create_app()
-    logger.info(f"Created Agent FastAPI App")
-    return app
+    server = create_agent_server(settings)
+    logger.info("Created Agent FastAPI App")
+    return server.app
 
 
 def get_app() -> FastAPI:
