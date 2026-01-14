@@ -49,6 +49,9 @@ class AgentServerSettings(BaseSettings):
     # Agentic loop configuration (from K8s operator)
     agentic_loop_max_steps: int = 5
 
+    # Memory context limit for delegation (number of messages to include)
+    memory_context_limit: int = 6
+
     # Debug settings (only enable in development/testing)
     agent_debug_memory_endpoints: bool = False
 
@@ -377,6 +380,7 @@ def create_agent_server(
         model_api=model_api,
         sub_agents=sub_agents,
         max_steps=settings.agentic_loop_max_steps,
+        memory_context_limit=settings.memory_context_limit,
     )
 
     server = AgentServer(

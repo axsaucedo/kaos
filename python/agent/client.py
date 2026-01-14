@@ -166,6 +166,7 @@ class Agent:
         mcp_clients: Optional[List[MCPClient]] = None,
         sub_agents: Optional[List[RemoteAgent]] = None,
         max_steps: int = 5,
+        memory_context_limit: int = 6,
     ):
         self.name = name
         self.instructions = instructions
@@ -177,6 +178,7 @@ class Agent:
             agent.name: agent for agent in (sub_agents or [])
         }
         self.max_steps = max_steps
+        self.memory_context_limit = memory_context_limit
 
         logger.info(f"Agent initialized: {name}")
 
@@ -235,7 +237,9 @@ class Agent:
             parts.append("\n**Unavailable agents:**")
             parts.extend(unavailable)
 
-        return "\n## Available Agents for Delegation\n" + "\n".join(parts) + "\n" + AGENT_INSTRUCTIONS
+        return (
+            "\n## Available Agents for Delegation\n" + "\n".join(parts) + "\n" + AGENT_INSTRUCTIONS
+        )
 
     async def _build_system_prompt(self, user_system_prompt: Optional[str] = None) -> str:
         """Build enhanced system prompt with tools, agents info, and optional user prompt.
@@ -467,7 +471,7 @@ class Agent:
         # Build messages for sub-agent with context
         messages: List[Dict[str, str]] = []
         if context_messages:
-            messages.extend(context_messages[-6:])  # Last 6 messages
+            messages.extend(context_messages[-self.memory_context_limit :])
         messages.append({"role": "task-delegation", "content": task})
 
         try:

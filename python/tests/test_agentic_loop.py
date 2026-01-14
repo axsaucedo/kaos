@@ -263,6 +263,74 @@ class TestAgenticLoopMaxSteps:
         logger.info("✓ Max steps limit works")
 
 
+class TestMemoryContextLimit:
+    """Tests for configurable memory context limit."""
+
+    @pytest.mark.asyncio
+    async def test_default_memory_context_limit(self):
+        """Test default memory_context_limit value."""
+        mock_model = MockModelAPI(["test"])
+        agent = Agent(name="test", model_api=mock_model)
+        assert agent.memory_context_limit == 6
+
+    @pytest.mark.asyncio
+    async def test_custom_memory_context_limit(self):
+        """Test custom memory_context_limit value."""
+        mock_model = MockModelAPI(["test"])
+        agent = Agent(name="test", model_api=mock_model, memory_context_limit=10)
+        assert agent.memory_context_limit == 10
+
+    @pytest.mark.asyncio
+    async def test_delegation_respects_memory_context_limit(self):
+        """Test that delegation uses memory_context_limit to limit context messages."""
+        # Create mock model that returns delegation then final response
+        delegation_response = """I'll delegate this.
+```delegate
+{"agent": "worker", "task": "Do the work"}
+```"""
+        final_response = "Done."
+
+        mock_model = MockModelAPI(responses=[delegation_response, final_response])
+        memory = LocalMemory()
+
+        # Create mock remote agent
+        mock_remote = RemoteAgent(name="worker", card_url="http://localhost:9999")
+        mock_remote.agent_card = type(
+            "AgentCard",
+            (),
+            {"name": "worker", "description": "Worker", "url": "http://localhost:9999"},
+        )()
+        mock_remote._active = True
+        mock_remote.process_message = AsyncMock(return_value="Work done")  # type: ignore[method-assign]
+
+        # Create agent with custom memory context limit of 2
+        agent = Agent(
+            name="coordinator",
+            model_api=mock_model,
+            sub_agents=[mock_remote],
+            memory=memory,
+            memory_context_limit=2,  # Only include last 2 messages
+        )
+
+        # Process message
+        result = []
+        async for chunk in agent.process_message("Do some work"):
+            result.append(chunk)
+
+        # Verify delegation occurred
+        mock_remote.process_message.assert_called_once()  # type: ignore[union-attr]
+        call_args = mock_remote.process_message.call_args[0][0]  # type: ignore[union-attr]
+
+        # Should have at most memory_context_limit + 1 messages (context + task-delegation)
+        # With limit=2, we expect: up to 2 context messages + 1 task-delegation message
+        assert len(call_args) <= 3
+
+        # Last message should always be task-delegation
+        assert call_args[-1]["role"] == "task-delegation"
+
+        logger.info("✓ Memory context limit works for delegation")
+
+
 class TestSystemPromptBuilding:
     """Tests for system prompt construction with tools and agents."""
 
