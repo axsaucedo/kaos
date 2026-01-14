@@ -44,13 +44,6 @@ Wait for the agent's response before providing your final answer.
 
 
 @dataclass
-class AgenticLoopConfig:
-    """Configuration for the agentic reasoning loop."""
-
-    max_steps: int = 5  # Maximum reasoning steps to prevent infinite loops
-
-
-@dataclass
 class AgentCard:
     """Agent discovery card for A2A protocol."""
 
@@ -174,7 +167,7 @@ class Agent:
         memory: Optional[LocalMemory] = None,
         mcp_clients: Optional[List[MCPClient]] = None,
         sub_agents: Optional[List[RemoteAgent]] = None,
-        loop_config: Optional[AgenticLoopConfig] = None,
+        max_steps: int = 5,
     ):
         self.name = name
         self.instructions = instructions
@@ -185,7 +178,7 @@ class Agent:
         self.sub_agents: Dict[str, RemoteAgent] = {
             agent.name: agent for agent in (sub_agents or [])
         }
-        self.loop_config = loop_config or AgenticLoopConfig()
+        self.max_steps = max_steps
 
         logger.info(f"Agent initialized: {name}")
 
@@ -306,8 +299,8 @@ class Agent:
 
         try:
             # Agentic loop - iterate up to max_steps
-            for step in range(self.loop_config.max_steps):
-                logger.debug(f"Agentic loop step {step + 1}/{self.loop_config.max_steps}")
+            for step in range(self.max_steps):
+                logger.debug(f"Agentic loop step {step + 1}/{self.max_steps}")
 
                 # Get model response (stream=False always returns str)
                 content = cast(str, await self.model_api.process_message(messages, stream=False))
@@ -394,7 +387,7 @@ class Agent:
                 return
 
             # Max steps reached
-            max_steps_msg = f"Reached maximum reasoning steps ({self.loop_config.max_steps})"
+            max_steps_msg = f"Reached maximum reasoning steps ({self.max_steps})"
             logger.warning(max_steps_msg)
             yield max_steps_msg
 

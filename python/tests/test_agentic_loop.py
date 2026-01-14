@@ -16,7 +16,7 @@ from multiprocessing import Process
 from typing import Optional, List
 from unittest.mock import AsyncMock
 
-from agent.client import Agent, RemoteAgent, AgenticLoopConfig
+from agent.client import Agent, RemoteAgent
 from agent.memory import LocalMemory
 from agent.server import AgentServerSettings, create_agent_server
 from modelapi.client import ModelAPI
@@ -91,18 +91,20 @@ class MockMCPClient(MCPClient):
         pass
 
 
-class TestAgenticLoopConfig:
-    """Tests for AgenticLoopConfig."""
+class TestMaxStepsConfig:
+    """Tests for max_steps configuration."""
 
-    def test_default_config(self):
-        """Test default agentic loop configuration."""
-        config = AgenticLoopConfig()
-        assert config.max_steps == 5
+    def test_default_max_steps(self):
+        """Test default max_steps value."""
+        model_api = MockModelAPI(["test"])
+        agent = Agent(name="test", model_api=model_api)
+        assert agent.max_steps == 5
 
-    def test_custom_config(self):
-        """Test custom agentic loop configuration."""
-        config = AgenticLoopConfig(max_steps=3)
-        assert config.max_steps == 3
+    def test_custom_max_steps(self):
+        """Test custom max_steps value."""
+        model_api = MockModelAPI(["test"])
+        agent = Agent(name="test", model_api=model_api, max_steps=3)
+        assert agent.max_steps == 3
 
 
 class TestAgenticLoopToolCalling:
@@ -127,7 +129,7 @@ class TestAgenticLoopToolCalling:
             model_api=mock_model,
             mcp_clients=[mock_mcp],
             memory=memory,
-            loop_config=AgenticLoopConfig(max_steps=3),
+            max_steps=3,
         )
 
         # Process message
@@ -193,7 +195,7 @@ class TestAgenticLoopDelegation:
             model_api=mock_model,
             sub_agents=[mock_remote],
             memory=memory,
-            loop_config=AgenticLoopConfig(max_steps=3),
+            max_steps=3,
         )
 
         # Process message
@@ -243,7 +245,7 @@ class TestAgenticLoopMaxSteps:
             model_api=mock_model,
             mcp_clients=[mock_mcp],
             memory=memory,
-            loop_config=AgenticLoopConfig(max_steps=3),
+            max_steps=3,
         )
 
         result = []
@@ -386,7 +388,7 @@ class TestMockResponseEnvVar:
                 model_api=model_api,
                 mcp_clients=[mock_mcp],
                 memory=memory,
-                loop_config=AgenticLoopConfig(max_steps=5),
+                max_steps=5,
             )
 
             result = []
@@ -450,7 +452,7 @@ class TestMemoryEventTracking:
             mcp_clients=[mock_mcp],
             sub_agents=[mock_remote],
             memory=memory,
-            loop_config=AgenticLoopConfig(max_steps=5),
+            max_steps=5,
         )
 
         result = []
