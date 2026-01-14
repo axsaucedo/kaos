@@ -180,36 +180,39 @@ class Agent:
 
         logger.info(f"Agent initialized: {name}")
 
-    async def _build_system_prompt(self) -> str:
-        """Build enhanced system prompt with tools and agents info."""
-        parts = [self.instructions]
+    async def _get_tools_prompt(self) -> Optional[str]:
+        """Build complete tools section for system prompt.
 
-        # Add tools info if available (inline tool description building)
-        if self.mcp_clients:
-            tools_desc = []
-            for mcp_client in self.mcp_clients:
-                if not mcp_client._active:
-                    await mcp_client._init()
-                for tool in mcp_client.get_tools():
-                    params_str = json.dumps(tool.parameters, indent=2) if tool.parameters else "{}"
-                    tools_desc.append(
-                        f"- **{tool.name}**: {tool.description}\n  Parameters: {params_str}"
-                    )
-            if tools_desc:
-                parts.append("\n## Available Tools\n" + "\n".join(tools_desc))
-                parts.append(TOOLS_INSTRUCTIONS)
+        Returns:
+            Complete tools section with header and instructions, or None if no tools.
+        """
+        if not self.mcp_clients:
+            return None
 
-        # Add agents info if available
-        if self.sub_agents:
-            agents_info = await self._get_agents_description()
-            if agents_info:
-                parts.append("\n## Available Agents for Delegation\n" + agents_info)
-                parts.append(AGENT_INSTRUCTIONS)
+        tools_desc = []
+        for mcp_client in self.mcp_clients:
+            if not mcp_client._active:
+                await mcp_client._init()
+            for tool in mcp_client.get_tools():
+                params_str = json.dumps(tool.parameters, indent=2) if tool.parameters else "{}"
+                tools_desc.append(
+                    f"- **{tool.name}**: {tool.description}\n  Parameters: {params_str}"
+                )
 
-        return "\n".join(parts)
+        if not tools_desc:
+            return None
 
-    async def _get_agents_description(self) -> str:
-        """Get formatted description of all sub-agents, attempting init for inactive ones."""
+        return "\n## Available Tools\n" + "\n".join(tools_desc) + "\n" + TOOLS_INSTRUCTIONS
+
+    async def _get_agents_prompt(self) -> Optional[str]:
+        """Build complete agents section for system prompt.
+
+        Returns:
+            Complete agents section with header and instructions, or None if no agents.
+        """
+        if not self.sub_agents:
+            return None
+
         available = []
         unavailable = []
 
@@ -224,10 +227,28 @@ class Agent:
             else:
                 unavailable.append(f"- **{sub_agent.name}**: (unavailable)")
 
+        if not available and not unavailable:
+            return None
+
         parts = available
         if unavailable:
             parts.append("\n**Unavailable agents:**")
             parts.extend(unavailable)
+
+        return "\n## Available Agents for Delegation\n" + "\n".join(parts) + "\n" + AGENT_INSTRUCTIONS
+
+    async def _build_system_prompt(self) -> str:
+        """Build enhanced system prompt with tools and agents info."""
+        parts = [self.instructions]
+
+        tools_prompt = await self._get_tools_prompt()
+        if tools_prompt:
+            parts.append(tools_prompt)
+
+        agents_prompt = await self._get_agents_prompt()
+        if agents_prompt:
+            parts.append(agents_prompt)
+
         return "\n".join(parts)
 
     def _parse_block(self, content: str, block_type: str) -> Optional[Dict[str, Any]]:
