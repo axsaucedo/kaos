@@ -115,14 +115,12 @@ class RemoteAgent:
     async def process_message(
         self,
         messages: List[Dict[str, str]],
-        session_id: Optional[str] = None,
     ) -> str:
         """Process messages via remote agent's /v1/chat/completions.
 
         Args:
             messages: List of messages providing context. The last message
                      should have role "task-delegation" with the delegated task.
-            session_id: Optional session ID for tracking (not currently used by remote).
 
         Returns:
             The agent's response content.
@@ -425,7 +423,7 @@ class Agent:
         messages.append({"role": "task-delegation", "content": task})
 
         try:
-            response = await sub_agent.process_message(messages, session_id=session_id)
+            response = await sub_agent.process_message(messages)
 
             if session_id:
                 await self.memory.add_event(
