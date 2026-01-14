@@ -325,6 +325,61 @@ class TestSystemPromptBuilding:
 
         logger.info("✓ System prompt includes agents")
 
+    @pytest.mark.asyncio
+    async def test_system_prompt_includes_user_provided_prompt(self):
+        """Test that system prompt includes user-provided system prompt."""
+        mock_model = MockModelAPI(responses=["Response with user context."])
+
+        agent = Agent(
+            name="test-agent",
+            instructions="You are a helpful agent.",
+            model_api=mock_model,
+        )
+
+        # Build prompt with user-provided system prompt
+        prompt = await agent._build_system_prompt("Always respond in JSON format.")
+
+        # Check agent system prompt is included
+        assert "## Agent System Prompt" in prompt
+        assert "You are a helpful agent." in prompt
+
+        # Check user-provided system prompt is included
+        assert "## User-Provided System Prompt" in prompt
+        assert "Always respond in JSON format." in prompt
+
+        # Check precedence note is included
+        assert "Agent System Prompt takes precedence" in prompt
+
+        logger.info("✓ System prompt includes user-provided prompt")
+
+    @pytest.mark.asyncio
+    async def test_process_message_merges_user_system_prompt(self):
+        """Test that process_message correctly merges user system prompts."""
+        mock_model = MockModelAPI(responses=["Response considering user context."])
+
+        agent = Agent(
+            name="test-agent",
+            instructions="You are a helpful agent.",
+            model_api=mock_model,
+        )
+
+        # Send message with user-provided system prompt
+        result = []
+        async for chunk in agent.process_message(
+            [
+                {"role": "system", "content": "Always be concise."},
+                {"role": "user", "content": "Hello"},
+            ]
+        ):
+            result.append(chunk)
+
+        # Verify the model was called (we can't easily check the exact prompt
+        # without more intrusive mocking, but we verify the flow completes)
+        assert len(result) > 0
+        assert mock_model.call_count == 1
+
+        logger.info("✓ Process message merges user system prompt")
+
 
 class TestMockResponseEnvVar:
     """Tests for the DEBUG_MOCK_RESPONSES environment variable."""

@@ -237,9 +237,20 @@ class Agent:
 
         return "\n## Available Agents for Delegation\n" + "\n".join(parts) + "\n" + AGENT_INSTRUCTIONS
 
-    async def _build_system_prompt(self) -> str:
-        """Build enhanced system prompt with tools and agents info."""
-        parts = [self.instructions]
+    async def _build_system_prompt(self, user_system_prompt: Optional[str] = None) -> str:
+        """Build enhanced system prompt with tools, agents info, and optional user prompt.
+
+        Args:
+            user_system_prompt: Optional user-provided system prompt to merge.
+
+        Returns:
+            Complete system prompt with clear section markers.
+        """
+        parts = []
+
+        # Agent's core system prompt
+        parts.append("## Agent System Prompt")
+        parts.append(self.instructions)
 
         tools_prompt = await self._get_tools_prompt()
         if tools_prompt:
@@ -248,6 +259,14 @@ class Agent:
         agents_prompt = await self._get_agents_prompt()
         if agents_prompt:
             parts.append(agents_prompt)
+
+        # User-provided system prompt (if any)
+        if user_system_prompt:
+            parts.append("\n## User-Provided System Prompt")
+            parts.append(user_system_prompt)
+            parts.append(
+                "\n*Note: The Agent System Prompt takes precedence for behavior and capabilities.*"
+            )
 
         return "\n".join(parts)
 
@@ -290,8 +309,16 @@ class Agent:
 
         logger.debug(f"Processing message for session {session_id}, streaming={stream}")
 
+        # Extract user-provided system prompt (if any) from message array
+        user_system_prompt: Optional[str] = None
+        if isinstance(message, list):
+            for msg in message:
+                if msg.get("role") == "system":
+                    user_system_prompt = msg.get("content", "")
+                    break
+
         # Build enhanced system prompt with tools/agents info
-        system_prompt = await self._build_system_prompt()
+        system_prompt = await self._build_system_prompt(user_system_prompt)
         messages = [{"role": "system", "content": system_prompt}]
 
         # Handle both string and array input formats
@@ -304,7 +331,7 @@ class Agent:
                 role = msg.get("role", "user")
                 content = msg.get("content", "")
                 if role == "system":
-                    continue  # Skip external system messages
+                    continue  # Already captured above
 
                 if role == "task-delegation":
                     delegation_event = self.memory.create_event("task_delegation_received", content)
