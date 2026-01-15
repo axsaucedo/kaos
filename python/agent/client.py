@@ -44,13 +44,6 @@ Wait for the agent's response before providing your final answer.
 
 
 @dataclass
-class AgenticLoopConfig:
-    """Configuration for the agentic reasoning loop."""
-
-    max_steps: int = 5  # Maximum reasoning steps to prevent infinite loops
-
-
-@dataclass
 class AgentCard:
     """Agent discovery card for A2A protocol."""
 
@@ -122,14 +115,12 @@ class RemoteAgent:
     async def process_message(
         self,
         messages: List[Dict[str, str]],
-        session_id: Optional[str] = None,
     ) -> str:
         """Process messages via remote agent's /v1/chat/completions.
 
         Args:
             messages: List of messages providing context. The last message
                      should have role "task-delegation" with the delegated task.
-            session_id: Optional session ID for tracking (not currently used by remote).
 
         Returns:
             The agent's response content.
@@ -174,7 +165,8 @@ class Agent:
         memory: Optional[LocalMemory] = None,
         mcp_clients: Optional[List[MCPClient]] = None,
         sub_agents: Optional[List[RemoteAgent]] = None,
-        loop_config: Optional[AgenticLoopConfig] = None,
+        max_steps: int = 5,
+        memory_context_limit: int = 6,
     ):
         self.name = name
         self.instructions = instructions
@@ -185,40 +177,44 @@ class Agent:
         self.sub_agents: Dict[str, RemoteAgent] = {
             agent.name: agent for agent in (sub_agents or [])
         }
-        self.loop_config = loop_config or AgenticLoopConfig()
+        self.max_steps = max_steps
+        self.memory_context_limit = memory_context_limit
 
         logger.info(f"Agent initialized: {name}")
 
-    async def _build_system_prompt(self) -> str:
-        """Build enhanced system prompt with tools and agents info."""
-        parts = [self.instructions]
+    async def _get_tools_prompt(self) -> Optional[str]:
+        """Build complete tools section for system prompt.
 
-        # Add tools info if available (inline tool description building)
-        if self.mcp_clients:
-            tools_desc = []
-            for mcp_client in self.mcp_clients:
-                if not mcp_client._active:
-                    await mcp_client._init()
-                for tool in mcp_client.get_tools():
-                    params_str = json.dumps(tool.parameters, indent=2) if tool.parameters else "{}"
-                    tools_desc.append(
-                        f"- **{tool.name}**: {tool.description}\n  Parameters: {params_str}"
-                    )
-            if tools_desc:
-                parts.append("\n## Available Tools\n" + "\n".join(tools_desc))
-                parts.append(TOOLS_INSTRUCTIONS)
+        Returns:
+            Complete tools section with header and instructions, or None if no tools.
+        """
+        if not self.mcp_clients:
+            return None
 
-        # Add agents info if available
-        if self.sub_agents:
-            agents_info = await self._get_agents_description()
-            if agents_info:
-                parts.append("\n## Available Agents for Delegation\n" + agents_info)
-                parts.append(AGENT_INSTRUCTIONS)
+        tools_desc = []
+        for mcp_client in self.mcp_clients:
+            if not mcp_client._active:
+                await mcp_client._init()
+            for tool in mcp_client.get_tools():
+                params_str = json.dumps(tool.parameters, indent=2) if tool.parameters else "{}"
+                tools_desc.append(
+                    f"- **{tool.name}**: {tool.description}\n  Parameters: {params_str}"
+                )
 
-        return "\n".join(parts)
+        if not tools_desc:
+            return None
 
-    async def _get_agents_description(self) -> str:
-        """Get formatted description of all sub-agents, attempting init for inactive ones."""
+        return "\n## Available Tools\n" + "\n".join(tools_desc) + "\n" + TOOLS_INSTRUCTIONS
+
+    async def _get_agents_prompt(self) -> Optional[str]:
+        """Build complete agents section for system prompt.
+
+        Returns:
+            Complete agents section with header and instructions, or None if no agents.
+        """
+        if not self.sub_agents:
+            return None
+
         available = []
         unavailable = []
 
@@ -233,10 +229,49 @@ class Agent:
             else:
                 unavailable.append(f"- **{sub_agent.name}**: (unavailable)")
 
+        if not available and not unavailable:
+            return None
+
         parts = available
         if unavailable:
             parts.append("\n**Unavailable agents:**")
             parts.extend(unavailable)
+
+        return (
+            "\n## Available Agents for Delegation\n" + "\n".join(parts) + "\n" + AGENT_INSTRUCTIONS
+        )
+
+    async def _build_system_prompt(self, user_system_prompt: Optional[str] = None) -> str:
+        """Build enhanced system prompt with tools, agents info, and optional user prompt.
+
+        Args:
+            user_system_prompt: Optional user-provided system prompt to merge.
+
+        Returns:
+            Complete system prompt with clear section markers.
+        """
+        parts = []
+
+        # Agent's core system prompt
+        parts.append("## Agent System Prompt")
+        parts.append(self.instructions)
+
+        tools_prompt = await self._get_tools_prompt()
+        if tools_prompt:
+            parts.append(tools_prompt)
+
+        agents_prompt = await self._get_agents_prompt()
+        if agents_prompt:
+            parts.append(agents_prompt)
+
+        # User-provided system prompt (if any)
+        if user_system_prompt:
+            parts.append("\n## User-Provided System Prompt")
+            parts.append(user_system_prompt)
+            parts.append(
+                "\n*Note: The Agent System Prompt takes precedence for behavior and capabilities.*"
+            )
+
         return "\n".join(parts)
 
     def _parse_block(self, content: str, block_type: str) -> Optional[Dict[str, Any]]:
@@ -278,8 +313,16 @@ class Agent:
 
         logger.debug(f"Processing message for session {session_id}, streaming={stream}")
 
+        # Extract user-provided system prompt (if any) from message array
+        user_system_prompt: Optional[str] = None
+        if isinstance(message, list):
+            for msg in message:
+                if msg.get("role") == "system":
+                    user_system_prompt = msg.get("content", "")
+                    break
+
         # Build enhanced system prompt with tools/agents info
-        system_prompt = await self._build_system_prompt()
+        system_prompt = await self._build_system_prompt(user_system_prompt)
         messages = [{"role": "system", "content": system_prompt}]
 
         # Handle both string and array input formats
@@ -292,7 +335,7 @@ class Agent:
                 role = msg.get("role", "user")
                 content = msg.get("content", "")
                 if role == "system":
-                    continue  # Skip external system messages
+                    continue  # Already captured above
 
                 if role == "task-delegation":
                     delegation_event = self.memory.create_event("task_delegation_received", content)
@@ -306,8 +349,8 @@ class Agent:
 
         try:
             # Agentic loop - iterate up to max_steps
-            for step in range(self.loop_config.max_steps):
-                logger.debug(f"Agentic loop step {step + 1}/{self.loop_config.max_steps}")
+            for step in range(self.max_steps):
+                logger.debug(f"Agentic loop step {step + 1}/{self.max_steps}")
 
                 # Get model response (stream=False always returns str)
                 content = cast(str, await self.model_api.process_message(messages, stream=False))
@@ -394,7 +437,7 @@ class Agent:
                 return
 
             # Max steps reached
-            max_steps_msg = f"Reached maximum reasoning steps ({self.loop_config.max_steps})"
+            max_steps_msg = f"Reached maximum reasoning steps ({self.max_steps})"
             logger.warning(max_steps_msg)
             yield max_steps_msg
 
@@ -428,11 +471,11 @@ class Agent:
         # Build messages for sub-agent with context
         messages: List[Dict[str, str]] = []
         if context_messages:
-            messages.extend(context_messages[-6:])  # Last 6 messages
+            messages.extend(context_messages[-self.memory_context_limit :])
         messages.append({"role": "task-delegation", "content": task})
 
         try:
-            response = await sub_agent.process_message(messages, session_id=session_id)
+            response = await sub_agent.process_message(messages)
 
             if session_id:
                 await self.memory.add_event(

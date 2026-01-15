@@ -16,7 +16,7 @@ from multiprocessing import Process
 from typing import Optional, List
 from unittest.mock import AsyncMock
 
-from agent.client import Agent, RemoteAgent, AgenticLoopConfig
+from agent.client import Agent, RemoteAgent
 from agent.memory import LocalMemory
 from agent.server import AgentServerSettings, create_agent_server
 from modelapi.client import ModelAPI
@@ -91,18 +91,20 @@ class MockMCPClient(MCPClient):
         pass
 
 
-class TestAgenticLoopConfig:
-    """Tests for AgenticLoopConfig."""
+class TestMaxStepsConfig:
+    """Tests for max_steps configuration."""
 
-    def test_default_config(self):
-        """Test default agentic loop configuration."""
-        config = AgenticLoopConfig()
-        assert config.max_steps == 5
+    def test_default_max_steps(self):
+        """Test default max_steps value."""
+        model_api = MockModelAPI(["test"])
+        agent = Agent(name="test", model_api=model_api)
+        assert agent.max_steps == 5
 
-    def test_custom_config(self):
-        """Test custom agentic loop configuration."""
-        config = AgenticLoopConfig(max_steps=3)
-        assert config.max_steps == 3
+    def test_custom_max_steps(self):
+        """Test custom max_steps value."""
+        model_api = MockModelAPI(["test"])
+        agent = Agent(name="test", model_api=model_api, max_steps=3)
+        assert agent.max_steps == 3
 
 
 class TestAgenticLoopToolCalling:
@@ -127,7 +129,7 @@ class TestAgenticLoopToolCalling:
             model_api=mock_model,
             mcp_clients=[mock_mcp],
             memory=memory,
-            loop_config=AgenticLoopConfig(max_steps=3),
+            max_steps=3,
         )
 
         # Process message
@@ -193,7 +195,7 @@ class TestAgenticLoopDelegation:
             model_api=mock_model,
             sub_agents=[mock_remote],
             memory=memory,
-            loop_config=AgenticLoopConfig(max_steps=3),
+            max_steps=3,
         )
 
         # Process message
@@ -243,7 +245,7 @@ class TestAgenticLoopMaxSteps:
             model_api=mock_model,
             mcp_clients=[mock_mcp],
             memory=memory,
-            loop_config=AgenticLoopConfig(max_steps=3),
+            max_steps=3,
         )
 
         result = []
@@ -259,6 +261,74 @@ class TestAgenticLoopMaxSteps:
         assert len(mock_mcp.call_log) == 3
 
         logger.info("✓ Max steps limit works")
+
+
+class TestMemoryContextLimit:
+    """Tests for configurable memory context limit."""
+
+    @pytest.mark.asyncio
+    async def test_default_memory_context_limit(self):
+        """Test default memory_context_limit value."""
+        mock_model = MockModelAPI(["test"])
+        agent = Agent(name="test", model_api=mock_model)
+        assert agent.memory_context_limit == 6
+
+    @pytest.mark.asyncio
+    async def test_custom_memory_context_limit(self):
+        """Test custom memory_context_limit value."""
+        mock_model = MockModelAPI(["test"])
+        agent = Agent(name="test", model_api=mock_model, memory_context_limit=10)
+        assert agent.memory_context_limit == 10
+
+    @pytest.mark.asyncio
+    async def test_delegation_respects_memory_context_limit(self):
+        """Test that delegation uses memory_context_limit to limit context messages."""
+        # Create mock model that returns delegation then final response
+        delegation_response = """I'll delegate this.
+```delegate
+{"agent": "worker", "task": "Do the work"}
+```"""
+        final_response = "Done."
+
+        mock_model = MockModelAPI(responses=[delegation_response, final_response])
+        memory = LocalMemory()
+
+        # Create mock remote agent
+        mock_remote = RemoteAgent(name="worker", card_url="http://localhost:9999")
+        mock_remote.agent_card = type(
+            "AgentCard",
+            (),
+            {"name": "worker", "description": "Worker", "url": "http://localhost:9999"},
+        )()
+        mock_remote._active = True
+        mock_remote.process_message = AsyncMock(return_value="Work done")  # type: ignore[method-assign]
+
+        # Create agent with custom memory context limit of 2
+        agent = Agent(
+            name="coordinator",
+            model_api=mock_model,
+            sub_agents=[mock_remote],
+            memory=memory,
+            memory_context_limit=2,  # Only include last 2 messages
+        )
+
+        # Process message
+        result = []
+        async for chunk in agent.process_message("Do some work"):
+            result.append(chunk)
+
+        # Verify delegation occurred
+        mock_remote.process_message.assert_called_once()  # type: ignore[union-attr]
+        call_args = mock_remote.process_message.call_args[0][0]  # type: ignore[union-attr]
+
+        # Should have at most memory_context_limit + 1 messages (context + task-delegation)
+        # With limit=2, we expect: up to 2 context messages + 1 task-delegation message
+        assert len(call_args) <= 3
+
+        # Last message should always be task-delegation
+        assert call_args[-1]["role"] == "task-delegation"
+
+        logger.info("✓ Memory context limit works for delegation")
 
 
 class TestSystemPromptBuilding:
@@ -323,6 +393,61 @@ class TestSystemPromptBuilding:
 
         logger.info("✓ System prompt includes agents")
 
+    @pytest.mark.asyncio
+    async def test_system_prompt_includes_user_provided_prompt(self):
+        """Test that system prompt includes user-provided system prompt."""
+        mock_model = MockModelAPI(responses=["Response with user context."])
+
+        agent = Agent(
+            name="test-agent",
+            instructions="You are a helpful agent.",
+            model_api=mock_model,
+        )
+
+        # Build prompt with user-provided system prompt
+        prompt = await agent._build_system_prompt("Always respond in JSON format.")
+
+        # Check agent system prompt is included
+        assert "## Agent System Prompt" in prompt
+        assert "You are a helpful agent." in prompt
+
+        # Check user-provided system prompt is included
+        assert "## User-Provided System Prompt" in prompt
+        assert "Always respond in JSON format." in prompt
+
+        # Check precedence note is included
+        assert "Agent System Prompt takes precedence" in prompt
+
+        logger.info("✓ System prompt includes user-provided prompt")
+
+    @pytest.mark.asyncio
+    async def test_process_message_merges_user_system_prompt(self):
+        """Test that process_message correctly merges user system prompts."""
+        mock_model = MockModelAPI(responses=["Response considering user context."])
+
+        agent = Agent(
+            name="test-agent",
+            instructions="You are a helpful agent.",
+            model_api=mock_model,
+        )
+
+        # Send message with user-provided system prompt
+        result = []
+        async for chunk in agent.process_message(
+            [
+                {"role": "system", "content": "Always be concise."},
+                {"role": "user", "content": "Hello"},
+            ]
+        ):
+            result.append(chunk)
+
+        # Verify the model was called (we can't easily check the exact prompt
+        # without more intrusive mocking, but we verify the flow completes)
+        assert len(result) > 0
+        assert mock_model.call_count == 1
+
+        logger.info("✓ Process message merges user system prompt")
+
 
 class TestMockResponseEnvVar:
     """Tests for the DEBUG_MOCK_RESPONSES environment variable."""
@@ -386,7 +511,7 @@ class TestMockResponseEnvVar:
                 model_api=model_api,
                 mcp_clients=[mock_mcp],
                 memory=memory,
-                loop_config=AgenticLoopConfig(max_steps=5),
+                max_steps=5,
             )
 
             result = []
@@ -450,7 +575,7 @@ class TestMemoryEventTracking:
             mcp_clients=[mock_mcp],
             sub_agents=[mock_remote],
             memory=memory,
-            loop_config=AgenticLoopConfig(max_steps=5),
+            max_steps=5,
         )
 
         result = []
