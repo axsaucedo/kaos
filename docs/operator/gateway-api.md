@@ -64,7 +64,7 @@ When Gateway API is enabled, the operator automatically creates HTTPRoute resour
 ### Using Helm
 
 ```bash
-helm install agentic-operator ./operator/chart \
+helm install kaos-operator ./operator/chart \
   --namespace kaos-system \
   --create-namespace \
   --set gatewayAPI.enabled=true \
@@ -77,7 +77,7 @@ helm install agentic-operator ./operator/chart \
 | Value | Default | Description |
 |-------|---------|-------------|
 | `gatewayAPI.enabled` | `false` | Enable Gateway API integration |
-| `gatewayAPI.gatewayName` | `agentic-gateway` | Name of the Gateway resource |
+| `gatewayAPI.gatewayName` | `kaos-gateway` | Name of the Gateway resource |
 | `gatewayAPI.gatewayNamespace` | Release namespace | Namespace of the Gateway |
 | `gatewayAPI.createGateway` | `false` | Create a Gateway resource |
 | `gatewayAPI.gatewayClassName` | Required if createGateway | GatewayClass to use |
@@ -129,7 +129,7 @@ This works for all CRD types (Agent, ModelAPI, MCPServer).
 To use an existing Gateway instead of creating one:
 
 ```bash
-helm install agentic-operator ./operator/chart \
+helm install kaos-operator ./operator/chart \
   --namespace kaos-system \
   --create-namespace \
   --set gatewayAPI.enabled=true \
@@ -219,7 +219,7 @@ kubectl get httproute agent-my-agent -n my-namespace -o yaml
 To run without Gateway API (using direct service access):
 
 ```bash
-helm install agentic-operator ./operator/chart \
+helm install kaos-operator ./operator/chart \
   --namespace kaos-system \
   --create-namespace
   # gatewayAPI.enabled defaults to false
@@ -237,12 +237,12 @@ curl http://localhost:8080/health
 
 Check operator logs:
 ```bash
-kubectl logs -n kaos-system deployment/agentic-operator-controller-manager | grep HTTPRoute
+kubectl logs -n kaos-system deployment/kaos-operator-controller-manager | grep HTTPRoute
 ```
 
 Verify Gateway API is enabled:
 ```bash
-kubectl get configmap -n kaos-system agentic-operator-config -o yaml
+kubectl get configmap -n kaos-system kaos-operator-config -o yaml
 ```
 
 ### 404 Errors
@@ -266,7 +266,7 @@ kubectl get configmap -n kaos-system agentic-operator-config -o yaml
 
 If you see "forbidden" errors for httproutes, ensure the operator has proper RBAC:
 ```bash
-kubectl get clusterrole agentic-operator-agentic-operator -o yaml | grep -A10 gateway
+kubectl get clusterrole kaos-operator-kaos-operator -o yaml | grep -A10 gateway
 ```
 
 ## Internal Routing (Future)

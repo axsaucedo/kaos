@@ -378,12 +378,12 @@ cat > /tmp/my-values.yaml << EOF
 controllerManager:
   manager:
     image:
-      repository: my-registry/agentic-operator
+      repository: my-registry/kaos-operator
       tag: v1.0.0
     imagePullPolicy: Always
 defaultImages:
   agentRuntime: my-registry/kaos-agent:v1.0.0
-  mcpServer: my-registry/agentic-mcp-server:v1.0.0
+  mcpServer: my-registry/kaos-mcp-server:v1.0.0
 EOF
 
 # Run tests with custom values

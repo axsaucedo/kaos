@@ -1,6 +1,6 @@
 """Pytest configuration and fixtures for E2E tests.
 
-Uses Gateway API for routing - all requests go through the agentic-gateway.
+Uses Gateway API for routing - all requests go through the kaos-gateway.
 """
 
 import os
@@ -104,7 +104,7 @@ def _install_operator():
                 # Already installed, just wait for Gateway
                 for _ in range(30):
                     try:
-                        result = kubectl("get", "gateway", "agentic-gateway", "-n", OPERATOR_NAMESPACE,
+                        result = kubectl("get", "gateway", "kaos-gateway", "-n", OPERATOR_NAMESPACE,
                                        "-o", "jsonpath={.status.conditions[?(@.type=='Programmed')].status}")
                         if "True" in str(result):
                             return
@@ -138,7 +138,7 @@ def _install_operator():
         else:
             # Default to local images for Docker Desktop
             helm_args.extend([
-                "--set", "controllerManager.manager.image.repository=agentic-operator",
+                "--set", "controllerManager.manager.image.repository=kaos-operator",
                 "--set", "controllerManager.manager.image.tag=latest",
             ])
         helm_args.extend([
@@ -153,7 +153,7 @@ def _install_operator():
         # Wait for Gateway to be ready
         for _ in range(30):
             try:
-                result = kubectl("get", "gateway", "agentic-gateway", "-n", OPERATOR_NAMESPACE,
+                result = kubectl("get", "gateway", "kaos-gateway", "-n", OPERATOR_NAMESPACE,
                                "-o", "jsonpath={.status.conditions[?(@.type=='Programmed')].status}")
                 if "True" in str(result):
                     return

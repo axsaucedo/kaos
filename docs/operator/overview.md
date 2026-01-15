@@ -218,7 +218,7 @@ For development, run the operator locally:
 
 ```bash
 # Scale down deployed operator
-kubectl scale deployment agentic-operator-controller-manager \
+kubectl scale deployment kaos-operator-controller-manager \
   -n kaos-system --replicas=0
 
 # Run locally
@@ -232,7 +232,7 @@ Monitor operator logs:
 
 ```bash
 kubectl logs -n kaos-system \
-  deployment/agentic-operator-controller-manager -f
+  deployment/kaos-operator-controller-manager -f
 ```
 
 Watch custom resources:

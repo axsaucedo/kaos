@@ -1,6 +1,6 @@
 .PHONY: help build docker-build test clean run
 
-IMG ?= agentic-runtime:latest
+IMG ?= kaos-runtime:latest
 
 help:
 	@echo "Agent Runtime build targets:"

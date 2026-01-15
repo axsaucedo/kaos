@@ -302,7 +302,7 @@ spec:
 - MCPServer: 30s (tool calls are typically fast)
 
 **Operator Configuration Environment Variables:**
-All operator configuration is managed via the `agentic-operator-config` ConfigMap, which sets the following env vars:
+All operator configuration is managed via the `kaos-operator-config` ConfigMap, which sets the following env vars:
 
 | Variable | Description | Default |
 |----------|-------------|---------|
@@ -311,7 +311,7 @@ All operator configuration is managed via the `agentic-operator-config` ConfigMa
 | `DEFAULT_LITELLM_IMAGE` | Default LiteLLM proxy image | `ghcr.io/berriai/litellm:main-latest` |
 | `DEFAULT_OLLAMA_IMAGE` | Default Ollama image | `alpine/ollama:latest` |
 | `GATEWAY_API_ENABLED` | Enable Gateway API integration | `false` |
-| `GATEWAY_NAME` | Name of the Gateway resource | `agentic-gateway` |
+| `GATEWAY_NAME` | Name of the Gateway resource | `kaos-gateway` |
 | `GATEWAY_NAMESPACE` | Namespace of the Gateway | Release namespace |
 | `GATEWAY_DEFAULT_AGENT_TIMEOUT` | Default timeout for Agent HTTPRoutes | `120s` |
 | `GATEWAY_DEFAULT_MODELAPI_TIMEOUT` | Default timeout for ModelAPI HTTPRoutes | `120s` |
@@ -331,7 +331,7 @@ gateway:
     mcp: "30s"
 gatewayAPI:
   enabled: true
-  gatewayName: "agentic-gateway"
+  gatewayName: "kaos-gateway"
 ```
 
 ### Controller Environment Variables
@@ -473,7 +473,7 @@ cd operator && make generate && make manifests
 cd operator && make helm
 
 # Run operator locally (scale down deployed operator first)
-kubectl scale deployment agentic-operator-controller-manager -n kaos-system --replicas=0
+kubectl scale deployment kaos-operator-controller-manager -n kaos-system --replicas=0
 cd operator && ./bin/manager
 
 # Run Python tests (34 tests)
@@ -492,15 +492,15 @@ The operator includes a Helm chart in `operator/chart/` generated from kustomize
 
 ```bash
 # Install with Helm
-helm install agentic-operator operator/chart/ -n kaos-system --create-namespace
+helm install kaos-operator operator/chart/ -n kaos-system --create-namespace
 
 # Customize installation
-helm install agentic-operator operator/chart/ -n kaos-system --create-namespace \
+helm install kaos-operator operator/chart/ -n kaos-system --create-namespace \
   --set controllerManager.manager.image.tag=v1.0.0 \
   --set controllerManager.replicas=2
 
 # Uninstall
-helm uninstall agentic-operator -n kaos-system
+helm uninstall kaos-operator -n kaos-system
 ```
 
 Key values in `chart/values.yaml`:
@@ -564,7 +564,7 @@ Four self-contained examples are provided in `operator/config/samples/`:
 Single agent with echo MCP tool and hosted Ollama model (runs in-cluster).
 ```bash
 kubectl apply -f operator/config/samples/1-simple-echo-agent.yaml
-# Creates namespace: agentic-simple
+# Creates namespace: kaos-simple
 # Resources: simple-modelapi (Hosted), simple-echo-mcp, simple-agent
 ```
 
@@ -572,7 +572,7 @@ kubectl apply -f operator/config/samples/1-simple-echo-agent.yaml
 Coordinator with two workers, all with access to echo MCP tool. Uses hosted Ollama.
 ```bash
 kubectl apply -f operator/config/samples/2-multi-agent-mcp.yaml
-# Creates namespace: agentic-multi
+# Creates namespace: kaos-multi
 # Resources: multi-modelapi (Hosted), multi-echo-mcp, coordinator, worker-1, worker-2
 ```
 
@@ -581,7 +581,7 @@ Complex multi-level hierarchy: supervisor -> team leads -> workers.
 Demonstrates `tools.fromString` for dynamic MCP tool creation. Uses hosted Ollama.
 ```bash
 kubectl apply -f operator/config/samples/3-hierarchical-agents.yaml
-# Creates namespace: agentic-hierarchy
+# Creates namespace: kaos-hierarchy
 # Resources: hierarchy-modelapi (Hosted), hierarchy-echo-mcp, hierarchy-calc-mcp,
 #            supervisor, research-lead, analysis-lead, researcher-1/2, analyst-1
 ```
@@ -591,7 +591,7 @@ For local development with Ollama running on host machine.
 Uses LiteLLM proxy with wildcard config to connect to host Ollama.
 ```bash
 kubectl apply -f operator/config/samples/4-dev-ollama-proxy-agent.yaml
-# Creates namespace: agentic-dev
+# Creates namespace: kaos-dev
 # Resources: dev-ollama-proxy (Proxy), dev-echo-mcp, dev-agent
 # Requires: Ollama running on host at localhost:11434
 ```

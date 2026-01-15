@@ -212,7 +212,7 @@ kubectl exec -it deploy/my-agent -n my-namespace -- \
 
 **Diagnosis:**
 ```bash
-kubectl logs -n kaos-system deployment/agentic-operator-controller-manager
+kubectl logs -n kaos-system deployment/kaos-operator-controller-manager
 ```
 
 **Common Causes:**
@@ -233,7 +233,7 @@ kubectl logs -n kaos-system deployment/agentic-operator-controller-manager
 
 **Diagnosis:**
 ```bash
-kubectl logs -n kaos-system deployment/agentic-operator-controller-manager -f
+kubectl logs -n kaos-system deployment/kaos-operator-controller-manager -f
 ```
 
 **Common Causes:**

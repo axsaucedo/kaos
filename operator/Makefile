@@ -1,7 +1,7 @@
 .PHONY: help build docker-build deploy generate manifests test test-unit clean envtest helm kind-create kind-delete kind-e2e e2e-test e2e-test-seq e2e-clean
 
 # Configuration
-IMG ?= agentic-operator:latest
+IMG ?= kaos-operator:latest
 CONTROLLER_GEN ?= $(shell which controller-gen || echo "$(shell pwd)/bin/controller-gen")
 CRD_OPTIONS ?= "crd:generateEmbeddedObjectMeta=true"
 SETUP_ENVTEST ?= $(shell which setup-envtest)
@@ -55,7 +55,7 @@ generate:
 
 # Generate CRD manifests
 manifests:
-	$(CONTROLLER_GEN) $(CRD_OPTIONS) rbac:roleName=agentic-operator paths="./..." output:crd:artifacts:config=config/crd/bases
+	$(CONTROLLER_GEN) $(CRD_OPTIONS) rbac:roleName=kaos-operator paths="./..." output:crd:artifacts:config=config/crd/bases
 
 # Install envtest binary (one-time setup)
 envtest:

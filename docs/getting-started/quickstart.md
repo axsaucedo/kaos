@@ -24,7 +24,7 @@ Verify the operator is running:
 
 ```bash
 kubectl get pods -n kaos-system
-# Expected: agentic-operator-controller-manager-xxx  Running
+# Expected: kaos-operator-controller-manager-xxx  Running
 ```
 
 ## Step 2: Deploy a Simple Agent
