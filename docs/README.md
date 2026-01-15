@@ -23,29 +23,23 @@ This documentation provides comprehensive coverage of the KAOS, a framework for 
 - [Agent CRD](operator/agent-crd.md) - Agent custom resource specification
 - [ModelAPI CRD](operator/modelapi-crd.md) - Model API deployment modes
 - [MCPServer CRD](operator/mcpserver-crd.md) - MCP tool server configuration
-- [Environment Variables](operator/environment-variables.md) - Configuration reference
+- [Gateway API](operator/gateway-api.md) - Gateway integration
 
 ### Tutorials
 - [Simple Agent with Tools](tutorials/simple-agent-tools.md) - Basic agent with MCP tools
 - [Multi-Agent Coordination](tutorials/multi-agent.md) - Coordinator and worker patterns
-- [Hierarchical Agents](tutorials/hierarchical-agents.md) - Complex agent hierarchies
 - [Custom MCP Tools](tutorials/custom-mcp-tools.md) - Creating dynamic tools
 
 ### Reference
-- [API Reference](reference/api-reference.md) - Complete CRD field reference
-- [Python API](reference/python-api.md) - Python class and method reference
 - [Environment Variables](reference/environment-variables.md) - All configuration options
 - [Troubleshooting](reference/troubleshooting.md) - Common issues and solutions
 
 ### Development
 - [Testing](development/testing.md) - Running and writing tests
-- [Contributing](development/contributing.md) - Development workflow
-- [Architecture Decisions](development/architecture-decisions.md) - Design rationale
 
 ## Quick Links
 
 | Resource | Description |
 |----------|-------------|
-| [Samples](../operator/config/samples/) | Ready-to-deploy example configurations |
-| [CLAUDE.md](../CLAUDE.md) | Project memory and conventions |
-| [REPORT.md](../REPORT.md) | Technical review and recommendations |
+| [GitHub](https://github.com/axsaucedo/kaos) | Source code repository |
+| [Quick Start](getting-started/quickstart.md) | Get started in 5 minutes |
