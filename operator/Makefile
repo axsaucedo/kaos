@@ -8,7 +8,7 @@ SETUP_ENVTEST ?= $(shell which setup-envtest)
 HELMIFY ?= $(shell which helmify || echo "$(HOME)/go/bin/helmify")
 
 # KIND cluster configuration
-KIND_CLUSTER_NAME ?= agentic-e2e
+KIND_CLUSTER_NAME ?= kaos-e2e
 
 help:
 	@echo "Operator build targets:"
@@ -115,7 +115,7 @@ e2e-test-seq:
 # Clean up E2E test resources
 e2e-clean:
 	@echo "Cleaning up E2E test resources..."
-	-helm uninstall agentic-e2e -n agentic-e2e-system 2>/dev/null || true
-	-kubectl delete namespace agentic-e2e-system --wait=false 2>/dev/null || true
+	-helm uninstall kaos-e2e -n kaos-e2e-system 2>/dev/null || true
+	-kubectl delete namespace kaos-e2e-system --wait=false 2>/dev/null || true
 	-kubectl get ns -o name | grep e2e | xargs -I{} kubectl delete {} --wait=false 2>/dev/null || true
 	@sleep 3

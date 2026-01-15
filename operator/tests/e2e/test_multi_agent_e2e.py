@@ -49,7 +49,7 @@ def create_multi_agent_resources(namespace: str, modelapi_name: str, suffix: str
         return env
     
     worker_1_spec = {
-        "apiVersion": "ethical.institute/v1alpha1",
+        "apiVersion": "kaos.dev/v1alpha1",
         "kind": "Agent",
         "metadata": {"name": worker1_name, "namespace": namespace},
         "spec": {
@@ -64,7 +64,7 @@ def create_multi_agent_resources(namespace: str, modelapi_name: str, suffix: str
     }
     
     worker_2_spec = {
-        "apiVersion": "ethical.institute/v1alpha1",
+        "apiVersion": "kaos.dev/v1alpha1",
         "kind": "Agent",
         "metadata": {"name": worker2_name, "namespace": namespace},
         "spec": {
@@ -79,7 +79,7 @@ def create_multi_agent_resources(namespace: str, modelapi_name: str, suffix: str
     }
     
     coordinator_spec = {
-        "apiVersion": "ethical.institute/v1alpha1",
+        "apiVersion": "kaos.dev/v1alpha1",
         "kind": "Agent",
         "metadata": {"name": coord_name, "namespace": namespace},
         "spec": {

@@ -1,7 +1,7 @@
 [project]
-name = "agentic-runtime"
+name = "kaos-runtime"
 version = "0.1.0"
-description = "Agentic Kubernetes Operator - Custom Agent Runtime without Google ADK"
+description = "KAOS Runtime - K8s Agent Orchestration System"
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.0.0",

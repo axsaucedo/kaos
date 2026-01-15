@@ -9,7 +9,7 @@ controllerManager:
         - ALL
       readOnlyRootFilesystem: true
     image:
-      repository: agentic-operator
+      repository: kaos-operator
       tag: latest
     imagePullPolicy: IfNotPresent
     resources:
@@ -36,9 +36,9 @@ serviceAccount:
 # These are used when no image is specified in the CRD
 defaultImages:
   # Agent runtime image for Agent CRD
-  agentRuntime: "agentic-agent:latest"
+  agentRuntime: "kaos-agent:latest"
   # MCP server image for MCPServer CRD
-  mcpServer: "agentic-agent:latest"
+  mcpServer: "kaos-agent:latest"
   # LiteLLM proxy image for ModelAPI CRD (Proxy mode)
   litellm: "ghcr.io/berriai/litellm:main-latest"
   # Ollama image for ModelAPI CRD (Hosted mode)
@@ -60,7 +60,7 @@ gatewayAPI:
   enabled: false
   # Gateway resource settings (only used if createGateway is true)
   createGateway: false
-  gatewayName: "agentic-gateway"
+  gatewayName: "kaos-gateway"
   gatewayNamespace: ""  # Defaults to release namespace
   gatewayClassName: ""  # Required if createGateway is true (e.g., "envoy")
   listenerPort: 80

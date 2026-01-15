@@ -1,12 +1,12 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: agentic-operator-rolebinding
+  name: kaos-operator-rolebinding
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: agentic-operator
+  name: kaos-operator
 subjects:
 - kind: ServiceAccount
-  name: agentic-operator
-  namespace: agentic-system
+  name: kaos-operator
+  namespace: kaos-system

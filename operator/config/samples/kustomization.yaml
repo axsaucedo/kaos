@@ -1,4 +1,4 @@
-# Kustomization for agentic-kubernetes-operator samples
+# Kustomization for kaos-kubernetes-operator samples
 # These are example configurations, apply individually:
 #   kubectl apply -f 1-simple-echo-agent.yaml
 #   kubectl apply -f 2-multi-agent-mcp.yaml

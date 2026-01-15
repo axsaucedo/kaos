@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: agentic-operator-controller-manager
-  namespace: agentic-system
+  namespace: kaos-system
   labels:
     control-plane: controller-manager
 spec:

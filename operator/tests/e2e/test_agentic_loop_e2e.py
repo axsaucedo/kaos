@@ -45,7 +45,7 @@ def create_agentic_loop_worker(
         env.append({"name": "DEBUG_MOCK_RESPONSES", "value": json.dumps(mock_responses)})
     
     return {
-        "apiVersion": "ethical.institute/v1alpha1",
+        "apiVersion": "kaos.dev/v1alpha1",
         "kind": "Agent",
         "metadata": {"name": name, "namespace": namespace},
         "spec": {
@@ -85,7 +85,7 @@ def create_agentic_loop_coordinator(
         env.append({"name": "DEBUG_MOCK_RESPONSES", "value": json.dumps(mock_responses)})
     
     return {
-        "apiVersion": "ethical.institute/v1alpha1",
+        "apiVersion": "kaos.dev/v1alpha1",
         "kind": "Agent",
         "metadata": {"name": name, "namespace": namespace},
         "spec": {
@@ -315,7 +315,7 @@ async def test_wait_for_dependencies_false(test_namespace: str, shared_modelapi:
     """Test that agent can start without waiting for dependencies."""
     agent_name = "loop-nowait"
     agent_spec = {
-        "apiVersion": "ethical.institute/v1alpha1",
+        "apiVersion": "kaos.dev/v1alpha1",
         "kind": "Agent",
         "metadata": {"name": agent_name, "namespace": test_namespace},
         "spec": {

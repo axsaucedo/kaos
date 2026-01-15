@@ -21,8 +21,8 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
-	agenticv1alpha1 "agentic.example.com/agentic-operator/api/v1alpha1"
-	"agentic.example.com/agentic-operator/controllers"
+	kaosv1alpha1 "github.com/axsaucedo/kaos/operator/api/v1alpha1"
+	"github.com/axsaucedo/kaos/operator/controllers"
 )
 
 var (
@@ -59,7 +59,7 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(cfg).NotTo(BeNil())
 
-	err = agenticv1alpha1.AddToScheme(scheme.Scheme)
+	err = kaosv1alpha1.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 
 	k8sClient, err = client.New(cfg, client.Options{Scheme: scheme.Scheme})

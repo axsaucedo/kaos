@@ -7,7 +7,7 @@ metadata:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: '{{ include "chart.fullname" . }}-agentic-operator'
+  name: '{{ include "chart.fullname" . }}-kaos-operator'
 subjects:
 - kind: ServiceAccount
   name: '{{ include "chart.serviceAccountName" . }}'

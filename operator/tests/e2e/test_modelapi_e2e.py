@@ -91,7 +91,7 @@ async def test_modelapi_proxy_with_hosted_backend(test_namespace: str):
     # Step 1: Create the Hosted backend (Ollama in-cluster)
     backend_name = "proxy-backend"
     backend_spec = {
-        "apiVersion": "ethical.institute/v1alpha1",
+        "apiVersion": "kaos.dev/v1alpha1",
         "kind": "ModelAPI",
         "metadata": {"name": backend_name, "namespace": test_namespace},
         "spec": {
@@ -115,7 +115,7 @@ async def test_modelapi_proxy_with_hosted_backend(test_namespace: str):
     # Configure gatewayRoute.timeout to 120s to allow for LLM inference
     proxy_name = "proxy-chain"
     proxy_spec = {
-        "apiVersion": "ethical.institute/v1alpha1",
+        "apiVersion": "kaos.dev/v1alpha1",
         "kind": "ModelAPI",
         "metadata": {"name": proxy_name, "namespace": test_namespace},
         "spec": {
@@ -171,7 +171,7 @@ async def test_modelapi_hosted_ollama(test_namespace: str):
     """
     name = "hosted"
     modelapi_spec = {
-        "apiVersion": "ethical.institute/v1alpha1",
+        "apiVersion": "kaos.dev/v1alpha1",
         "kind": "ModelAPI",
         "metadata": {"name": name, "namespace": test_namespace},
         "spec": {

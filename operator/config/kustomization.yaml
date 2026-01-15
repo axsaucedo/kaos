@@ -9,5 +9,5 @@ resources:
 
 # Common labels applied to all resources
 commonLabels:
-  app.kubernetes.io/name: agentic-operator
+  app.kubernetes.io/name: kaos-operator
   app.kubernetes.io/managed-by: kustomize

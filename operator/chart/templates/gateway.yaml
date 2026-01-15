@@ -2,7 +2,7 @@
 apiVersion: gateway.networking.k8s.io/v1
 kind: Gateway
 metadata:
-  name: {{ .Values.gatewayAPI.gatewayName | default "agentic-gateway" }}
+  name: {{ .Values.gatewayAPI.gatewayName | default "kaos-gateway" }}
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "chart.labels" . | nindent 4 }}
