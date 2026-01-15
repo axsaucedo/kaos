@@ -20,12 +20,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
-	agenticv1alpha1 "agentic.example.com/agentic-operator/api/v1alpha1"
-	"agentic.example.com/agentic-operator/pkg/gateway"
-	"agentic.example.com/agentic-operator/pkg/util"
+	kaosv1alpha1 "github.com/axsaucedo/kaos/operator/api/v1alpha1"
+	"github.com/axsaucedo/kaos/operator/pkg/gateway"
+	"github.com/axsaucedo/kaos/operator/pkg/util"
 )
 
-const mcpServerFinalizerName = "ethical.institute/mcpserver-finalizer"
+const mcpServerFinalizerName = "kaos.tools/mcpserver-finalizer"
 
 // MCPServerReconciler reconciles a MCPServer object
 type MCPServerReconciler struct {
@@ -34,9 +34,9 @@ type MCPServerReconciler struct {
 	Scheme *runtime.Scheme
 }
 
-//+kubebuilder:rbac:groups=ethical.institute,resources=mcpservers,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=ethical.institute,resources=mcpservers/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=ethical.institute,resources=mcpservers/finalizers,verbs=update
+//+kubebuilder:rbac:groups=kaos.tools,resources=mcpservers,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=kaos.tools,resources=mcpservers/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=kaos.tools,resources=mcpservers/finalizers,verbs=update
 //+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
 
@@ -45,7 +45,7 @@ type MCPServerReconciler struct {
 func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 
-	mcpserver := &agenticv1alpha1.MCPServer{}
+	mcpserver := &kaosv1alpha1.MCPServer{}
 	if err := r.Get(ctx, req.NamespacedName, mcpserver); err != nil {
 		log.Error(err, "unable to fetch MCPServer")
 		return ctrl.Result{}, client.IgnoreNotFound(err)
@@ -175,7 +175,7 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 }
 
 // constructDeployment creates a Deployment for the MCPServer
-func (r *MCPServerReconciler) constructDeployment(mcpserver *agenticv1alpha1.MCPServer) *appsv1.Deployment {
+func (r *MCPServerReconciler) constructDeployment(mcpserver *kaosv1alpha1.MCPServer) *appsv1.Deployment {
 	labels := map[string]string{
 		"app":       "mcpserver",
 		"mcpserver": mcpserver.Name,
@@ -185,7 +185,7 @@ func (r *MCPServerReconciler) constructDeployment(mcpserver *agenticv1alpha1.MCP
 
 	// Construct container based on server type
 	var container corev1.Container
-	if mcpserver.Spec.Type == agenticv1alpha1.MCPServerTypePython {
+	if mcpserver.Spec.Type == kaosv1alpha1.MCPServerTypePython {
 		container = r.constructPythonContainer(mcpserver)
 	} else {
 		// Default to Python if type is unknown
@@ -229,7 +229,7 @@ func (r *MCPServerReconciler) constructDeployment(mcpserver *agenticv1alpha1.MCP
 }
 
 // constructPythonContainer creates a container that runs MCP server
-func (r *MCPServerReconciler) constructPythonContainer(mcpserver *agenticv1alpha1.MCPServer) corev1.Container {
+func (r *MCPServerReconciler) constructPythonContainer(mcpserver *kaosv1alpha1.MCPServer) corev1.Container {
 	env := append([]corev1.EnvVar{}, mcpserver.Spec.Config.Env...)
 
 	var image string
@@ -238,13 +238,13 @@ func (r *MCPServerReconciler) constructPythonContainer(mcpserver *agenticv1alpha
 	// Get default MCP server image from environment
 	defaultMcpImage := os.Getenv("DEFAULT_MCP_SERVER_IMAGE")
 	if defaultMcpImage == "" {
-		defaultMcpImage = "agentic-agent:latest"
+		defaultMcpImage = "kaos-agent:latest"
 	}
 
 	// Check if using tools config
 	if mcpserver.Spec.Config.Tools != nil {
 		if mcpserver.Spec.Config.Tools.FromString != "" {
-			// Use the agentic-agent image with MCP_TOOLS_STRING
+			// Use the kaos-agent image with MCP_TOOLS_STRING
 			image = defaultMcpImage
 			command = []string{"python", "-m", "mcptools.server"}
 			env = append(env, corev1.EnvVar{
@@ -252,7 +252,7 @@ func (r *MCPServerReconciler) constructPythonContainer(mcpserver *agenticv1alpha
 				Value: mcpserver.Spec.Config.Tools.FromString,
 			})
 		} else if mcpserver.Spec.Config.Tools.FromSecretKeyRef != nil {
-			// Use the agentic-agent image with MCP_TOOLS_STRING from secret
+			// Use the kaos-agent image with MCP_TOOLS_STRING from secret
 			image = defaultMcpImage
 			command = []string{"python", "-m", "mcptools.server"}
 			env = append(env, corev1.EnvVar{
@@ -315,7 +315,7 @@ func (r *MCPServerReconciler) constructPythonContainer(mcpserver *agenticv1alpha
 }
 
 // constructService creates a Service for the MCPServer
-func (r *MCPServerReconciler) constructService(mcpserver *agenticv1alpha1.MCPServer) *corev1.Service {
+func (r *MCPServerReconciler) constructService(mcpserver *kaosv1alpha1.MCPServer) *corev1.Service {
 	labels := map[string]string{
 		"app":       "mcpserver",
 		"mcpserver": mcpserver.Name,
@@ -347,7 +347,7 @@ func (r *MCPServerReconciler) constructService(mcpserver *agenticv1alpha1.MCPSer
 // SetupWithManager sets up the controller with the Manager.
 func (r *MCPServerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	builder := ctrl.NewControllerManagedBy(mgr).
-		For(&agenticv1alpha1.MCPServer{}).
+		For(&kaosv1alpha1.MCPServer{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{})
 

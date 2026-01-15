@@ -6,17 +6,17 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: agentic-multi
+  name: kaos-multi
   labels:
-    app.kubernetes.io/part-of: agentic-sample-multi
+    app.kubernetes.io/part-of: kaos-sample-multi
 
 ---
 # ModelAPI: Hosted Ollama with smollm2 model (runs in-cluster)
-apiVersion: ethical.institute/v1alpha1
+apiVersion: kaos.tools/v1alpha1
 kind: ModelAPI
 metadata:
   name: multi-modelapi
-  namespace: agentic-multi
+  namespace: kaos-multi
 spec:
   mode: Hosted
   hostedConfig:
@@ -27,11 +27,11 @@ spec:
 
 ---
 # MCPServer: Echo tool for all agents
-apiVersion: ethical.institute/v1alpha1
+apiVersion: kaos.tools/v1alpha1
 kind: MCPServer
 metadata:
   name: multi-echo-mcp
-  namespace: agentic-multi
+  namespace: kaos-multi
 spec:
   type: python-runtime
   config:
@@ -43,11 +43,11 @@ spec:
 
 ---
 # Agent: Coordinator - orchestrates worker agents
-apiVersion: ethical.institute/v1alpha1
+apiVersion: kaos.tools/v1alpha1
 kind: Agent
 metadata:
   name: coordinator
-  namespace: agentic-multi
+  namespace: kaos-multi
 spec:
   modelAPI: multi-modelapi
   mcpServers:
@@ -70,11 +70,11 @@ spec:
 
 ---
 # Agent: Worker 1 - general purpose worker
-apiVersion: ethical.institute/v1alpha1
+apiVersion: kaos.tools/v1alpha1
 kind: Agent
 metadata:
   name: worker-1
-  namespace: agentic-multi
+  namespace: kaos-multi
 spec:
   modelAPI: multi-modelapi
   mcpServers:
@@ -95,11 +95,11 @@ spec:
 
 ---
 # Agent: Worker 2 - specialized worker
-apiVersion: ethical.institute/v1alpha1
+apiVersion: kaos.tools/v1alpha1
 kind: Agent
 metadata:
   name: worker-2
-  namespace: agentic-multi
+  namespace: kaos-multi
 spec:
   modelAPI: multi-modelapi
   mcpServers:

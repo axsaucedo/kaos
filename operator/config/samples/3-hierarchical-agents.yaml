@@ -7,17 +7,17 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: agentic-hierarchy
+  name: kaos-hierarchy
   labels:
-    app.kubernetes.io/part-of: agentic-sample-hierarchy
+    app.kubernetes.io/part-of: kaos-sample-hierarchy
 
 ---
 # ModelAPI: Hosted Ollama with smollm2 model
-apiVersion: ethical.institute/v1alpha1
+apiVersion: kaos.tools/v1alpha1
 kind: ModelAPI
 metadata:
   name: hierarchy-modelapi
-  namespace: agentic-hierarchy
+  namespace: kaos-hierarchy
 spec:
   mode: Hosted
   hostedConfig:
@@ -25,11 +25,11 @@ spec:
 
 ---
 # MCPServer: Echo tool
-apiVersion: ethical.institute/v1alpha1
+apiVersion: kaos.tools/v1alpha1
 kind: MCPServer
 metadata:
   name: hierarchy-echo-mcp
-  namespace: agentic-hierarchy
+  namespace: kaos-hierarchy
 spec:
   type: python-runtime
   config:
@@ -38,11 +38,11 @@ spec:
 
 ---
 # MCPServer: Calculator tool using fromString
-apiVersion: ethical.institute/v1alpha1
+apiVersion: kaos.tools/v1alpha1
 kind: MCPServer
 metadata:
   name: hierarchy-calc-mcp
-  namespace: agentic-hierarchy
+  namespace: kaos-hierarchy
 spec:
   type: python-runtime
   config:
@@ -62,11 +62,11 @@ spec:
 
 ---
 # Agent: Supervisor - top of hierarchy
-apiVersion: ethical.institute/v1alpha1
+apiVersion: kaos.tools/v1alpha1
 kind: Agent
 metadata:
   name: supervisor
-  namespace: agentic-hierarchy
+  namespace: kaos-hierarchy
 spec:
   modelAPI: hierarchy-modelapi
   mcpServers:
@@ -83,11 +83,11 @@ spec:
 
 ---
 # Agent: Research Lead
-apiVersion: ethical.institute/v1alpha1
+apiVersion: kaos.tools/v1alpha1
 kind: Agent
 metadata:
   name: research-lead
-  namespace: agentic-hierarchy
+  namespace: kaos-hierarchy
 spec:
   modelAPI: hierarchy-modelapi
   mcpServers:
@@ -104,11 +104,11 @@ spec:
 
 ---
 # Agent: Analysis Lead
-apiVersion: ethical.institute/v1alpha1
+apiVersion: kaos.tools/v1alpha1
 kind: Agent
 metadata:
   name: analysis-lead
-  namespace: agentic-hierarchy
+  namespace: kaos-hierarchy
 spec:
   modelAPI: hierarchy-modelapi
   mcpServers:
@@ -124,11 +124,11 @@ spec:
 
 ---
 # Agent: Researcher 1
-apiVersion: ethical.institute/v1alpha1
+apiVersion: kaos.tools/v1alpha1
 kind: Agent
 metadata:
   name: researcher-1
-  namespace: agentic-hierarchy
+  namespace: kaos-hierarchy
 spec:
   modelAPI: hierarchy-modelapi
   mcpServers:
@@ -141,11 +141,11 @@ spec:
 
 ---
 # Agent: Researcher 2
-apiVersion: ethical.institute/v1alpha1
+apiVersion: kaos.tools/v1alpha1
 kind: Agent
 metadata:
   name: researcher-2
-  namespace: agentic-hierarchy
+  namespace: kaos-hierarchy
 spec:
   modelAPI: hierarchy-modelapi
   mcpServers:
@@ -158,11 +158,11 @@ spec:
 
 ---
 # Agent: Analyst 1
-apiVersion: ethical.institute/v1alpha1
+apiVersion: kaos.tools/v1alpha1
 kind: Agent
 metadata:
   name: analyst-1
-  namespace: agentic-hierarchy
+  namespace: kaos-hierarchy
 spec:
   modelAPI: hierarchy-modelapi
   mcpServers:

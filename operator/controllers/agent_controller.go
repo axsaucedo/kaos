@@ -21,12 +21,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
-	agenticv1alpha1 "agentic.example.com/agentic-operator/api/v1alpha1"
-	"agentic.example.com/agentic-operator/pkg/gateway"
-	"agentic.example.com/agentic-operator/pkg/util"
+	kaosv1alpha1 "github.com/axsaucedo/kaos/operator/api/v1alpha1"
+	"github.com/axsaucedo/kaos/operator/pkg/gateway"
+	"github.com/axsaucedo/kaos/operator/pkg/util"
 )
 
-const agentFinalizerName = "ethical.institute/agent-finalizer"
+const agentFinalizerName = "kaos.tools/agent-finalizer"
 
 // AgentReconciler reconciles an Agent object
 type AgentReconciler struct {
@@ -35,11 +35,11 @@ type AgentReconciler struct {
 	Scheme *runtime.Scheme
 }
 
-//+kubebuilder:rbac:groups=ethical.institute,resources=agents,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=ethical.institute,resources=agents/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=ethical.institute,resources=agents/finalizers,verbs=update
-//+kubebuilder:rbac:groups=ethical.institute,resources=modelapis,verbs=get;list;watch
-//+kubebuilder:rbac:groups=ethical.institute,resources=mcpservers,verbs=get;list;watch
+//+kubebuilder:rbac:groups=kaos.tools,resources=agents,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=kaos.tools,resources=agents/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=kaos.tools,resources=agents/finalizers,verbs=update
+//+kubebuilder:rbac:groups=kaos.tools,resources=modelapis,verbs=get;list;watch
+//+kubebuilder:rbac:groups=kaos.tools,resources=mcpservers,verbs=get;list;watch
 //+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
 
@@ -48,7 +48,7 @@ type AgentReconciler struct {
 func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 
-	agent := &agenticv1alpha1.Agent{}
+	agent := &kaosv1alpha1.Agent{}
 	if err := r.Get(ctx, req.NamespacedName, agent); err != nil {
 		log.Error(err, "unable to fetch Agent")
 		return ctrl.Result{}, client.IgnoreNotFound(err)
@@ -88,7 +88,7 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	// Resolve ModelAPI reference
-	modelapi := &agenticv1alpha1.ModelAPI{}
+	modelapi := &kaosv1alpha1.ModelAPI{}
 	err := r.Get(ctx, types.NamespacedName{Name: agent.Spec.ModelAPI, Namespace: agent.Namespace}, modelapi)
 	if err != nil {
 		log.Error(err, "unable to fetch ModelAPI", "modelAPI", agent.Spec.ModelAPI)
@@ -112,7 +112,7 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	// Resolve MCPServer references
 	mcpServers := make(map[string]string)
 	for _, mcpName := range agent.Spec.MCPServers {
-		mcp := &agenticv1alpha1.MCPServer{}
+		mcp := &kaosv1alpha1.MCPServer{}
 		err := r.Get(ctx, types.NamespacedName{Name: mcpName, Namespace: agent.Namespace}, mcp)
 		if err != nil {
 			log.Error(err, "unable to fetch MCPServer", "mcpserver", mcpName)
@@ -137,7 +137,7 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	peerAgents := make(map[string]string)
 	if agent.Spec.AgentNetwork != nil {
 		for _, peerName := range agent.Spec.AgentNetwork.Access {
-			peerAgent := &agenticv1alpha1.Agent{}
+			peerAgent := &kaosv1alpha1.Agent{}
 			err := r.Get(ctx, types.NamespacedName{Name: peerName, Namespace: agent.Namespace}, peerAgent)
 			if err != nil {
 				log.Info("peer agent not found yet", "peer", peerName)
@@ -260,7 +260,7 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 }
 
 // constructDeployment creates a Deployment for the Agent
-func (r *AgentReconciler) constructDeployment(agent *agenticv1alpha1.Agent, modelapi *agenticv1alpha1.ModelAPI, mcpServers map[string]string, peerAgents map[string]string) *appsv1.Deployment {
+func (r *AgentReconciler) constructDeployment(agent *kaosv1alpha1.Agent, modelapi *kaosv1alpha1.ModelAPI, mcpServers map[string]string, peerAgents map[string]string) *appsv1.Deployment {
 	labels := map[string]string{
 		"app":   "agent",
 		"agent": agent.Name,
@@ -274,7 +274,7 @@ func (r *AgentReconciler) constructDeployment(agent *agenticv1alpha1.Agent, mode
 	// Get agent image from environment or use default
 	agentImage := os.Getenv("DEFAULT_AGENT_IMAGE")
 	if agentImage == "" {
-		agentImage = "agentic-agent:latest"
+		agentImage = "kaos-agent:latest"
 	}
 
 	container := corev1.Container{
@@ -350,7 +350,7 @@ func (r *AgentReconciler) constructDeployment(agent *agenticv1alpha1.Agent, mode
 }
 
 // constructEnvVars builds environment variables for the agent
-func (r *AgentReconciler) constructEnvVars(agent *agenticv1alpha1.Agent, modelapi *agenticv1alpha1.ModelAPI, mcpServers map[string]string, peerAgents map[string]string) []corev1.EnvVar {
+func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *kaosv1alpha1.ModelAPI, mcpServers map[string]string, peerAgents map[string]string) []corev1.EnvVar {
 	var env []corev1.EnvVar
 
 	// Agent identity and configuration
@@ -492,7 +492,7 @@ func (r *AgentReconciler) envVarsEqual(a, b []corev1.EnvVar) bool {
 }
 
 // constructService creates a Service for A2A communication
-func (r *AgentReconciler) constructService(agent *agenticv1alpha1.Agent) *corev1.Service {
+func (r *AgentReconciler) constructService(agent *kaosv1alpha1.Agent) *corev1.Service {
 	labels := map[string]string{
 		"app":   "agent",
 		"agent": agent.Name,
@@ -525,9 +525,9 @@ func (r *AgentReconciler) constructService(agent *agenticv1alpha1.Agent) *corev1
 func (r *AgentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	// Map ModelAPI changes to related Agents
 	mapModelAPIToAgents := handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []ctrl.Request {
-		modelapi := obj.(*agenticv1alpha1.ModelAPI)
+		modelapi := obj.(*kaosv1alpha1.ModelAPI)
 		// Find all Agents in the same namespace
-		agentList := &agenticv1alpha1.AgentList{}
+		agentList := &kaosv1alpha1.AgentList{}
 		if err := r.List(ctx, agentList, client.InNamespace(modelapi.Namespace)); err != nil {
 			return []ctrl.Request{}
 		}
@@ -545,9 +545,9 @@ func (r *AgentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 
 	// Map MCPServer changes to related Agents
 	mapMCPServerToAgents := handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []ctrl.Request {
-		mcpserver := obj.(*agenticv1alpha1.MCPServer)
+		mcpserver := obj.(*kaosv1alpha1.MCPServer)
 		// Find all Agents in the same namespace
-		agentList := &agenticv1alpha1.AgentList{}
+		agentList := &kaosv1alpha1.AgentList{}
 		if err := r.List(ctx, agentList, client.InNamespace(mcpserver.Namespace)); err != nil {
 			return []ctrl.Request{}
 		}
@@ -566,11 +566,11 @@ func (r *AgentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	})
 
 	builder := ctrl.NewControllerManagedBy(mgr).
-		For(&agenticv1alpha1.Agent{}).
+		For(&kaosv1alpha1.Agent{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
-		Watches(&agenticv1alpha1.ModelAPI{}, mapModelAPIToAgents).
-		Watches(&agenticv1alpha1.MCPServer{}, mapMCPServerToAgents)
+		Watches(&kaosv1alpha1.ModelAPI{}, mapModelAPIToAgents).
+		Watches(&kaosv1alpha1.MCPServer{}, mapMCPServerToAgents)
 
 	// Own HTTPRoutes if Gateway API is enabled
 	if gateway.GetConfig().Enabled {

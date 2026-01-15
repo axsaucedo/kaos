@@ -1,5 +1,5 @@
 apiVersion: v2
-name: agentic-operator
+name: kaos-operator
 description: Kubernetes operator for managing AI agents with A2A protocol support
 type: application
 version: 0.1.0
@@ -11,9 +11,9 @@ keywords:
   - agents
   - a2a
   - mcp
-home: https://github.com/EthicalML/agentic-kubernetes-operator
+home: https://github.com/axsaucedo/kaos
 sources:
-  - https://github.com/EthicalML/agentic-kubernetes-operator
+  - https://github.com/axsaucedo/kaos
 maintainers:
-  - name: EthicalML
-    url: https://github.com/EthicalML
+  - name: axsaucedo
+    url: https://github.com/axsaucedo

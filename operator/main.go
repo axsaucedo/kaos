@@ -15,8 +15,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
-	agenticv1alpha1 "agentic.example.com/agentic-operator/api/v1alpha1"
-	"agentic.example.com/agentic-operator/controllers"
+	kaosv1alpha1 "github.com/axsaucedo/kaos/operator/api/v1alpha1"
+	"github.com/axsaucedo/kaos/operator/controllers"
 )
 
 var (
@@ -33,7 +33,7 @@ var (
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(agenticv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(kaosv1alpha1.AddToScheme(scheme))
 	utilruntime.Must(gatewayv1.Install(scheme))
 }
 
@@ -60,7 +60,7 @@ func main() {
 		Scheme:                 scheme,
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
-		LeaderElectionID:       "agentic-operator.agentic.example.com",
+		LeaderElectionID:       "kaos-operator.kaos.tools",
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")

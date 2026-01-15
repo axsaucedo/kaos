@@ -13,7 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
-	agenticv1alpha1 "agentic.example.com/agentic-operator/api/v1alpha1"
+	kaosv1alpha1 "github.com/axsaucedo/kaos/operator/api/v1alpha1"
 )
 
 // uniqueName generates unique names to avoid conflicts between tests
@@ -27,14 +27,14 @@ var _ = Describe("ModelAPI Controller", func() {
 
 	It("should create Deployment, Service and ConfigMap in Proxy mode", func() {
 		name := uniqueName("proxy-api")
-		modelAPI := &agenticv1alpha1.ModelAPI{
+		modelAPI := &kaosv1alpha1.ModelAPI{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      name,
 				Namespace: namespace,
 			},
-			Spec: agenticv1alpha1.ModelAPISpec{
-				Mode: agenticv1alpha1.ModelAPIModeProxy,
-				ProxyConfig: &agenticv1alpha1.ProxyConfig{
+			Spec: kaosv1alpha1.ModelAPISpec{
+				Mode: kaosv1alpha1.ModelAPIModeProxy,
+				ProxyConfig: &kaosv1alpha1.ProxyConfig{
 					APIBase: "http://localhost:11434",
 				},
 			},
@@ -79,7 +79,7 @@ var _ = Describe("ModelAPI Controller", func() {
 
 		// Verify status endpoint is set
 		Eventually(func() string {
-			updated := &agenticv1alpha1.ModelAPI{}
+			updated := &kaosv1alpha1.ModelAPI{}
 			k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, updated)
 			return updated.Status.Endpoint
 		}, timeout, interval).Should(ContainSubstring(fmt.Sprintf("modelapi-%s", name)))
@@ -87,14 +87,14 @@ var _ = Describe("ModelAPI Controller", func() {
 
 	It("should apply podSpec overrides in Proxy mode", func() {
 		name := uniqueName("proxy-podspec")
-		modelAPI := &agenticv1alpha1.ModelAPI{
+		modelAPI := &kaosv1alpha1.ModelAPI{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      name,
 				Namespace: namespace,
 			},
-			Spec: agenticv1alpha1.ModelAPISpec{
-				Mode: agenticv1alpha1.ModelAPIModeProxy,
-				ProxyConfig: &agenticv1alpha1.ProxyConfig{
+			Spec: kaosv1alpha1.ModelAPISpec{
+				Mode: kaosv1alpha1.ModelAPIModeProxy,
+				ProxyConfig: &kaosv1alpha1.ProxyConfig{
 					Model: "mock-model",
 				},
 				PodSpec: &corev1.PodSpec{
@@ -135,14 +135,14 @@ var _ = Describe("ModelAPI Controller", func() {
 
 	It("should create Deployment with Ollama and init container in Hosted mode", func() {
 		name := uniqueName("hosted-api")
-		modelAPI := &agenticv1alpha1.ModelAPI{
+		modelAPI := &kaosv1alpha1.ModelAPI{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      name,
 				Namespace: namespace,
 			},
-			Spec: agenticv1alpha1.ModelAPISpec{
-				Mode: agenticv1alpha1.ModelAPIModeHosted,
-				HostedConfig: &agenticv1alpha1.HostedConfig{
+			Spec: kaosv1alpha1.ModelAPISpec{
+				Mode: kaosv1alpha1.ModelAPIModeHosted,
+				HostedConfig: &kaosv1alpha1.HostedConfig{
 					Model: "smollm2:135m",
 				},
 			},
@@ -193,15 +193,15 @@ def echo(message: str) -> str:
     """Echo the message back."""
     return message
 `
-		mcp := &agenticv1alpha1.MCPServer{
+		mcp := &kaosv1alpha1.MCPServer{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      name,
 				Namespace: namespace,
 			},
-			Spec: agenticv1alpha1.MCPServerSpec{
-				Type: agenticv1alpha1.MCPServerTypePython,
-				Config: agenticv1alpha1.MCPServerConfig{
-					Tools: &agenticv1alpha1.MCPToolsConfig{
+			Spec: kaosv1alpha1.MCPServerSpec{
+				Type: kaosv1alpha1.MCPServerTypePython,
+				Config: kaosv1alpha1.MCPServerConfig{
+					Tools: &kaosv1alpha1.MCPToolsConfig{
 						FromString: toolsString,
 					},
 				},
@@ -244,7 +244,7 @@ def echo(message: str) -> str:
 
 		// Verify status endpoint is set
 		Eventually(func() string {
-			updated := &agenticv1alpha1.MCPServer{}
+			updated := &kaosv1alpha1.MCPServer{}
 			k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, updated)
 			return updated.Status.Endpoint
 		}, timeout, interval).Should(ContainSubstring(fmt.Sprintf("mcpserver-%s", name)))
@@ -252,15 +252,15 @@ def echo(message: str) -> str:
 
 	It("should create Deployment with pip install for fromPackage tools", func() {
 		name := uniqueName("mcp-package")
-		mcp := &agenticv1alpha1.MCPServer{
+		mcp := &kaosv1alpha1.MCPServer{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      name,
 				Namespace: namespace,
 			},
-			Spec: agenticv1alpha1.MCPServerSpec{
-				Type: agenticv1alpha1.MCPServerTypePython,
-				Config: agenticv1alpha1.MCPServerConfig{
-					Tools: &agenticv1alpha1.MCPToolsConfig{
+			Spec: kaosv1alpha1.MCPServerSpec{
+				Type: kaosv1alpha1.MCPServerTypePython,
+				Config: kaosv1alpha1.MCPServerConfig{
+					Tools: &kaosv1alpha1.MCPToolsConfig{
 						FromPackage: "mcp-echo-server",
 					},
 				},
@@ -296,14 +296,14 @@ var _ = Describe("Agent Controller", func() {
 		agentName := uniqueName("agent")
 
 		// Create ModelAPI first
-		modelAPI := &agenticv1alpha1.ModelAPI{
+		modelAPI := &kaosv1alpha1.ModelAPI{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      modelAPIName,
 				Namespace: namespace,
 			},
-			Spec: agenticv1alpha1.ModelAPISpec{
-				Mode: agenticv1alpha1.ModelAPIModeProxy,
-				ProxyConfig: &agenticv1alpha1.ProxyConfig{
+			Spec: kaosv1alpha1.ModelAPISpec{
+				Mode: kaosv1alpha1.ModelAPIModeProxy,
+				ProxyConfig: &kaosv1alpha1.ProxyConfig{
 					Model: "mock-model",
 				},
 			},
@@ -314,15 +314,15 @@ var _ = Describe("Agent Controller", func() {
 		}()
 
 		maxSteps := int32(10)
-		agent := &agenticv1alpha1.Agent{
+		agent := &kaosv1alpha1.Agent{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      agentName,
 				Namespace: namespace,
 			},
-			Spec: agenticv1alpha1.AgentSpec{
+			Spec: kaosv1alpha1.AgentSpec{
 				ModelAPI:            modelAPIName,
 				WaitForDependencies: boolPtr(false),
-				Config: &agenticv1alpha1.AgentConfig{
+				Config: &kaosv1alpha1.AgentConfig{
 					Description:           "Test agent",
 					Instructions:          "You are a test agent.",
 					ReasoningLoopMaxSteps: &maxSteps,
@@ -370,14 +370,14 @@ var _ = Describe("Agent Controller", func() {
 		agentName := uniqueName("podspec-agent")
 
 		// Create ModelAPI first
-		modelAPI := &agenticv1alpha1.ModelAPI{
+		modelAPI := &kaosv1alpha1.ModelAPI{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      modelAPIName,
 				Namespace: namespace,
 			},
-			Spec: agenticv1alpha1.ModelAPISpec{
-				Mode: agenticv1alpha1.ModelAPIModeProxy,
-				ProxyConfig: &agenticv1alpha1.ProxyConfig{
+			Spec: kaosv1alpha1.ModelAPISpec{
+				Mode: kaosv1alpha1.ModelAPIModeProxy,
+				ProxyConfig: &kaosv1alpha1.ProxyConfig{
 					Model: "mock-model",
 				},
 			},
@@ -387,15 +387,15 @@ var _ = Describe("Agent Controller", func() {
 			k8sClient.Delete(ctx, modelAPI)
 		}()
 
-		agent := &agenticv1alpha1.Agent{
+		agent := &kaosv1alpha1.Agent{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      agentName,
 				Namespace: namespace,
 			},
-			Spec: agenticv1alpha1.AgentSpec{
+			Spec: kaosv1alpha1.AgentSpec{
 				ModelAPI:            modelAPIName,
 				WaitForDependencies: boolPtr(false),
-				Config: &agenticv1alpha1.AgentConfig{
+				Config: &kaosv1alpha1.AgentConfig{
 					Description: "Test agent with podSpec",
 				},
 				PodSpec: &corev1.PodSpec{
@@ -436,14 +436,14 @@ var _ = Describe("Agent Controller", func() {
 		workerName := uniqueName("worker")
 
 		// Create ModelAPI
-		modelAPI := &agenticv1alpha1.ModelAPI{
+		modelAPI := &kaosv1alpha1.ModelAPI{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      modelAPIName,
 				Namespace: namespace,
 			},
-			Spec: agenticv1alpha1.ModelAPISpec{
-				Mode: agenticv1alpha1.ModelAPIModeProxy,
-				ProxyConfig: &agenticv1alpha1.ProxyConfig{
+			Spec: kaosv1alpha1.ModelAPISpec{
+				Mode: kaosv1alpha1.ModelAPIModeProxy,
+				ProxyConfig: &kaosv1alpha1.ProxyConfig{
 					Model: "mock-model",
 				},
 			},
@@ -454,15 +454,15 @@ var _ = Describe("Agent Controller", func() {
 		}()
 
 		// Create worker first
-		worker := &agenticv1alpha1.Agent{
+		worker := &kaosv1alpha1.Agent{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      workerName,
 				Namespace: namespace,
 			},
-			Spec: agenticv1alpha1.AgentSpec{
+			Spec: kaosv1alpha1.AgentSpec{
 				ModelAPI:            modelAPIName,
 				WaitForDependencies: boolPtr(false),
-				Config: &agenticv1alpha1.AgentConfig{
+				Config: &kaosv1alpha1.AgentConfig{
 					Description: "Worker agent",
 				},
 			},
@@ -474,24 +474,24 @@ var _ = Describe("Agent Controller", func() {
 
 		// Wait for worker to get endpoint
 		Eventually(func() string {
-			updated := &agenticv1alpha1.Agent{}
+			updated := &kaosv1alpha1.Agent{}
 			k8sClient.Get(ctx, types.NamespacedName{Name: workerName, Namespace: namespace}, updated)
 			return updated.Status.Endpoint
 		}, timeout, interval).ShouldNot(BeEmpty())
 
 		// Create coordinator that references worker
-		coordinator := &agenticv1alpha1.Agent{
+		coordinator := &kaosv1alpha1.Agent{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      coordinatorName,
 				Namespace: namespace,
 			},
-			Spec: agenticv1alpha1.AgentSpec{
+			Spec: kaosv1alpha1.AgentSpec{
 				ModelAPI:            modelAPIName,
 				WaitForDependencies: boolPtr(false),
-				Config: &agenticv1alpha1.AgentConfig{
+				Config: &kaosv1alpha1.AgentConfig{
 					Description: "Coordinator agent",
 				},
-				AgentNetwork: &agenticv1alpha1.AgentNetworkConfig{
+				AgentNetwork: &kaosv1alpha1.AgentNetworkConfig{
 					Access: []string{workerName},
 				},
 			},

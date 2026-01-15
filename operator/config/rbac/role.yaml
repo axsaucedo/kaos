@@ -2,7 +2,7 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: agentic-operator
+  name: kaos-operator
 rules:
 - apiGroups:
   - ""
@@ -49,7 +49,7 @@ rules:
   - update
   - watch
 - apiGroups:
-  - ethical.institute
+  - kaos.tools
   resources:
   - agents
   - mcpservers
@@ -63,7 +63,7 @@ rules:
   - update
   - watch
 - apiGroups:
-  - ethical.institute
+  - kaos.tools
   resources:
   - agents/finalizers
   - mcpservers/finalizers
@@ -71,7 +71,7 @@ rules:
   verbs:
   - update
 - apiGroups:
-  - ethical.institute
+  - kaos.tools
   resources:
   - agents/status
   - mcpservers/status

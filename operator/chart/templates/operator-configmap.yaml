@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: agentic-operator-config
+  name: kaos-operator-config
   namespace: {{ .Release.Namespace }}
   labels:
     {{- include "chart.labels" . | nindent 4 }}
@@ -14,7 +14,7 @@ data:
   # Gateway API configuration
   {{- if .Values.gatewayAPI.enabled }}
   GATEWAY_API_ENABLED: "true"
-  GATEWAY_NAME: {{ .Values.gatewayAPI.gatewayName | default "agentic-gateway" | quote }}
+  GATEWAY_NAME: {{ .Values.gatewayAPI.gatewayName | default "kaos-gateway" | quote }}
   GATEWAY_NAMESPACE: {{ .Values.gatewayAPI.gatewayNamespace | default .Release.Namespace | quote }}
   {{- else }}
   GATEWAY_API_ENABLED: "false"

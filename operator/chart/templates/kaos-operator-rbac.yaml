@@ -1,7 +1,7 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: {{ include "chart.fullname" . }}-agentic-operator
+  name: {{ include "chart.fullname" . }}-kaos-operator
   labels:
   {{- include "chart.labels" . | nindent 4 }}
 rules:
@@ -50,7 +50,7 @@ rules:
   - update
   - watch
 - apiGroups:
-  - ethical.institute
+  - kaos.tools
   resources:
   - agents
   - mcpservers
@@ -64,7 +64,7 @@ rules:
   - update
   - watch
 - apiGroups:
-  - ethical.institute
+  - kaos.tools
   resources:
   - agents/finalizers
   - mcpservers/finalizers
@@ -72,7 +72,7 @@ rules:
   verbs:
   - update
 - apiGroups:
-  - ethical.institute
+  - kaos.tools
   resources:
   - agents/status
   - mcpservers/status

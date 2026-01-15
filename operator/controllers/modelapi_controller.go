@@ -19,12 +19,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
-	agenticv1alpha1 "agentic.example.com/agentic-operator/api/v1alpha1"
-	"agentic.example.com/agentic-operator/pkg/gateway"
-	"agentic.example.com/agentic-operator/pkg/util"
+	kaosv1alpha1 "github.com/axsaucedo/kaos/operator/api/v1alpha1"
+	"github.com/axsaucedo/kaos/operator/pkg/gateway"
+	"github.com/axsaucedo/kaos/operator/pkg/util"
 )
 
-const modelAPIFinalizerName = "ethical.institute/modelapi-finalizer"
+const modelAPIFinalizerName = "kaos.tools/modelapi-finalizer"
 
 // ModelAPIReconciler reconciles a ModelAPI object
 type ModelAPIReconciler struct {
@@ -33,9 +33,9 @@ type ModelAPIReconciler struct {
 	Scheme *runtime.Scheme
 }
 
-//+kubebuilder:rbac:groups=ethical.institute,resources=modelapis,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=ethical.institute,resources=modelapis/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=ethical.institute,resources=modelapis/finalizers,verbs=update
+//+kubebuilder:rbac:groups=kaos.tools,resources=modelapis,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=kaos.tools,resources=modelapis/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=kaos.tools,resources=modelapis/finalizers,verbs=update
 //+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
@@ -45,7 +45,7 @@ type ModelAPIReconciler struct {
 func (r *ModelAPIReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 
-	modelapi := &agenticv1alpha1.ModelAPI{}
+	modelapi := &kaosv1alpha1.ModelAPI{}
 	if err := r.Get(ctx, req.NamespacedName, modelapi); err != nil {
 		log.Error(err, "unable to fetch ModelAPI")
 		return ctrl.Result{}, client.IgnoreNotFound(err)
@@ -85,7 +85,7 @@ func (r *ModelAPIReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	// Create ConfigMap for Proxy mode - always needed since we use config file mode
-	needsConfigMap := modelapi.Spec.Mode == agenticv1alpha1.ModelAPIModeProxy &&
+	needsConfigMap := modelapi.Spec.Mode == kaosv1alpha1.ModelAPIModeProxy &&
 		modelapi.Spec.ProxyConfig != nil
 
 	if needsConfigMap {
@@ -172,7 +172,7 @@ func (r *ModelAPIReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	// Update status - use correct port based on mode
 	port := 8000
-	if modelapi.Spec.Mode == agenticv1alpha1.ModelAPIModeHosted {
+	if modelapi.Spec.Mode == kaosv1alpha1.ModelAPIModeHosted {
 		port = 11434
 	}
 	modelapi.Status.Endpoint = fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", serviceName, modelapi.Namespace, port)
@@ -214,7 +214,7 @@ func (r *ModelAPIReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 }
 
 // constructDeployment creates a Deployment for the ModelAPI
-func (r *ModelAPIReconciler) constructDeployment(modelapi *agenticv1alpha1.ModelAPI) *appsv1.Deployment {
+func (r *ModelAPIReconciler) constructDeployment(modelapi *kaosv1alpha1.ModelAPI) *appsv1.Deployment {
 	labels := map[string]string{
 		"app":      "modelapi",
 		"modelapi": modelapi.Name,
@@ -224,7 +224,7 @@ func (r *ModelAPIReconciler) constructDeployment(modelapi *agenticv1alpha1.Model
 
 	// Build volumes list - add litellm-config for Proxy mode (always uses config file)
 	volumes := []corev1.Volume{}
-	if modelapi.Spec.Mode == agenticv1alpha1.ModelAPIModeProxy && modelapi.Spec.ProxyConfig != nil {
+	if modelapi.Spec.Mode == kaosv1alpha1.ModelAPIModeProxy && modelapi.Spec.ProxyConfig != nil {
 		volumes = append(volumes, corev1.Volume{
 			Name: "litellm-config",
 			VolumeSource: corev1.VolumeSource{
@@ -243,7 +243,7 @@ func (r *ModelAPIReconciler) constructDeployment(modelapi *agenticv1alpha1.Model
 	if ollamaImage == "" {
 		ollamaImage = "alpine/ollama:latest"
 	}
-	if modelapi.Spec.Mode == agenticv1alpha1.ModelAPIModeHosted && modelapi.Spec.HostedConfig != nil && modelapi.Spec.HostedConfig.Model != "" {
+	if modelapi.Spec.Mode == kaosv1alpha1.ModelAPIModeHosted && modelapi.Spec.HostedConfig != nil && modelapi.Spec.HostedConfig.Model != "" {
 		// Init container starts Ollama server, pulls model, then exits
 		// The model is stored in the emptyDir volume shared with main container
 		volumes = append(volumes, corev1.Volume{
@@ -307,14 +307,14 @@ func (r *ModelAPIReconciler) constructDeployment(modelapi *agenticv1alpha1.Model
 }
 
 // constructContainer creates the container spec based on ModelAPI mode
-func (r *ModelAPIReconciler) constructContainer(modelapi *agenticv1alpha1.ModelAPI) corev1.Container {
+func (r *ModelAPIReconciler) constructContainer(modelapi *kaosv1alpha1.ModelAPI) corev1.Container {
 	var image string
 	var args []string
 	var env []corev1.EnvVar
 	var port int32 = 8000
 	var healthPath string = "/health"
 
-	if modelapi.Spec.Mode == agenticv1alpha1.ModelAPIModeProxy {
+	if modelapi.Spec.Mode == kaosv1alpha1.ModelAPIModeProxy {
 		// LiteLLM Proxy mode - always uses config file
 		image = os.Getenv("DEFAULT_LITELLM_IMAGE")
 		if image == "" {
@@ -368,14 +368,14 @@ func (r *ModelAPIReconciler) constructContainer(modelapi *agenticv1alpha1.ModelA
 
 	// Build volume mounts - add litellm-config for Proxy mode (always uses config file)
 	volumeMounts := []corev1.VolumeMount{}
-	if modelapi.Spec.Mode == agenticv1alpha1.ModelAPIModeProxy && modelapi.Spec.ProxyConfig != nil {
+	if modelapi.Spec.Mode == kaosv1alpha1.ModelAPIModeProxy && modelapi.Spec.ProxyConfig != nil {
 		volumeMounts = append(volumeMounts, corev1.VolumeMount{
 			Name:      "litellm-config",
 			MountPath: "/etc/litellm",
 		})
 	}
 	// Add ollama-data volume mount for Hosted mode
-	if modelapi.Spec.Mode == agenticv1alpha1.ModelAPIModeHosted && modelapi.Spec.HostedConfig != nil && modelapi.Spec.HostedConfig.Model != "" {
+	if modelapi.Spec.Mode == kaosv1alpha1.ModelAPIModeHosted && modelapi.Spec.HostedConfig != nil && modelapi.Spec.HostedConfig.Model != "" {
 		volumeMounts = append(volumeMounts, corev1.VolumeMount{
 			Name:      "ollama-data",
 			MountPath: "/root/.ollama",
@@ -428,7 +428,7 @@ func (r *ModelAPIReconciler) constructContainer(modelapi *agenticv1alpha1.ModelA
 }
 
 // constructService creates a Service for the ModelAPI
-func (r *ModelAPIReconciler) constructService(modelapi *agenticv1alpha1.ModelAPI) *corev1.Service {
+func (r *ModelAPIReconciler) constructService(modelapi *kaosv1alpha1.ModelAPI) *corev1.Service {
 	labels := map[string]string{
 		"app":      "modelapi",
 		"modelapi": modelapi.Name,
@@ -437,7 +437,7 @@ func (r *ModelAPIReconciler) constructService(modelapi *agenticv1alpha1.ModelAPI
 	// Use different ports based on mode
 	var port int32 = 8000
 	var targetPort int32 = 8000
-	if modelapi.Spec.Mode == agenticv1alpha1.ModelAPIModeHosted {
+	if modelapi.Spec.Mode == kaosv1alpha1.ModelAPIModeHosted {
 		port = 11434
 		targetPort = 11434
 	}
@@ -468,7 +468,7 @@ func (r *ModelAPIReconciler) constructService(modelapi *agenticv1alpha1.ModelAPI
 // constructConfigMap creates a ConfigMap with LiteLLM configuration
 // If user provides configYaml, use it directly
 // Otherwise, generate a wildcard config to forward all requests to apiBase
-func (r *ModelAPIReconciler) constructConfigMap(modelapi *agenticv1alpha1.ModelAPI) *corev1.ConfigMap {
+func (r *ModelAPIReconciler) constructConfigMap(modelapi *kaosv1alpha1.ModelAPI) *corev1.ConfigMap {
 	configYaml := ""
 
 	if modelapi.Spec.ProxyConfig != nil {
@@ -523,7 +523,7 @@ litellm_settings:
 // SetupWithManager sets up the controller with the Manager.
 func (r *ModelAPIReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	builder := ctrl.NewControllerManagedBy(mgr).
-		For(&agenticv1alpha1.ModelAPI{}).
+		For(&kaosv1alpha1.ModelAPI{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
 		Owns(&corev1.ConfigMap{})

@@ -7,19 +7,19 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: agentic-dev
+  name: kaos-dev
   labels:
-    app.kubernetes.io/part-of: agentic-sample-dev
+    app.kubernetes.io/part-of: kaos-sample-dev
 
 ---
 # ModelAPI: LiteLLM proxy to host Ollama (WILDCARD MODE)
 # When only apiBase is specified (no model), LiteLLM will proxy ANY model
 # to the backend. This allows agents to request any model available on Ollama.
-apiVersion: ethical.institute/v1alpha1
+apiVersion: kaos.tools/v1alpha1
 kind: ModelAPI
 metadata:
   name: dev-ollama-proxy
-  namespace: agentic-dev
+  namespace: kaos-dev
 spec:
   mode: Proxy
   proxyConfig:
@@ -34,11 +34,11 @@ spec:
 
 ---
 # MCPServer: Echo tool for testing
-apiVersion: ethical.institute/v1alpha1
+apiVersion: kaos.tools/v1alpha1
 kind: MCPServer
 metadata:
   name: dev-echo-mcp
-  namespace: agentic-dev
+  namespace: kaos-dev
 spec:
   type: python-runtime
   config:
@@ -50,11 +50,11 @@ spec:
 
 ---
 # Agent: Development agent with proxy to host Ollama
-apiVersion: ethical.institute/v1alpha1
+apiVersion: kaos.tools/v1alpha1
 kind: Agent
 metadata:
   name: dev-agent
-  namespace: agentic-dev
+  namespace: kaos-dev
 spec:
   modelAPI: dev-ollama-proxy
   mcpServers:

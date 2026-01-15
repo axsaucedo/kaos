@@ -10,14 +10,14 @@ spec:
   selector:
     matchLabels:
       app.kubernetes.io/managed-by: kustomize
-      app.kubernetes.io/name: agentic-operator
+      app.kubernetes.io/name: kaos-operator
       control-plane: controller-manager
     {{- include "chart.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
         app.kubernetes.io/managed-by: kustomize
-        app.kubernetes.io/name: agentic-operator
+        app.kubernetes.io/name: kaos-operator
         control-plane: controller-manager
       {{- include "chart.selectorLabels" . | nindent 8 }}
       annotations:
@@ -32,7 +32,7 @@ spec:
           value: {{ quote .Values.kubernetesClusterDomain }}
         envFrom:
         - configMapRef:
-            name: agentic-operator-config
+            name: kaos-operator-config
         image: {{ .Values.controllerManager.manager.image.repository }}:{{ .Values.controllerManager.manager.image.tag
           | default .Chart.AppVersion }}
         imagePullPolicy: {{ .Values.controllerManager.manager.imagePullPolicy }}

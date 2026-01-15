@@ -1,4 +1,4 @@
-module agentic.example.com/agentic-operator
+module github.com/axsaucedo/kaos/operator
 
 go 1.24.0
 

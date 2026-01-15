@@ -19,9 +19,9 @@ import yaml
 # Gateway configuration - can be overridden via environment variable for KIND clusters
 GATEWAY_URL = os.environ.get("GATEWAY_URL", "http://localhost:80")
 CHART_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../chart"))
-RELEASE_NAME = "agentic-e2e"
-OPERATOR_NAMESPACE = "agentic-e2e-system"
-LOCK_FILE = os.path.join(tempfile.gettempdir(), "agentic-e2e-operator.lock")
+RELEASE_NAME = "kaos-e2e"
+OPERATOR_NAMESPACE = "kaos-e2e-system"
+LOCK_FILE = os.path.join(tempfile.gettempdir(), "kaos-e2e-operator.lock")
 
 
 def gateway_url(namespace: str, resource_type: str, resource_name: str) -> str:

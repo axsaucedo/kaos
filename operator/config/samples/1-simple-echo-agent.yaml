@@ -6,17 +6,17 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: agentic-simple
+  name: kaos-simple
   labels:
-    app.kubernetes.io/part-of: agentic-sample-simple
+    app.kubernetes.io/part-of: kaos-sample-simple
 
 ---
 # ModelAPI: Hosted Ollama with smollm2 model (runs in-cluster)
-apiVersion: ethical.institute/v1alpha1
+apiVersion: kaos.tools/v1alpha1
 kind: ModelAPI
 metadata:
   name: simple-modelapi
-  namespace: agentic-simple
+  namespace: kaos-simple
 spec:
   mode: Hosted
   hostedConfig:
@@ -27,11 +27,11 @@ spec:
 
 ---
 # MCPServer: Echo tool for testing
-apiVersion: ethical.institute/v1alpha1
+apiVersion: kaos.tools/v1alpha1
 kind: MCPServer
 metadata:
   name: simple-echo-mcp
-  namespace: agentic-simple
+  namespace: kaos-simple
 spec:
   type: python-runtime
   config:
@@ -43,11 +43,11 @@ spec:
 
 ---
 # Agent: Simple echo agent with MCP tool access
-apiVersion: ethical.institute/v1alpha1
+apiVersion: kaos.tools/v1alpha1
 kind: Agent
 metadata:
   name: simple-agent
-  namespace: agentic-simple
+  namespace: kaos-simple
 spec:
   modelAPI: simple-modelapi
   mcpServers:

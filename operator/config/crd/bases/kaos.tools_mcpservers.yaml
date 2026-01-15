@@ -4,22 +4,25 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.20.0
-  name: agents.ethical.institute
+  name: mcpservers.kaos.tools
 spec:
-  group: ethical.institute
+  group: kaos.tools
   names:
-    kind: Agent
-    listKind: AgentList
-    plural: agents
+    kind: MCPServer
+    listKind: MCPServerList
+    plural: mcpservers
     shortNames:
-    - agent
-    - agents
-    singular: agent
+    - mcp
+    - mcps
+    singular: mcpserver
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
-    - jsonPath: .spec.modelAPI
-      name: ModelAPI
+    - jsonPath: .spec.type
+      name: Type
+      type: string
+    - jsonPath: .spec.config.mcp
+      name: MCP
       type: string
     - jsonPath: .status.ready
       name: Ready
@@ -30,7 +33,7 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: Agent is the Schema for the agents API
+        description: MCPServer is the Schema for the mcpservers API
         properties:
           apiVersion:
             description: |-
@@ -50,32 +53,13 @@ spec:
           metadata:
             type: object
           spec:
-            description: AgentSpec defines the desired state of Agent
+            description: MCPServerSpec defines the desired state of MCPServer
             properties:
-              agentNetwork:
-                description: AgentNetwork defines A2A communication settings
-                properties:
-                  access:
-                    description: Access is the allowlist of peer agent names this
-                      agent can call
-                    items:
-                      type: string
-                    type: array
-                  expose:
-                    default: true
-                    description: Expose indicates if this agent exposes an Agent Card
-                      endpoint for A2A
-                    type: boolean
-                type: object
               config:
-                description: Config contains agent-specific configuration
+                description: Config contains the MCP server configuration
                 properties:
-                  description:
-                    description: Description is a human-readable description of the
-                      agent
-                    type: string
                   env:
-                    description: Env variables to pass to the agent runtime
+                    description: Env variables to pass to the MCP server
                     items:
                       description: EnvVar represents an environment variable present
                         in a Container.
@@ -232,18 +216,46 @@ spec:
                       - name
                       type: object
                     type: array
-                  instructions:
-                    description: Instructions are the system instructions for the
-                      agent
-                    type: string
-                  reasoningLoopMaxSteps:
-                    default: 5
-                    description: ReasoningLoopMaxSteps is the maximum number of reasoning
-                      steps before stopping
-                    format: int32
-                    maximum: 20
-                    minimum: 1
-                    type: integer
+                  tools:
+                    description: Tools configures how MCP tools are loaded
+                    properties:
+                      fromPackage:
+                        description: |-
+                          FromPackage is the package name to run with uvx (e.g., "mcp-server-calculator")
+                          For python-runtime type: runs as "uvx <package-name>"
+                          The package must be available on PyPI
+                        type: string
+                      fromSecretKeyRef:
+                        description: FromSecretKeyRef is a reference to a Secret key
+                          containing tool definitions
+                        properties:
+                          key:
+                            description: The key of the secret to select from.  Must
+                              be a valid secret key.
+                            type: string
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
+                          optional:
+                            description: Specify whether the Secret or its key must
+                              be defined
+                            type: boolean
+                        required:
+                        - key
+                        type: object
+                        x-kubernetes-map-type: atomic
+                      fromString:
+                        description: |-
+                          FromString is a Python literal string defining tools dynamically
+                          When set, the MCP server uses MCP_TOOLS_STRING env var instead of uvx package
+                        type: string
+                    type: object
                 type: object
               gatewayRoute:
                 description: GatewayRoute configures Gateway API routing (timeout,
@@ -259,16 +271,6 @@ spec:
                     pattern: ^([0-9]+(h|m|s|ms)){1,4}$
                     type: string
                 type: object
-              mcpServers:
-                description: MCPServers is a list of MCPServer names this agent can
-                  use
-                items:
-                  type: string
-                type: array
-              modelAPI:
-                description: ModelAPI is the name of the ModelAPI resource this agent
-                  uses
-                type: string
               podSpec:
                 description: PodSpec allows overriding the generated pod spec using
                   strategic merge patch
@@ -8653,27 +8655,27 @@ spec:
                 required:
                 - containers
                 type: object
-              waitForDependencies:
-                default: true
-                description: |-
-                  WaitForDependencies controls whether the agent waits for ModelAPI and MCPServers to be ready
-                  before creating the deployment. Default is true.
-                type: boolean
+              type:
+                description: Type specifies the MCP server runtime type
+                enum:
+                - python-runtime
+                - node-runtime
+                type: string
             required:
-            - modelAPI
+            - config
+            - type
             type: object
           status:
-            description: AgentStatus defines the observed state of Agent
+            description: MCPServerStatus defines the observed state of MCPServer
             properties:
-              endpoint:
-                description: Endpoint is the Agent Card HTTP endpoint for A2A communication
-                type: string
-              linkedResources:
-                additionalProperties:
+              availableTools:
+                description: AvailableTools lists tools exposed by this server
+                items:
                   type: string
-                description: LinkedResources tracks references to ModelAPI and MCPServer
-                  resources
-                type: object
+                type: array
+              endpoint:
+                description: Endpoint is the service endpoint for the MCP server
+                type: string
               message:
                 description: Message provides additional status information
                 type: string
@@ -8683,10 +8685,9 @@ spec:
                 - Pending
                 - Ready
                 - Failed
-                - Waiting
                 type: string
               ready:
-                description: Ready indicates if the agent is ready
+                description: Ready indicates if the MCP server is ready
                 type: boolean
             type: object
         type: object
