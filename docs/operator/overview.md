@@ -1,6 +1,6 @@
 # Kubernetes Operator Overview
 
-KAOS manages the lifecycle of AI agents and their dependencies on Kubernetes.
+YAAY manages the lifecycle of AI agents and their dependencies on Kubernetes.
 
 ## Architecture
 

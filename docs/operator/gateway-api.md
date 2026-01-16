@@ -1,6 +1,6 @@
 # Gateway API Integration
 
-KAOS supports the [Kubernetes Gateway API](https://gateway-api.sigs.k8s.io/) for exposing Agent, ModelAPI, and MCPServer resources via a unified ingress point.
+YAAY supports the [Kubernetes Gateway API](https://gateway-api.sigs.k8s.io/) for exposing Agent, ModelAPI, and MCPServer resources via a unified ingress point.
 
 ## Overview
 

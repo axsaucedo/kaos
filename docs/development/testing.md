@@ -1,6 +1,6 @@
 # Testing Guide
 
-How to run and write tests for the KAOS.
+How to run and write tests for the YAAY.
 
 ## Test Structure
 

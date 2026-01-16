@@ -1,4 +1,4 @@
-# Contributing to KAOS (K8s Agent Orchestration System)
+# Contributing to YAAY (Yet Another Agentic System)
 
 Thank you for your interest in contributing! This document provides guidelines and instructions for contributing.
 

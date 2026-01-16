@@ -1,6 +1,6 @@
-# KAOS Documentation
+# YAAY Documentation
 
-This documentation provides comprehensive coverage of the KAOS, a framework for deploying and managing AI agents with tool access and multi-agent coordination on Kubernetes.
+This documentation provides comprehensive coverage of the YAAY, a framework for deploying and managing AI agents with tool access and multi-agent coordination on Kubernetes.
 
 ## Documentation Structure
 

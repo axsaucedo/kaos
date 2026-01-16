@@ -1,4 +1,4 @@
-# KAOS: K8s Agent Orchestration System
+# YAAY: Yet Another Agentic System
 
 <p align="center">
   <strong>Deploy, manage, and orchestrate AI agents on Kubernetes</strong>
@@ -13,7 +13,7 @@
 
 ---
 
-KAOS is a Kubernetes-native framework for deploying and orchestrating AI agents with tool access, multi-agent coordination, and seamless LLM integration.
+YAAY is a Kubernetes-native framework for deploying and orchestrating AI agents with tool access, multi-agent coordination, and seamless LLM integration.
 
 ## Features
 
@@ -32,7 +32,7 @@ KAOS is a Kubernetes-native framework for deploying and orchestrating AI agents 
 - kubectl configured
 - Helm 3.x
 
-### Install KAOS Operator
+### Install YAAY Operator
 
 ```bash
 cd operator
@@ -94,7 +94,7 @@ curl http://localhost:8000/v1/chat/completions \
 
 ## Multi-Agent with Gateway API
 
-KAOS supports complex multi-agent systems with Gateway API for external access:
+YAAY supports complex multi-agent systems with Gateway API for external access:
 
 ```yaml
 # multi-agent-gateway.yaml
@@ -190,7 +190,7 @@ http://<gateway-ip>/coordinator/v1/chat/completions
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                       KAOS Operator                              │
+│                       YAAY Operator                              │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐              │
 │  │   Agent     │  │  MCPServer  │  │  ModelAPI   │              │
 │  │ Controller  │  │ Controller  │  │ Controller  │              │

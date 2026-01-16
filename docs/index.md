@@ -2,8 +2,8 @@
 layout: home
 
 hero:
-  name: KAOS
-  text: K8s Agent Orchestration System
+  name: YAAY
+  text: Yet Another Agentic System
   tagline: Deploy, manage, and orchestrate AI agents on Kubernetes
   actions:
     - theme: brand

@@ -1,14 +1,14 @@
 import { defineConfig } from 'vitepress'
 
 export default defineConfig({
-  title: 'KAOS',
-  description: 'K8s Agent Orchestration System',
+  title: 'YAAY',
+  description: 'Yet Another Agentic System',
   
-  // For GitHub Pages deployment to /kaos/
-  base: '/kaos/',
+  // For GitHub Pages deployment to /yaay/
+  base: '/yaay/',
   
   head: [
-    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/kaos/logo.svg' }]
+    ['link', { rel: 'icon', type: 'image/svg+xml', href: '/yaay/logo.svg' }]
   ],
 
   // Ignore dead links for external references
@@ -16,13 +16,13 @@ export default defineConfig({
 
   themeConfig: {
     logo: '/logo.svg',
-    siteTitle: 'KAOS',
+    siteTitle: 'YAAY',
     
     nav: [
       { text: 'Guide', link: '/getting-started/quickstart' },
       { text: 'Operator', link: '/operator/overview' },
       { text: 'Python', link: '/python-framework/overview' },
-      { text: 'GitHub', link: 'https://github.com/axsaucedo/kaos' }
+      { text: 'GitHub', link: 'https://github.com/axsaucedo/yaay' }
     ],
 
     sidebar: [
@@ -79,12 +79,12 @@ export default defineConfig({
     ],
 
     socialLinks: [
-      { icon: 'github', link: 'https://github.com/axsaucedo/kaos' }
+      { icon: 'github', link: 'https://github.com/axsaucedo/yaay' }
     ],
 
     footer: {
       message: 'Released under the Apache 2.0 License.',
-      copyright: 'Copyright © 2024-present KAOS Contributors'
+      copyright: 'Copyright © 2024-present YAAY Contributors'
     },
 
     search: {
@@ -92,7 +92,7 @@ export default defineConfig({
     },
 
     editLink: {
-      pattern: 'https://github.com/axsaucedo/kaos/edit/main/docs/:path',
+      pattern: 'https://github.com/axsaucedo/yaay/edit/main/docs/:path',
       text: 'Edit this page on GitHub'
     }
   }

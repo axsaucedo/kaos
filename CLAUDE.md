@@ -1,4 +1,4 @@
-# KAOS (K8s Agent Orchestration System) - Project Documentation
+# YAAY (Yet Another Agentic System) - Project Documentation
 
 ## Commit Guidelines
 Use conventional commits with brief, functional descriptions:

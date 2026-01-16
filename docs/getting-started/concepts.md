@@ -2,7 +2,7 @@
 
 ## Overview
 
-KAOS provides a declarative way to deploy AI agents that can:
+YAAY provides a declarative way to deploy AI agents that can:
 - Process natural language messages using LLMs
 - Call external tools via the Model Context Protocol (MCP)
 - Delegate tasks to other agents (Agent-to-Agent / A2A)

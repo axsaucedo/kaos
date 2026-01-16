@@ -1,6 +1,6 @@
 # Troubleshooting Guide
 
-Common issues and solutions for the KAOS.
+Common issues and solutions for the YAAY.
 
 ## Agent Issues
 

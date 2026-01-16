@@ -1,6 +1,6 @@
 # Environment Variables Reference
 
-Complete reference for all environment variables used by the KAOS.
+Complete reference for all environment variables used by the YAAY.
 
 ## Agent Container Environment Variables
 
