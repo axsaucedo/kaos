@@ -1,34 +1,51 @@
 #!/bin/bash
 # Runs E2E tests in KIND cluster.
-# This script builds all images, loads them into KIND, and runs tests.
+# This script installs the operator, sets up port-forwarding, and runs tests.
 #
-# The operator is installed once at the start and uninstalled at the end.
-# Port-forward is maintained throughout the test run.
+# Prerequisites (run these before this script):
+#   - make kind-create      - Create KIND cluster with Gateway and MetalLB
+#   - make kind-e2e-values  - Generate Helm values file
+#   - make kind-load-images - Build and load images into KIND
 #
-# Prerequisites:
-#   - KIND cluster created with: make kind-create (from operator/)
-#   - Gateway and MetalLB installed (done by kind-create)
+# Or use: make kind-e2e  (runs all steps)
 set -o errexit
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OPERATOR_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 PROJECT_ROOT="$(cd "${OPERATOR_ROOT}/.." && pwd)"
 
-# Configuration - single source of truth for versions
+# Configuration
 export KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-kaos-e2e}"
-export REGISTRY="${REGISTRY:-kind-local}"
-export OPERATOR_TAG="${OPERATOR_TAG:-dev}"
-export AGENT_TAG="${AGENT_TAG:-dev}"
-export LITELLM_VERSION="${LITELLM_VERSION:-v1.56.5}"
-export OLLAMA_TAG="${OLLAMA_TAG:-latest}"
-
-echo "=== Generating Helm values file ==="
-"${SCRIPT_DIR}/update-kind-e2e-values.sh"
 HELM_VALUES_FILE="${SCRIPT_DIR}/kind-e2e-values.yaml"
 
-echo ""
-echo "=== Building images and loading into KIND ==="
-"${SCRIPT_DIR}/build-push-images.sh"
+# Check prerequisites
+echo "=== Checking prerequisites ==="
+
+# Check KIND cluster exists
+if ! kind get clusters 2>/dev/null | grep -q "^${KIND_CLUSTER_NAME}$"; then
+    echo "ERROR: KIND cluster '${KIND_CLUSTER_NAME}' not found."
+    echo "Run: make kind-create"
+    exit 1
+fi
+echo "✓ KIND cluster '${KIND_CLUSTER_NAME}' exists"
+
+# Check Helm values file exists
+if [ ! -f "${HELM_VALUES_FILE}" ]; then
+    echo "ERROR: Helm values file not found: ${HELM_VALUES_FILE}"
+    echo "Run: make kind-e2e-values"
+    exit 1
+fi
+echo "✓ Helm values file exists"
+
+# Check images are loaded (spot check operator image)
+REGISTRY="${REGISTRY:-kind-local}"
+OPERATOR_TAG="${OPERATOR_TAG:-dev}"
+if ! docker exec "${KIND_CLUSTER_NAME}-control-plane" crictl images 2>/dev/null | grep -q "${REGISTRY}/kaos-operator"; then
+    echo "ERROR: Operator image not found in KIND cluster."
+    echo "Run: make kind-load-images"
+    exit 1
+fi
+echo "✓ Images loaded in KIND"
 
 echo ""
 echo "=== Setting up test environment ==="
@@ -103,9 +120,6 @@ cleanup() {
     
     # Clean up leftover test namespaces
     kubectl get ns -o name | grep -E "e2e-(gw[0-9]+|main)" | xargs -I{} kubectl delete {} --wait=false 2>/dev/null || true
-    
-    # Clean up generated values file
-    rm -f "${HELM_VALUES_FILE}"
 }
 trap cleanup EXIT
 

@@ -9,7 +9,7 @@ controllerManager:
         - ALL
       readOnlyRootFilesystem: true
     image:
-      repository: kaos-operator
+      repository: axsauze/kaos-operator
       tag: latest
     imagePullPolicy: IfNotPresent
     resources:
@@ -36,9 +36,9 @@ serviceAccount:
 # These are used when no image is specified in the CRD
 defaultImages:
   # Agent runtime image for Agent CRD
-  agentRuntime: "kaos-agent:latest"
+  agentRuntime: "axsauze/kaos-agent:latest"
   # MCP server image for MCPServer CRD
-  mcpServer: "kaos-agent:latest"
+  mcpServer: "axsauze/kaos-agent:latest"
   # LiteLLM proxy image for ModelAPI CRD (Proxy mode)
   litellm: "ghcr.io/berriai/litellm:main-latest"
   # Ollama image for ModelAPI CRD (Hosted mode)

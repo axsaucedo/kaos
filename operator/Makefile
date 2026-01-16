@@ -1,4 +1,4 @@
-.PHONY: help build docker-build deploy generate manifests test test-unit clean envtest helm kind-create kind-delete kind-e2e e2e-test e2e-test-seq e2e-clean
+.PHONY: help build docker-build deploy generate manifests test test-unit clean envtest helm kind-create kind-delete kind-e2e kind-e2e-values kind-load-images kind-e2e-run e2e-test e2e-test-seq e2e-clean
 
 # Configuration
 IMG ?= kaos-operator:latest
@@ -22,12 +22,15 @@ help:
 	@echo "  clean           - Clean build artifacts"
 	@echo ""
 	@echo "KIND E2E targets:"
-	@echo "  kind-create     - Create KIND cluster with registry, Gateway, MetalLB"
-	@echo "  kind-delete     - Delete KIND cluster"
-	@echo "  kind-e2e        - Create cluster and run E2E tests"
-	@echo "  e2e-test        - Run E2E tests (parallel, requires cluster)"
-	@echo "  e2e-test-seq    - Run E2E tests sequentially"
-	@echo "  e2e-clean       - Clean up E2E test resources"
+	@echo "  kind-create       - Create KIND cluster with registry, Gateway, MetalLB"
+	@echo "  kind-delete       - Delete KIND cluster"
+	@echo "  kind-e2e-values   - Generate Helm values for KIND E2E"
+	@echo "  kind-load-images  - Build and load images into KIND"
+	@echo "  kind-e2e-run      - Run E2E tests (operator lifecycle managed)"
+	@echo "  kind-e2e          - Full E2E: create + values + images + run"
+	@echo "  e2e-test          - Run E2E tests (parallel, requires operator)"
+	@echo "  e2e-test-seq      - Run E2E tests sequentially"
+	@echo "  e2e-clean         - Clean up E2E test resources"
 
 # Build operator binary
 build: generate manifests
@@ -86,7 +89,14 @@ clean:
 
 # === KIND E2E Test Targets ===
 
-# Create KIND cluster with registry
+# Configuration for KIND E2E
+REGISTRY ?= kind-local
+OPERATOR_TAG ?= dev
+AGENT_TAG ?= dev
+LITELLM_VERSION ?= v1.56.5
+OLLAMA_TAG ?= latest
+
+# Create KIND cluster with registry, Gateway, MetalLB
 kind-create:
 	@./hack/kind-with-registry.sh
 	@./hack/install-gateway.sh
@@ -96,11 +106,27 @@ kind-create:
 kind-delete:
 	@./hack/kind-delete.sh
 
-# Full E2E: create cluster and run tests
-kind-e2e: kind-create
+# Generate Helm values file for KIND E2E testing
+kind-e2e-values:
+	@REGISTRY=$(REGISTRY) OPERATOR_TAG=$(OPERATOR_TAG) AGENT_TAG=$(AGENT_TAG) \
+		LITELLM_VERSION=$(LITELLM_VERSION) OLLAMA_TAG=$(OLLAMA_TAG) \
+		./hack/update-kind-e2e-values.sh
+
+# Build images and load into KIND cluster
+kind-load-images:
+	@REGISTRY=$(REGISTRY) KIND_CLUSTER_NAME=$(KIND_CLUSTER_NAME) \
+		OPERATOR_TAG=$(OPERATOR_TAG) AGENT_TAG=$(AGENT_TAG) \
+		LITELLM_VERSION=$(LITELLM_VERSION) OLLAMA_TAG=$(OLLAMA_TAG) \
+		./hack/build-push-images.sh
+
+# Run E2E tests in KIND (operator lifecycle managed by script)
+kind-e2e-run:
 	@./hack/run-e2e-tests.sh
 
-# Run E2E tests (parallel) - requires existing cluster
+# Full E2E: create cluster, build images, run tests
+kind-e2e: kind-create kind-e2e-values kind-load-images kind-e2e-run
+
+# Run E2E tests (parallel) - requires existing cluster with operator installed
 # Cap at 4 workers to avoid "out of pty devices" errors on high-CPU machines
 e2e-test:
 	@cd tests && \
@@ -108,7 +134,7 @@ e2e-test:
 	JOBS="$$(( CPUS > 4 ? 4 : CPUS ))"; \
 	uv run pytest e2e/ -v -n "$$JOBS" --dist loadscope
 
-# Run E2E tests sequentially - requires existing cluster
+# Run E2E tests sequentially - requires existing cluster with operator installed
 e2e-test-seq:
 	@cd tests && uv run pytest e2e/ -v -s --log-cli-level=DEBUG
 

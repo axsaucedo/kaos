@@ -52,6 +52,7 @@ operator/                  # Kubernetes operator (Go/kubebuilder)
 └── tests/e2e/             # E2E tests (14 tests)
 
 .github/workflows/         # GitHub Actions
+├── docker-push.yaml       # Build and push images on main
 ├── e2e-tests.yaml         # E2E tests in KIND
 ├── go-tests.yaml          # Go unit tests
 └── python-tests.yaml      # Python unit tests
@@ -114,15 +115,41 @@ cd operator
 # Create KIND cluster with Gateway API and MetalLB
 make kind-create
 
-# Run full E2E test suite in KIND (builds images, installs operator, runs tests)
+# Individual steps (for debugging):
+make kind-e2e-values   # Generate Helm values file
+make kind-load-images  # Build and load images into KIND
+make kind-e2e-run      # Run E2E tests (operator managed by script)
+
+# Full E2E (all steps combined):
 make kind-e2e
 
 # Delete KIND cluster
 make kind-delete
 ```
 
-The `kind-e2e` target builds images, loads into KIND, and runs tests.
+The `kind-e2e` target runs: `kind-create` → `kind-e2e-values` → `kind-load-images` → `kind-e2e-run`
 This is the same setup used in GitHub Actions CI.
+
+## Docker Images
+
+Official images are published to Docker Hub under `axsauze/`:
+
+| Image | Description |
+|-------|-------------|
+| `axsauze/kaos-operator:latest` | Kubernetes operator controller |
+| `axsauze/kaos-agent:latest` | Agent runtime (also used for MCP servers) |
+
+Images are automatically built and pushed on merge to main via `.github/workflows/docker-push.yaml`.
+
+### Helm Chart Default Images
+The Helm chart (`operator/chart/values.yaml`) uses these defaults:
+```yaml
+defaultImages:
+  agentRuntime: "axsauze/kaos-agent:latest"
+  mcpServer: "axsauze/kaos-agent:latest"
+  litellm: "ghcr.io/berriai/litellm:main-latest"
+  ollama: "alpine/ollama:latest"
+```
 
 ## Dependencies
 - Ollama running locally with `smollm2:135m` model (for local host-Ollama tests)
