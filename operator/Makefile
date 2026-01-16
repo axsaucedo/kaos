@@ -1,7 +1,7 @@
-.PHONY: help build docker-build deploy generate manifests test test-unit clean envtest helm kind-create kind-delete kind-e2e kind-e2e-values kind-load-images kind-e2e-run e2e-test e2e-test-seq e2e-clean
+.PHONY: help build docker-build deploy generate manifests test test-unit clean envtest helm kind-create kind-delete kind-e2e kind-load-images kind-e2e-install-kaos kind-e2e-run e2e-test e2e-test-seq e2e-clean
 
 # Configuration
-IMG ?= kaos-operator:latest
+IMG ?= axsauze/kaos-operator:latest
 CONTROLLER_GEN ?= $(shell which controller-gen || echo "$(shell pwd)/bin/controller-gen")
 CRD_OPTIONS ?= "crd:generateEmbeddedObjectMeta=true"
 SETUP_ENVTEST ?= $(shell which setup-envtest)
@@ -22,15 +22,15 @@ help:
 	@echo "  clean           - Clean build artifacts"
 	@echo ""
 	@echo "KIND E2E targets:"
-	@echo "  kind-create       - Create KIND cluster with registry, Gateway, MetalLB"
-	@echo "  kind-delete       - Delete KIND cluster"
-	@echo "  kind-e2e-values   - Generate Helm values for KIND E2E"
-	@echo "  kind-load-images  - Build and load images into KIND"
-	@echo "  kind-e2e-run      - Run E2E tests (operator lifecycle managed)"
-	@echo "  kind-e2e          - Full E2E: create + values + images + run"
-	@echo "  e2e-test          - Run E2E tests (parallel, requires operator)"
-	@echo "  e2e-test-seq      - Run E2E tests sequentially"
-	@echo "  e2e-clean         - Clean up E2E test resources"
+	@echo "  kind-create          - Create KIND cluster with registry, Gateway, MetalLB"
+	@echo "  kind-delete          - Delete KIND cluster"
+	@echo "  kind-load-images     - Build and load images into KIND"
+	@echo "  kind-e2e-install-kaos - Generate values and install KAOS operator"
+	@echo "  kind-e2e-run         - Run E2E tests (depends on load-images + install-kaos)"
+	@echo "  kind-e2e             - Full E2E: create cluster + run tests"
+	@echo "  e2e-test             - Run E2E tests (parallel, requires operator)"
+	@echo "  e2e-test-seq         - Run E2E tests sequentially"
+	@echo "  e2e-clean            - Clean up E2E test resources"
 
 # Build operator binary
 build: generate manifests
@@ -95,6 +95,7 @@ OPERATOR_TAG ?= dev
 AGENT_TAG ?= dev
 LITELLM_VERSION ?= v1.56.5
 OLLAMA_TAG ?= latest
+HELM_VALUES_FILE ?= $(shell pwd)/hack/kind-e2e-values.yaml
 
 # Create KIND cluster with registry, Gateway, MetalLB
 kind-create:
@@ -106,12 +107,6 @@ kind-create:
 kind-delete:
 	@./hack/kind-delete.sh
 
-# Generate Helm values file for KIND E2E testing
-kind-e2e-values:
-	@REGISTRY=$(REGISTRY) OPERATOR_TAG=$(OPERATOR_TAG) AGENT_TAG=$(AGENT_TAG) \
-		LITELLM_VERSION=$(LITELLM_VERSION) OLLAMA_TAG=$(OLLAMA_TAG) \
-		./hack/update-kind-e2e-values.sh
-
 # Build images and load into KIND cluster
 kind-load-images:
 	@REGISTRY=$(REGISTRY) KIND_CLUSTER_NAME=$(KIND_CLUSTER_NAME) \
@@ -119,12 +114,31 @@ kind-load-images:
 		LITELLM_VERSION=$(LITELLM_VERSION) OLLAMA_TAG=$(OLLAMA_TAG) \
 		./hack/build-push-images.sh
 
-# Run E2E tests in KIND (operator lifecycle managed by script)
-kind-e2e-run:
+# Generate Helm values and install KAOS operator in KIND
+kind-e2e-install-kaos:
+	@echo "=== Generating Helm values ==="
+	@REGISTRY=$(REGISTRY) OPERATOR_TAG=$(OPERATOR_TAG) AGENT_TAG=$(AGENT_TAG) \
+		LITELLM_VERSION=$(LITELLM_VERSION) OLLAMA_TAG=$(OLLAMA_TAG) \
+		./hack/update-kind-e2e-values.sh
+	@echo "=== Installing KAOS operator ==="
+	@kubectl create namespace kaos-e2e-system 2>/dev/null || true
+	@kubectl apply --server-side -f config/crd/bases
+	@helm upgrade --install kaos-e2e chart/ \
+		--namespace kaos-e2e-system \
+		-f $(HELM_VALUES_FILE) \
+		--set gatewayAPI.enabled=true \
+		--set gatewayAPI.createGateway=true \
+		--set gatewayAPI.gatewayClassName=envoy-gateway \
+		--skip-crds \
+		--wait --timeout 120s
+	@echo "=== KAOS operator installed ==="
+
+# Run E2E tests in KIND (requires kind-load-images and kind-e2e-install-kaos)
+kind-e2e-run: kind-load-images kind-e2e-install-kaos
 	@./hack/run-e2e-tests.sh
 
-# Full E2E: create cluster, build images, run tests
-kind-e2e: kind-create kind-e2e-values kind-load-images kind-e2e-run
+# Full E2E: create cluster, build images, install operator, run tests
+kind-e2e: kind-create kind-e2e-run
 
 # Run E2E tests (parallel) - requires existing cluster with operator installed
 # Cap at 4 workers to avoid "out of pty devices" errors on high-CPU machines

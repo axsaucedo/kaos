@@ -343,8 +343,8 @@ All operator configuration is managed via the `kaos-operator-config` ConfigMap, 
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `DEFAULT_AGENT_IMAGE` | Default agent container image | `kaos-agent:latest` |
-| `DEFAULT_MCP_SERVER_IMAGE` | Default MCP server image | `kaos-agent:latest` |
+| `DEFAULT_AGENT_IMAGE` | Default agent container image | `axsauze/kaos-agent:latest` |
+| `DEFAULT_MCP_SERVER_IMAGE` | Default MCP server image | `axsauze/kaos-agent:latest` |
 | `DEFAULT_LITELLM_IMAGE` | Default LiteLLM proxy image | `ghcr.io/berriai/litellm:main-latest` |
 | `DEFAULT_OLLAMA_IMAGE` | Default Ollama image | `alpine/ollama:latest` |
 | `GATEWAY_API_ENABLED` | Enable Gateway API integration | `false` |
@@ -357,8 +357,8 @@ All operator configuration is managed via the `kaos-operator-config` ConfigMap, 
 These can be set via Helm values:
 ```yaml
 defaultImages:
-  agentRuntime: "kaos-agent:latest"
-  mcpServer: "kaos-agent:latest"
+  agentRuntime: "axsauze/kaos-agent:latest"
+  mcpServer: "axsauze/kaos-agent:latest"
   litellm: "ghcr.io/berriai/litellm:main-latest"
   ollama: "alpine/ollama:latest"
 gateway:

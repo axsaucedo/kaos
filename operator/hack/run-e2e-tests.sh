@@ -1,11 +1,12 @@
 #!/bin/bash
 # Runs E2E tests in KIND cluster.
-# This script installs the operator, sets up port-forwarding, and runs tests.
+# This script sets up port-forwarding and runs tests.
+# The operator must already be installed via `make kind-e2e-install-kaos`.
 #
 # Prerequisites (run these before this script):
-#   - make kind-create      - Create KIND cluster with Gateway and MetalLB
-#   - make kind-e2e-values  - Generate Helm values file
-#   - make kind-load-images - Build and load images into KIND
+#   - make kind-create           - Create KIND cluster with Gateway and MetalLB
+#   - make kind-load-images      - Build and load images into KIND
+#   - make kind-e2e-install-kaos - Generate Helm values and install operator
 #
 # Or use: make kind-e2e  (runs all steps)
 set -o errexit
@@ -29,10 +30,10 @@ if ! kind get clusters 2>/dev/null | grep -q "^${KIND_CLUSTER_NAME}$"; then
 fi
 echo "✓ KIND cluster '${KIND_CLUSTER_NAME}' exists"
 
-# Check Helm values file exists
+# Check Helm values file exists (created by kind-e2e-install-kaos)
 if [ ! -f "${HELM_VALUES_FILE}" ]; then
     echo "ERROR: Helm values file not found: ${HELM_VALUES_FILE}"
-    echo "Run: make kind-e2e-values"
+    echo "Run: make kind-e2e-install-kaos"
     exit 1
 fi
 echo "✓ Helm values file exists"
@@ -61,18 +62,13 @@ uv pip install -e .
 
 echo "Using Helm values: ${HELM_VALUES_FILE}"
 
-# Install operator with Gateway
-echo "Installing operator with Gateway..."
-kubectl create namespace kaos-e2e-system 2>/dev/null || true
-kubectl apply --server-side -f "${OPERATOR_ROOT}/config/crd/bases"
-helm upgrade --install kaos-e2e "${OPERATOR_ROOT}/chart" \
-    --namespace kaos-e2e-system \
-    -f "${HELM_VALUES_FILE}" \
-    --set gatewayAPI.enabled=true \
-    --set gatewayAPI.createGateway=true \
-    --set gatewayAPI.gatewayClassName=envoy-gateway \
-    --skip-crds \
-    --wait --timeout 120s
+# Check operator is installed
+if ! helm status kaos-e2e -n kaos-e2e-system >/dev/null 2>&1; then
+    echo "ERROR: Operator not installed."
+    echo "Run: make kind-e2e-install-kaos"
+    exit 1
+fi
+echo "✓ Operator is installed"
 
 # Wait for Gateway to be programmed
 echo "Waiting for Gateway to be programmed..."
