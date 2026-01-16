@@ -1,6 +1,8 @@
 # YAAY Documentation
 
-This documentation provides comprehensive coverage of the YAAY, a framework for deploying and managing AI agents with tool access and multi-agent coordination on Kubernetes.
+Welcome to the **YAAY** documentation! YAAY (Yet Another Agentic System) is the simplest way to deploy AI agents on Kubernetes.
+
+This documentation provides comprehensive coverage of the framework for deploying and managing AI agents with tool access and multi-agent coordination on Kubernetes.
 
 ## Documentation Structure
 

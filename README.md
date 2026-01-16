@@ -1,7 +1,7 @@
 # YAAY: Yet Another Agentic System
 
 <p align="center">
-  <strong>Deploy, manage, and orchestrate AI agents on Kubernetes</strong>
+  <strong>🎉 The simplest way to deploy AI agents on Kubernetes</strong>
 </p>
 
 <p align="center">
@@ -13,11 +13,11 @@
 
 ---
 
-YAAY is a Kubernetes-native framework for deploying and orchestrating AI agents with tool access, multi-agent coordination, and seamless LLM integration.
+**YAAY** makes deploying AI agents on Kubernetes as simple as writing YAML. Define your agents, connect them to tools, and let Kubernetes handle the rest.
 
 ## Features
 
-- **🤖 Agent CRD** - Deploy AI agents as Kubernetes resources
+- **🤖 Agent CRD** - Deploy AI agents as native Kubernetes resources
 - **🔧 MCP Tools** - Integrate tools using Model Context Protocol
 - **🔗 Multi-Agent Networks** - Build hierarchical agent systems with automatic delegation
 - **🌐 Gateway API** - Expose agents via Kubernetes Gateway API
@@ -222,11 +222,11 @@ cd operator && make kind-e2e
 
 ## Documentation
 
-�� **[Full Documentation](https://axsaucedo.github.io/kaos)**
+📚 **[Full Documentation](https://axsaucedo.github.io/yaay)**
 
-- [Getting Started](https://axsaucedo.github.io/kaos/getting-started/quickstart)
-- [Agent CRD Reference](https://axsaucedo.github.io/kaos/operator/agent-crd)
-- [Multi-Agent Tutorial](https://axsaucedo.github.io/kaos/tutorials/multi-agent)
+- [Getting Started](https://axsaucedo.github.io/yaay/getting-started/quickstart)
+- [Agent CRD Reference](https://axsaucedo.github.io/yaay/operator/agent-crd)
+- [Multi-Agent Tutorial](https://axsaucedo.github.io/yaay/tutorials/multi-agent)
 
 ## Sample Configurations
 

@@ -1,5 +1,7 @@
 # YAAY (Yet Another Agentic System) - Project Documentation
 
+> 🎉 The simplest way to deploy AI agents on Kubernetes
+
 ## Commit Guidelines
 Use conventional commits with brief, functional descriptions:
 - `feat(scope): add feature` - New functionality
@@ -11,7 +13,7 @@ Use conventional commits with brief, functional descriptions:
 Keep commits atomic and easy to review. Group related changes logically.
 
 ## Overview
-Custom Agent Runtime framework (replacing Google ADK) for Kubernetes-native AI agents.
+**YAAY** is a Kubernetes-native framework for deploying AI agents. Define your agents in YAML, connect them to tools, and let Kubernetes handle the rest.
 
 ## Project Structure
 ```

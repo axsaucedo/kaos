@@ -1,6 +1,6 @@
-# Contributing to YAAY (Yet Another Agentic System)
+# Contributing to YAAY
 
-Thank you for your interest in contributing! This document provides guidelines and instructions for contributing.
+Thank you for your interest in contributing to **YAAY** (Yet Another Agentic System)! This document provides guidelines and instructions for contributing.
 
 ## Development Setup
 
