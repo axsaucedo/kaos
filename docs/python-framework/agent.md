@@ -15,7 +15,8 @@ class Agent:
         memory: LocalMemory = None,
         mcp_clients: List[MCPClient] = None,
         sub_agents: List[RemoteAgent] = None,
-        loop_config: AgenticLoopConfig = None
+        max_steps: int = 5,
+        memory_context_limit: int = 6
     )
 ```
 
@@ -30,18 +31,32 @@ class Agent:
 | `memory` | LocalMemory | No | New instance | Session/event storage |
 | `mcp_clients` | List[MCPClient] | No | [] | Tool clients for MCP servers |
 | `sub_agents` | List[RemoteAgent] | No | [] | Remote agents for delegation |
-| `loop_config` | AgenticLoopConfig | No | Default config | Agentic loop settings |
+| `max_steps` | int | No | 5 | Maximum agentic loop iterations |
+| `memory_context_limit` | int | No | 6 | Max conversation turns in context |
 
-## AgenticLoopConfig
+## Agentic Loop Configuration
 
-Controls the reasoning loop behavior:
+The agentic loop behavior is controlled by two parameters:
+
+- **`max_steps`**: Maximum reasoning iterations before returning. Prevents infinite loops.
+- **`memory_context_limit`**: How many recent conversation turns to include in the context.
 
 ```python
-@dataclass
-class AgenticLoopConfig:
-    max_steps: int = 5           # Maximum reasoning iterations
-    enable_tools: bool = True    # Enable tool calling
-    enable_delegation: bool = True  # Enable agent delegation
+# High-complexity tasks with more steps
+agent = Agent(
+    name="complex-agent",
+    model_api=model_api,
+    max_steps=10,
+    memory_context_limit=10
+)
+
+# Simple tasks with fewer steps
+agent = Agent(
+    name="simple-agent",
+    model_api=model_api,
+    max_steps=2,
+    memory_context_limit=4
+)
 ```
 
 ## Core Methods
@@ -167,29 +182,23 @@ coordinator = Agent(
 )
 ```
 
-### Custom Loop Configuration
+### Custom Configuration
 
 ```python
-from agent.client import AgenticLoopConfig
-
 # High-complexity tasks with more steps
-complex_config = AgenticLoopConfig(
-    max_steps=10,
-    enable_tools=True,
-    enable_delegation=True
-)
-
-# Simple tasks without tools
-simple_config = AgenticLoopConfig(
-    max_steps=2,
-    enable_tools=False,
-    enable_delegation=False
-)
-
 agent = Agent(
-    name="custom",
+    name="complex-agent",
     model_api=model_api,
-    loop_config=complex_config
+    max_steps=10,
+    memory_context_limit=10
+)
+
+# Simple tasks with fewer steps
+agent = Agent(
+    name="simple-agent",
+    model_api=model_api,
+    max_steps=2,
+    memory_context_limit=4
 )
 ```
 

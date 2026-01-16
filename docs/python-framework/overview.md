@@ -28,30 +28,18 @@ python/
 
 ## Component Relationships
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│                        AgentServer                            │
-│  ┌────────────────────────────────────────────────────────┐  │
-│  │                         Agent                           │  │
-│  │                                                          │  │
-│  │  ┌─────────────┐   ┌─────────────┐   ┌──────────────┐  │  │
-│  │  │ LocalMemory │   │  ModelAPI   │   │  MCPClient[] │  │  │
-│  │  │             │   │  (LLM)      │   │  (Tools)     │  │  │
-│  │  └─────────────┘   └─────────────┘   └──────────────┘  │  │
-│  │                                                          │  │
-│  │                     ┌──────────────┐                     │  │
-│  │                     │RemoteAgent[] │                     │  │
-│  │                     │(Sub-agents)  │                     │  │
-│  │                     └──────────────┘                     │  │
-│  └────────────────────────────────────────────────────────┘  │
-│                                                               │
-│  Endpoints:                                                   │
-│  - /health, /ready           (Kubernetes probes)             │
-│  - /.well-known/agent        (A2A discovery)                 │
-│  - /agent/invoke             (A2A invocation)                │
-│  - /v1/chat/completions      (OpenAI API)                    │
-│  - /memory/events            (Debug)                         │
-└──────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph server["AgentServer"]
+        subgraph agent["Agent"]
+            memory["LocalMemory"]
+            model["ModelAPI<br/>(LLM)"]
+            mcp["MCPClient[]<br/>(Tools)"]
+            remote["RemoteAgent[]<br/>(Sub-agents)"]
+        end
+        
+        endpoints["Endpoints:<br/>• /health, /ready (K8s probes)<br/>• /.well-known/agent (A2A discovery)<br/>• /agent/invoke (A2A invocation)<br/>• /v1/chat/completions (OpenAI API)<br/>• /memory/events (Debug)"]
+    end
 ```
 
 ## Quick Start

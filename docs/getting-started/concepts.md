@@ -10,34 +10,24 @@ KAOS provides a declarative way to deploy AI agents that can:
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                     Kubernetes Cluster                          │
-│                                                                  │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │                 kaos-system namespace                  │   │
-│  │  ┌─────────────────────────────────────────────────┐    │   │
-│  │  │        Agentic Operator Controller              │    │   │
-│  │  │  - AgentReconciler                              │    │   │
-│  │  │  - ModelAPIReconciler                           │    │   │
-│  │  │  - MCPServerReconciler                          │    │   │
-│  │  └─────────────────────────────────────────────────┘    │   │
-│  └─────────────────────────────────────────────────────────┘   │
-│                                                                  │
-│  ┌─────────────────────────────────────────────────────────┐   │
-│  │                  User Namespace                          │   │
-│  │                                                          │   │
-│  │  ┌─────────────┐    ┌─────────────┐    ┌────────────┐   │   │
-│  │  │   Agent     │───▶│  ModelAPI   │───▶│   LLM      │   │   │
-│  │  │   Pod       │    │  (LiteLLM)  │    │ (Ollama)   │   │   │
-│  │  └──────┬──────┘    └─────────────┘    └────────────┘   │   │
-│  │         │                                                │   │
-│  │         │            ┌─────────────┐                     │   │
-│  │         └───────────▶│ MCPServer   │                     │   │
-│  │                      │ (Tools)     │                     │   │
-│  │                      └─────────────┘                     │   │
-│  └─────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph cluster["Kubernetes Cluster"]
+        subgraph system["kaos-system namespace"]
+            operator["Agentic Operator Controller<br/>• AgentReconciler<br/>• ModelAPIReconciler<br/>• MCPServerReconciler"]
+        end
+        
+        subgraph user["User Namespace"]
+            agent["Agent Pod"]
+            modelapi["ModelAPI<br/>(LiteLLM)"]
+            llm["LLM<br/>(Ollama)"]
+            mcp["MCPServer<br/>(Tools)"]
+            
+            agent --> modelapi
+            modelapi --> llm
+            agent --> mcp
+        end
+    end
 ```
 
 ## Custom Resource Definitions (CRDs)

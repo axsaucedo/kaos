@@ -4,55 +4,46 @@ The agentic loop is the reasoning mechanism that enables agents to use tools and
 
 ## How It Works
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                    Agentic Loop                          │
-│                                                          │
-│  ┌──────────────────────────────────────────────────┐   │
-│  │ 1. Build System Prompt                           │   │
-│  │    - Base instructions                           │   │
-│  │    - Available tools (if enabled)                │   │
-│  │    - Available agents (if enabled)               │   │
-│  └──────────────────┬───────────────────────────────┘   │
-│                     ▼                                    │
-│  ┌──────────────────────────────────────────────────┐   │
-│  │ 2. Send to LLM                                   │   │
-│  │    - System prompt + conversation history        │   │
-│  └──────────────────┬───────────────────────────────┘   │
-│                     ▼                                    │
-│  ┌──────────────────────────────────────────────────┐   │
-│  │ 3. Parse Response                                │   │
-│  │    - Check for ```tool_call``` block             │   │
-│  │    - Check for ```delegate``` block              │   │
-│  └──────────────────┬───────────────────────────────┘   │
-│                     ▼                                    │
-│         ┌───────────┴───────────┐                       │
-│         ▼                       ▼                       │
-│  ┌─────────────┐         ┌─────────────┐                │
-│  │ Tool Call?  │         │ Delegation? │                │
-│  │  Execute    │         │   Invoke    │                │
-│  │  tool       │         │   agent     │                │
-│  └──────┬──────┘         └──────┬──────┘                │
-│         │                       │                       │
-│         └───────────┬───────────┘                       │
-│                     ▼                                    │
-│  ┌──────────────────────────────────────────────────┐   │
-│  │ 4. Add Result to Conversation                    │   │
-│  │    - Go back to step 2                           │   │
-│  └──────────────────────────────────────────────────┘   │
-│                                                          │
-│  ┌──────────────────────────────────────────────────┐   │
-│  │ 5. No Action → Return Final Response             │   │
-│  └──────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    start["1. Build System Prompt<br/>• Base instructions<br/>• Available tools<br/>• Available agents"]
+    
+    llm["2. Send to LLM<br/>System prompt + conversation history"]
+    
+    parse["3. Parse Response<br/>• Check for tool_call block<br/>• Check for delegate block"]
+    
+    tool{"Tool Call?"}
+    delegate{"Delegation?"}
+    
+    exec_tool["Execute tool"]
+    exec_delegate["Invoke agent"]
+    
+    add["4. Add Result to Conversation"]
+    
+    final["5. No Action → Return Final Response"]
+    
+    start --> llm
+    llm --> parse
+    parse --> tool
+    tool -->|Yes| exec_tool
+    tool -->|No| delegate
+    delegate -->|Yes| exec_delegate
+    delegate -->|No| final
+    exec_tool --> add
+    exec_delegate --> add
+    add --> llm
 ```
 
 ## Configuration
 
+The agentic loop is controlled by the `max_steps` parameter passed to the Agent:
+
 ```python
-@dataclass
-class AgenticLoopConfig:
-    max_steps: int = 5          # Maximum loop iterations
+agent = Agent(
+    name="my-agent",
+    model_api=model_api,
+    max_steps=5  # Maximum loop iterations
+)
 ```
 
 ### max_steps

@@ -5,9 +5,16 @@
 </p>
 
 <p align="center">
+  <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License"></a>
+  <a href="https://kubernetes.io"><img src="https://img.shields.io/badge/kubernetes-%3E%3D1.28-blue" alt="Kubernetes"></a>
+  <a href="https://go.dev"><img src="https://img.shields.io/badge/go-%3E%3D1.21-blue" alt="Go"></a>
+  <a href="https://python.org"><img src="https://img.shields.io/badge/python-%3E%3D3.11-blue" alt="Python"></a>
+</p>
+
+<p align="center">
   <a href="#features">Features</a> •
   <a href="#quick-start">Quick Start</a> •
-  <a href="#multi-agent-with-gateway-api">Multi-Agent</a> •
+  <a href="#architecture">Architecture</a> •
   <a href="#documentation">Documentation</a>
 </p>
 
@@ -15,14 +22,16 @@
 
 KAOS is a Kubernetes-native framework for deploying and orchestrating AI agents with tool access, multi-agent coordination, and seamless LLM integration.
 
-## Features
+## Principles & Features
 
-- **🤖 Agent CRD** - Deploy AI agents as Kubernetes resources
-- **🔧 MCP Tools** - Integrate tools using Model Context Protocol
-- **🔗 Multi-Agent Networks** - Build hierarchical agent systems with automatic delegation
-- **🌐 Gateway API** - Expose agents via Kubernetes Gateway API
-- **📡 OpenAI-Compatible** - All agents expose `/v1/chat/completions` endpoints
-- **🔄 Agentic Loop** - Built-in reasoning loop with tool calling and delegation
+| Principle | Description |
+|-----------|-------------|
+| **🎯 Kubernetes-Native** | Agents, tools, and LLM backends are Custom Resources managed by controllers |
+| **🔧 MCP Standard** | Tool integration via the Model Context Protocol for interoperability |
+| **🔗 Multi-Agent Delegation** | Hierarchical agent systems with automatic discovery and delegation |
+| **📡 OpenAI-Compatible** | All agents expose standard `/v1/chat/completions` endpoints |
+| **🌐 Gateway API** | Optional unified ingress via Kubernetes Gateway API |
+| **🔄 Agentic Reasoning** | Built-in reasoning loop with configurable max steps |
 
 ## Quick Start
 
@@ -188,24 +197,35 @@ http://<gateway-ip>/coordinator/v1/chat/completions
 
 ## Architecture
 
+```mermaid
+flowchart TB
+    subgraph operator["KAOS Operator"]
+        ac["Agent Controller"]
+        mc["MCPServer Controller"]
+        mac["ModelAPI Controller"]
+    end
+    
+    subgraph resources["Managed Resources"]
+        agent["Agent Pod<br/>Agent Runtime"]
+        mcp["MCP Server Pod<br/>MCP Tools"]
+        model["ModelAPI Pod<br/>Ollama/LiteLLM"]
+    end
+    
+    ac --> agent
+    mc --> mcp
+    mac --> model
+    agent --> mcp
+    agent --> model
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                       KAOS Operator                              │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐              │
-│  │   Agent     │  │  MCPServer  │  │  ModelAPI   │              │
-│  │ Controller  │  │ Controller  │  │ Controller  │              │
-│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘              │
-└─────────┼────────────────┼────────────────┼─────────────────────┘
-          │                │                │
-          ▼                ▼                ▼
-┌─────────────────┐ ┌─────────────────┐ ┌─────────────────┐
-│   Agent Pod     │ │  MCP Server Pod │ │ Ollama (Hosted) │
-│  ┌───────────┐  │ │  ┌───────────┐  │ │  ┌───────────┐  │
-│  │  Agent    │  │ │  │ MCP Tools │  │ │  │  Ollama   │  │
-│  │  Runtime  │──┼─┼─►│  Server   │  │ │  │  + Model  │  │
-│  └───────────┘  │ │  └───────────┘  │ │  └───────────┘  │
-└─────────────────┘ └─────────────────┘ └─────────────────┘
-```
+
+## Documentation
+
+| Resource | Link |
+|----------|------|
+| 📖 Full Documentation | [axsaucedo.github.io/kaos](https://axsaucedo.github.io/kaos) |
+| 🚀 Quick Start | [Getting Started](https://axsaucedo.github.io/kaos/getting-started/quickstart) |
+| 🤖 Agent CRD | [Agent Reference](https://axsaucedo.github.io/kaos/operator/agent-crd) |
+| 🔗 Multi-Agent | [Multi-Agent Tutorial](https://axsaucedo.github.io/kaos/tutorials/multi-agent) |
 
 ## Development
 
@@ -219,14 +239,6 @@ cd operator && make test
 # E2E tests (requires kind)
 cd operator && make kind-e2e
 ```
-
-## Documentation
-
-�� **[Full Documentation](https://axsaucedo.github.io/kaos)**
-
-- [Getting Started](https://axsaucedo.github.io/kaos/getting-started/quickstart)
-- [Agent CRD Reference](https://axsaucedo.github.io/kaos/operator/agent-crd)
-- [Multi-Agent Tutorial](https://axsaucedo.github.io/kaos/tutorials/multi-agent)
 
 ## Sample Configurations
 

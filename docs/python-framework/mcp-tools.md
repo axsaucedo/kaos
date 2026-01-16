@@ -4,30 +4,17 @@ The Model Context Protocol (MCP) integration enables agents to discover and call
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                         Agent                                │
-│                                                              │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │                    MCPClient                          │   │
-│  │  - discover_tools() → List tools from server         │   │
-│  │  - call_tool(name, args) → Execute tool              │   │
-│  │  - get_tools() → Return cached tool list             │   │
-│  └──────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────┘
-                              │
-                              ▼
-┌─────────────────────────────────────────────────────────────┐
-│                       MCPServer                              │
-│                                                              │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │                    FastMCP                            │   │
-│  │  - GET /mcp/tools → List available tools             │   │
-│  │  - POST /mcp/tools → Call tool with arguments        │   │
-│  │  - GET /health → Health check                        │   │
-│  │  - GET /ready → Readiness with tool list             │   │
-│  └──────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph agent["Agent"]
+        client["MCPClient<br/>• discover_tools() → List tools<br/>• call_tool(name, args) → Execute<br/>• get_tools() → Return cached list"]
+    end
+    
+    subgraph server["MCPServer"]
+        fastmcp["FastMCP<br/>• GET /mcp/tools → List available tools<br/>• POST /mcp/tools → Call tool<br/>• GET /health → Health check<br/>• GET /ready → Readiness + tool list"]
+    end
+    
+    agent --> server
 ```
 
 ## MCPClient

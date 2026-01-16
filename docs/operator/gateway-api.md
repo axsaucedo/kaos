@@ -6,29 +6,26 @@ KAOS supports the [Kubernetes Gateway API](https://gateway-api.sigs.k8s.io/) for
 
 When Gateway API is enabled, the operator automatically creates HTTPRoute resources for each managed resource, allowing external access through a central Gateway.
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         External Client                          │
-│                              │                                   │
-│         http://gateway-host/{namespace}/{type}/{name}/...        │
-└──────────────────────────────┼──────────────────────────────────┘
-                               ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                          Gateway                                 │
-│                    (envoy, nginx, etc.)                          │
-│                              │                                   │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐              │
-│  │ HTTPRoute   │  │ HTTPRoute   │  │ HTTPRoute   │              │
-│  │ /ns/agent/a │  │/ns/modelapi/│  │ /ns/mcp/m   │              │
-│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘              │
-└─────────┼────────────────┼────────────────┼─────────────────────┘
-          ▼                ▼                ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                        User Namespace                            │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐  │
-│  │  Agent Service  │  │ ModelAPI Service│  │MCPServer Service│  │
-│  └─────────────────┘  └─────────────────┘  └─────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    client["External Client<br/>http://gateway-host/{namespace}/{type}/{name}/..."]
+    
+    subgraph gateway["Gateway (envoy, nginx, etc.)"]
+        route1["HTTPRoute<br/>/ns/agent/a"]
+        route2["HTTPRoute<br/>/ns/modelapi/m"]
+        route3["HTTPRoute<br/>/ns/mcp/m"]
+    end
+    
+    subgraph user["User Namespace"]
+        svc1["Agent Service"]
+        svc2["ModelAPI Service"]
+        svc3["MCPServer Service"]
+    end
+    
+    client --> gateway
+    route1 --> svc1
+    route2 --> svc2
+    route3 --> svc3
 ```
 
 ## Prerequisites

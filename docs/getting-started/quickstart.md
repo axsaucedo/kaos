@@ -6,18 +6,23 @@ Deploy your first AI agent on Kubernetes in under 5 minutes.
 
 - Kubernetes cluster (Docker Desktop, kind, minikube, or cloud)
 - kubectl configured and connected
-- Ollama installed locally (for development) or in-cluster
+- Helm 3.x installed
 
 ## Step 1: Install the Operator
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/kaos.git
-cd kaos
+git clone https://github.com/axsaucedo/kaos.git
+cd kaos/operator
 
-# Install CRDs and deploy operator
-cd operator
-make deploy
+# Install with Helm
+helm install kaos-operator chart/ -n kaos-system --create-namespace
+
+# Optional: Enable Gateway API for external access
+# helm install kaos-operator chart/ -n kaos-system --create-namespace \
+#   --set gatewayAPI.enabled=true \
+#   --set gatewayAPI.createGateway=true \
+#   --set gatewayAPI.gatewayClassName=envoy-gateway
 ```
 
 Verify the operator is running:

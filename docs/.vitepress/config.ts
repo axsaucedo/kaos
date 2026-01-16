@@ -37,7 +37,6 @@ export default defineConfig({
       {
         text: 'Kubernetes Operator',
         items: [
-          { text: 'Overview', link: '/operator/overview' },
           { text: 'Agent CRD', link: '/operator/agent-crd' },
           { text: 'ModelAPI CRD', link: '/operator/modelapi-crd' },
           { text: 'MCPServer CRD', link: '/operator/mcpserver-crd' },
@@ -48,11 +47,17 @@ export default defineConfig({
         text: 'Python Framework',
         items: [
           { text: 'Overview', link: '/python-framework/overview' },
-          { text: 'Agent', link: '/python-framework/agent' },
-          { text: 'Agentic Loop', link: '/python-framework/agentic-loop' },
+          { 
+            text: 'Agent', 
+            link: '/python-framework/agent',
+            items: [
+              { text: 'Agent Server', link: '/python-framework/server' },
+              { text: 'Agentic Loop', link: '/python-framework/agentic-loop' },
+              { text: 'Memory', link: '/python-framework/memory' }
+            ]
+          },
           { text: 'MCP Tools', link: '/python-framework/mcp-tools' },
-          { text: 'Model API', link: '/python-framework/model-api' },
-          { text: 'Server', link: '/python-framework/server' }
+          { text: 'Model API Client', link: '/python-framework/model-api' }
         ]
       },
       {
@@ -66,6 +71,7 @@ export default defineConfig({
       {
         text: 'Reference',
         items: [
+          { text: 'Control Plane Overview', link: '/operator/overview' },
           { text: 'Environment Variables', link: '/reference/environment-variables' },
           { text: 'Troubleshooting', link: '/reference/troubleshooting' }
         ]

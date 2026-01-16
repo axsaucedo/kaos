@@ -4,36 +4,33 @@ KAOS manages the lifecycle of AI agents and their dependencies on Kubernetes.
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                      Kubernetes API Server                       │
-│                                                                   │
-│  Custom Resource Definitions:                                     │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐              │
-│  │   Agent     │  │  ModelAPI   │  │  MCPServer  │              │
-│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘              │
-└─────────┼────────────────┼────────────────┼─────────────────────┘
-          │                │                │
-          ▼                ▼                ▼
-┌─────────────────────────────────────────────────────────────────┐
-│               Agentic Operator Controller Manager                │
-│                    (kaos-system namespace)                    │
-│                                                                  │
-│  ┌────────────────┐ ┌────────────────┐ ┌────────────────┐       │
-│  │AgentReconciler │ │ModelAPIReconciler│ │MCPServerReconciler│  │
-│  └────────┬───────┘ └────────┬───────┘ └────────┬───────┘       │
-└───────────┼──────────────────┼──────────────────┼───────────────┘
-            │                  │                  │
-            ▼                  ▼                  ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                        User Namespace                            │
-│                                                                  │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐  │
-│  │ Agent Deployment│  │ModelAPI Deploy  │  │MCPServer Deploy │  │
-│  │  + Service      │  │  + Service      │  │  + Service      │  │
-│  │  + ConfigMap    │  │  + ConfigMap    │  │                 │  │
-│  └─────────────────┘  └─────────────────┘  └─────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph api["Kubernetes API Server"]
+        crd1["Agent CRD"]
+        crd2["ModelAPI CRD"]
+        crd3["MCPServer CRD"]
+    end
+    
+    subgraph controller["Agentic Operator Controller Manager<br/>(kaos-system namespace)"]
+        ar["AgentReconciler"]
+        mr["ModelAPIReconciler"]
+        mcpr["MCPServerReconciler"]
+    end
+    
+    subgraph user["User Namespace"]
+        ad["Agent Deployment<br/>+ Service<br/>+ ConfigMap"]
+        md["ModelAPI Deploy<br/>+ Service<br/>+ ConfigMap"]
+        mcpd["MCPServer Deploy<br/>+ Service"]
+    end
+    
+    crd1 --> ar
+    crd2 --> mr
+    crd3 --> mcpr
+    
+    ar --> ad
+    mr --> md
+    mcpr --> mcpd
 ```
 
 ## Controllers
@@ -107,14 +104,11 @@ Manages MCPServer custom resources:
 
 ## Resource Dependencies
 
-```
-Agent
-  │
-  ├─── requires ──▶ ModelAPI (must be Ready)
-  │
-  ├─── optional ───▶ MCPServer[] (must be Ready)
-  │
-  └─── optional ───▶ Agent[] (peer agents, must be Ready)
+```mermaid
+flowchart LR
+    Agent -->|requires| ModelAPI["ModelAPI (must be Ready)"]
+    Agent -.->|optional| MCPServers["MCPServer[] (must be Ready)"]
+    Agent -.->|optional| Peers["Agent[] (peer agents, must be Ready)"]
 ```
 
 The operator waits for dependencies before marking an Agent as Ready.
