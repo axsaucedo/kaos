@@ -345,8 +345,8 @@ You can run the same E2E tests locally using KIND:
 # Create KIND cluster with Gateway API, MetalLB, and registry (one-time setup)
 make kind-create
 
-# Run E2E tests in KIND
-make kind-e2e
+# Run E2E tests in KIND (builds images, installs operator, runs tests)
+make kind-e2e-run-tests
 
 # Delete KIND cluster when done
 make kind-delete
@@ -358,10 +358,10 @@ The `kind-create` target:
 3. Creates the GatewayClass for Envoy Gateway
 4. Installs MetalLB for LoadBalancer support
 
-The `kind-e2e` target:
+The `kind-e2e-run-tests` target:
 1. Builds all Docker images (including pulling external LiteLLM/Ollama images)
 2. Pushes images to the local KIND registry (localhost:5001)
-3. Pre-installs the operator to create the Gateway
+3. Installs the KAOS operator via Helm
 4. Sets up port-forwarding to the Gateway for host access
 5. Runs all 14 E2E tests in parallel
 

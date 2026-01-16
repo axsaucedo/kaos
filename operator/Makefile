@@ -1,4 +1,4 @@
-.PHONY: help build docker-build deploy generate manifests test test-unit clean envtest helm kind-create kind-delete kind-e2e kind-load-images kind-e2e-install-kaos kind-e2e-run e2e-test e2e-test-seq e2e-clean
+.PHONY: help build docker-build deploy generate manifests test test-unit clean envtest helm kind-create kind-delete kind-load-images kind-e2e-install-kaos kind-e2e-run-tests e2e-test e2e-test-seq e2e-clean
 
 # Configuration
 IMG ?= axsauze/kaos-operator:latest
@@ -22,15 +22,14 @@ help:
 	@echo "  clean           - Clean build artifacts"
 	@echo ""
 	@echo "KIND E2E targets:"
-	@echo "  kind-create          - Create KIND cluster with registry, Gateway, MetalLB"
-	@echo "  kind-delete          - Delete KIND cluster"
-	@echo "  kind-load-images     - Build and load images into KIND"
+	@echo "  kind-create           - Create KIND cluster with registry, Gateway, MetalLB"
+	@echo "  kind-delete           - Delete KIND cluster"
+	@echo "  kind-load-images      - Build and load images into KIND"
 	@echo "  kind-e2e-install-kaos - Generate values and install KAOS operator"
-	@echo "  kind-e2e-run         - Run E2E tests (depends on load-images + install-kaos)"
-	@echo "  kind-e2e             - Full E2E: create cluster + run tests"
-	@echo "  e2e-test             - Run E2E tests (parallel, requires operator)"
-	@echo "  e2e-test-seq         - Run E2E tests sequentially"
-	@echo "  e2e-clean            - Clean up E2E test resources"
+	@echo "  kind-e2e-run-tests    - Run E2E tests (depends on load-images + install-kaos)"
+	@echo "  e2e-test              - Run E2E tests (parallel, requires operator)"
+	@echo "  e2e-test-seq          - Run E2E tests sequentially"
+	@echo "  e2e-clean             - Clean up E2E test resources"
 
 # Build operator binary
 build: generate manifests
@@ -134,11 +133,8 @@ kind-e2e-install-kaos:
 	@echo "=== KAOS operator installed ==="
 
 # Run E2E tests in KIND (requires kind-load-images and kind-e2e-install-kaos)
-kind-e2e-run: kind-load-images kind-e2e-install-kaos
+kind-e2e-run-tests: kind-load-images kind-e2e-install-kaos
 	@./hack/run-e2e-tests.sh
-
-# Full E2E: create cluster, build images, install operator, run tests
-kind-e2e: kind-create kind-e2e-run
 
 # Run E2E tests (parallel) - requires existing cluster with operator installed
 # Cap at 4 workers to avoid "out of pty devices" errors on high-CPU machines

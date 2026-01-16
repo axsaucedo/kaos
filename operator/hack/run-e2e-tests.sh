@@ -8,7 +8,7 @@
 #   - make kind-load-images      - Build and load images into KIND
 #   - make kind-e2e-install-kaos - Generate Helm values and install operator
 #
-# Or use: make kind-e2e  (runs all steps)
+# Or use: make kind-e2e-run-tests (runs load-images, install-kaos, then this script)
 set -o errexit
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

@@ -61,7 +61,7 @@ operator/                  # Kubernetes operator (Go/kubebuilder)
 ## Key Principles
 - **KEEP IT SIMPLE** - Avoid over-engineering
 - Python commands: `cd python && source .venv/bin/activate && <command>`
-- Operator E2E: `cd operator && make kind-e2e`
+- Operator E2E: `cd operator && make kind-create && make kind-e2e-run-tests`
 - Tests AND linting are the success criteria for development
 - **Documentation**: When making changes, update both `CLAUDE.md` AND `docs/` directory
 
@@ -115,19 +115,19 @@ cd operator
 # Create KIND cluster with Gateway API and MetalLB
 make kind-create
 
-# Individual steps (for debugging):
-make kind-e2e-values   # Generate Helm values file
-make kind-load-images  # Build and load images into KIND
-make kind-e2e-run      # Run E2E tests (operator managed by script)
+# Run full E2E (builds images, installs operator, runs tests):
+make kind-e2e-run-tests
 
-# Full E2E (all steps combined):
-make kind-e2e
+# Individual steps (for debugging):
+make kind-load-images      # Build and load images into KIND
+make kind-e2e-install-kaos # Generate Helm values and install operator
+make e2e-test              # Run E2E tests (parallel)
 
 # Delete KIND cluster
 make kind-delete
 ```
 
-The `kind-e2e` target runs: `kind-create` → `kind-e2e-values` → `kind-load-images` → `kind-e2e-run`
+The `kind-e2e-run-tests` target runs: `kind-load-images` → `kind-e2e-install-kaos` → `e2e-test`
 This is the same setup used in GitHub Actions CI.
 
 ## Docker Images
