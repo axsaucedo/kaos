@@ -13,7 +13,7 @@ import logging
 import time
 import httpx
 from multiprocessing import Process
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from unittest.mock import AsyncMock
 
 from agent.client import Agent, RemoteAgent
@@ -62,7 +62,7 @@ class MockMCPClient(MCPClient):
 
     def __init__(self, tools: Optional[dict] = None):
         """Initialize with tool definitions: {name: (description, result)}"""
-        self._url = "mock://mcp"
+        self._sse_url = "mock://mcp/sse"
         self._tools = {}
         self._active = True  # Always active for mocks
         self.call_log = []
@@ -72,15 +72,15 @@ class MockMCPClient(MCPClient):
             self._tools[name] = Tool(
                 name=name,
                 description=desc,
-                parameters={"type": "object", "properties": {}},
+                input_schema={"type": "object", "properties": {}},
             )
             setattr(self, f"_result_{name}", result)
 
     async def _init(self):
         return True
 
-    async def call_tool(self, name: str, args: dict):
-        self.call_log.append({"tool": name, "args": args})
+    async def call_tool(self, name: str, args: Optional[Dict[str, Any]] = None) -> Any:
+        self.call_log.append({"tool": name, "args": args or {}})
         result = getattr(self, f"_result_{name}", {"result": "ok"})
         return result
 

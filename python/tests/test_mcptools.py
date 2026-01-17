@@ -208,13 +208,21 @@ class TestMCPClient:
 
         assert client is not None
         assert client.name == "test-server"
-        assert "localhost" in client._url
-        assert client._url.endswith("/mcp/tools")
+        assert "localhost" in client._sse_url
+        assert client._sse_url.endswith("/sse")
 
-        # Test Tool model
-        tool = Tool(name="test_tool", description="A test tool", parameters={"param1": "string"})
+        # Test Tool model with input_schema (MCP standard)
+        tool = Tool(
+            name="test_tool",
+            description="A test tool",
+            input_schema={
+                "type": "object",
+                "properties": {"param1": {"type": "string"}},
+            },
+        )
         assert tool.name == "test_tool"
         assert tool.description == "A test tool"
+        assert "properties" in tool.input_schema
 
         logger.info("✓ Client creation and Tool model work correctly")
 
