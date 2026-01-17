@@ -88,6 +88,32 @@ Images are automatically built and pushed via GitHub Actions:
 - **Workflow**: `.github/workflows/docker-push.yaml`
 - **Tags**: `latest` and git commit SHA
 
+### Build Optimization
+
+Docker builds use several optimization techniques:
+
+1. **GitHub Actions Cache (GHA)** - BuildKit layers are cached in GitHub's cache storage
+2. **Scoped Caches** - Each image has its own cache scope to avoid conflicts
+3. **Cache Mounts** - Go modules and pip packages are cached during builds
+4. **Layer Ordering** - Dependencies are copied before source code for better cache hits
+
+The Dockerfiles use BuildKit cache mounts:
+
+```dockerfile
+# Go - cache modules and build cache
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go build -o manager main.go
+
+# Python - cache pip/uv packages
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install -r requirements.txt
+```
+
+### Cache Cleanup
+
+When a PR is closed or merged, caches for that PR branch are automatically cleaned up via `.github/workflows/cache-cleanup.yaml`. This prevents cache storage from filling up with stale PR caches.
+
 ### Required Secrets
 
 For the GitHub Action to push images:

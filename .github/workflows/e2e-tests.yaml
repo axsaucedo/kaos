@@ -45,6 +45,10 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v4
 
+      # Set up Docker Buildx for better caching support
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Create KIND cluster
         uses: helm/kind-action@v1
         with:
@@ -56,8 +60,54 @@ jobs:
       - name: Install MetalLB for LoadBalancer support
         run: ./operator/hack/install-metallb.sh
 
-      - name: Build and load images
-        run: make -C operator kind-load-images
+      # Build images with GHA cache for faster CI builds
+      - name: Build operator image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./operator
+          load: true
+          tags: ${{ env.REGISTRY }}/kaos-operator:${{ env.OPERATOR_TAG }}
+          cache-from: type=gha,scope=operator-e2e
+          cache-to: type=gha,scope=operator-e2e,mode=max
+          github-token: ${{ github.token }}
+
+      - name: Build agent image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./python
+          load: true
+          tags: ${{ env.REGISTRY }}/kaos-agent:${{ env.AGENT_TAG }}
+          cache-from: type=gha,scope=agent-e2e
+          cache-to: type=gha,scope=agent-e2e,mode=max
+          github-token: ${{ github.token }}
+
+      - name: Build LiteLLM image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./operator/hack
+          file: ./operator/hack/Dockerfile.litellm
+          load: true
+          tags: ${{ env.REGISTRY }}/litellm:v1.56.5
+          cache-from: type=gha,scope=litellm-e2e
+          cache-to: type=gha,scope=litellm-e2e,mode=max
+          github-token: ${{ github.token }}
+
+      - name: Pull and tag Ollama image
+        run: |
+          docker pull alpine/ollama:latest
+          docker tag alpine/ollama:latest ${{ env.REGISTRY }}/ollama:latest
+
+      - name: Tag MCP server image
+        run: |
+          docker tag ${{ env.REGISTRY }}/kaos-agent:${{ env.AGENT_TAG }} ${{ env.REGISTRY }}/kaos-mcp-server:${{ env.AGENT_TAG }}
+
+      - name: Load images into KIND
+        run: |
+          kind load docker-image ${{ env.REGISTRY }}/kaos-operator:${{ env.OPERATOR_TAG }} --name ${{ env.KIND_CLUSTER_NAME }}
+          kind load docker-image ${{ env.REGISTRY }}/kaos-agent:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }}
+          kind load docker-image ${{ env.REGISTRY }}/kaos-mcp-server:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }}
+          kind load docker-image ${{ env.REGISTRY }}/litellm:v1.56.5 --name ${{ env.KIND_CLUSTER_NAME }}
+          kind load docker-image ${{ env.REGISTRY }}/ollama:latest --name ${{ env.KIND_CLUSTER_NAME }}
 
       - name: Install KAOS operator
         run: make -C operator kind-e2e-install-kaos

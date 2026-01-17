@@ -3,16 +3,19 @@ FROM python:3.12-slim
 WORKDIR /app
 
 # Install UV for dependency management
-RUN pip install --no-cache-dir uv
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install uv
 
-# Copy project files
-COPY pyproject.toml pyproject.toml
+# Copy only dependency files first for better layer caching
+COPY pyproject.toml ./
 
-# Install dependencies using UV
-RUN uv pip compile pyproject.toml -o requirements.txt && \
+# Install dependencies using UV with cache mount
+# This layer is cached unless pyproject.toml changes
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip compile pyproject.toml -o requirements.txt && \
     uv pip install --system -r requirements.txt
 
-# Copy source code
+# Copy source code (changes frequently, so copied last)
 COPY agent/ agent/
 COPY mcptools/ mcptools/
 COPY modelapi/ modelapi/

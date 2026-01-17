@@ -59,21 +59,27 @@ jobs:
             type=raw,value=${{ github.event.inputs.tag }},enable=${{ github.event_name == 'workflow_dispatch' }}
 
       - name: Build and push operator image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: ./operator
           push: true
           tags: ${{ steps.meta-operator.outputs.tags }}
           labels: ${{ steps.meta-operator.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Use scoped cache to avoid conflicts between images
+          # mode=max exports all layers for maximum cache reuse
+          cache-from: type=gha,scope=operator
+          cache-to: type=gha,scope=operator,mode=max
+          # Provide GitHub token to avoid rate limiting on cache lookups
+          github-token: ${{ github.token }}
 
       - name: Build and push agent image
-        uses: docker/build-push-action@v5
+        uses: docker/build-push-action@v6
         with:
           context: ./python
           push: true
           tags: ${{ steps.meta-agent.outputs.tags }}
           labels: ${{ steps.meta-agent.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # Use scoped cache to avoid conflicts between images
+          cache-from: type=gha,scope=agent
+          cache-to: type=gha,scope=agent,mode=max
+          github-token: ${{ github.token }}

@@ -1,0 +1,50 @@
+name: Cleanup PR Caches
+
+# Clean up GitHub Actions caches when a PR is closed or merged
+# This prevents cache storage from filling up with stale PR caches
+# Reference: https://docs.github.com/en/actions/using-workflows/caching-dependencies-to-speed-up-workflows
+
+on:
+  pull_request:
+    types:
+      - closed
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    permissions:
+      # Required to delete caches
+      actions: write
+    steps:
+      - name: Cleanup PR caches
+        run: |
+          echo "Cleaning up caches for PR #${{ github.event.pull_request.number }}"
+          echo "Branch: $BRANCH"
+          
+          # Fetch list of cache keys for this PR's merge ref
+          echo "Fetching list of cache keys..."
+          cacheKeys=$(gh cache list --ref "$BRANCH" --limit 100 --json id,key --jq '.[] | "\(.id) \(.key)"')
+          
+          if [ -z "$cacheKeys" ]; then
+            echo "No caches found for this PR"
+            exit 0
+          fi
+          
+          echo "Found caches to delete:"
+          echo "$cacheKeys"
+          
+          # Delete each cache, continuing on errors
+          set +e
+          echo ""
+          echo "Deleting caches..."
+          echo "$cacheKeys" | while read -r id key; do
+            echo "  Deleting cache: $key (id: $id)"
+            gh cache delete "$id" 2>/dev/null || echo "    Warning: Failed to delete cache $id"
+          done
+          
+          echo ""
+          echo "Cache cleanup complete!"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BRANCH: refs/pull/${{ github.event.pull_request.number }}/merge

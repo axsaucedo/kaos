@@ -7,7 +7,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 # Install LiteLLM proxy deps with pinned version
-RUN pip install --no-cache-dir "litellm[proxy]==1.56.5"
+# Using cache mount for pip to speed up rebuilds
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install "litellm[proxy]==1.56.5"
 
 # Port 8000 to match operator controller expectations
 EXPOSE 8000
