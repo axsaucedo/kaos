@@ -105,9 +105,9 @@ cd operator
 make kind-create
 
 # Run full E2E test suite (builds images, installs operator, runs tests)
-make kind-e2e
+make kind-e2e-run-tests
 
-# Or run tests on existing cluster
+# Or run tests on existing cluster (operator must be installed)
 make e2e-test
 
 # Clean up
@@ -174,7 +174,8 @@ act -j go-tests --container-architecture linux/amd64
    cd operator && make test-unit
    
    # E2E tests (optional but recommended)
-   cd operator && make kind-e2e
+   cd operator && make kind-create
+   cd operator && make kind-e2e-run-tests
    ```
 
 4. **Push and create a PR** against `main`

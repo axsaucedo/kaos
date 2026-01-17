@@ -72,6 +72,7 @@ export default defineConfig({
         text: 'Reference',
         items: [
           { text: 'Control Plane Overview', link: '/operator/overview' },
+          { text: 'Docker Images', link: '/reference/docker-images' },
           { text: 'Environment Variables', link: '/reference/environment-variables' },
           { text: 'Troubleshooting', link: '/reference/troubleshooting' }
         ]

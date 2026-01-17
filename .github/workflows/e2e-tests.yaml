@@ -19,6 +19,9 @@ env:
   KIND_CLUSTER_NAME: kaos-e2e
   CI: true
   KIND_CLUSTER: true
+  REGISTRY: kind-local
+  OPERATOR_TAG: dev
+  AGENT_TAG: dev
 
 jobs:
   e2e-tests:
@@ -52,6 +55,12 @@ jobs:
 
       - name: Install MetalLB for LoadBalancer support
         run: ./operator/hack/install-metallb.sh
+
+      - name: Build and load images
+        run: make -C operator kind-load-images
+
+      - name: Install KAOS operator
+        run: make -C operator kind-e2e-install-kaos
 
       - name: Run E2E tests
         run: ./operator/hack/run-e2e-tests.sh

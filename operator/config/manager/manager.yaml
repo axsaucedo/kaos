@@ -26,7 +26,7 @@ spec:
         - /manager
         args:
         - --leader-elect
-        image: kaos-operator:latest
+        image: axsauze/kaos-operator:latest
         imagePullPolicy: IfNotPresent
         name: manager
         securityContext:

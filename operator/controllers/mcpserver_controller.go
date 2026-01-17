@@ -238,7 +238,7 @@ func (r *MCPServerReconciler) constructPythonContainer(mcpserver *kaosv1alpha1.M
 	// Get default MCP server image from environment
 	defaultMcpImage := os.Getenv("DEFAULT_MCP_SERVER_IMAGE")
 	if defaultMcpImage == "" {
-		defaultMcpImage = "kaos-agent:latest"
+		defaultMcpImage = "axsauze/kaos-agent:latest"
 	}
 
 	// Check if using tools config

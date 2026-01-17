@@ -49,7 +49,7 @@ kubectl describe pod -l app=my-agent -n my-namespace
    - Verify endpoint is reachable
 
 2. **Image not found**
-   - Ensure `kaos-agent:latest` is available
+   - Ensure `axsauze/kaos-agent:latest` is available
    - For remote clusters, push to registry
 
 3. **Python errors**

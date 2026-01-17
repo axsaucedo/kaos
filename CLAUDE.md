@@ -52,6 +52,7 @@ operator/                  # Kubernetes operator (Go/kubebuilder)
 └── tests/e2e/             # E2E tests (14 tests)
 
 .github/workflows/         # GitHub Actions
+├── docker-push.yaml       # Build and push images on main
 ├── e2e-tests.yaml         # E2E tests in KIND
 ├── go-tests.yaml          # Go unit tests
 └── python-tests.yaml      # Python unit tests
@@ -60,7 +61,7 @@ operator/                  # Kubernetes operator (Go/kubebuilder)
 ## Key Principles
 - **KEEP IT SIMPLE** - Avoid over-engineering
 - Python commands: `cd python && source .venv/bin/activate && <command>`
-- Operator E2E: `cd operator && make kind-e2e`
+- Operator E2E: `cd operator && make kind-create && make kind-e2e-run-tests`
 - Tests AND linting are the success criteria for development
 - **Documentation**: When making changes, update both `CLAUDE.md` AND `docs/` directory
 
@@ -114,15 +115,41 @@ cd operator
 # Create KIND cluster with Gateway API and MetalLB
 make kind-create
 
-# Run full E2E test suite in KIND (builds images, installs operator, runs tests)
-make kind-e2e
+# Run full E2E (builds images, installs operator, runs tests):
+make kind-e2e-run-tests
+
+# Individual steps (for debugging):
+make kind-load-images      # Build and load images into KIND
+make kind-e2e-install-kaos # Generate Helm values and install operator
+make e2e-test              # Run E2E tests (parallel)
 
 # Delete KIND cluster
 make kind-delete
 ```
 
-The `kind-e2e` target builds images, loads into KIND, and runs tests.
+The `kind-e2e-run-tests` target runs: `kind-load-images` → `kind-e2e-install-kaos` → `e2e-test`
 This is the same setup used in GitHub Actions CI.
+
+## Docker Images
+
+Official images are published to Docker Hub under `axsauze/`:
+
+| Image | Description |
+|-------|-------------|
+| `axsauze/kaos-operator:latest` | Kubernetes operator controller |
+| `axsauze/kaos-agent:latest` | Agent runtime (also used for MCP servers) |
+
+Images are automatically built and pushed on merge to main via `.github/workflows/docker-push.yaml`.
+
+### Helm Chart Default Images
+The Helm chart (`operator/chart/values.yaml`) uses these defaults:
+```yaml
+defaultImages:
+  agentRuntime: "axsauze/kaos-agent:latest"
+  mcpServer: "axsauze/kaos-agent:latest"
+  litellm: "ghcr.io/berriai/litellm:main-latest"
+  ollama: "alpine/ollama:latest"
+```
 
 ## Dependencies
 - Ollama running locally with `smollm2:135m` model (for local host-Ollama tests)
@@ -316,8 +343,8 @@ All operator configuration is managed via the `kaos-operator-config` ConfigMap, 
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `DEFAULT_AGENT_IMAGE` | Default agent container image | `kaos-agent:latest` |
-| `DEFAULT_MCP_SERVER_IMAGE` | Default MCP server image | `kaos-agent:latest` |
+| `DEFAULT_AGENT_IMAGE` | Default agent container image | `axsauze/kaos-agent:latest` |
+| `DEFAULT_MCP_SERVER_IMAGE` | Default MCP server image | `axsauze/kaos-agent:latest` |
 | `DEFAULT_LITELLM_IMAGE` | Default LiteLLM proxy image | `ghcr.io/berriai/litellm:main-latest` |
 | `DEFAULT_OLLAMA_IMAGE` | Default Ollama image | `alpine/ollama:latest` |
 | `GATEWAY_API_ENABLED` | Enable Gateway API integration | `false` |
@@ -330,8 +357,8 @@ All operator configuration is managed via the `kaos-operator-config` ConfigMap, 
 These can be set via Helm values:
 ```yaml
 defaultImages:
-  agentRuntime: "kaos-agent:latest"
-  mcpServer: "kaos-agent:latest"
+  agentRuntime: "axsauze/kaos-agent:latest"
+  mcpServer: "axsauze/kaos-agent:latest"
   litellm: "ghcr.io/berriai/litellm:main-latest"
   ollama: "alpine/ollama:latest"
 gateway:

@@ -237,7 +237,8 @@ cd python && uv sync && uv run pytest tests/ -v
 cd operator && make test
 
 # E2E tests (requires kind)
-cd operator && make kind-e2e
+cd operator && make kind-create
+cd operator && make kind-e2e-run-tests
 ```
 
 ## Sample Configurations

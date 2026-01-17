@@ -40,12 +40,12 @@ Key configurable values in `chart/values.yaml`:
 
 | Value | Description | Default |
 |-------|-------------|---------|
-| `controllerManager.manager.image.repository` | Operator image repository | `kaos-operator` |
+| `controllerManager.manager.image.repository` | Operator image repository | `axsauze/kaos-operator` |
 | `controllerManager.manager.image.tag` | Operator image tag | `latest` |
 | `controllerManager.replicas` | Number of operator replicas | `1` |
 | `controllerManager.manager.resources` | Resource limits/requests | See values.yaml |
-| `defaultImages.agentRuntime` | Default agent container image | `kaos-agent:latest` |
-| `defaultImages.mcpServer` | Default MCP server image | `kaos-agent:latest` |
+| `defaultImages.agentRuntime` | Default agent container image | `axsauze/kaos-agent:latest` |
+| `defaultImages.mcpServer` | Default MCP server image | `axsauze/kaos-agent:latest` |
 | `defaultImages.litellm` | Default LiteLLM proxy image | `ghcr.io/berriai/litellm:main-latest` |
 | `defaultImages.ollama` | Default Ollama image | `alpine/ollama:latest` |
 | `gateway.defaultTimeouts.agent` | Default timeout for Agent HTTPRoutes | `120s` |
