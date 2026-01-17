@@ -107,6 +107,28 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	} else if err != nil {
 		log.Error(err, "failed to get Deployment")
 		return ctrl.Result{}, err
+	} else {
+		// Deployment exists - check if spec has changed using hash annotation
+		desiredDeployment := r.constructDeployment(mcpserver)
+		currentHash := ""
+		if deployment.Spec.Template.Annotations != nil {
+			currentHash = deployment.Spec.Template.Annotations[util.PodSpecHashAnnotation]
+		}
+		desiredHash := ""
+		if desiredDeployment.Spec.Template.Annotations != nil {
+			desiredHash = desiredDeployment.Spec.Template.Annotations[util.PodSpecHashAnnotation]
+		}
+
+		if currentHash != desiredHash {
+			log.Info("Updating Deployment due to spec change", "name", deployment.Name,
+				"currentHash", currentHash, "desiredHash", desiredHash)
+			// Update the deployment spec to trigger rolling update
+			deployment.Spec.Template = desiredDeployment.Spec.Template
+			if err := r.Update(ctx, deployment); err != nil {
+				log.Error(err, "failed to update Deployment")
+				return ctrl.Result{}, err
+			}
+		}
 	}
 
 	// Create or update Service
@@ -205,6 +227,9 @@ func (r *MCPServerReconciler) constructDeployment(mcpserver *kaosv1alpha1.MCPSer
 		}
 	}
 
+	// Compute hash of the pod spec for change detection
+	podSpecHash := util.ComputePodSpecHash(finalPodSpec)
+
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("mcpserver-%s", mcpserver.Name),
@@ -219,6 +244,9 @@ func (r *MCPServerReconciler) constructDeployment(mcpserver *kaosv1alpha1.MCPSer
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: labels,
+					Annotations: map[string]string{
+						util.PodSpecHashAnnotation: podSpecHash,
+					},
 				},
 				Spec: finalPodSpec,
 			},

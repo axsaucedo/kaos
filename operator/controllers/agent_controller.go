@@ -176,11 +176,22 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		log.Error(err, "failed to get Deployment")
 		return ctrl.Result{}, err
 	} else {
-		// Deployment exists - check if env vars need updating (e.g., peer agents discovered)
+		// Deployment exists - check if spec has changed using hash annotation
 		desiredDeployment := r.constructDeployment(agent, modelapi, mcpServers, peerAgents)
-		if !r.envVarsEqual(deployment.Spec.Template.Spec.Containers[0].Env, desiredDeployment.Spec.Template.Spec.Containers[0].Env) {
-			log.Info("Updating Deployment with new environment", "name", deployment.Name)
-			deployment.Spec.Template.Spec.Containers[0].Env = desiredDeployment.Spec.Template.Spec.Containers[0].Env
+		currentHash := ""
+		if deployment.Spec.Template.Annotations != nil {
+			currentHash = deployment.Spec.Template.Annotations[util.PodSpecHashAnnotation]
+		}
+		desiredHash := ""
+		if desiredDeployment.Spec.Template.Annotations != nil {
+			desiredHash = desiredDeployment.Spec.Template.Annotations[util.PodSpecHashAnnotation]
+		}
+
+		if currentHash != desiredHash {
+			log.Info("Updating Deployment due to spec change", "name", deployment.Name,
+				"currentHash", currentHash, "desiredHash", desiredHash)
+			// Update the deployment spec to trigger rolling update
+			deployment.Spec.Template = desiredDeployment.Spec.Template
 			if err := r.Update(ctx, deployment); err != nil {
 				log.Error(err, "failed to update Deployment")
 				return ctrl.Result{}, err
@@ -326,6 +337,9 @@ func (r *AgentReconciler) constructDeployment(agent *kaosv1alpha1.Agent, modelap
 		}
 	}
 
+	// Compute hash of the pod spec for change detection
+	podSpecHash := util.ComputePodSpecHash(finalPodSpec)
+
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("agent-%s", agent.Name),
@@ -340,6 +354,9 @@ func (r *AgentReconciler) constructDeployment(agent *kaosv1alpha1.Agent, modelap
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: labels,
+					Annotations: map[string]string{
+						util.PodSpecHashAnnotation: podSpecHash,
+					},
 				},
 				Spec: finalPodSpec,
 			},
@@ -472,23 +489,6 @@ func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *
 	}
 
 	return env
-}
-
-// envVarsEqual compares two env var lists for equality
-func (r *AgentReconciler) envVarsEqual(a, b []corev1.EnvVar) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	aMap := make(map[string]string)
-	for _, e := range a {
-		aMap[e.Name] = e.Value
-	}
-	for _, e := range b {
-		if val, ok := aMap[e.Name]; !ok || val != e.Value {
-			return false
-		}
-	}
-	return true
 }
 
 // constructService creates a Service for A2A communication
