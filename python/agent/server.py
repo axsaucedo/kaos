@@ -8,6 +8,7 @@ Supports both streaming and non-streaming responses.
 import time
 import uuid
 import logging
+import sys
 from typing import Dict, Any, List, Optional
 from contextlib import asynccontextmanager
 
@@ -20,6 +21,43 @@ import uvicorn
 from modelapi.client import ModelAPI
 from agent.client import Agent, RemoteAgent
 from agent.memory import LocalMemory
+
+
+def configure_logging(level: str = "INFO") -> None:
+    """Configure logging for the application.
+
+    Sets up a consistent logging format and ensures all application loggers
+    are properly configured to output to stdout.
+    """
+    log_level = getattr(logging, level.upper(), logging.INFO)
+
+    # Configure root logger
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        stream=sys.stdout,
+        force=True,  # Override any existing configuration
+    )
+
+    # Ensure our application loggers are at the right level
+    for logger_name in [
+        "agent",
+        "agent.server",
+        "agent.client",
+        "agent.memory",
+        "modelapi",
+        "modelapi.client",
+        "mcptools",
+        "mcptools.client",
+    ]:
+        logging.getLogger(logger_name).setLevel(log_level)
+
+    # Reduce noise from third-party libraries
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.error").setLevel(log_level)
+
 
 logger = logging.getLogger(__name__)
 
@@ -109,10 +147,46 @@ class AgentServer:
     @asynccontextmanager
     async def _lifespan(self, app: FastAPI):
         """Manage agent lifecycle."""
-        logger.info("AgentServer startup")
+        self._log_startup_config()
         yield
         logger.info("AgentServer shutdown")
         await self.agent.close()
+
+    def _log_startup_config(self):
+        """Log server configuration on startup for debugging."""
+        logger.info("=" * 60)
+        logger.info("AgentServer Starting")
+        logger.info("=" * 60)
+        logger.info(f"Agent Name: {self.agent.name}")
+        logger.info(f"Description: {self.agent.description}")
+        logger.info(f"Port: {self.port}")
+        logger.info(f"Max Steps: {self.agent.max_steps}")
+        logger.info(f"Memory Context Limit: {self.agent.memory_context_limit}")
+
+        # Log model API info
+        if self.agent.model_api:
+            logger.info(f"Model API: {self.agent.model_api.api_base}")
+            logger.info(f"Model: {self.agent.model_api.model}")
+
+        # Log MCP tools
+        if self.agent.mcp_clients:
+            logger.info(f"MCP Servers: {len(self.agent.mcp_clients)}")
+            for mcp in self.agent.mcp_clients:
+                logger.info(f"  - {mcp.name}: {mcp.url}")
+        else:
+            logger.info("MCP Servers: None")
+
+        # Log sub-agents
+        if self.agent.sub_agents:
+            logger.info(f"Sub-agents: {len(self.agent.sub_agents)}")
+            for name, sub in self.agent.sub_agents.items():
+                logger.info(f"  - {name}: {sub.card_url}")
+        else:
+            logger.info("Sub-agents: None")
+
+        logger.info(f"Debug Memory Endpoints: {self.debug_memory_endpoints}")
+        logger.info(f"Access Log: {self.access_log}")
+        logger.info("=" * 60)
 
     def _setup_routes(self):
         """Setup HTTP routes for health, A2A, and OpenAI endpoints."""
@@ -340,6 +414,9 @@ def create_agent_server(
     if not settings:
         # Load from environment variables - requires AGENT_NAME and MODEL_API_URL
         settings = AgentServerSettings()  # type: ignore[call-arg]
+
+    # Configure logging before anything else
+    configure_logging(settings.agent_log_level)
 
     model_api = ModelAPI(model=settings.model_name, api_base=settings.model_api_url)
 

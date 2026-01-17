@@ -1,5 +1,6 @@
 import json
 import logging
+import sys
 import time
 from types import FunctionType
 from typing import Dict, Any, Callable, List, Optional, Literal
@@ -9,6 +10,33 @@ from fastmcp.server.http import StarletteWithLifespan
 from pydantic_settings import BaseSettings
 from starlette.routing import Route
 from starlette.responses import JSONResponse
+
+
+def configure_logging(level: str = "INFO") -> None:
+    """Configure logging for the application.
+
+    Sets up a consistent logging format and ensures all application loggers
+    are properly configured to output to stdout.
+    """
+    log_level = getattr(logging, level.upper(), logging.INFO)
+
+    # Configure root logger
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        stream=sys.stdout,
+        force=True,  # Override any existing configuration
+    )
+
+    # Ensure our application loggers are at the right level
+    for logger_name in ["mcptools", "mcptools.server", "mcptools.client"]:
+        logging.getLogger(logger_name).setLevel(log_level)
+
+    # Reduce noise from third-party libraries
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.error").setLevel(log_level)
 
 
 logger = logging.getLogger(__name__)
@@ -30,6 +58,9 @@ class MCPServer:
 
     def __init__(self, settings: MCPServerSettings):
         """Initialize MCP server."""
+        # Configure logging first
+        configure_logging(settings.mcp_log_level)
+
         self._host = settings.mcp_host
         self._port = settings.mcp_port
         self._log_level = settings.mcp_log_level
@@ -41,9 +72,21 @@ class MCPServer:
         if settings.mcp_tools_string:
             self.register_tools_from_string(settings.mcp_tools_string)
 
-        logger.info(
-            f"MCPServer initialized on port {self._port} with {len(self.tools_registry)} tools"
-        )
+    def _log_startup_config(self):
+        """Log server configuration on startup for debugging."""
+        logger.info("=" * 60)
+        logger.info("MCPServer Starting")
+        logger.info("=" * 60)
+        logger.info(f"Host: {self._host}")
+        logger.info(f"Port: {self._port}")
+        logger.info(f"Log Level: {self._log_level}")
+        logger.info(f"Access Log: {self._access_log}")
+        logger.info(f"Tools Registered: {len(self.tools_registry)}")
+        for tool_name in self.tools_registry:
+            func = self.tools_registry[tool_name]
+            doc = func.__doc__.split("\n")[0] if func.__doc__ else "No description"
+            logger.info(f"  - {tool_name}: {doc}")
+        logger.info("=" * 60)
 
     def register_tools(self, tools: Dict[str, Callable]):
         """Register multiple tools with the MCP server.
@@ -116,9 +159,7 @@ class MCPServer:
 
     def run(self, transport: Literal["http", "streamable-http", "sse"] = "http") -> None:
         """Run the MCP server through the FastMCP run command."""
-        logger.info(
-            f"Starting MCP server on {self._host}:{self._port} with tools: {self.get_registered_tools()}"
-        )
+        self._log_startup_config()
         app = self.create_app(transport)
         try:
             uvicorn.run(
