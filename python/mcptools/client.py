@@ -1,8 +1,8 @@
 """
 MCP Client using the official MCP SDK for protocol-compliant communication.
 
-This client uses the MCP SDK's SSE client to connect to any MCP-compliant
-server (FastMCP servers, external MCP servers, etc.).
+This client uses the MCP SDK's Streamable HTTP client to connect to any
+MCP-compliant server (FastMCP servers, external MCP servers, etc.).
 """
 
 import logging
@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from contextlib import asynccontextmanager
 
 from mcp import ClientSession
-from mcp.client.sse import sse_client
+from mcp.client.streamable_http import streamable_http_client
 from mcp import types as mcp_types
 
 logger = logging.getLogger(__name__)
@@ -41,12 +41,12 @@ class Tool:
 class MCPClient:
     """MCP client using the official MCP SDK for protocol-compliant communication.
 
-    This client uses the MCP SDK's SSE client to connect to any MCP-compliant
-    server. It provides graceful degradation for unavailable servers with
-    auto-retry on failure.
+    This client uses the MCP SDK's Streamable HTTP client to connect to any
+    MCP-compliant server. It provides graceful degradation for unavailable
+    servers with auto-retry on failure.
 
-    The client connects to the standard MCP SSE endpoint (typically /sse) and uses
-    JSON-RPC over SSE for tool discovery and execution.
+    The client connects to the standard MCP endpoint (typically /mcp) and uses
+    JSON-RPC over Streamable HTTP for tool discovery and execution.
     """
 
     TIMEOUT = 5.0  # Short timeout - MCP servers should respond quickly
@@ -57,25 +57,25 @@ class MCPClient:
         Args:
             name: Name of the MCP server (for logging/identification)
             url: Base URL of the MCP server (e.g., 'http://localhost:8000')
-                 The /sse endpoint is automatically appended if not present.
+                 The /mcp endpoint is automatically appended if not present.
         """
         self.name = name
         self.url = url.rstrip("/")
 
-        # Ensure URL ends with /sse for SSE transport endpoint
-        if not self.url.endswith("/sse"):
-            self._sse_url = f"{self.url}/sse"
+        # Ensure URL ends with /mcp for Streamable HTTP transport endpoint
+        if not self.url.endswith("/mcp"):
+            self._mcp_url = f"{self.url}/mcp"
         else:
-            self._sse_url = self.url
+            self._mcp_url = self.url
 
         self._tools: Dict[str, Tool] = {}
         self._active = False
-        logger.info(f"MCPClient initialized: {self.name} -> {self._sse_url}")
+        logger.info(f"MCPClient initialized: {self.name} -> {self._mcp_url}")
 
     @asynccontextmanager
     async def _connect(self):
-        """Create a connection to the MCP server via SSE."""
-        async with sse_client(self._sse_url) as (read, write):
+        """Create a connection to the MCP server via Streamable HTTP."""
+        async with streamable_http_client(self._mcp_url) as (read, write, _):
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 yield session
@@ -118,7 +118,7 @@ class MCPClient:
         """
         if not self._active:
             if not await self._init():
-                raise RuntimeError(f"MCP server {self.name} unavailable at {self._sse_url}")
+                raise RuntimeError(f"MCP server {self.name} unavailable at {self._mcp_url}")
 
         if name not in self._tools:
             raise ValueError(f"Tool '{name}' not found. Available: {list(self._tools.keys())}")

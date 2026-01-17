@@ -1,9 +1,8 @@
-import json
 import logging
 import sys
 import time
 from types import FunctionType
-from typing import Dict, Any, Callable, List, Optional, Literal
+from typing import Dict, Any, Callable, List, Literal
 from fastmcp import FastMCP
 import uvicorn
 from fastmcp.server.http import StarletteWithLifespan
@@ -43,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 
 class MCPServerSettings(BaseSettings):
-    """Agent server configuration from environment variables."""
+    """MCP server configuration from environment variables."""
 
     # Required settings
     mcp_host: str = "0.0.0.0"
@@ -54,7 +53,11 @@ class MCPServerSettings(BaseSettings):
 
 
 class MCPServer:
-    """Secure MCP server that hosts tools via FastMCP protocol."""
+    """MCP server that hosts tools via FastMCP Streamable HTTP protocol.
+
+    Uses the standard MCP protocol with Streamable HTTP transport at /mcp endpoint.
+    Tools can be registered programmatically or via fromString for dynamic creation.
+    """
 
     def __init__(self, settings: MCPServerSettings):
         """Initialize MCP server."""
@@ -75,10 +78,11 @@ class MCPServer:
     def _log_startup_config(self):
         """Log server configuration on startup for debugging."""
         logger.info("=" * 60)
-        logger.info("MCPServer Starting")
+        logger.info("MCPServer Starting (Streamable HTTP)")
         logger.info("=" * 60)
         logger.info(f"Host: {self._host}")
         logger.info(f"Port: {self._port}")
+        logger.info(f"Endpoint: /mcp")
         logger.info(f"Log Level: {self._log_level}")
         logger.info(f"Access Log: {self._access_log}")
         logger.info(f"Tools Registered: {len(self.tools_registry)}")
@@ -128,9 +132,13 @@ class MCPServer:
         return list(self.tools_registry.keys())
 
     def create_app(
-        self, transport: Literal["http", "streamable-http", "sse"] = "http"
+        self, transport: Literal["streamable-http", "sse"] = "streamable-http"
     ) -> StarletteWithLifespan:
-        """Create FastMCP ASGI app with health probes and REST tool endpoints."""
+        """Create FastMCP ASGI app with health probes.
+
+        Args:
+            transport: MCP transport type. Default is streamable-http (recommended).
+        """
         mcp_app = self.mcp.http_app(transport=transport)
 
         async def health(request):
@@ -151,92 +159,18 @@ class MCPServer:
                 }
             )
 
-        async def list_tools(request):
-            """REST endpoint to list available tools (GET /mcp/tools)."""
-            tools = []
-            for name, func in self.tools_registry.items():
-                # Build inputSchema from function annotations (MCP standard format)
-                properties = {}
-                required = []
-                if hasattr(func, "__annotations__"):
-                    for param_name, param_type in func.__annotations__.items():
-                        if param_name != "return":
-                            type_name = getattr(param_type, "__name__", str(param_type))
-                            # Map Python types to JSON Schema types
-                            json_type = {
-                                "str": "string",
-                                "int": "integer",
-                                "float": "number",
-                                "bool": "boolean",
-                                "list": "array",
-                                "dict": "object",
-                            }.get(type_name, "string")
-                            properties[param_name] = {"type": json_type}
-                            required.append(param_name)
-
-                input_schema = {
-                    "type": "object",
-                    "properties": properties,
-                    "required": required,
-                }
-
-                tools.append(
-                    {
-                        "name": name,
-                        "description": (
-                            func.__doc__.split("\n")[0] if func.__doc__ else "No description"
-                        ),
-                        "inputSchema": input_schema,
-                    }
-                )
-            return JSONResponse({"tools": tools})
-
-        async def call_tool(request):
-            """REST endpoint to call a tool (POST /mcp/tools)."""
-            try:
-                body = await request.json()
-                tool_name = body.get("tool")
-                arguments = body.get("arguments", {})
-
-                if not tool_name:
-                    return JSONResponse({"error": "Missing 'tool' field"}, status_code=400)
-
-                if tool_name not in self.tools_registry:
-                    return JSONResponse(
-                        {"error": f"Tool '{tool_name}' not found"},
-                        status_code=404,
-                    )
-
-                func = self.tools_registry[tool_name]
-                result = func(**arguments)
-
-                return JSONResponse({"result": result})
-            except json.JSONDecodeError:
-                return JSONResponse({"error": "Invalid JSON"}, status_code=400)
-            except TypeError as e:
-                return JSONResponse({"error": f"Invalid arguments: {e}"}, status_code=400)
-            except Exception as e:
-                logger.error(f"Tool call error: {e}")
-                return JSONResponse({"error": str(e)}, status_code=500)
-
-        async def mcp_tools_handler(request):
-            """Handle both GET and POST for /mcp/tools."""
-            if request.method == "GET":
-                return await list_tools(request)
-            elif request.method == "POST":
-                return await call_tool(request)
-            else:
-                return JSONResponse({"error": "Method not allowed"}, status_code=405)
-
-        # Prepend health routes and REST tool endpoint
+        # Prepend health routes
         mcp_app.routes.insert(0, Route("/health", health))
         mcp_app.routes.insert(1, Route("/ready", ready))
-        mcp_app.routes.insert(2, Route("/mcp/tools", mcp_tools_handler, methods=["GET", "POST"]))
 
         return mcp_app
 
-    def run(self, transport: Literal["http", "streamable-http", "sse"] = "http") -> None:
-        """Run the MCP server through the FastMCP run command."""
+    def run(self, transport: Literal["streamable-http", "sse"] = "streamable-http") -> None:
+        """Run the MCP server.
+
+        Args:
+            transport: MCP transport type. Default is streamable-http (recommended).
+        """
         self._log_startup_config()
         app = self.create_app(transport)
         try:

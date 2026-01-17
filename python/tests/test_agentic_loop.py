@@ -62,7 +62,7 @@ class MockMCPClient(MCPClient):
 
     def __init__(self, tools: Optional[dict] = None):
         """Initialize with tool definitions: {name: (description, result)}"""
-        self._sse_url = "mock://mcp/sse"
+        self._mcp_url = "mock://mcp"
         self._tools = {}
         self._active = True  # Always active for mocks
         self.call_log = []
