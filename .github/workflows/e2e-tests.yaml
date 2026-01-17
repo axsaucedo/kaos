@@ -63,7 +63,7 @@ jobs:
         run: make -C operator kind-e2e-install-kaos
 
       - name: Run E2E tests
-        run: make -C operator e2e-test
+        run: ./operator/hack/run-e2e-tests.sh
 
       - name: Collect logs on failure
         if: failure()
