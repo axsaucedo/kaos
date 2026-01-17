@@ -1,25 +1,25 @@
 # MCP Tools
 
-The Model Context Protocol (MCP) integration enables agents to discover and call external tools hosted on MCP servers.
+The Model Context Protocol (MCP) integration enables agents to discover and call external tools hosted on any MCP-compliant server.
 
 ## Architecture
 
 ```mermaid
 flowchart TB
     subgraph agent["Agent"]
-        client["MCPClient<br/>• discover_tools() → List tools<br/>• call_tool(name, args) → Execute<br/>• get_tools() → Return cached list"]
+        client["MCPClient<br/>• Uses MCP SDK SSE client<br/>• list_tools() → Discover tools<br/>• call_tool(name, args) → Execute"]
     end
     
-    subgraph server["MCPServer"]
-        fastmcp["FastMCP<br/>• GET /mcp/tools → List available tools<br/>• POST /mcp/tools → Call tool<br/>• GET /health → Health check<br/>• GET /ready → Readiness + tool list"]
+    subgraph server["MCPServer (FastMCP)"]
+        fastmcp["FastMCP<br/>• /sse → MCP SSE transport<br/>• /mcp → MCP HTTP transport<br/>• /health → Health check<br/>• /ready → Readiness check"]
     end
     
-    agent --> server
+    agent -->|"MCP Protocol (SSE)"| server
 ```
 
 ## MCPClient
 
-Client for discovering and calling tools on MCP servers.
+Protocol-compliant client using the official MCP SDK for tool discovery and execution.
 
 ### Configuration
 
@@ -27,6 +27,7 @@ Client for discovering and calling tools on MCP servers.
 from mcptools.client import MCPClient
 
 # Create client with name and URL
+# The client automatically appends /sse for SSE transport
 client = MCPClient(name="my-server", url="http://localhost:8001")
 ```
 
@@ -41,7 +42,7 @@ await client._init()
 
 for tool in client.get_tools():
     print(f"{tool.name}: {tool.description}")
-    print(f"  Parameters: {tool.parameters}")
+    print(f"  Schema: {tool.input_schema}")
 ```
 
 ### Call Tool
@@ -56,12 +57,41 @@ print(result)  # {"result": "Echo: Hello, world!"}
 
 ### Tool Data Structure
 
+The Tool dataclass uses MCP standard `inputSchema` format:
+
 ```python
 @dataclass
 class Tool:
     name: str              # Tool identifier
     description: str       # Human-readable description
-    parameters: Dict       # JSON Schema of parameters
+    input_schema: Dict     # JSON Schema for parameters (MCP standard)
+```
+
+Example input_schema (MCP standard format):
+```python
+{
+    "type": "object",
+    "properties": {
+        "text": {"type": "string", "description": "Text to echo"}
+    },
+    "required": ["text"]
+}
+```
+
+### External MCP Server Support
+
+The MCPClient uses the official MCP SDK, enabling connection to any MCP-compliant server:
+
+```python
+# Connect to external FastMCP server
+external_client = MCPClient(
+    name="github-mcp",
+    url="http://github-mcp-server:8000"
+)
+
+# Discover and use tools
+await external_client._init()
+repos = await external_client.call_tool("list_repos", {"user": "octocat"})
 ```
 
 ## MCPServer
@@ -121,6 +151,10 @@ server.register_tools_from_string(tools_string)
 ### Run Server
 
 ```python
+# SSE transport (recommended, used by MCPClient)
+server.run(transport="sse")
+
+# HTTP transport (alternative)
 server.run(transport="http")
 ```
 
