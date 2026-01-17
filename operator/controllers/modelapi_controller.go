@@ -115,6 +115,17 @@ func (r *ModelAPIReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			modelapi.Status.Message = fmt.Sprintf("Failed to get ConfigMap: %v", err)
 			r.Status().Update(ctx, modelapi)
 			return ctrl.Result{}, err
+		} else {
+			// ConfigMap exists - check if it needs updating
+			desiredConfigMap := r.constructConfigMap(modelapi)
+			if configmap.Data["config.yaml"] != desiredConfigMap.Data["config.yaml"] {
+				log.Info("Updating ConfigMap", "name", configmap.Name)
+				configmap.Data = desiredConfigMap.Data
+				if err := r.Update(ctx, configmap); err != nil {
+					log.Error(err, "failed to update ConfigMap")
+					return ctrl.Result{}, err
+				}
+			}
 		}
 	}
 
@@ -142,6 +153,28 @@ func (r *ModelAPIReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	} else if err != nil {
 		log.Error(err, "failed to get Deployment")
 		return ctrl.Result{}, err
+	} else {
+		// Deployment exists - check if spec has changed using hash annotation
+		desiredDeployment := r.constructDeployment(modelapi)
+		currentHash := ""
+		if deployment.Spec.Template.Annotations != nil {
+			currentHash = deployment.Spec.Template.Annotations[util.PodSpecHashAnnotation]
+		}
+		desiredHash := ""
+		if desiredDeployment.Spec.Template.Annotations != nil {
+			desiredHash = desiredDeployment.Spec.Template.Annotations[util.PodSpecHashAnnotation]
+		}
+
+		if currentHash != desiredHash {
+			log.Info("Updating Deployment due to spec change", "name", deployment.Name,
+				"currentHash", currentHash, "desiredHash", desiredHash)
+			// Update the deployment spec to trigger rolling update
+			deployment.Spec.Template = desiredDeployment.Spec.Template
+			if err := r.Update(ctx, deployment); err != nil {
+				log.Error(err, "failed to update Deployment")
+				return ctrl.Result{}, err
+			}
+		}
 	}
 
 	// Create or update Service
@@ -283,6 +316,9 @@ func (r *ModelAPIReconciler) constructDeployment(modelapi *kaosv1alpha1.ModelAPI
 		}
 	}
 
+	// Compute hash of the pod spec for change detection
+	podSpecHash := util.ComputePodSpecHash(finalPodSpec)
+
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      fmt.Sprintf("modelapi-%s", modelapi.Name),
@@ -297,6 +333,9 @@ func (r *ModelAPIReconciler) constructDeployment(modelapi *kaosv1alpha1.ModelAPI
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: labels,
+					Annotations: map[string]string{
+						util.PodSpecHashAnnotation: podSpecHash,
+					},
 				},
 				Spec: finalPodSpec,
 			},
