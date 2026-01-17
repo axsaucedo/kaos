@@ -47,7 +47,7 @@ func (r *ModelAPIReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	modelapi := &kaosv1alpha1.ModelAPI{}
 	if err := r.Get(ctx, req.NamespacedName, modelapi); err != nil {
-		log.Error(err, "unable to fetch ModelAPI")
+		// Ignore not-found errors (resource was deleted)
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 

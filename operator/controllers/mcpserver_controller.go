@@ -47,7 +47,7 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	mcpserver := &kaosv1alpha1.MCPServer{}
 	if err := r.Get(ctx, req.NamespacedName, mcpserver); err != nil {
-		log.Error(err, "unable to fetch MCPServer")
+		// Ignore not-found errors (resource was deleted)
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 

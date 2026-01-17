@@ -50,7 +50,7 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	agent := &kaosv1alpha1.Agent{}
 	if err := r.Get(ctx, req.NamespacedName, agent); err != nil {
-		log.Error(err, "unable to fetch Agent")
+		// Ignore not-found errors (resource was deleted)
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
