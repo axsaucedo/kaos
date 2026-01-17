@@ -7,14 +7,14 @@ The Model Context Protocol (MCP) integration enables agents to discover and call
 ```mermaid
 flowchart TB
     subgraph agent["Agent"]
-        client["MCPClient<br/>• Uses MCP SDK SSE client<br/>• list_tools() → Discover tools<br/>• call_tool(name, args) → Execute"]
+        client["MCPClient<br/>• Uses MCP SDK Streamable HTTP<br/>• list_tools() → Discover tools<br/>• call_tool(name, args) → Execute"]
     end
     
     subgraph server["MCPServer (FastMCP)"]
-        fastmcp["FastMCP<br/>• /sse → MCP SSE transport<br/>• /mcp → MCP HTTP transport<br/>• /health → Health check<br/>• /ready → Readiness check"]
+        fastmcp["FastMCP<br/>• /mcp → Streamable HTTP transport<br/>• /health → Health check<br/>• /ready → Readiness check"]
     end
     
-    agent -->|"MCP Protocol (SSE)"| server
+    agent -->|"MCP Protocol (Streamable HTTP)"| server
 ```
 
 ## MCPClient
@@ -27,7 +27,7 @@ Protocol-compliant client using the official MCP SDK for tool discovery and exec
 from mcptools.client import MCPClient
 
 # Create client with name and URL
-# The client automatically appends /sse for SSE transport
+# The client automatically appends /mcp for Streamable HTTP transport
 client = MCPClient(name="my-server", url="http://localhost:8001")
 ```
 
@@ -151,11 +151,11 @@ server.register_tools_from_string(tools_string)
 ### Run Server
 
 ```python
-# SSE transport (recommended, used by MCPClient)
-server.run(transport="sse")
+# Streamable HTTP transport (default, recommended)
+server.run(transport="streamable-http")
 
-# HTTP transport (alternative)
-server.run(transport="http")
+# SSE transport (legacy, for backward compatibility)
+server.run(transport="sse")
 ```
 
 ## Environment Variable Configuration
