@@ -155,13 +155,30 @@ class MCPServer:
             """REST endpoint to list available tools (GET /mcp/tools)."""
             tools = []
             for name, func in self.tools_registry.items():
-                # Build parameters from function annotations
-                params = {}
+                # Build inputSchema from function annotations (MCP standard format)
+                properties = {}
+                required = []
                 if hasattr(func, "__annotations__"):
                     for param_name, param_type in func.__annotations__.items():
                         if param_name != "return":
                             type_name = getattr(param_type, "__name__", str(param_type))
-                            params[param_name] = type_name
+                            # Map Python types to JSON Schema types
+                            json_type = {
+                                "str": "string",
+                                "int": "integer",
+                                "float": "number",
+                                "bool": "boolean",
+                                "list": "array",
+                                "dict": "object",
+                            }.get(type_name, "string")
+                            properties[param_name] = {"type": json_type}
+                            required.append(param_name)
+
+                input_schema = {
+                    "type": "object",
+                    "properties": properties,
+                    "required": required,
+                }
 
                 tools.append(
                     {
@@ -169,7 +186,7 @@ class MCPServer:
                         "description": (
                             func.__doc__.split("\n")[0] if func.__doc__ else "No description"
                         ),
-                        "parameters": params,
+                        "inputSchema": input_schema,
                     }
                 )
             return JSONResponse({"tools": tools})

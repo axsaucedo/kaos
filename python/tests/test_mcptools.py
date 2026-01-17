@@ -231,7 +231,7 @@ class TestMCPRestEndpoint:
     """Tests for MCP server REST /mcp/tools endpoint."""
 
     def test_rest_tools_list_endpoint(self, mcp_server_process):
-        """Test GET /mcp/tools returns tool list."""
+        """Test GET /mcp/tools returns tool list with MCP standard inputSchema."""
         url = mcp_server_process["url"]
 
         response = httpx.get(f"{url}/mcp/tools")
@@ -246,10 +246,12 @@ class TestMCPRestEndpoint:
         assert "echo" in tool_names
         assert "add" in tool_names
 
-        # Each tool should have name, description, and parameters
+        # Each tool should have name, description, and inputSchema (MCP standard)
         echo_tool = next(t for t in tools if t["name"] == "echo")
         assert "description" in echo_tool
-        assert "parameters" in echo_tool
+        assert "inputSchema" in echo_tool
+        assert echo_tool["inputSchema"]["type"] == "object"
+        assert "properties" in echo_tool["inputSchema"]
 
         logger.info("✓ REST tools list endpoint works correctly")
 

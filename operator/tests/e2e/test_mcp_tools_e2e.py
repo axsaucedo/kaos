@@ -133,10 +133,10 @@ async def test_mcpserver_tool_discovery(test_namespace: str):
         assert "echo" in tool_names, f"echo not in tools: {tool_names}"
         assert "reverse" in tool_names, f"reverse not in tools: {tool_names}"
         
-        # Check tool has description and parameters
+        # Check tool has description and inputSchema (MCP standard)
         echo_tool = next(t for t in tool_list if t["name"] == "echo")
         assert "description" in echo_tool
-        assert "parameters" in echo_tool
+        assert "inputSchema" in echo_tool
 
 
 @pytest.mark.asyncio
