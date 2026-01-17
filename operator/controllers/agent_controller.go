@@ -453,7 +453,7 @@ func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *
 
 		env = append(env, corev1.EnvVar{
 			Name:  "MCP_SERVERS",
-			Value: fmt.Sprintf("%v", mcpNames), // Will be comma-separated in JSON
+			Value: strings.Join(mcpNames, ","), // Comma-separated list
 		})
 
 		// Add individual MCP server URLs
