@@ -201,6 +201,21 @@ func (r *ModelAPIReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	} else if err != nil {
 		log.Error(err, "failed to get Service")
 		return ctrl.Result{}, err
+	} else {
+		// Service exists - check if port needs to be updated (mode changed)
+		desiredService := r.constructService(modelapi)
+		currentPort := service.Spec.Ports[0].Port
+		desiredPort := desiredService.Spec.Ports[0].Port
+
+		if currentPort != desiredPort {
+			log.Info("Updating Service due to port change", "name", service.Name,
+				"currentPort", currentPort, "desiredPort", desiredPort)
+			service.Spec.Ports = desiredService.Spec.Ports
+			if err := r.Update(ctx, service); err != nil {
+				log.Error(err, "failed to update Service")
+				return ctrl.Result{}, err
+			}
+		}
 	}
 
 	// Update status - use correct port based on mode
@@ -436,8 +451,8 @@ func (r *ModelAPIReconciler) constructContainer(modelapi *kaosv1alpha1.ModelAPI)
 				Protocol:      corev1.ProtocolTCP,
 			},
 		},
-		Env:           env,
-		VolumeMounts:  volumeMounts,
+		Env:          env,
+		VolumeMounts: volumeMounts,
 		LivenessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
 				HTTPGet: &corev1.HTTPGetAction{
