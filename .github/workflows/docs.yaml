@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'docs/**'
+      - 'operator/chart/**'
       - '.github/workflows/docs.yaml'
   workflow_dispatch:
 
@@ -31,6 +32,11 @@ jobs:
         with:
           node-version: 20
 
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.14.0
+
       - name: Setup Pages
         uses: actions/configure-pages@v4
 
@@ -41,6 +47,11 @@ jobs:
       - name: Build with VitePress
         working-directory: docs
         run: npm run build
+
+      - name: Package Helm chart
+        run: |
+          helm package operator/chart -d docs/.vitepress/dist/charts
+          helm repo index docs/.vitepress/dist/charts --url https://axsaucedo.github.io/kaos/charts
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

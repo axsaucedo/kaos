@@ -7,7 +7,7 @@ import sys
 import typer
 
 # Helm chart repository URL (hosted on GitHub Pages)
-HELM_REPO_URL = "https://axsaucedo.github.io/kaos"
+HELM_REPO_URL = "https://axsaucedo.github.io/kaos/charts"
 HELM_REPO_NAME = "kaos"
 HELM_CHART_NAME = "kaos-operator"
 DEFAULT_NAMESPACE = "kaos-system"
