@@ -316,6 +316,19 @@ spec:
 | `ready` | bool | Whether ModelAPI is ready |
 | `endpoint` | string | Service URL for agents |
 | `message` | string | Additional status info |
+| `deployment` | object | Deployment status for rolling update visibility |
+
+### deployment (status)
+
+Mirrors key status fields from the underlying Kubernetes Deployment:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `replicas` | int32 | Total number of non-terminated pods |
+| `readyReplicas` | int32 | Number of pods with Ready condition |
+| `availableReplicas` | int32 | Number of available pods |
+| `updatedReplicas` | int32 | Number of pods with desired template (rolling update progress) |
+| `conditions` | array | Deployment conditions (Available, Progressing, ReplicaFailure) |
 
 ## Examples
 

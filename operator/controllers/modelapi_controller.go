@@ -227,6 +227,9 @@ func (r *ModelAPIReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		log.Error(err, "failed to reconcile HTTPRoute")
 	}
 
+	// Copy deployment status for rolling update visibility
+	modelapi.Status.Deployment = util.CopyDeploymentStatus(deployment)
+
 	// Check deployment readiness
 	if deployment.Status.ReadyReplicas > 0 {
 		modelapi.Status.Ready = true

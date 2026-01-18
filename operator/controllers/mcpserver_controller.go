@@ -177,6 +177,9 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		log.Error(err, "failed to reconcile HTTPRoute")
 	}
 
+	// Copy deployment status for rolling update visibility
+	mcpserver.Status.Deployment = util.CopyDeploymentStatus(deployment)
+
 	// Check deployment readiness
 	if deployment.Status.ReadyReplicas > 0 {
 		mcpserver.Status.Ready = true

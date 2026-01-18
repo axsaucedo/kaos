@@ -251,6 +251,9 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	agent.Status.LinkedResources = make(map[string]string)
 	agent.Status.LinkedResources["modelapi"] = agent.Spec.ModelAPI
 
+	// Copy deployment status for rolling update visibility
+	agent.Status.Deployment = util.CopyDeploymentStatus(deployment)
+
 	// Check deployment readiness
 	if deployment.Status.ReadyReplicas > 0 {
 		agent.Status.Ready = true

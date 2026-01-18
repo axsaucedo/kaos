@@ -20,9 +20,9 @@ import yaml
 # Gateway configuration - can be overridden via environment variable for KIND clusters
 GATEWAY_URL = os.environ.get("GATEWAY_URL", "http://localhost:80")
 CHART_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../chart"))
-RELEASE_NAME = "kaos-e2e"
-OPERATOR_NAMESPACE = "kaos-e2e-system"
-LOCK_FILE = os.path.join(tempfile.gettempdir(), "kaos-e2e-operator.lock")
+RELEASE_NAME = "kaos"
+OPERATOR_NAMESPACE = "kaos-system"
+LOCK_FILE = os.path.join(tempfile.gettempdir(), "kaos-operator.lock")
 
 
 async def async_wait_for_healthy(

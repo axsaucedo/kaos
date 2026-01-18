@@ -149,7 +149,7 @@ jobs:
           echo "=== All Namespaces ==="
           kubectl get ns
           echo "=== Operator Logs ==="
-          kubectl logs -n kaos-e2e-system -l app.kubernetes.io/name=kaos-operator --tail=100 || true
+          kubectl logs -n kaos-system -l app.kubernetes.io/name=kaos-operator --tail=100 || true
           echo "=== All Pods ==="
           kubectl get pods -A
           echo "=== Events ==="

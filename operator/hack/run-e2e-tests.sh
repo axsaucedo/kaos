@@ -63,7 +63,7 @@ uv pip install -e .
 echo "Using Helm values: ${HELM_VALUES_FILE}"
 
 # Check operator is installed
-if ! helm status kaos-e2e -n kaos-e2e-system >/dev/null 2>&1; then
+if ! helm status kaos -n kaos-system >/dev/null 2>&1; then
     echo "ERROR: Operator not installed."
     echo "Run: make kind-e2e-install-kaos"
     exit 1
@@ -73,7 +73,7 @@ echo "✓ Operator is installed"
 # Wait for Gateway to be programmed
 echo "Waiting for Gateway to be programmed..."
 for i in {1..30}; do
-    STATUS=$(kubectl get gateway kaos-gateway -n kaos-e2e-system -o jsonpath='{.status.conditions[?(@.type=="Programmed")].status}' 2>/dev/null || echo "")
+    STATUS=$(kubectl get gateway kaos-gateway -n kaos-system -o jsonpath='{.status.conditions[?(@.type=="Programmed")].status}' 2>/dev/null || echo "")
     if [ "$STATUS" = "True" ]; then
         echo "Gateway is programmed!"
         break
@@ -111,8 +111,8 @@ cleanup() {
     kill $PORT_FORWARD_PID 2>/dev/null || true
     
     echo "Uninstalling operator..."
-    helm uninstall kaos-e2e -n kaos-e2e-system 2>/dev/null || true
-    kubectl delete namespace kaos-e2e-system --wait=false 2>/dev/null || true
+    helm uninstall kaos -n kaos-system 2>/dev/null || true
+    kubectl delete namespace kaos-system --wait=false 2>/dev/null || true
     
     # Clean up leftover test namespaces
     kubectl get ns -o name | grep -E "e2e-(gw[0-9]+|main)" | xargs -I{} kubectl delete {} --wait=false 2>/dev/null || true

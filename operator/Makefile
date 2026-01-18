@@ -120,10 +120,10 @@ kind-e2e-install-kaos:
 		LITELLM_VERSION=$(LITELLM_VERSION) OLLAMA_TAG=$(OLLAMA_TAG) \
 		./hack/update-kind-e2e-values.sh
 	@echo "=== Installing KAOS operator ==="
-	@kubectl create namespace kaos-e2e-system 2>/dev/null || true
+	@kubectl create namespace kaos-system 2>/dev/null || true
 	@kubectl apply --server-side -f config/crd/bases
-	@helm upgrade --install kaos-e2e chart/ \
-		--namespace kaos-e2e-system \
+	@helm upgrade --install kaos chart/ \
+		--namespace kaos-system \
 		-f $(HELM_VALUES_FILE) \
 		--set gatewayAPI.enabled=true \
 		--set gatewayAPI.createGateway=true \
@@ -151,7 +151,7 @@ e2e-test-seq:
 # Clean up E2E test resources
 e2e-clean:
 	@echo "Cleaning up E2E test resources..."
-	-helm uninstall kaos-e2e -n kaos-e2e-system 2>/dev/null || true
-	-kubectl delete namespace kaos-e2e-system --wait=false 2>/dev/null || true
+	-helm uninstall kaos -n kaos-system 2>/dev/null || true
+	-kubectl delete namespace kaos-system --wait=false 2>/dev/null || true
 	-kubectl get ns -o name | grep e2e | xargs -I{} kubectl delete {} --wait=false 2>/dev/null || true
 	@sleep 3

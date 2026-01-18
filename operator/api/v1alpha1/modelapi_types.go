@@ -103,6 +103,10 @@ type ModelAPIStatus struct {
 
 	// Message provides additional status information
 	Message string `json:"message,omitempty"`
+
+	// Deployment contains status information from the underlying Deployment
+	// +kubebuilder:validation:Optional
+	Deployment *DeploymentStatus `json:"deployment,omitempty"`
 }
 
 // +kubebuilder:object:root=true

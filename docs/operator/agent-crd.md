@@ -68,7 +68,17 @@ status:
   endpoint: "http://agent-my-agent.my-namespace.svc.cluster.local:8000"
   linkedResources:
     modelAPI: my-modelapi
-  message: ""
+  message: "Deployment ready replicas: 1/1"
+  deployment:
+    replicas: 1
+    readyReplicas: 1
+    availableReplicas: 1
+    updatedReplicas: 1
+    conditions:
+    - type: Available
+      status: "True"
+    - type: Progressing
+      status: "True"
 ```
 
 ## Spec Fields
@@ -254,6 +264,40 @@ spec:
 | `endpoint` | string | Service URL for A2A communication |
 | `linkedResources` | map | References to dependencies |
 | `message` | string | Additional status information |
+| `deployment` | object | Deployment status for rolling update visibility |
+
+### deployment (status)
+
+Mirrors key status fields from the underlying Kubernetes Deployment:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `replicas` | int32 | Total number of non-terminated pods |
+| `readyReplicas` | int32 | Number of pods with Ready condition |
+| `availableReplicas` | int32 | Number of available pods (ready for minReadySeconds) |
+| `updatedReplicas` | int32 | Number of pods with desired template (rolling update progress) |
+| `conditions` | array | Deployment conditions (Available, Progressing, ReplicaFailure) |
+
+Example status during a rolling update:
+
+```yaml
+status:
+  phase: Pending
+  ready: false
+  deployment:
+    replicas: 2
+    readyReplicas: 1
+    availableReplicas: 1
+    updatedReplicas: 1
+    conditions:
+    - type: Progressing
+      status: "True"
+      reason: ReplicaSetUpdated
+      message: "ReplicaSet 'agent-my-agent-xyz' is progressing"
+    - type: Available
+      status: "True"
+      reason: MinimumReplicasAvailable
+```
 
 ## Examples
 
