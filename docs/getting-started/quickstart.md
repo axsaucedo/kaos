@@ -6,33 +6,84 @@ Deploy your first AI agent on Kubernetes in under 5 minutes.
 
 - Kubernetes cluster (Docker Desktop, kind, minikube, or cloud)
 - kubectl configured and connected
-- Helm 3.x installed
 
-## Step 1: Install the Operator
+Choose your preferred interface:
+
+- **Option A (CLI/UI)**: Install `kaos-cli` via pip
+- **Option B (Helm/kubectl)**: Install Helm 3.x
+
+---
+
+## Option A: KAOS CLI & UI
+
+The easiest way to get started with KAOS.
+
+### Step 1: Install the CLI
 
 ```bash
-# Clone the repository
-git clone https://github.com/axsaucedo/kaos.git
-cd kaos/operator
+pip install kaos-cli
+```
 
-# Install with Helm
-helm install kaos-operator chart/ -n kaos-system --create-namespace
+### Step 2: Install the Operator
 
-# Optional: Enable Gateway API for external access
-# helm install kaos-operator chart/ -n kaos-system --create-namespace \
-#   --set gatewayAPI.enabled=true \
-#   --set gatewayAPI.createGateway=true \
-#   --set gatewayAPI.gatewayClassName=envoy-gateway
+```bash
+kaos install
+```
+
+This installs the KAOS operator to your cluster using the published Helm chart.
+
+### Step 3: Open the UI
+
+```bash
+kaos ui
+```
+
+This starts a local proxy and opens the KAOS UI in your browser.
+
+### Step 4: Create Your First Agent
+
+In the UI:
+1. Navigate to **Agents** → **Create Agent**
+2. Fill in the agent details
+3. Select a ModelAPI (or create one)
+4. Click **Create**
+
+Or use the CLI to apply a YAML file:
+
+```bash
+kubectl apply -f my-agent.yaml
+```
+
+### Next Steps
+
+- [CLI Commands](/cli/commands) - Full CLI reference
+- [UI Features](/ui/features) - Explore the UI
+
+---
+
+## Option B: Helm & kubectl
+
+For users who prefer direct Kubernetes tooling.
+
+### Step 1: Install the Operator
+
+```bash
+# Add the KAOS Helm repository
+helm repo add kaos https://axsaucedo.github.io/kaos/charts
+helm repo update
+
+# Install the operator
+helm install kaos kaos/kaos-operator -n kaos-system --create-namespace
 ```
 
 Verify the operator is running:
 
 ```bash
 kubectl get pods -n kaos-system
-# Expected: kaos-operator-controller-manager-xxx  Running
+# Expected: kaos-controller-manager-xxx  Running
 ```
 
-## Step 2: Deploy a Simple Agent
+### Step 2: Deploy a Simple Agent
 
 Create a file `my-agent.yaml`:
 
@@ -50,7 +101,7 @@ metadata:
   namespace: my-agents
 spec:
   mode: Hosted
-  serverConfig:
+  hostedConfig:
     model: "smollm2:135m"
 
 ---
@@ -64,8 +115,9 @@ spec:
   config:
     description: "My first agent"
     instructions: "You are a helpful assistant."
-  agentNetwork:
-    expose: true
+    env:
+      - name: MODEL_NAME
+        value: "ollama/smollm2:135m"
 ```
 
 Apply it:
@@ -74,26 +126,26 @@ Apply it:
 kubectl apply -f my-agent.yaml
 ```
 
-## Step 3: Wait for Resources
+### Step 3: Wait for Resources
 
 ```bash
 # Watch resources become ready
 kubectl get agent,modelapi -n my-agents -w
 
 # Expected output after ~60s:
-# NAME                           MODELAPI   READY   PHASE
-# agent.kaos.tools/my-agent   ollama     true    Ready
+# NAME                        READY   PHASE
+# agent.kaos.tools/my-agent   true    Ready
 # 
-# NAME                               MODE     READY   PHASE
-# modelapi.kaos.tools/ollama   Hosted   true    Ready
+# NAME                         READY   PHASE
+# modelapi.kaos.tools/ollama   true    Ready
 ```
 
-## Step 4: Interact with the Agent
+### Step 4: Interact with the Agent
 
 Port-forward to the agent service:
 
 ```bash
-kubectl port-forward -n my-agents svc/my-agent 8000:80
+kubectl port-forward -n my-agents svc/agent-my-agent 8000:8000
 ```
 
 Send a message:
@@ -107,12 +159,13 @@ curl http://localhost:8000/v1/chat/completions \
   }'
 ```
 
-## Step 5: Add MCP Tools
+---
+
+## Adding MCP Tools
 
 Extend your agent with tools by adding an MCPServer:
 
 ```yaml
----
 apiVersion: kaos.tools/v1alpha1
 kind: MCPServer
 metadata:
@@ -121,32 +174,23 @@ metadata:
 spec:
   type: python-runtime
   config:
-    mcp: "test-mcp-echo-server"
+    tools:
+      fromString: |
+        def echo(message: str) -> str:
+            """Echo back the message."""
+            return f"Echo: {message}"
+```
 
----
-# Update Agent to reference the MCP server
-apiVersion: kaos.tools/v1alpha1
-kind: Agent
-metadata:
-  name: my-agent
-  namespace: my-agents
+Then update your Agent to reference it:
+
+```yaml
 spec:
-  modelAPI: ollama
   mcpServers:
-  - echo-tools  # Add this line
-  config:
-    description: "Agent with echo tools"
-    instructions: "You are a helpful assistant with access to an echo tool."
-    agenticLoop:
-      maxSteps: 5
-      enableTools: true
-  agentNetwork:
-    expose: true
+    - echo-tools
 ```
 
 ## Next Steps
 
-- [Concepts](concepts.md) - Understand the architecture
-- [Multi-Agent Coordination](../tutorials/multi-agent.md) - Build agent teams
-- [Custom MCP Tools](../tutorials/custom-mcp-tools.md) - Create your own tools
-- [Samples](../../operator/config/samples/) - More example configurations
+- [Concepts](./concepts) - Understand the architecture
+- [Multi-Agent Tutorial](/tutorials/multi-agent) - Build agent teams
+- [Custom MCP Tools](/tutorials/custom-mcp-tools) - Create your own tools

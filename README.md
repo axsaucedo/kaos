@@ -33,16 +33,16 @@
 
 KAOS is a Kubernetes-native framework for deploying and orchestrating AI agents with tool access, multi-agent coordination, and seamless LLM integration.
 
-## Principles & Features
+## Features
 
-| Principle | Description |
-|-----------|-------------|
-| **🎯 Kubernetes-Native** | Agents, tools, and LLM backends are Custom Resources managed by controllers |
-| **🔧 MCP Standard** | Tool integration via the Model Context Protocol for interoperability |
-| **🔗 Multi-Agent Delegation** | Hierarchical agent systems with automatic discovery and delegation |
-| **📡 OpenAI-Compatible** | All agents expose standard `/v1/chat/completions` endpoints |
-| **🌐 Gateway API** | Optional unified ingress via Kubernetes Gateway API |
-| **🔄 Agentic Reasoning** | Built-in reasoning loop with configurable max steps |
+| Feature | Description |
+|---------|-------------|
+| **🖥️ CLI & Web UI** | Install and manage agents with `kaos` CLI and visual dashboard |
+| **🤖 Agent CRD** | Deploy agents as Kubernetes Custom Resources |
+| **🔧 MCP Tools** | Tool integration via the Model Context Protocol standard |
+| **🔗 Multi-Agent** | Hierarchical agent systems with automatic delegation |
+| **📡 OpenAI-Compatible** | All agents expose `/v1/chat/completions` endpoints |
+| **🎛️ Visual Dashboard** | Monitor agents, test chat, debug memory and tools |
 
 ## Quick Start
 
@@ -50,39 +50,33 @@ KAOS is a Kubernetes-native framework for deploying and orchestrating AI agents 
 
 - Kubernetes cluster (Docker Desktop, kind, minikube)
 - kubectl configured
-- Helm 3.x
 
-##### Interfaces
-
-1) KAOS Native (cli/ui)
-2) Kubernetes Vanilla (helm/kubectl)
-
-### Option 1: KAOS Native (CLI/UI)
+### Option 1: KAOS CLI/UI (Recommended)
 
 ```bash
+# Install the CLI
+pip install kaos-cli
+
 # Install KAOS in your cluster
 kaos install
 
-# Run Proxy and Open UI
+# Open the UI
 kaos ui
 ```
 
-#### Access UI
-
-You can then access the UI at [axsaucedo.github.io/kaos](axsaucedo.github.io/kaos). High level walk-through:
-
 <img src="docs/public/demo.gif">
 
-#### Next Steps
+The UI opens at [axsaucedo.github.io/kaos-ui](https://axsaucedo.github.io/kaos-ui). For CLI/UI documentation, see the [CLI Guide](https://axsaucedo.github.io/kaos/cli/overview).
 
-For detailed deep dive on the KAOS cli/ui you can check out the [documentation](https://axsaucedo.github.io/kaos/).
-
-
-### Option 2: Kubernetes Vanilla (heln/kubectl)
+### Option 2: Helm/kubectl
 
 ```bash
-cd operator
-helm install kaos-operator chart/ -n kaos-system --create-namespace
+# Add the Helm repository
+helm repo add kaos https://axsaucedo.github.io/kaos/charts
+helm repo update
+
+# Install the operator
+helm install kaos kaos/kaos-operator -n kaos-system --create-namespace
 ```
 
 #### Deploy Your First Agent
@@ -106,7 +100,11 @@ metadata:
 spec:
   type: python-runtime
   config:
-    mcp: "test-mcp-echo-server"
+    tools:
+      fromString: |
+        def echo(message: str) -> str:
+            """Echo back the message."""
+            return f"Echo: {message}"
 
 ---
 apiVersion: kaos.tools/v1alpha1
@@ -119,7 +117,7 @@ spec:
     - echo-tools
   config:
     description: "AI assistant with echo tools"
-    instructions: "You are a helpful assistant. Use the echo tool when asked to repeat something."
+    instructions: "You are a helpful assistant."
     env:
       - name: MODEL_NAME
         value: "ollama/smollm2:135m"
@@ -129,59 +127,20 @@ spec:
 kubectl apply -f simple-agent.yaml
 
 # Wait for pods to be ready
-kubectl wait --for=condition=ready pod -l app=assistant --timeout=120s
+kubectl wait --for=condition=ready pod -l agent=assistant --timeout=120s
 
 # Port-forward and test
-kubectl port-forward svc/assistant 8000:80
+kubectl port-forward svc/agent-assistant 8000:8000
 curl http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model": "assistant", "messages": [{"role": "user", "content": "Hello!"}]}'
 ```
 
-#### Multi-Agent with Gateway API
+#### Multi-Agent Systems
 
-KAOS supports complex multi-agent systems with Gateway API for external access:
+KAOS supports hierarchical multi-agent systems where a coordinator delegates tasks to specialist agents:
 
 ```yaml
-# multi-agent-gateway.yaml
-apiVersion: kaos.tools/v1alpha1
-kind: ModelAPI
-metadata:
-  name: ollama
-spec:
-  mode: Hosted
-  hostedConfig:
-    model: "llama3.2:latest"
-
----
-apiVersion: kaos.tools/v1alpha1
-kind: MCPServer
-metadata:
-  name: search-tools
-spec:
-  type: python-runtime
-  config:
-    tools:
-      fromString: |
-        def web_search(query: str) -> str:
-            """Search the web for information."""
-            return f"Results for: {query}"
-
----
-apiVersion: kaos.tools/v1alpha1
-kind: MCPServer
-metadata:
-  name: calculator
-spec:
-  type: python-runtime
-  config:
-    tools:
-      fromString: |
-        def calculate(expression: str) -> str:
-            """Evaluate a mathematical expression."""
-            return str(eval(expression))
-
----
 apiVersion: kaos.tools/v1alpha1
 kind: Agent
 metadata:
@@ -189,48 +148,15 @@ metadata:
 spec:
   modelAPI: ollama
   config:
-    description: "Coordinator that delegates to specialist agents"
-    instructions: |
-      You are a coordinator. Delegate research tasks to researcher,
-      and calculations to analyst.
+    description: "Coordinator that delegates to specialists"
+    instructions: "Delegate research to researcher, calculations to analyst."
   agentNetwork:
     access:
       - researcher
       - analyst
-  gatewayRoute:
-    timeout: "120s"
-
----
-apiVersion: kaos.tools/v1alpha1
-kind: Agent
-metadata:
-  name: researcher
-spec:
-  modelAPI: ollama
-  mcpServers:
-    - search-tools
-  config:
-    description: "Research specialist with web search"
-    instructions: "You are a researcher. Use web_search to find information."
-
----
-apiVersion: kaos.tools/v1alpha1
-kind: Agent
-metadata:
-  name: analyst
-spec:
-  modelAPI: ollama
-  mcpServers:
-    - calculator
-  config:
-    description: "Data analyst with calculation tools"
-    instructions: "You are an analyst. Use calculate for math operations."
 ```
 
-With Gateway API enabled, agents are accessible via:
-```
-http://<gateway-ip>/coordinator/v1/chat/completions
-```
+See [`operator/config/samples/`](operator/config/samples/) for complete multi-agent examples.
 
 ## Architecture
 
@@ -261,6 +187,8 @@ flowchart TB
 |----------|------|
 | 📖 Full Documentation | [axsaucedo.github.io/kaos](https://axsaucedo.github.io/kaos) |
 | 🚀 Quick Start | [Getting Started](https://axsaucedo.github.io/kaos/getting-started/quickstart) |
+| 🖥️ CLI Guide | [CLI Commands](https://axsaucedo.github.io/kaos/cli/commands) |
+| 🎛️ Web UI | [UI Features](https://axsaucedo.github.io/kaos/ui/features) |
 | 🤖 Agent CRD | [Agent Reference](https://axsaucedo.github.io/kaos/operator/agent-crd) |
 | 🔗 Multi-Agent | [Multi-Agent Tutorial](https://axsaucedo.github.io/kaos/tutorials/multi-agent) |
 
