@@ -20,6 +20,8 @@ export default defineConfig({
     
     nav: [
       { text: 'Guide', link: '/getting-started/quickstart' },
+      { text: 'CLI', link: '/cli/overview' },
+      { text: 'UI', link: '/ui/overview' },
       { text: 'Operator', link: '/operator/overview' },
       { text: 'Python', link: '/python-framework/overview' },
       { text: 'GitHub', link: 'https://github.com/axsaucedo/kaos' }
@@ -32,6 +34,20 @@ export default defineConfig({
           { text: 'Quick Start', link: '/getting-started/quickstart' },
           { text: 'Installation', link: '/getting-started/installation' },
           { text: 'Concepts', link: '/getting-started/concepts' }
+        ]
+      },
+      {
+        text: 'CLI',
+        items: [
+          { text: 'Overview', link: '/cli/overview' },
+          { text: 'Commands', link: '/cli/commands' }
+        ]
+      },
+      {
+        text: 'Web UI',
+        items: [
+          { text: 'Overview', link: '/ui/overview' },
+          { text: 'Features', link: '/ui/features' }
         ]
       },
       {
