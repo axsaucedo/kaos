@@ -8,26 +8,10 @@
 <table width="100%">
 <tr>
 <td>
-<pre>
-<code>
-🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥
-🔥                                               🔥
-🔥       ██╗  ██╗ █████╗  ██████╗ ███████╗       🔥
-🔥       ██║ ██╔╝██╔══██╗██╔═══██╗██╔════╝       🔥
-🔥       █████╔╝ ███████║██║   ██║███████╗       🔥
-🔥       ██╔═██╗ ██╔══██║██║   ██║╚════██║       🔥
-🔥       ██║  ██╗██║  ██║╚██████╔╝███████║       🔥
-🔥       ╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝       🔥
-🔥                                               🔥
-🔥        K8s Agent Orchestration System         🔥
-🔥                                               🔥
-🔥  Managing the chaos in your agentic systems   🔥
-🔥                                               🔥
-🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥
-</pre>
-</code>
+<img src="docs/public/kaos-banner.png">
 </td>
 <td>
+<br>
     <p align="center">
       <a href="https://opensource.org/licenses/Apache-2.0"><img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License"></a><br>
       <a href="https://kubernetes.io"><img src="https://img.shields.io/badge/kubernetes-%3E%3D1.28-blue" alt="Kubernetes"></a><br>
@@ -68,14 +52,40 @@ KAOS is a Kubernetes-native framework for deploying and orchestrating AI agents 
 - kubectl configured
 - Helm 3.x
 
-### Install KAOS Operator
+##### Interfaces
+
+1) KAOS Native (cli/ui)
+2) Kubernetes Vanilla (helm/kubectl)
+
+### Option 1: KAOS Native (CLI/UI)
+
+```bash
+# Install KAOS in your cluster
+kaos install
+
+# Run Proxy and Open UI
+kaos ui
+```
+
+#### Access UI
+
+You can then access the UI at [axsaucedo.github.io/kaos](axsaucedo.github.io/kaos). High level walk-through:
+
+<img src="docs/public/demo.gif">
+
+#### Next Steps
+
+For detailed deep dive on the KAOS cli/ui you can check out the [documentation](https://axsaucedo.github.io/kaos/).
+
+
+### Option 2: Kubernetes Vanilla (heln/kubectl)
 
 ```bash
 cd operator
 helm install kaos-operator chart/ -n kaos-system --create-namespace
 ```
 
-### Deploy Your First Agent
+#### Deploy Your First Agent
 
 ```yaml
 # simple-agent.yaml
@@ -128,7 +138,7 @@ curl http://localhost:8000/v1/chat/completions \
   -d '{"model": "assistant", "messages": [{"role": "user", "content": "Hello!"}]}'
 ```
 
-## Multi-Agent with Gateway API
+#### Multi-Agent with Gateway API
 
 KAOS supports complex multi-agent systems with Gateway API for external access:
 
