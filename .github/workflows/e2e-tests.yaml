@@ -26,7 +26,18 @@ env:
 jobs:
   e2e-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard:
+          - name: core
+            files: "e2e/test_base_func_e2e.py e2e/test_modelapi_e2e.py"
+          - name: mcp
+            files: "e2e/test_mcp_tools_e2e.py"
+          - name: multi-agent
+            files: "e2e/test_agentic_loop_e2e.py e2e/test_multi_agent_e2e.py"
+    name: E2E (${{ matrix.shard.name }})
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -112,8 +123,23 @@ jobs:
       - name: Install KAOS operator
         run: make -C operator kind-e2e-install-kaos
 
-      - name: Run E2E tests
-        run: ./operator/hack/run-e2e-tests.sh
+      - name: Run E2E tests (${{ matrix.shard.name }})
+        run: |
+          cd operator/tests
+          source .venv/bin/activate 2>/dev/null || (uv venv && source .venv/bin/activate && uv pip install -e .)
+          
+          # Set up port-forward to Gateway
+          GATEWAY_SVC=$(kubectl get svc -n envoy-gateway-system -l "gateway.envoyproxy.io/owning-gateway-name=kaos-gateway" -o jsonpath='{.items[0].metadata.name}')
+          kubectl port-forward -n envoy-gateway-system "svc/${GATEWAY_SVC}" 8888:80 &
+          sleep 5
+          
+          export GATEWAY_URL="http://localhost:8888"
+          export OPERATOR_MANAGED_EXTERNALLY=1
+          export KIND_CLUSTER=true
+          export HELM_VALUES_FILE="$(pwd)/../hack/kind-e2e-values.yaml"
+          
+          # Run tests for this shard (2 workers on 2-core runner)
+          uv run pytest ${{ matrix.shard.files }} -v -n 2 --dist loadscope
 
       - name: Collect logs on failure
         if: failure()
