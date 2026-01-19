@@ -1,7 +1,7 @@
 """
 Consolidated Agent tests.
 
-Tests Agent, RemoteAgent, AgentCard, LocalMemory, and ModelAPI functionality.
+Tests Agent, RemoteAgent, AgentCard, LocalMemory, NullMemory, and ModelAPI functionality.
 Focuses on meaningful integration between components.
 """
 
@@ -11,7 +11,7 @@ from unittest.mock import Mock, AsyncMock
 from typing import List, Dict, Optional
 
 from agent.client import Agent, RemoteAgent, AgentCard
-from agent.memory import LocalMemory
+from agent.memory import LocalMemory, NullMemory
 from agent.server import AgentServer
 from modelapi.client import ModelAPI, LiteLLM
 
@@ -160,6 +160,121 @@ class TestMemorySystem:
         assert "Hello user!" in context
 
         logger.info("✓ Memory system complete workflow works correctly")
+
+    @pytest.mark.asyncio
+    async def test_deque_based_event_storage_auto_eviction(self):
+        """Test that deque-based storage automatically evicts old events."""
+        memory = LocalMemory(max_sessions=10, max_events_per_session=5)
+
+        session_id = await memory.create_session("test_app", "test_user")
+
+        # Add 7 events (exceeds max_events_per_session=5)
+        for i in range(7):
+            event = memory.create_event("user_message", f"Message {i}")
+            await memory.add_event(session_id, event)
+
+        # Should only have 5 events (oldest evicted automatically by deque)
+        events = await memory.get_session_events(session_id)
+        assert len(events) == 5
+
+        # Should have messages 2-6 (0 and 1 were evicted)
+        contents = [e.content for e in events]
+        assert "Message 2" in contents
+        assert "Message 6" in contents
+        assert "Message 0" not in contents
+        assert "Message 1" not in contents
+
+        logger.info("✓ Deque-based event storage auto-eviction works correctly")
+
+
+class TestNullMemory:
+    """Tests for NullMemory (disabled memory) functionality."""
+
+    @pytest.mark.asyncio
+    async def test_null_memory_all_operations_succeed(self):
+        """Test NullMemory operations all succeed silently."""
+        memory = NullMemory()
+
+        # Create session returns constant ID or provided ID
+        session_id = await memory.create_session("app", "user")
+        assert session_id == "null-session"
+
+        custom_session = await memory.create_session("app", "user", "custom-id")
+        assert custom_session == "custom-id"
+
+        # Get or create returns the provided ID
+        session = await memory.get_or_create_session("my-session")
+        assert session == "my-session"
+
+        # Get session returns None
+        assert await memory.get_session("any-id") is None
+
+        # Create event returns a valid event
+        event = memory.create_event("user_message", "Hello")
+        assert event is not None
+        assert event.event_type == "user_message"
+        assert event.content == "Hello"
+
+        # Add event succeeds
+        result = await memory.add_event("any-session", event)
+        assert result is True
+
+        # Get session events returns empty list
+        events = await memory.get_session_events("any-session")
+        assert events == []
+
+        # Build context returns empty string
+        context = await memory.build_conversation_context("any-session")
+        assert context == ""
+
+        # List sessions returns empty list
+        sessions = await memory.list_sessions()
+        assert sessions == []
+
+        # Delete session returns True
+        deleted = await memory.delete_session("any-session")
+        assert deleted is True
+
+        # Get memory stats returns zeros
+        stats = await memory.get_memory_stats()
+        assert stats["total_sessions"] == 0
+        assert stats["total_events"] == 0
+
+        # Cleanup returns 0
+        cleaned = await memory.cleanup_old_sessions()
+        assert cleaned == 0
+
+        logger.info("✓ NullMemory all operations succeed silently")
+
+    @pytest.mark.asyncio
+    async def test_agent_with_null_memory_processes_messages(self):
+        """Test Agent works correctly with NullMemory."""
+        from tests.test_agent import MockModelAPI
+
+        mock_llm = MockModelAPI("null-memory-agent")
+        null_memory = NullMemory()
+
+        agent = Agent(
+            name="null-memory-agent",
+            instructions="Test agent with disabled memory.",
+            model_api=mock_llm,
+            memory=null_memory,
+            memory_enabled=False,
+        )
+
+        # Process a message - should work without storing events
+        response_chunks = []
+        async for chunk in agent.process_message("Hello!"):
+            response_chunks.append(chunk)
+
+        response = "".join(response_chunks)
+        assert len(response) > 0
+
+        # Memory should still be empty
+        sessions = await null_memory.list_sessions()
+        assert sessions == []
+
+        logger.info("✓ Agent with NullMemory processes messages correctly")
 
 
 class TestMessageProcessing:
