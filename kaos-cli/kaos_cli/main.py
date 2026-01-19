@@ -28,9 +28,15 @@ def ui(
         help="Kubernetes API server URL. If not provided, uses kubeconfig.",
     ),
     expose_port: int = typer.Option(
-        8080,
+        8010,
         "--expose-port",
         help="Port to expose the CORS proxy on.",
+    ),
+    namespace: str = typer.Option(
+        "default",
+        "--namespace",
+        "-n",
+        help="Initial namespace to display in the UI.",
     ),
     no_browser: bool = typer.Option(
         False,
@@ -39,7 +45,7 @@ def ui(
     ),
 ) -> None:
     """Start a CORS-enabled proxy and open the KAOS UI."""
-    ui_command(k8s_url=k8s_url, expose_port=expose_port, no_browser=no_browser)
+    ui_command(k8s_url=k8s_url, expose_port=expose_port, namespace=namespace, no_browser=no_browser)
 
 
 @app.command(name="install")
