@@ -249,8 +249,6 @@ class TestNullMemory:
     @pytest.mark.asyncio
     async def test_agent_with_null_memory_processes_messages(self):
         """Test Agent works correctly with NullMemory."""
-        from tests.test_agent import MockModelAPI
-
         mock_llm = MockModelAPI("null-memory-agent")
         null_memory = NullMemory()
 
