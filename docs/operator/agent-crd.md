@@ -35,6 +35,14 @@ spec:
     # Max reasoning loop iterations (1-20, default: 5)
     reasoningLoopMaxSteps: 5
     
+    # Memory system configuration
+    memory:
+      enabled: true           # Enable/disable memory (default: true)
+      type: local             # Memory type (only "local" supported)
+      contextLimit: 6         # Messages for delegation context
+      maxSessions: 1000       # Max sessions to keep
+      maxSessionEvents: 500   # Max events per session
+    
     # Additional environment variables
     env:
     - name: MODEL_NAME
@@ -162,6 +170,33 @@ config:
 ```
 
 The reasoning loop runs tool calls and delegations until the model produces a final response or max steps is reached.
+
+#### config.memory
+
+Memory system configuration:
+
+```yaml
+config:
+  memory:
+    enabled: true           # Enable/disable memory (default: true)
+    type: local             # Memory type (default: local, only option)
+    contextLimit: 6         # Messages for delegation context (default: 6)
+    maxSessions: 1000       # Max sessions to keep (default: 1000)
+    maxSessionEvents: 500   # Max events per session (default: 500)
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | `true` | Enable memory; when `false`, uses NullMemory (no-op) |
+| `type` | string | `local` | Memory implementation type (only `local` supported) |
+| `contextLimit` | int | `6` | Messages to include when delegating to sub-agents |
+| `maxSessions` | int | `1000` | Maximum sessions before oldest are evicted |
+| `maxSessionEvents` | int | `500` | Maximum events per session before eviction |
+
+**When to disable memory:**
+- Stateless agents that don't need conversation history
+- Resource-constrained environments
+- High-throughput agents where memory overhead matters
 
 #### config.env
 

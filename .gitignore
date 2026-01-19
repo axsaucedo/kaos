@@ -69,3 +69,7 @@ TASKS.md
 
 # Generated KIND E2E values (created by hack/update-kind-e2e-values.sh)
 hack/kind-e2e-values.yaml
+
+# Analysis reports (local only, not committed)
+MEMORY_REPORT.md
+REPORT.md
