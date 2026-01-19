@@ -37,21 +37,22 @@ KAOS is a Kubernetes-native framework for deploying and orchestrating AI agents 
 
 | Feature | Description |
 |---------|-------------|
-| ** CLI & Web UI** | Install and manage agents with `kaos` CLI and visual dashboard |
-| ** Agent CRD** | Deploy agents as Kubernetes Custom Resources |
-| ** MCP Tools** | Tool integration via the Model Context Protocol standard |
-| ** Multi-Agent** | Hierarchical agent systems with automatic delegation |
-| ** OpenAI-Compatible** | All agents expose `/v1/chat/completions` endpoints |
-| ** Visual Dashboard** | Monitor agents, test chat, debug memory and tools |
+| **Agentic Graphs** | Deploy distributed agents networks as Kubernetes resources |
+| **MCP Primitives** | Tool integration via the Model Context Protocol standard |
+| **Multi-Agent Support** | Hierarchical agent systems with automatic delegation |
+| **OpenAI-Compatible** | All agents expose `/v1/chat/completions` endpoints |
+| **KAOS CLI** | Install and manage agents and environments with `kaos` CLI |
+| **Visual Dashboard** | UI to monitor agents, test chat, debug memory and tools |
 
 ## Quick Start
 
 ### Prerequisites
 
-- Kubernetes cluster (Docker Desktop, kind, minikube)
+- Kubernetes cluster
 - kubectl configured
+- helm installed
 
-### Option 1: KAOS CLI/UI (Recommended)
+### Option 1: KAOS CLI/UI
 
 ```bash
 # Install the CLI
