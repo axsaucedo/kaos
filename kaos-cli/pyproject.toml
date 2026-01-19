@@ -1,6 +1,6 @@
 [project]
 name = "kaos-cli"
-version = "0.1.0"
+version = "0.1.1"
 description = "CLI for KAOS (K8s Agent Orchestration System)"
 readme = "README.md"
 requires-python = ">=3.12"
