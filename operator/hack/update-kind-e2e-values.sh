@@ -31,6 +31,14 @@ defaultImages:
   mcpServer: ${REGISTRY}/kaos-mcp-server:${AGENT_TAG}
   litellm: ${REGISTRY}/litellm:${LITELLM_VERSION}
   ollama: ${REGISTRY}/ollama:${OLLAMA_TAG}
+
+# Enable Gateway API for E2E tests
+gatewayAPI:
+  enabled: true
+  createGateway: true
+  gatewayName: kaos-gateway
+  gatewayClassName: envoy-gateway
+  listenerPort: 80
 EOF
 
 echo "Generated ${VALUES_FILE}"

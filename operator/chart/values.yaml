@@ -32,3 +32,16 @@ serviceAccount:
   automount: true
   create: true
   name: ""
+defaultImages:
+  agentRuntime: "axsauze/kaos-agent:latest"
+  mcpServer: "axsauze/kaos-agent:latest"
+  litellm: "ghcr.io/berriai/litellm:main-latest"
+  ollama: "alpine/ollama:latest"
+gateway:
+  defaultTimeouts:
+    agent: "120s"
+    modelAPI: "120s"
+    mcp: "30s"
+gatewayAPI:
+  enabled: false
+  gatewayName: "kaos-gateway"

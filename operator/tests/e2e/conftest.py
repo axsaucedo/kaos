@@ -326,7 +326,10 @@ def shared_modelapi(shared_namespace: str) -> Generator[str, None, None]:
 def create_modelapi_resource(
     namespace: str, name: str = "mock-proxy"
 ) -> Dict[str, Any]:
-    """Create a ModelAPI resource spec for LiteLLM proxy (supports mock_response)."""
+    """Create a ModelAPI resource spec for LiteLLM proxy (supports mock_response).
+    
+    Uses wildcard models: ["*"] so any agent model can be validated against it.
+    """
     return {
         "apiVersion": "kaos.tools/v1alpha1",
         "kind": "ModelAPI",
@@ -334,7 +337,7 @@ def create_modelapi_resource(
         "spec": {
             "mode": "Proxy",
             "proxyConfig": {
-                "models": ["gpt-3.5-turbo"],
+                "models": ["*"],  # Wildcard for testing - accepts any model
                 "env": [
                     {"name": "OPENAI_API_KEY", "value": "sk-test"},
                     {"name": "LITELLM_LOG", "value": "WARN"},
