@@ -8628,13 +8628,76 @@ spec:
                 description: ProxyConfig contains configuration for Proxy mode
                 properties:
                   apiBase:
-                    description: APIBase is the base URL of the backend LLM API to
-                      proxy to (e.g., http://host.docker.internal:11434)
+                    description: |-
+                      APIBase is the base URL of the backend LLM API to proxy to (e.g., http://host.docker.internal:11434)
+                      Set as PROXY_API_BASE environment variable
                     type: string
+                  apiKey:
+                    description: |-
+                      APIKey for authentication with the backend LLM API
+                      Set as PROXY_API_KEY environment variable
+                    properties:
+                      value:
+                        description: Value is a direct string value (not recommended
+                          for production)
+                        type: string
+                      valueFrom:
+                        description: ValueFrom is a reference to a secret or configmap
+                        properties:
+                          configMapKeyRef:
+                            description: ConfigMapKeyRef is a reference to a configmap
+                              key
+                            properties:
+                              key:
+                                description: The key to select.
+                                type: string
+                              name:
+                                default: ""
+                                description: |-
+                                  Name of the referent.
+                                  This field is effectively required, but due to backwards compatibility is
+                                  allowed to be empty. Instances of this type with an empty value here are
+                                  almost certainly wrong.
+                                  More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                type: string
+                              optional:
+                                description: Specify whether the ConfigMap or its
+                                  key must be defined
+                                type: boolean
+                            required:
+                            - key
+                            type: object
+                            x-kubernetes-map-type: atomic
+                          secretKeyRef:
+                            description: SecretKeyRef is a reference to a secret key
+                            properties:
+                              key:
+                                description: The key of the secret to select from.  Must
+                                  be a valid secret key.
+                                type: string
+                              name:
+                                default: ""
+                                description: |-
+                                  Name of the referent.
+                                  This field is effectively required, but due to backwards compatibility is
+                                  allowed to be empty. Instances of this type with an empty value here are
+                                  almost certainly wrong.
+                                  More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                type: string
+                              optional:
+                                description: Specify whether the Secret or its key
+                                  must be defined
+                                type: boolean
+                            required:
+                            - key
+                            type: object
+                            x-kubernetes-map-type: atomic
+                        type: object
+                    type: object
                   configYaml:
                     description: |-
                       ConfigYaml allows providing a custom LiteLLM config (for advanced multi-model routing)
-                      If provided, APIBase and Model are ignored and this config is used instead
+                      When provided, used directly for LiteLLM config; models list is still used for Agent validation
                     properties:
                       fromSecretKeyRef:
                         description: FromSecretKeyRef is a reference to a Secret key
@@ -8823,9 +8886,16 @@ spec:
                       - name
                       type: object
                     type: array
-                  model:
-                    description: Model is the model identifier to proxy (e.g., ollama/smollm2:135m)
-                    type: string
+                  models:
+                    description: |-
+                      Models is the list of model identifiers supported by this proxy
+                      Examples: ["openai/gpt-5-mini", "gemini/*", "*"]
+                    items:
+                      type: string
+                    minItems: 1
+                    type: array
+                required:
+                - models
                 type: object
             required:
             - mode
@@ -8935,6 +9005,14 @@ spec:
               ready:
                 description: Ready indicates if the model API is ready
                 type: boolean
+              supportedModels:
+                description: |-
+                  SupportedModels is the list of model patterns supported by this ModelAPI
+                  For Proxy mode: copied from spec.proxyConfig.models
+                  For Hosted mode: contains the single model from hostedConfig.model
+                items:
+                  type: string
+                type: array
             type: object
         type: object
     served: true

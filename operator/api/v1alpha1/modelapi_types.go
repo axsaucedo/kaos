@@ -30,18 +30,52 @@ type ConfigYamlSource struct {
 
 // +kubebuilder:object:generate=true
 
+// ApiKeyValueFrom defines sources for API key values
+type ApiKeyValueFrom struct {
+	// SecretKeyRef is a reference to a secret key
+	// +kubebuilder:validation:Optional
+	SecretKeyRef *corev1.SecretKeySelector `json:"secretKeyRef,omitempty"`
+
+	// ConfigMapKeyRef is a reference to a configmap key
+	// +kubebuilder:validation:Optional
+	ConfigMapKeyRef *corev1.ConfigMapKeySelector `json:"configMapKeyRef,omitempty"`
+}
+
+// +kubebuilder:object:generate=true
+
+// ApiKeySource defines the source of an API key
+type ApiKeySource struct {
+	// Value is a direct string value (not recommended for production)
+	// +kubebuilder:validation:Optional
+	Value string `json:"value,omitempty"`
+
+	// ValueFrom is a reference to a secret or configmap
+	// +kubebuilder:validation:Optional
+	ValueFrom *ApiKeyValueFrom `json:"valueFrom,omitempty"`
+}
+
+// +kubebuilder:object:generate=true
+
 // ProxyConfig defines configuration for LiteLLM proxy mode
 type ProxyConfig struct {
+	// Models is the list of model identifiers supported by this proxy
+	// Examples: ["openai/gpt-5-mini", "gemini/*", "*"]
+	// +kubebuilder:validation:Required
+	// +kubebuilder:validation:MinItems=1
+	Models []string `json:"models"`
+
 	// APIBase is the base URL of the backend LLM API to proxy to (e.g., http://host.docker.internal:11434)
+	// Set as PROXY_API_BASE environment variable
 	// +kubebuilder:validation:Optional
 	APIBase string `json:"apiBase,omitempty"`
 
-	// Model is the model identifier to proxy (e.g., ollama/smollm2:135m)
+	// APIKey for authentication with the backend LLM API
+	// Set as PROXY_API_KEY environment variable
 	// +kubebuilder:validation:Optional
-	Model string `json:"model,omitempty"`
+	APIKey *ApiKeySource `json:"apiKey,omitempty"`
 
 	// ConfigYaml allows providing a custom LiteLLM config (for advanced multi-model routing)
-	// If provided, APIBase and Model are ignored and this config is used instead
+	// When provided, used directly for LiteLLM config; models list is still used for Agent validation
 	// +kubebuilder:validation:Optional
 	ConfigYaml *ConfigYamlSource `json:"configYaml,omitempty"`
 
@@ -103,6 +137,12 @@ type ModelAPIStatus struct {
 
 	// Message provides additional status information
 	Message string `json:"message,omitempty"`
+
+	// SupportedModels is the list of model patterns supported by this ModelAPI
+	// For Proxy mode: copied from spec.proxyConfig.models
+	// For Hosted mode: contains the single model from hostedConfig.model
+	// +kubebuilder:validation:Optional
+	SupportedModels []string `json:"supportedModels,omitempty"`
 
 	// Deployment contains status information from the underlying Deployment
 	// +kubebuilder:validation:Optional

@@ -26,7 +26,7 @@ var _ = Describe("ModelAPI Controller", func() {
 	ctx := context.Background()
 	const namespace = "default"
 
-	It("should create Deployment, Service and ConfigMap in Proxy mode", func() {
+	It("should create Deployment, Service and ConfigMap in Proxy mode with models list", func() {
 		name := uniqueModelAPIName("proxy-api")
 		modelAPI := &kaosv1alpha1.ModelAPI{
 			ObjectMeta: metav1.ObjectMeta{
@@ -36,6 +36,7 @@ var _ = Describe("ModelAPI Controller", func() {
 			Spec: kaosv1alpha1.ModelAPISpec{
 				Mode: kaosv1alpha1.ModelAPIModeProxy,
 				ProxyConfig: &kaosv1alpha1.ProxyConfig{
+					Models:  []string{"*"},
 					APIBase: "http://localhost:11434",
 				},
 			},
@@ -58,6 +59,17 @@ var _ = Describe("ModelAPI Controller", func() {
 		Expect(deployment.Spec.Template.Spec.Containers).To(HaveLen(1))
 		Expect(deployment.Spec.Template.Spec.Containers[0].Image).To(Equal("ghcr.io/berriai/litellm:main-latest"))
 
+		// Verify PROXY_API_BASE env var is set
+		container := deployment.Spec.Template.Spec.Containers[0]
+		var foundProxyAPIBase bool
+		for _, env := range container.Env {
+			if env.Name == "PROXY_API_BASE" && env.Value == "http://localhost:11434" {
+				foundProxyAPIBase = true
+				break
+			}
+		}
+		Expect(foundProxyAPIBase).To(BeTrue(), "PROXY_API_BASE env var should be set")
+
 		// Verify Service is created
 		service := &corev1.Service{}
 		Eventually(func() error {
@@ -77,13 +89,108 @@ var _ = Describe("ModelAPI Controller", func() {
 			}, configMap)
 		}, timeout, interval).Should(Succeed())
 		Expect(configMap.Data["config.yaml"]).To(ContainSubstring("model_name: \"*\""))
+		Expect(configMap.Data["config.yaml"]).To(ContainSubstring("api_base: \"os.environ/PROXY_API_BASE\""))
 
-		// Verify status endpoint is set
-		Eventually(func() string {
+		// Verify status endpoint and supportedModels are set
+		Eventually(func() bool {
+			updated := &kaosv1alpha1.ModelAPI{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, updated); err != nil {
+				return false
+			}
+			return containsSubstring(updated.Status.Endpoint, fmt.Sprintf("modelapi-%s", name)) &&
+				len(updated.Status.SupportedModels) == 1 &&
+				updated.Status.SupportedModels[0] == "*"
+		}, timeout, interval).Should(BeTrue())
+	})
+
+	It("should create ConfigMap with multiple models", func() {
+		name := uniqueModelAPIName("proxy-multi")
+		modelAPI := &kaosv1alpha1.ModelAPI{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: namespace,
+			},
+			Spec: kaosv1alpha1.ModelAPISpec{
+				Mode: kaosv1alpha1.ModelAPIModeProxy,
+				ProxyConfig: &kaosv1alpha1.ProxyConfig{
+					Models: []string{"openai/gpt-4", "anthropic/claude-3"},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, modelAPI)).To(Succeed())
+		defer func() {
+			k8sClient.Delete(ctx, modelAPI)
+		}()
+
+		// Verify ConfigMap is created with both models
+		configMap := &corev1.ConfigMap{}
+		Eventually(func() error {
+			return k8sClient.Get(ctx, types.NamespacedName{
+				Name:      fmt.Sprintf("litellm-config-%s", name),
+				Namespace: namespace,
+			}, configMap)
+		}, timeout, interval).Should(Succeed())
+		Expect(configMap.Data["config.yaml"]).To(ContainSubstring("model_name: \"openai/gpt-4\""))
+		Expect(configMap.Data["config.yaml"]).To(ContainSubstring("model_name: \"anthropic/claude-3\""))
+
+		// Verify supportedModels in status
+		Eventually(func() int {
 			updated := &kaosv1alpha1.ModelAPI{}
 			k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, updated)
-			return updated.Status.Endpoint
-		}, timeout, interval).Should(ContainSubstring(fmt.Sprintf("modelapi-%s", name)))
+			return len(updated.Status.SupportedModels)
+		}, timeout, interval).Should(Equal(2))
+	})
+
+	It("should inject PROXY_API_KEY from direct value", func() {
+		name := uniqueModelAPIName("proxy-apikey")
+		modelAPI := &kaosv1alpha1.ModelAPI{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: namespace,
+			},
+			Spec: kaosv1alpha1.ModelAPISpec{
+				Mode: kaosv1alpha1.ModelAPIModeProxy,
+				ProxyConfig: &kaosv1alpha1.ProxyConfig{
+					Models: []string{"openai/*"},
+					APIKey: &kaosv1alpha1.ApiKeySource{
+						Value: "test-api-key",
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, modelAPI)).To(Succeed())
+		defer func() {
+			k8sClient.Delete(ctx, modelAPI)
+		}()
+
+		// Verify Deployment has PROXY_API_KEY env var
+		deployment := &appsv1.Deployment{}
+		Eventually(func() error {
+			return k8sClient.Get(ctx, types.NamespacedName{
+				Name:      fmt.Sprintf("modelapi-%s", name),
+				Namespace: namespace,
+			}, deployment)
+		}, timeout, interval).Should(Succeed())
+
+		container := deployment.Spec.Template.Spec.Containers[0]
+		var foundAPIKey bool
+		for _, env := range container.Env {
+			if env.Name == "PROXY_API_KEY" && env.Value == "test-api-key" {
+				foundAPIKey = true
+				break
+			}
+		}
+		Expect(foundAPIKey).To(BeTrue(), "PROXY_API_KEY env var should be set")
+
+		// Verify ConfigMap includes api_key reference
+		configMap := &corev1.ConfigMap{}
+		Eventually(func() error {
+			return k8sClient.Get(ctx, types.NamespacedName{
+				Name:      fmt.Sprintf("litellm-config-%s", name),
+				Namespace: namespace,
+			}, configMap)
+		}, timeout, interval).Should(Succeed())
+		Expect(configMap.Data["config.yaml"]).To(ContainSubstring("api_key: \"os.environ/PROXY_API_KEY\""))
 	})
 
 	It("should apply podSpec overrides in Proxy mode", func() {
@@ -96,7 +203,7 @@ var _ = Describe("ModelAPI Controller", func() {
 			Spec: kaosv1alpha1.ModelAPISpec{
 				Mode: kaosv1alpha1.ModelAPIModeProxy,
 				ProxyConfig: &kaosv1alpha1.ProxyConfig{
-					Model: "mock-model",
+					Models: []string{"mock-model"},
 				},
 				PodSpec: &corev1.PodSpec{
 					Containers: []corev1.Container{
@@ -180,6 +287,13 @@ var _ = Describe("ModelAPI Controller", func() {
 			}, service)
 		}, timeout, interval).Should(Succeed())
 		Expect(service.Spec.Ports[0].Port).To(Equal(int32(11434)))
+
+		// Verify supportedModels in status for Hosted mode
+		Eventually(func() []string {
+			updated := &kaosv1alpha1.ModelAPI{}
+			k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, updated)
+			return updated.Status.SupportedModels
+		}, timeout, interval).Should(Equal([]string{"smollm2:135m"}))
 	})
 
 	It("should trigger rolling update when model is changed in Hosted mode", func() {
@@ -243,7 +357,7 @@ var _ = Describe("ModelAPI Controller", func() {
 		}, timeout, interval).Should(BeTrue(), "Deployment should be updated with new model")
 	})
 
-	It("should trigger rolling update when apiBase is changed in Proxy mode", func() {
+	It("should trigger rolling update when models list is changed in Proxy mode", func() {
 		name := uniqueModelAPIName("proxy-update")
 		modelAPI := &kaosv1alpha1.ModelAPI{
 			ObjectMeta: metav1.ObjectMeta{
@@ -253,6 +367,7 @@ var _ = Describe("ModelAPI Controller", func() {
 			Spec: kaosv1alpha1.ModelAPISpec{
 				Mode: kaosv1alpha1.ModelAPIModeProxy,
 				ProxyConfig: &kaosv1alpha1.ProxyConfig{
+					Models:  []string{"*"},
 					APIBase: "http://localhost:11434",
 				},
 			},
@@ -278,19 +393,19 @@ var _ = Describe("ModelAPI Controller", func() {
 				Namespace: namespace,
 			}, configMap)
 		}, timeout, interval).Should(Succeed())
-		Expect(configMap.Data["config.yaml"]).To(ContainSubstring("http://localhost:11434"))
+		Expect(configMap.Data["config.yaml"]).To(ContainSubstring("model_name: \"*\""))
 
-		// Update the apiBase
+		// Update the models list
 		Eventually(func() error {
 			current := &kaosv1alpha1.ModelAPI{}
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, current); err != nil {
 				return err
 			}
-			current.Spec.ProxyConfig.APIBase = "http://newhost:11434"
+			current.Spec.ProxyConfig.Models = []string{"openai/*", "anthropic/*"}
 			return k8sClient.Update(ctx, current)
 		}, timeout, interval).Should(Succeed())
 
-		// Verify configmap is updated with new apiBase
+		// Verify configmap is updated with new models
 		Eventually(func() bool {
 			if err := k8sClient.Get(ctx, types.NamespacedName{
 				Name:      fmt.Sprintf("litellm-config-%s", name),
@@ -298,8 +413,9 @@ var _ = Describe("ModelAPI Controller", func() {
 			}, configMap); err != nil {
 				return false
 			}
-			return containsSubstring(configMap.Data["config.yaml"], "http://newhost:11434")
-		}, timeout, interval).Should(BeTrue(), "ConfigMap should be updated with new apiBase")
+			return containsSubstring(configMap.Data["config.yaml"], "model_name: \"openai/*\"") &&
+				containsSubstring(configMap.Data["config.yaml"], "model_name: \"anthropic/*\"")
+		}, timeout, interval).Should(BeTrue(), "ConfigMap should be updated with new models")
 	})
 
 	It("should delete ModelAPI without errors", func() {
@@ -312,7 +428,7 @@ var _ = Describe("ModelAPI Controller", func() {
 			Spec: kaosv1alpha1.ModelAPISpec{
 				Mode: kaosv1alpha1.ModelAPIModeProxy,
 				ProxyConfig: &kaosv1alpha1.ProxyConfig{
-					Model: "mock-model",
+					Models: []string{"mock-model"},
 				},
 			},
 		}

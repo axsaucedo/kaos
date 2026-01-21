@@ -43,7 +43,7 @@ var _ = Describe("Agent Controller", func() {
 			Spec: kaosv1alpha1.ModelAPISpec{
 				Mode: kaosv1alpha1.ModelAPIModeProxy,
 				ProxyConfig: &kaosv1alpha1.ProxyConfig{
-					Model: "mock-model",
+					Models: []string{"mock-model"},
 				},
 			},
 		}
@@ -116,7 +116,7 @@ var _ = Describe("Agent Controller", func() {
 			Spec: kaosv1alpha1.ModelAPISpec{
 				Mode: kaosv1alpha1.ModelAPIModeProxy,
 				ProxyConfig: &kaosv1alpha1.ProxyConfig{
-					Model: "mock-model",
+					Models: []string{"mock-model"},
 				},
 			},
 		}
@@ -182,7 +182,7 @@ var _ = Describe("Agent Controller", func() {
 			Spec: kaosv1alpha1.ModelAPISpec{
 				Mode: kaosv1alpha1.ModelAPIModeProxy,
 				ProxyConfig: &kaosv1alpha1.ProxyConfig{
-					Model: "mock-model",
+					Models: []string{"mock-model"},
 				},
 			},
 		}
@@ -271,7 +271,7 @@ var _ = Describe("Agent Controller", func() {
 			Spec: kaosv1alpha1.ModelAPISpec{
 				Mode: kaosv1alpha1.ModelAPIModeProxy,
 				ProxyConfig: &kaosv1alpha1.ProxyConfig{
-					Model: "mock-model",
+					Models: []string{"mock-model"},
 				},
 			},
 		}
@@ -357,7 +357,7 @@ var _ = Describe("Agent Controller", func() {
 			Spec: kaosv1alpha1.ModelAPISpec{
 				Mode: kaosv1alpha1.ModelAPIModeProxy,
 				ProxyConfig: &kaosv1alpha1.ProxyConfig{
-					Model: "mock-model",
+					Models: []string{"mock-model"},
 				},
 			},
 		}

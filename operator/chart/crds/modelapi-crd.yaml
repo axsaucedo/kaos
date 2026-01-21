@@ -8616,13 +8616,76 @@ spec:
                 description: ProxyConfig contains configuration for Proxy mode
                 properties:
                   apiBase:
-                    description: APIBase is the base URL of the backend LLM API to proxy
-                      to (e.g., http://host.docker.internal:11434)
+                    description: |-
+                      APIBase is the base URL of the backend LLM API to proxy to (e.g., http://host.docker.internal:11434)
+                      Set as PROXY_API_BASE environment variable
                     type: string
+                  apiKey:
+                    description: |-
+                      APIKey for authentication with the backend LLM API
+                      Set as PROXY_API_KEY environment variable
+                    properties:
+                      value:
+                        description: Value is a direct string value (not recommended
+                          for production)
+                        type: string
+                      valueFrom:
+                        description: ValueFrom is a reference to a secret or configmap
+                        properties:
+                          configMapKeyRef:
+                            description: ConfigMapKeyRef is a reference to a configmap
+                              key
+                            properties:
+                              key:
+                                description: The key to select.
+                                type: string
+                              name:
+                                default: ""
+                                description: |-
+                                  Name of the referent.
+                                  This field is effectively required, but due to backwards compatibility is
+                                  allowed to be empty. Instances of this type with an empty value here are
+                                  almost certainly wrong.
+                                  More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                type: string
+                              optional:
+                                description: Specify whether the ConfigMap or its key
+                                  must be defined
+                                type: boolean
+                            required:
+                            - key
+                            type: object
+                            x-kubernetes-map-type: atomic
+                          secretKeyRef:
+                            description: SecretKeyRef is a reference to a secret key
+                            properties:
+                              key:
+                                description: The key of the secret to select from.  Must
+                                  be a valid secret key.
+                                type: string
+                              name:
+                                default: ""
+                                description: |-
+                                  Name of the referent.
+                                  This field is effectively required, but due to backwards compatibility is
+                                  allowed to be empty. Instances of this type with an empty value here are
+                                  almost certainly wrong.
+                                  More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                                type: string
+                              optional:
+                                description: Specify whether the Secret or its key must
+                                  be defined
+                                type: boolean
+                            required:
+                            - key
+                            type: object
+                            x-kubernetes-map-type: atomic
+                        type: object
+                    type: object
                   configYaml:
                     description: |-
                       ConfigYaml allows providing a custom LiteLLM config (for advanced multi-model routing)
-                      If provided, APIBase and Model are ignored and this config is used instead
+                      When provided, used directly for LiteLLM config; models list is still used for Agent validation
                     properties:
                       fromSecretKeyRef:
                         description: FromSecretKeyRef is a reference to a Secret key
@@ -8810,9 +8873,16 @@ spec:
                       - name
                       type: object
                     type: array
-                  model:
-                    description: Model is the model identifier to proxy (e.g., ollama/smollm2:135m)
-                    type: string
+                  models:
+                    description: |-
+                      Models is the list of model identifiers supported by this proxy
+                      Examples: ["openai/gpt-5-mini", "gemini/*", "*"]
+                    items:
+                      type: string
+                    minItems: 1
+                    type: array
+                required:
+                - models
                 type: object
             required:
             - mode
@@ -8820,6 +8890,91 @@ spec:
           status:
             description: ModelAPIStatus defines the observed state of ModelAPI
             properties:
+              deployment:
+                description: Deployment contains status information from the underlying
+                  Deployment
+                properties:
+                  availableReplicas:
+                    description: AvailableReplicas is the number of pods that are available
+                      (ready for minReadySeconds).
+                    format: int32
+                    type: integer
+                  conditions:
+                    description: |-
+                      Conditions represent the latest available observations of the deployment's state.
+                      Typical conditions include Available, Progressing, and ReplicaFailure.
+                    items:
+                      description: Condition contains details for one aspect of the
+                        current state of this API Resource.
+                      properties:
+                        lastTransitionTime:
+                          description: |-
+                            lastTransitionTime is the last time the condition transitioned from one status to another.
+                            This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                          format: date-time
+                          type: string
+                        message:
+                          description: |-
+                            message is a human readable message indicating details about the transition.
+                            This may be an empty string.
+                          maxLength: 32768
+                          type: string
+                        observedGeneration:
+                          description: |-
+                            observedGeneration represents the .metadata.generation that the condition was set based upon.
+                            For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                            with respect to the current state of the instance.
+                          format: int64
+                          minimum: 0
+                          type: integer
+                        reason:
+                          description: |-
+                            reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                            Producers of specific condition types may define expected values and meanings for this field,
+                            and whether the values are considered a guaranteed API.
+                            The value should be a CamelCase string.
+                            This field may not be empty.
+                          maxLength: 1024
+                          minLength: 1
+                          pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                          type: string
+                        status:
+                          description: status of the condition, one of True, False,
+                            Unknown.
+                          enum:
+                          - "True"
+                          - "False"
+                          - Unknown
+                          type: string
+                        type:
+                          description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                          maxLength: 316
+                          pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                          type: string
+                      required:
+                      - lastTransitionTime
+                      - message
+                      - reason
+                      - status
+                      - type
+                      type: object
+                    type: array
+                  readyReplicas:
+                    description: ReadyReplicas is the number of pods with a Ready condition.
+                    format: int32
+                    type: integer
+                  replicas:
+                    description: Replicas is the total number of non-terminated pods
+                      targeted by this deployment.
+                    format: int32
+                    type: integer
+                  updatedReplicas:
+                    description: |-
+                      UpdatedReplicas is the number of pods with the desired pod template spec.
+                      During a rolling update, this shows progress toward the new version.
+                    format: int32
+                    type: integer
+                type: object
               endpoint:
                 description: Endpoint is the service endpoint for the model API
                 type: string
@@ -8836,6 +8991,14 @@ spec:
               ready:
                 description: Ready indicates if the model API is ready
                 type: boolean
+              supportedModels:
+                description: |-
+                  SupportedModels is the list of model patterns supported by this ModelAPI
+                  For Proxy mode: copied from spec.proxyConfig.models
+                  For Hosted mode: contains the single model from hostedConfig.model
+                items:
+                  type: string
+                type: array
             type: object
         type: object
     served: true

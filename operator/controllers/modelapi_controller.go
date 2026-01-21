@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
@@ -225,6 +226,15 @@ func (r *ModelAPIReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 	modelapi.Status.Endpoint = fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", serviceName, modelapi.Namespace, port)
 
+	// Populate SupportedModels in status
+	// For Proxy mode: copy from spec.proxyConfig.models
+	// For Hosted mode: use hostedConfig.model
+	if modelapi.Spec.Mode == kaosv1alpha1.ModelAPIModeProxy && modelapi.Spec.ProxyConfig != nil {
+		modelapi.Status.SupportedModels = modelapi.Spec.ProxyConfig.Models
+	} else if modelapi.Spec.Mode == kaosv1alpha1.ModelAPIModeHosted && modelapi.Spec.HostedConfig != nil {
+		modelapi.Status.SupportedModels = []string{modelapi.Spec.HostedConfig.Model}
+	}
+
 	// Create HTTPRoute if Gateway API is enabled
 	timeout := ""
 	if modelapi.Spec.GatewayRoute != nil && modelapi.Spec.GatewayRoute.Timeout != "" {
@@ -387,6 +397,41 @@ func (r *ModelAPIReconciler) constructContainer(modelapi *kaosv1alpha1.ModelAPI)
 		// - User provides apiBase → generate wildcard config to forward all requests
 		args = []string{"--config", "/etc/litellm/config.yaml", "--port", "8000"}
 
+		// Add PROXY_API_BASE env var if apiBase is configured
+		if modelapi.Spec.ProxyConfig != nil && modelapi.Spec.ProxyConfig.APIBase != "" {
+			env = append(env, corev1.EnvVar{
+				Name:  "PROXY_API_BASE",
+				Value: modelapi.Spec.ProxyConfig.APIBase,
+			})
+		}
+
+		// Add PROXY_API_KEY env var if apiKey is configured
+		if modelapi.Spec.ProxyConfig != nil && modelapi.Spec.ProxyConfig.APIKey != nil {
+			apiKey := modelapi.Spec.ProxyConfig.APIKey
+			if apiKey.Value != "" {
+				env = append(env, corev1.EnvVar{
+					Name:  "PROXY_API_KEY",
+					Value: apiKey.Value,
+				})
+			} else if apiKey.ValueFrom != nil {
+				if apiKey.ValueFrom.SecretKeyRef != nil {
+					env = append(env, corev1.EnvVar{
+						Name: "PROXY_API_KEY",
+						ValueFrom: &corev1.EnvVarSource{
+							SecretKeyRef: apiKey.ValueFrom.SecretKeyRef,
+						},
+					})
+				} else if apiKey.ValueFrom.ConfigMapKeyRef != nil {
+					env = append(env, corev1.EnvVar{
+						Name: "PROXY_API_KEY",
+						ValueFrom: &corev1.EnvVarSource{
+							ConfigMapKeyRef: apiKey.ValueFrom.ConfigMapKeyRef,
+						},
+					})
+				}
+			}
+		}
+
 		// Add user-provided env vars for proxy
 		if modelapi.Spec.ProxyConfig != nil {
 			env = append(env, modelapi.Spec.ProxyConfig.Env...)
@@ -524,7 +569,7 @@ func (r *ModelAPIReconciler) constructService(modelapi *kaosv1alpha1.ModelAPI) *
 
 // constructConfigMap creates a ConfigMap with LiteLLM configuration
 // If user provides configYaml, use it directly
-// Otherwise, generate a wildcard config to forward all requests to apiBase
+// Otherwise, generate config from the models list with optional apiKey and apiBase
 func (r *ModelAPIReconciler) constructConfigMap(modelapi *kaosv1alpha1.ModelAPI) *corev1.ConfigMap {
 	configYaml := ""
 
@@ -532,31 +577,9 @@ func (r *ModelAPIReconciler) constructConfigMap(modelapi *kaosv1alpha1.ModelAPI)
 		if modelapi.Spec.ProxyConfig.ConfigYaml != nil && modelapi.Spec.ProxyConfig.ConfigYaml.FromString != "" {
 			// Use user-provided configYaml directly
 			configYaml = modelapi.Spec.ProxyConfig.ConfigYaml.FromString
-		} else if modelapi.Spec.ProxyConfig.APIBase != "" {
-			// Generate wildcard config for proxying any model to the apiBase
-			// This allows requests like "ollama/smollm2:135m" to be forwarded to the backend
-			configYaml = fmt.Sprintf(`# Auto-generated wildcard config - forwards any model to backend
-model_list:
-  - model_name: "*"
-    litellm_params:
-      model: "*"
-      api_base: "%s"
-
-litellm_settings:
-  drop_params: true
-`, modelapi.Spec.ProxyConfig.APIBase)
-		} else if modelapi.Spec.ProxyConfig.Model != "" {
-			// Model specified without apiBase - generate minimal config for mock testing
-			// This allows mock_response to work without a real backend
-			configYaml = fmt.Sprintf(`# Auto-generated config for mock/test mode
-model_list:
-  - model_name: "%s"
-    litellm_params:
-      model: "%s"
-
-litellm_settings:
-  drop_params: true
-`, modelapi.Spec.ProxyConfig.Model, modelapi.Spec.ProxyConfig.Model)
+		} else if len(modelapi.Spec.ProxyConfig.Models) > 0 {
+			// Generate config from models list
+			configYaml = r.generateLiteLLMConfig(modelapi.Spec.ProxyConfig)
 		}
 	}
 
@@ -575,6 +598,36 @@ litellm_settings:
 	}
 
 	return configmap
+}
+
+// generateLiteLLMConfig creates LiteLLM config YAML from ProxyConfig
+func (r *ModelAPIReconciler) generateLiteLLMConfig(proxyConfig *kaosv1alpha1.ProxyConfig) string {
+	var sb strings.Builder
+
+	sb.WriteString("# Auto-generated LiteLLM config\n")
+	sb.WriteString("model_list:\n")
+
+	// Generate model_list entries for each model
+	for _, model := range proxyConfig.Models {
+		sb.WriteString(fmt.Sprintf("  - model_name: \"%s\"\n", model))
+		sb.WriteString("    litellm_params:\n")
+		sb.WriteString(fmt.Sprintf("      model: \"%s\"\n", model))
+
+		// Add api_base if configured
+		if proxyConfig.APIBase != "" {
+			sb.WriteString("      api_base: \"os.environ/PROXY_API_BASE\"\n")
+		}
+
+		// Add api_key if configured
+		if proxyConfig.APIKey != nil {
+			sb.WriteString("      api_key: \"os.environ/PROXY_API_KEY\"\n")
+		}
+	}
+
+	sb.WriteString("\nlitellm_settings:\n")
+	sb.WriteString("  drop_params: true\n")
+
+	return sb.String()
 }
 
 // SetupWithManager sets up the controller with the Manager.
