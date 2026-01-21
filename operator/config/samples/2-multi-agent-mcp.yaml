@@ -50,6 +50,7 @@ metadata:
   namespace: kaos-multi
 spec:
   modelAPI: multi-modelapi
+  model: "smollm2:135m"  # Required: must match hosted model
   mcpServers:
   - multi-echo-mcp
   config:
@@ -60,9 +61,6 @@ spec:
       Use worker-1 for general tasks and worker-2 for specialized tasks.
       You also have access to an echo tool for testing.
     reasoningLoopMaxSteps: 10
-    env:
-    - name: MODEL_NAME
-      value: "smollm2:135m"
   agentNetwork:
     access:
     - worker-1
@@ -77,6 +75,7 @@ metadata:
   namespace: kaos-multi
 spec:
   modelAPI: multi-modelapi
+  model: "smollm2:135m"  # Required: must match hosted model
   mcpServers:
   - multi-echo-mcp
   config:
@@ -87,9 +86,6 @@ spec:
       You have access to an echo tool for testing.
       Process tasks and return results clearly.
     reasoningLoopMaxSteps: 5
-    env:
-    - name: MODEL_NAME
-      value: "smollm2:135m"
   agentNetwork:
     access: []
 
@@ -102,6 +98,7 @@ metadata:
   namespace: kaos-multi
 spec:
   modelAPI: multi-modelapi
+  model: "smollm2:135m"  # Required: must match hosted model
   mcpServers:
   - multi-echo-mcp
   config:
@@ -112,8 +109,5 @@ spec:
       You have access to an echo tool for testing.
       Focus on detailed analysis and specialized processing.
     reasoningLoopMaxSteps: 5
-    env:
-    - name: MODEL_NAME
-      value: "smollm2:135m"
   agentNetwork:
     access: []
