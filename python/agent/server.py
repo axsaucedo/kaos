@@ -69,7 +69,7 @@ class AgentServerSettings(BaseSettings):
     # Required settings
     agent_name: str
     model_api_url: str
-    model_name: str = "smollm2:135m"  # Default model
+    model_name: str  # Required - no default, must be provided
 
     # Optional settings with defaults
     agent_description: str = "AI Agent"
