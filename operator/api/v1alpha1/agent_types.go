@@ -88,6 +88,10 @@ type AgentSpec struct {
 	// ModelAPI is the name of the ModelAPI resource this agent uses
 	ModelAPI string `json:"modelAPI"`
 
+	// Model is the model identifier this agent uses (e.g., "openai/gpt-4", "ollama/smollm2:135m")
+	// Must be supported by the referenced ModelAPI
+	Model string `json:"model"`
+
 	// MCPServers is a list of MCPServer names this agent can use
 	// +kubebuilder:validation:Optional
 	MCPServers []string `json:"mcpServers,omitempty"`
@@ -145,6 +149,7 @@ type AgentStatus struct {
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=agent;agents
 // +kubebuilder:printcolumn:name="ModelAPI",type=string,JSONPath=`.spec.modelAPI`
+// +kubebuilder:printcolumn:name="Model",type=string,JSONPath=`.spec.model`
 // +kubebuilder:printcolumn:name="Ready",type=boolean,JSONPath=`.status.ready`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 
