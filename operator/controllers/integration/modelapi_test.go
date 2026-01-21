@@ -455,6 +455,103 @@ var _ = Describe("ModelAPI Controller", func() {
 		// Note: envtest doesn't run garbage collection, so we only verify the CRD deletion
 		// In a real cluster, the deployment would be garbage collected via OwnerReferences
 	})
+
+	It("should fail when configYaml has models not in models list", func() {
+		name := uniqueModelAPIName("configyaml-invalid")
+		modelAPI := &kaosv1alpha1.ModelAPI{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: namespace,
+			},
+			Spec: kaosv1alpha1.ModelAPISpec{
+				Mode: kaosv1alpha1.ModelAPIModeProxy,
+				ProxyConfig: &kaosv1alpha1.ProxyConfig{
+					Models: []string{"openai/gpt-4", "anthropic/claude-3"},
+					ConfigYaml: &kaosv1alpha1.ConfigYamlSource{
+						FromString: `
+model_list:
+  - model_name: "openai/gpt-4"
+    litellm_params:
+      model: "openai/gpt-4"
+  - model_name: "gemini/gemini-pro"
+    litellm_params:
+      model: "gemini/gemini-pro"
+`,
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, modelAPI)).To(Succeed())
+		defer func() {
+			k8sClient.Delete(ctx, modelAPI)
+		}()
+
+		// Verify ModelAPI status is Failed with validation error
+		Eventually(func() string {
+			updated := &kaosv1alpha1.ModelAPI{}
+			k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, updated)
+			return updated.Status.Phase
+		}, timeout, interval).Should(Equal("Failed"))
+
+		// Verify error message mentions the mismatched model
+		Eventually(func() bool {
+			updated := &kaosv1alpha1.ModelAPI{}
+			k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, updated)
+			return containsSubstring(updated.Status.Message, "gemini/gemini-pro") &&
+				containsSubstring(updated.Status.Message, "not found")
+		}, timeout, interval).Should(BeTrue())
+	})
+
+	It("should succeed when configYaml models match models list with wildcard", func() {
+		name := uniqueModelAPIName("configyaml-valid")
+		modelAPI := &kaosv1alpha1.ModelAPI{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: namespace,
+			},
+			Spec: kaosv1alpha1.ModelAPISpec{
+				Mode: kaosv1alpha1.ModelAPIModeProxy,
+				ProxyConfig: &kaosv1alpha1.ProxyConfig{
+					Models: []string{"openai/*"},
+					ConfigYaml: &kaosv1alpha1.ConfigYamlSource{
+						FromString: `
+model_list:
+  - model_name: "openai/gpt-4"
+    litellm_params:
+      model: "openai/gpt-4"
+  - model_name: "openai/gpt-3.5-turbo"
+    litellm_params:
+      model: "openai/gpt-3.5-turbo"
+`,
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, modelAPI)).To(Succeed())
+		defer func() {
+			k8sClient.Delete(ctx, modelAPI)
+		}()
+
+		// Verify Deployment is created (validation passed)
+		deployment := &appsv1.Deployment{}
+		Eventually(func() error {
+			return k8sClient.Get(ctx, types.NamespacedName{
+				Name:      fmt.Sprintf("modelapi-%s", name),
+				Namespace: namespace,
+			}, deployment)
+		}, timeout, interval).Should(Succeed())
+
+		// Verify ConfigMap uses user-provided configYaml
+		configMap := &corev1.ConfigMap{}
+		Eventually(func() error {
+			return k8sClient.Get(ctx, types.NamespacedName{
+				Name:      fmt.Sprintf("litellm-config-%s", name),
+				Namespace: namespace,
+			}, configMap)
+		}, timeout, interval).Should(Succeed())
+		Expect(configMap.Data["config.yaml"]).To(ContainSubstring("openai/gpt-4"))
+		Expect(configMap.Data["config.yaml"]).To(ContainSubstring("openai/gpt-3.5-turbo"))
+	})
 })
 
 // containsSubstring checks if s contains substr (helper for test assertions)

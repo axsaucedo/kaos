@@ -19,6 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
+	"gopkg.in/yaml.v3"
 
 	kaosv1alpha1 "github.com/axsaucedo/kaos/operator/api/v1alpha1"
 	"github.com/axsaucedo/kaos/operator/pkg/gateway"
@@ -88,6 +89,18 @@ func (r *ModelAPIReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	// Create ConfigMap for Proxy mode - always needed since we use config file mode
 	needsConfigMap := modelapi.Spec.Mode == kaosv1alpha1.ModelAPIModeProxy &&
 		modelapi.Spec.ProxyConfig != nil
+
+	// Validate configYaml against models list if both are provided
+	if needsConfigMap && modelapi.Spec.ProxyConfig.ConfigYaml != nil &&
+		modelapi.Spec.ProxyConfig.ConfigYaml.FromString != "" {
+		if err := r.validateConfigYamlModels(modelapi.Spec.ProxyConfig); err != nil {
+			log.Error(err, "configYaml validation failed")
+			modelapi.Status.Phase = "Failed"
+			modelapi.Status.Message = err.Error()
+			r.Status().Update(ctx, modelapi)
+			return ctrl.Result{}, nil
+		}
+	}
 
 	if needsConfigMap {
 		configmap := &corev1.ConfigMap{}
@@ -643,4 +656,61 @@ func (r *ModelAPIReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 
 	return builder.Complete(r)
+}
+
+// liteLLMConfig represents the structure of LiteLLM config for validation
+type liteLLMConfig struct {
+	ModelList []struct {
+		ModelName string `yaml:"model_name"`
+	} `yaml:"model_list"`
+}
+
+// validateConfigYamlModels validates that model_names in configYaml match the models list
+func (r *ModelAPIReconciler) validateConfigYamlModels(proxyConfig *kaosv1alpha1.ProxyConfig) error {
+	if proxyConfig.ConfigYaml == nil || proxyConfig.ConfigYaml.FromString == "" {
+		return nil
+	}
+
+	// Parse the configYaml
+	var config liteLLMConfig
+	if err := yaml.Unmarshal([]byte(proxyConfig.ConfigYaml.FromString), &config); err != nil {
+		return fmt.Errorf("failed to parse configYaml: %w", err)
+	}
+
+	// Build a set of allowed models from the models list
+	allowedModels := make(map[string]bool)
+	for _, model := range proxyConfig.Models {
+		allowedModels[model] = true
+	}
+
+	// Check each model_name in configYaml against the models list
+	for _, entry := range config.ModelList {
+		if !r.modelMatchesPatterns(entry.ModelName, proxyConfig.Models) {
+			return fmt.Errorf("model_name %q in configYaml not found in models list %v", entry.ModelName, proxyConfig.Models)
+		}
+	}
+
+	return nil
+}
+
+// modelMatchesPatterns checks if a model matches any pattern in the list
+func (r *ModelAPIReconciler) modelMatchesPatterns(model string, patterns []string) bool {
+	for _, pattern := range patterns {
+		// Full wildcard
+		if pattern == "*" {
+			return true
+		}
+		// Exact match
+		if pattern == model {
+			return true
+		}
+		// Provider wildcard: "openai/*" matches "openai/gpt-4"
+		if strings.HasSuffix(pattern, "/*") {
+			prefix := strings.TrimSuffix(pattern, "*")
+			if strings.HasPrefix(model, prefix) {
+				return true
+			}
+		}
+	}
+	return false
 }
