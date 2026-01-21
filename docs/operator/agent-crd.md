@@ -14,6 +14,9 @@ spec:
   # Required: Reference to ModelAPI for LLM access
   modelAPI: my-modelapi
   
+  # Required: Model to use (must be supported by the referenced ModelAPI)
+  model: "openai/gpt-4o"
+  
   # Optional: List of MCPServer references for tool access
   mcpServers:
   - echo-tools
@@ -45,8 +48,6 @@ spec:
     
     # Additional environment variables
     env:
-    - name: MODEL_NAME
-      value: "ollama/smollm2:135m"
     - name: CUSTOM_VAR
       value: "custom-value"
   
@@ -74,6 +75,7 @@ status:
   phase: Ready             # Pending, Ready, Failed, Waiting
   ready: true
   endpoint: "http://agent-my-agent.my-namespace.svc.cluster.local:8000"
+  model: "openai/gpt-4o"   # Model being used
   linkedResources:
     modelAPI: my-modelapi
   message: "Deployment ready replicas: 1/1"
@@ -100,7 +102,27 @@ spec:
   modelAPI: my-modelapi
 ```
 
-The agent waits for the ModelAPI to become Ready before starting (see `waitForDependencies`).
+The agent waits for the ModelAPI to become Ready before starting (see \`waitForDependencies\`).
+
+### model (required)
+
+The LLM model to use. Must be supported by the referenced ModelAPI.
+
+```yaml
+spec:
+  modelAPI: my-modelapi
+  model: "openai/gpt-4o"
+```
+
+**Validation:**
+- The agent controller validates that this model is supported by the ModelAPI
+- Supports exact matches: \`openai/gpt-4o\` matches \`openai/gpt-4o\`
+- Supports provider wildcards: \`openai/gpt-4o\` matches \`openai/*\`
+- Supports full wildcards: any model matches \`*\`
+
+If the model is not supported, the agent status will show \`Failed\` with an error message.
+
+**Note:** Model validation happens at agent creation/update time. If a ModelAPI's supported models change after an agent is created, the agent continues running but may fail at runtime if the model is no longer available.
 
 ### mcpServers (optional)
 
@@ -113,7 +135,7 @@ spec:
   - calculator-tools
 ```
 
-All referenced MCPServers must be Ready for the agent to start (see `waitForDependencies`).
+All referenced MCPServers must be Ready for the agent to start (see \`waitForDependencies\`).
 
 ### waitForDependencies (optional)
 
@@ -126,10 +148,10 @@ spec:
 
 | Value | Behavior |
 |-------|----------|
-| `true` (default) | Agent deployment is created only after ModelAPI and all MCPServers are Ready |
-| `false` | Agent deployment is created immediately; agent handles unavailable dependencies gracefully at runtime |
+| \`true\` (default) | Agent deployment is created only after ModelAPI and all MCPServers are Ready |
+| \`false\` | Agent deployment is created immediately; agent handles unavailable dependencies gracefully at runtime |
 
-Setting to `false` is useful when:
+Setting to \`false\` is useful when:
 - Deploying agents in any order without worrying about startup sequence
 - Using the Python agent's graceful degradation for unavailable sub-agents/tools
 
@@ -187,11 +209,11 @@ config:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `enabled` | bool | `true` | Enable memory; when `false`, uses NullMemory (no-op) |
-| `type` | string | `local` | Memory implementation type (only `local` supported) |
-| `contextLimit` | int | `6` | Messages to include when delegating to sub-agents |
-| `maxSessions` | int | `1000` | Maximum sessions before oldest are evicted |
-| `maxSessionEvents` | int | `500` | Maximum events per session before eviction |
+| \`enabled\` | bool | \`true\` | Enable memory; when \`false\`, uses NullMemory (no-op) |
+| \`type\` | string | \`local\` | Memory implementation type (only \`local\` supported) |
+| \`contextLimit\` | int | \`6\` | Messages to include when delegating to sub-agents |
+| \`maxSessions\` | int | \`1000\` | Maximum sessions before oldest are evicted |
+| \`maxSessionEvents\` | int | \`500\` | Maximum events per session before eviction |
 
 **When to disable memory:**
 - Stateless agents that don't need conversation history
@@ -205,14 +227,16 @@ Additional environment variables:
 ```yaml
 config:
   env:
-  - name: MODEL_NAME
-    value: "gpt-4"
+  - name: CUSTOM_VAR
+    value: "my-value"
   - name: API_KEY
     valueFrom:
       secretKeyRef:
         name: my-secrets
         key: api-key
 ```
+
+**Note:** The \`MODEL_NAME\` environment variable is automatically set from \`spec.model\`.
 
 ### agentNetwork (optional)
 
@@ -227,9 +251,9 @@ agentNetwork:
   expose: true
 ```
 
-When `true`, creates a Service that exposes:
+When \`true\`, creates a Service that exposes:
 - Port 8000
-- Endpoints: `/health`, `/ready`, `/.well-known/agent`, `/agent/invoke`, `/v1/chat/completions`
+- Endpoints: \`/health\`, \`/ready\`, \`/.well-known/agent\`, \`/agent/invoke\`, \`/v1/chat/completions\`
 
 #### agentNetwork.access
 
@@ -244,9 +268,9 @@ agentNetwork:
 
 The operator automatically:
 1. Finds the referenced Agent resources
-2. Sets `PEER_AGENTS=worker-1,worker-2`
-3. Sets `PEER_AGENT_WORKER_1_CARD_URL=http://agent-worker-1...`
-4. Sets `PEER_AGENT_WORKER_2_CARD_URL=http://agent-worker-2...`
+2. Sets \`PEER_AGENTS=worker-1,worker-2\`
+3. Sets \`PEER_AGENT_WORKER_1_CARD_URL=http://agent-worker-1...\`
+4. Sets \`PEER_AGENT_WORKER_2_CARD_URL=http://agent-worker-2...\`
 
 ### podSpec (optional)
 
@@ -271,7 +295,7 @@ spec:
 ```
 
 **Strategic Merge Behavior:**
-- Container fields are merged by name (container `name` must be `agent`)
+- Container fields are merged by name (container \`name\` must be \`agent\`)
 - New fields are added, existing fields are overwritten
 - Useful for: resources, tolerations, nodeSelector, volumes, securityContext
 
@@ -294,12 +318,13 @@ spec:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `phase` | string | Current phase: Pending, Ready, Failed, Waiting |
-| `ready` | bool | Whether agent is ready to serve |
-| `endpoint` | string | Service URL for A2A communication |
-| `linkedResources` | map | References to dependencies |
-| `message` | string | Additional status information |
-| `deployment` | object | Deployment status for rolling update visibility |
+| \`phase\` | string | Current phase: Pending, Ready, Failed, Waiting |
+| \`ready\` | bool | Whether agent is ready to serve |
+| \`endpoint\` | string | Service URL for A2A communication |
+| \`model\` | string | Model being used by this agent |
+| \`linkedResources\` | map | References to dependencies |
+| \`message\` | string | Additional status information |
+| \`deployment\` | object | Deployment status for rolling update visibility |
 
 ### deployment (status)
 
@@ -307,11 +332,11 @@ Mirrors key status fields from the underlying Kubernetes Deployment:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `replicas` | int32 | Total number of non-terminated pods |
-| `readyReplicas` | int32 | Number of pods with Ready condition |
-| `availableReplicas` | int32 | Number of available pods (ready for minReadySeconds) |
-| `updatedReplicas` | int32 | Number of pods with desired template (rolling update progress) |
-| `conditions` | array | Deployment conditions (Available, Progressing, ReplicaFailure) |
+| \`replicas\` | int32 | Total number of non-terminated pods |
+| \`readyReplicas\` | int32 | Number of pods with Ready condition |
+| \`availableReplicas\` | int32 | Number of available pods (ready for minReadySeconds) |
+| \`updatedReplicas\` | int32 | Number of pods with desired template (rolling update progress) |
+| \`conditions\` | array | Deployment conditions (Available, Progressing, ReplicaFailure) |
 
 Example status during a rolling update:
 
@@ -319,6 +344,7 @@ Example status during a rolling update:
 status:
   phase: Pending
   ready: false
+  model: "openai/gpt-4o"
   deployment:
     replicas: 2
     readyReplicas: 1
@@ -345,6 +371,7 @@ metadata:
   name: simple-agent
 spec:
   modelAPI: ollama
+  model: "ollama/smollm2:135m"
   config:
     description: "A simple chat agent"
     instructions: "You are a helpful assistant."
@@ -359,6 +386,7 @@ metadata:
   name: tool-agent
 spec:
   modelAPI: ollama
+  model: "ollama/llama3"
   mcpServers:
   - calculator
   - web-search
@@ -378,7 +406,8 @@ kind: Agent
 metadata:
   name: coordinator
 spec:
-  modelAPI: ollama
+  modelAPI: openai
+  model: "openai/gpt-4o"
   config:
     description: "Coordinator agent"
     instructions: |
@@ -401,6 +430,7 @@ metadata:
   name: resource-agent
 spec:
   modelAPI: ollama
+  model: "ollama/llama3"
   config:
     description: "Agent with custom resources"
   podSpec:
@@ -424,6 +454,7 @@ metadata:
   name: eager-agent
 spec:
   modelAPI: ollama
+  model: "ollama/smollm2:135m"
   waitForDependencies: false  # Start immediately
   config:
     description: "Agent that handles unavailable dependencies gracefully"
@@ -450,9 +481,21 @@ kubectl get modelapi -n my-namespace
 kubectl get mcpserver -n my-namespace
 ```
 
-Set `waitForDependencies: false` to allow the agent to start without waiting.
+Set \`waitForDependencies: false\` to allow the agent to start without waiting.
 
-### Agent Stuck in Failed
+### Agent in Failed State
+
+Check status message:
+
+```bash
+kubectl get agent my-agent -o jsonpath='{.status.message}'
+```
+
+Common causes:
+- Model not supported by ModelAPI (e.g., agent uses \`openai/gpt-4o\` but ModelAPI only supports \`anthropic/*\`)
+- Invalid configuration
+
+### Pod Errors
 
 Check pod logs:
 
@@ -462,7 +505,7 @@ kubectl logs -l agent=my-agent -n my-namespace
 
 Common causes:
 - Invalid MODEL_API_URL
-- Model not available
+- Model not available at backend
 - Image pull errors
 
 ### Sub-Agent Delegation Failing
@@ -474,6 +517,6 @@ Verify peer agent is accessible:
 kubectl get svc agent-worker-1 -n my-namespace
 
 # Check agent card endpoint
-kubectl exec -it deploy/agent-coordinator -n my-namespace -- \
+kubectl exec -it deploy/agent-coordinator -n my-namespace -- \\
   curl http://agent-worker-1:8000/.well-known/agent
 ```

@@ -10,6 +10,7 @@ Complete reference for all environment variables used by the KAOS.
 |----------|-------------|---------|
 | `AGENT_NAME` | Unique agent identifier | `my-agent` |
 | `MODEL_API_URL` | Base URL for LLM API | `http://modelapi:8000` |
+| `MODEL_NAME` | Model identifier for LLM calls | `openai/gpt-4o` |
 
 ### Agent Configuration
 
@@ -19,12 +20,6 @@ Complete reference for all environment variables used by the KAOS.
 | `AGENT_INSTRUCTIONS` | System prompt for the agent | `You are a helpful assistant.` |
 | `AGENT_PORT` | Server port | `8000` |
 | `AGENT_LOG_LEVEL` | Logging level | `INFO` |
-
-### Model Configuration
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `MODEL_NAME` | Model identifier for LLM calls | `smollm2:135m` |
 
 ### Agentic Loop Configuration
 
@@ -75,6 +70,48 @@ Note: Replace `-` with `_` and use uppercase for variable name (e.g., `worker-1`
 | `MCP_LOG_LEVEL` | Logging level | `INFO` |
 | `MCP_ACCESS_LOG` | Enable uvicorn access logs | `false` |
 
+## ModelAPI Environment Variables
+
+### Proxy Mode (LiteLLM)
+
+The operator automatically sets these environment variables based on ModelAPI spec:
+
+| Variable | Source | Description |
+|----------|--------|-------------|
+| `PROXY_API_KEY` | `proxyConfig.apiKey` | API key for LLM backend |
+| `PROXY_API_BASE` | `proxyConfig.apiBase` | Base URL for LLM backend |
+
+These are used in the generated LiteLLM config:
+
+```yaml
+model_list:
+  - model_name: "openai/gpt-4o"
+    litellm_params:
+      model: "openai/gpt-4o"
+      api_key: "os.environ/PROXY_API_KEY"
+      api_base: "os.environ/PROXY_API_BASE"
+```
+
+#### Custom Environment Variables
+
+Add custom variables via `proxyConfig.env`:
+
+| Variable | Description |
+|----------|-------------|
+| `OPENAI_API_KEY` | OpenAI API key |
+| `ANTHROPIC_API_KEY` | Anthropic API key |
+| `AZURE_API_KEY` | Azure OpenAI API key |
+| Any LiteLLM-supported var | See LiteLLM documentation |
+
+### Hosted Mode (Ollama)
+
+| Variable | Description |
+|----------|-------------|
+| `OLLAMA_DEBUG` | Enable debug logging |
+| `OLLAMA_HOST` | Host to bind to |
+| `OLLAMA_MODELS` | Model directory path |
+| Any Ollama-supported var | See Ollama documentation |
+
 ## Operator-Set Variables
 
 The operator automatically sets these variables on agent pods:
@@ -84,6 +121,7 @@ The operator automatically sets these variables on agent pods:
 | CRD Field | Environment Variable |
 |-----------|---------------------|
 | `metadata.name` | `AGENT_NAME` |
+| `spec.model` | `MODEL_NAME` |
 | `config.description` | `AGENT_DESCRIPTION` |
 | `config.instructions` | `AGENT_INSTRUCTIONS` |
 | `config.reasoningLoopMaxSteps` | `AGENTIC_LOOP_MAX_STEPS` |
@@ -123,25 +161,7 @@ spec:
           key: config-key
 ```
 
-## ModelAPI Environment Variables
-
-### Proxy Mode (LiteLLM)
-
-| Variable | Description |
-|----------|-------------|
-| `OPENAI_API_KEY` | OpenAI API key |
-| `ANTHROPIC_API_KEY` | Anthropic API key |
-| `AZURE_API_KEY` | Azure OpenAI API key |
-| Any LiteLLM-supported var | See LiteLLM documentation |
-
-### Hosted Mode (Ollama)
-
-| Variable | Description |
-|----------|-------------|
-| `OLLAMA_DEBUG` | Enable debug logging |
-| `OLLAMA_HOST` | Host to bind to |
-| `OLLAMA_MODELS` | Model directory path |
-| Any Ollama-supported var | See Ollama documentation |
+**Note:** `MODEL_NAME` is automatically set from `spec.model` and should not be overridden via `config.env`.
 
 ## Environment Variable Precedence
 
@@ -149,16 +169,6 @@ For agent pods, environment variables are applied in this order:
 
 1. Operator-generated variables (from CRD fields)
 2. `config.env` variables (can override operator-generated)
-
-Example:
-
-```yaml
-spec:
-  config:
-    env:
-    - name: MODEL_NAME
-      value: "gpt-4"  # Overrides default smollm2:135m
-```
 
 ## Debugging Environment Variables
 
@@ -180,7 +190,7 @@ MEMORY_CONTEXT_LIMIT=6
 MEMORY_MAX_SESSIONS=1000
 MEMORY_MAX_SESSION_EVENTS=500
 MODEL_API_URL=http://modelapi.my-namespace.svc.cluster.local:8000
-MODEL_NAME=smollm2:135m
+MODEL_NAME=openai/gpt-4o
 PEER_AGENTS=worker-1,worker-2
 PEER_AGENT_WORKER_1_CARD_URL=http://worker-1.my-namespace.svc.cluster.local
 PEER_AGENT_WORKER_2_CARD_URL=http://worker-2.my-namespace.svc.cluster.local
