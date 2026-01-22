@@ -135,7 +135,8 @@ export default defineConfig({
       {
         text: 'Development',
         items: [
-          { text: 'Testing', link: '/development/testing' }
+          { text: 'Testing', link: '/development/testing' },
+          { text: 'Releasing', link: '/development/releasing' }
         ]
       }
     ],

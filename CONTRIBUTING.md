@@ -215,3 +215,21 @@ When making changes:
 - Open an issue for bugs or feature requests
 - Check existing issues before creating new ones
 - Use discussions for questions and ideas
+
+## Release Process
+
+See [docs/development/releasing.md](docs/development/releasing.md) for details on:
+
+- Version management and the `VERSION` file
+- Creating releases via git tags
+- Documentation versioning
+- Helm chart and PyPI publishing
+
+In brief, releases are created by tagging `main`:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The release workflow then automatically builds, tests, publishes, and creates a GitHub Release.
