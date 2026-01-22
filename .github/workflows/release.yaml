@@ -308,9 +308,46 @@ jobs:
           path: ./charts/*.tgz
           if-no-files-found: error
 
+  # Publish kaos-cli to PyPI
+  publish-python:
+    needs: validate
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/kaos-cli/
+    permissions:
+      id-token: write  # Required for trusted publishing
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build tools
+        run: |
+          python -m pip install --upgrade pip build
+
+      - name: Update version and build kaos-cli
+        working-directory: kaos-cli
+        run: |
+          VERSION=${{ needs.validate.outputs.version }}
+          # Update version in pyproject.toml for release
+          sed -i "s/^version = .*/version = \"$VERSION\"/" pyproject.toml
+          echo "Building kaos-cli version $VERSION"
+          python -m build
+          ls -la dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: kaos-cli/dist/
+
   # Create GitHub Release
   create-release:
-    needs: [validate, merge-operator, merge-agent, build-helm]
+    needs: [validate, merge-operator, merge-agent, build-helm, publish-python]
     runs-on: ubuntu-latest
     permissions:
       contents: write
