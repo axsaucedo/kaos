@@ -40,7 +40,6 @@ def create_agentic_loop_worker(
     name = f"loop-worker{suffix}"
     env = [
         {"name": "AGENT_LOG_LEVEL", "value": "DEBUG"},
-        {"name": "MODEL_NAME", "value": model_name},
     ]
     if mock_responses:
         env.append(
@@ -53,6 +52,7 @@ def create_agentic_loop_worker(
         "metadata": {"name": name, "namespace": namespace},
         "spec": {
             "modelAPI": modelapi_name,
+            "model": model_name,  # Required: model to use
             "config": {
                 "description": "Worker for agentic loop tests",
                 "instructions": "You are a worker. Process tasks and respond briefly.",
@@ -82,7 +82,6 @@ def create_agentic_loop_coordinator(
     name = f"loop-coord{suffix}"
     env = [
         {"name": "AGENT_LOG_LEVEL", "value": "DEBUG"},
-        {"name": "MODEL_NAME", "value": model_name},
     ]
     if mock_responses:
         env.append(
@@ -95,6 +94,7 @@ def create_agentic_loop_coordinator(
         "metadata": {"name": name, "namespace": namespace},
         "spec": {
             "modelAPI": modelapi_name,
+            "model": model_name,  # Required: model to use
             "config": {
                 "description": "Coordinator for agentic loop tests",
                 "instructions": f"You are a coordinator. You can delegate tasks to {worker_name}.",
@@ -378,6 +378,7 @@ async def test_wait_for_dependencies_false(test_namespace: str, shared_modelapi:
         "metadata": {"name": agent_name, "namespace": test_namespace},
         "spec": {
             "modelAPI": shared_modelapi,
+            "model": "ollama/smollm2:135m",  # Required field
             "mcpServers": [],
             "waitForDependencies": False,
             "config": {

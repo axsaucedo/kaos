@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -43,7 +44,7 @@ var _ = Describe("Agent Controller", func() {
 			Spec: kaosv1alpha1.ModelAPISpec{
 				Mode: kaosv1alpha1.ModelAPIModeProxy,
 				ProxyConfig: &kaosv1alpha1.ProxyConfig{
-					Model: "mock-model",
+					Models: []string{"mock-model"},
 				},
 			},
 		}
@@ -60,6 +61,7 @@ var _ = Describe("Agent Controller", func() {
 			},
 			Spec: kaosv1alpha1.AgentSpec{
 				ModelAPI:            modelAPIName,
+				Model:               "mock-model",
 				WaitForDependencies: boolPtr(false),
 				Config: &kaosv1alpha1.AgentConfig{
 					Description:           "Test agent",
@@ -116,7 +118,7 @@ var _ = Describe("Agent Controller", func() {
 			Spec: kaosv1alpha1.ModelAPISpec{
 				Mode: kaosv1alpha1.ModelAPIModeProxy,
 				ProxyConfig: &kaosv1alpha1.ProxyConfig{
-					Model: "mock-model",
+					Models: []string{"mock-model"},
 				},
 			},
 		}
@@ -132,6 +134,7 @@ var _ = Describe("Agent Controller", func() {
 			},
 			Spec: kaosv1alpha1.AgentSpec{
 				ModelAPI:            modelAPIName,
+				Model:               "mock-model",
 				WaitForDependencies: boolPtr(false),
 				Config: &kaosv1alpha1.AgentConfig{
 					Description: "Test agent with podSpec",
@@ -182,7 +185,7 @@ var _ = Describe("Agent Controller", func() {
 			Spec: kaosv1alpha1.ModelAPISpec{
 				Mode: kaosv1alpha1.ModelAPIModeProxy,
 				ProxyConfig: &kaosv1alpha1.ProxyConfig{
-					Model: "mock-model",
+					Models: []string{"mock-model"},
 				},
 			},
 		}
@@ -199,6 +202,7 @@ var _ = Describe("Agent Controller", func() {
 			},
 			Spec: kaosv1alpha1.AgentSpec{
 				ModelAPI:            modelAPIName,
+				Model:               "mock-model",
 				WaitForDependencies: boolPtr(false),
 				Config: &kaosv1alpha1.AgentConfig{
 					Description: "Worker agent",
@@ -225,6 +229,7 @@ var _ = Describe("Agent Controller", func() {
 			},
 			Spec: kaosv1alpha1.AgentSpec{
 				ModelAPI:            modelAPIName,
+				Model:               "mock-model",
 				WaitForDependencies: boolPtr(false),
 				Config: &kaosv1alpha1.AgentConfig{
 					Description: "Coordinator agent",
@@ -271,7 +276,7 @@ var _ = Describe("Agent Controller", func() {
 			Spec: kaosv1alpha1.ModelAPISpec{
 				Mode: kaosv1alpha1.ModelAPIModeProxy,
 				ProxyConfig: &kaosv1alpha1.ProxyConfig{
-					Model: "mock-model",
+					Models: []string{"mock-model"},
 				},
 			},
 		}
@@ -295,6 +300,7 @@ var _ = Describe("Agent Controller", func() {
 			},
 			Spec: kaosv1alpha1.AgentSpec{
 				ModelAPI:            modelAPIName,
+				Model:               "mock-model",
 				WaitForDependencies: boolPtr(false),
 				Config: &kaosv1alpha1.AgentConfig{
 					Description:  "Initial description",
@@ -357,7 +363,7 @@ var _ = Describe("Agent Controller", func() {
 			Spec: kaosv1alpha1.ModelAPISpec{
 				Mode: kaosv1alpha1.ModelAPIModeProxy,
 				ProxyConfig: &kaosv1alpha1.ProxyConfig{
-					Model: "mock-model",
+					Models: []string{"mock-model"},
 				},
 			},
 		}
@@ -373,6 +379,7 @@ var _ = Describe("Agent Controller", func() {
 			},
 			Spec: kaosv1alpha1.AgentSpec{
 				ModelAPI:            modelAPIName,
+				Model:               "mock-model",
 				WaitForDependencies: boolPtr(false),
 				Config: &kaosv1alpha1.AgentConfig{
 					Description: "Agent to be deleted",
@@ -401,5 +408,138 @@ var _ = Describe("Agent Controller", func() {
 
 		// Note: envtest doesn't run garbage collection, so we only verify the CRD deletion
 		// In a real cluster, the deployment would be garbage collected via OwnerReferences
+	})
+
+	It("should fail agent when model is not supported by ModelAPI", func() {
+		modelAPIName := uniqueAgentName("unsupported-modelapi")
+		agentName := uniqueAgentName("unsupported-agent")
+
+		// Create ModelAPI with specific models (not matching the agent's model)
+		modelAPI := &kaosv1alpha1.ModelAPI{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      modelAPIName,
+				Namespace: namespace,
+			},
+			Spec: kaosv1alpha1.ModelAPISpec{
+				Mode: kaosv1alpha1.ModelAPIModeProxy,
+				ProxyConfig: &kaosv1alpha1.ProxyConfig{
+					Models: []string{"openai/gpt-4", "anthropic/claude-3"},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, modelAPI)).To(Succeed())
+		defer func() {
+			k8sClient.Delete(ctx, modelAPI)
+		}()
+
+		// Wait for ModelAPI to have endpoint (reconcile has processed it)
+		Eventually(func() bool {
+			updated := &kaosv1alpha1.ModelAPI{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: modelAPIName, Namespace: namespace}, updated); err != nil {
+				return false
+			}
+			return updated.Status.Endpoint != ""
+		}, timeout, interval).Should(BeTrue())
+
+		// Create Agent with unsupported model
+		agent := &kaosv1alpha1.Agent{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      agentName,
+				Namespace: namespace,
+			},
+			Spec: kaosv1alpha1.AgentSpec{
+				ModelAPI:            modelAPIName,
+				Model:               "gemini/gemini-pro", // Not in ModelAPI's supported models
+				WaitForDependencies: boolPtr(false),
+			},
+		}
+		Expect(k8sClient.Create(ctx, agent)).To(Succeed())
+		defer func() {
+			k8sClient.Delete(ctx, agent)
+		}()
+
+		// Verify Agent status is Failed with model validation error
+		Eventually(func() string {
+			updated := &kaosv1alpha1.Agent{}
+			k8sClient.Get(ctx, types.NamespacedName{Name: agentName, Namespace: namespace}, updated)
+			return updated.Status.Phase
+		}, timeout, interval).Should(Equal("Failed"))
+
+		// Verify error message mentions the unsupported model
+		Eventually(func() bool {
+			updated := &kaosv1alpha1.Agent{}
+			k8sClient.Get(ctx, types.NamespacedName{Name: agentName, Namespace: namespace}, updated)
+			return strings.Contains(updated.Status.Message, "gemini/gemini-pro") &&
+				strings.Contains(updated.Status.Message, "not supported")
+		}, timeout, interval).Should(BeTrue())
+	})
+
+	It("should allow agent when model matches wildcard pattern", func() {
+		modelAPIName := uniqueAgentName("wildcard-modelapi")
+		agentName := uniqueAgentName("wildcard-agent")
+
+		// Create ModelAPI with wildcard pattern
+		modelAPI := &kaosv1alpha1.ModelAPI{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      modelAPIName,
+				Namespace: namespace,
+			},
+			Spec: kaosv1alpha1.ModelAPISpec{
+				Mode: kaosv1alpha1.ModelAPIModeProxy,
+				ProxyConfig: &kaosv1alpha1.ProxyConfig{
+					Models: []string{"openai/*"},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, modelAPI)).To(Succeed())
+		defer func() {
+			k8sClient.Delete(ctx, modelAPI)
+		}()
+
+		// Wait for ModelAPI to have endpoint (reconcile has processed it)
+		Eventually(func() bool {
+			updated := &kaosv1alpha1.ModelAPI{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: modelAPIName, Namespace: namespace}, updated); err != nil {
+				return false
+			}
+			return updated.Status.Endpoint != ""
+		}, timeout, interval).Should(BeTrue())
+
+		// Create Agent with model matching wildcard
+		agent := &kaosv1alpha1.Agent{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      agentName,
+				Namespace: namespace,
+			},
+			Spec: kaosv1alpha1.AgentSpec{
+				ModelAPI:            modelAPIName,
+				Model:               "openai/gpt-4-turbo", // Matches openai/*
+				WaitForDependencies: boolPtr(false),
+			},
+		}
+		Expect(k8sClient.Create(ctx, agent)).To(Succeed())
+		defer func() {
+			k8sClient.Delete(ctx, agent)
+		}()
+
+		// Verify Deployment is created (validation passed)
+		deployment := &appsv1.Deployment{}
+		Eventually(func() error {
+			return k8sClient.Get(ctx, types.NamespacedName{
+				Name:      fmt.Sprintf("agent-%s", agentName),
+				Namespace: namespace,
+			}, deployment)
+		}, timeout, interval).Should(Succeed())
+
+		// Verify MODEL_NAME env var is set to the agent's model
+		container := deployment.Spec.Template.Spec.Containers[0]
+		var foundModelName string
+		for _, env := range container.Env {
+			if env.Name == "MODEL_NAME" {
+				foundModelName = env.Value
+				break
+			}
+		}
+		Expect(foundModelName).To(Equal("openai/gpt-4-turbo"))
 	})
 })

@@ -32,36 +32,16 @@ serviceAccount:
   automount: true
   create: true
   name: ""
-# Default images for operator-managed resources
-# These are used when no image is specified in the CRD
 defaultImages:
-  # Agent runtime image for Agent CRD
   agentRuntime: "axsauze/kaos-agent:latest"
-  # MCP server image for MCPServer CRD
   mcpServer: "axsauze/kaos-agent:latest"
-  # LiteLLM proxy image for ModelAPI CRD (Proxy mode)
   litellm: "ghcr.io/berriai/litellm:main-latest"
-  # Ollama image for ModelAPI CRD (Hosted mode)
   ollama: "alpine/ollama:latest"
-# Gateway API configuration
 gateway:
-  # Default timeouts for HTTPRoute resources (Gateway API Duration format)
-  # These can be overridden per-resource using spec.gatewayRoute.timeout
   defaultTimeouts:
-    # Agent timeout - agents may do multi-step reasoning
     agent: "120s"
-    # ModelAPI timeout - LLM inference can take time
     modelAPI: "120s"
-    # MCP timeout - tool calls are typically fast
     mcp: "30s"
-# Gateway API integration (requires Gateway API CRDs to be installed)
 gatewayAPI:
-  # Enable Gateway API integration for external routing
   enabled: false
-  # Gateway resource settings (only used if createGateway is true)
-  createGateway: false
   gatewayName: "kaos-gateway"
-  gatewayNamespace: ""  # Defaults to release namespace
-  gatewayClassName: ""  # Required if createGateway is true (e.g., "envoy")
-  listenerPort: 80
-  listenerProtocol: "HTTP"

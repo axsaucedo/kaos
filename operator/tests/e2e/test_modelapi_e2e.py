@@ -124,8 +124,8 @@ async def test_modelapi_proxy_with_hosted_backend(test_namespace: str):
         "spec": {
             "mode": "Proxy",
             "proxyConfig": {
+                "models": ["ollama/smollm2:135m"],
                 "apiBase": f"http://modelapi-{backend_name}.{test_namespace}:11434",
-                "model": "ollama/smollm2:135m",
                 "env": [{"name": "OPENAI_API_KEY", "value": "sk-test"}],
             },
             "gatewayRoute": {

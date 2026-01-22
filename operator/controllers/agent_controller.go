@@ -110,6 +110,15 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, nil
 	}
 
+	// Validate that agent's model is supported by the ModelAPI
+	if err := r.validateAgentModel(agent, modelapi); err != nil {
+		log.Error(err, "model validation failed")
+		agent.Status.Phase = "Failed"
+		agent.Status.Message = err.Error()
+		r.Status().Update(ctx, agent)
+		return ctrl.Result{}, nil
+	}
+
 	// Resolve MCPServer references
 	mcpServers := make(map[string]string)
 	for _, mcpName := range agent.Spec.MCPServers {
@@ -405,23 +414,11 @@ func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *
 		Value: modelapi.Status.Endpoint,
 	})
 
-	// Default MODEL_NAME if not provided in user env vars
-	// Users can override via config.env
-	hasModelName := false
-	if agent.Spec.Config != nil {
-		for _, e := range agent.Spec.Config.Env {
-			if e.Name == "MODEL_NAME" {
-				hasModelName = true
-				break
-			}
-		}
-	}
-	if !hasModelName {
-		env = append(env, corev1.EnvVar{
-			Name:  "MODEL_NAME",
-			Value: "smollm2:135m", // Default model
-		})
-	}
+	// MODEL_NAME from required spec.model field
+	env = append(env, corev1.EnvVar{
+		Name:  "MODEL_NAME",
+		Value: agent.Spec.Model,
+	})
 
 	// Reasoning loop configuration
 	if agent.Spec.Config != nil && agent.Spec.Config.ReasoningLoopMaxSteps != nil {
@@ -606,4 +603,39 @@ func (r *AgentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	}
 
 	return builder.Complete(r)
+}
+
+// validateAgentModel checks if the agent's model is supported by the ModelAPI
+func (r *AgentReconciler) validateAgentModel(agent *kaosv1alpha1.Agent, modelapi *kaosv1alpha1.ModelAPI) error {
+	agentModel := agent.Spec.Model
+
+	// Get supported models from spec (models is required with MinItems=1)
+	var supportedModels []string
+	if modelapi.Spec.Mode == kaosv1alpha1.ModelAPIModeProxy && modelapi.Spec.ProxyConfig != nil {
+		supportedModels = modelapi.Spec.ProxyConfig.Models
+	} else if modelapi.Spec.Mode == kaosv1alpha1.ModelAPIModeHosted && modelapi.Spec.HostedConfig != nil {
+		supportedModels = []string{modelapi.Spec.HostedConfig.Model}
+	}
+
+	for _, pattern := range supportedModels {
+		// Full wildcard matches everything
+		if pattern == "*" {
+			return nil
+		}
+
+		// Exact match
+		if pattern == agentModel {
+			return nil
+		}
+
+		// Provider wildcard: "openai/*" matches "openai/gpt-4"
+		if strings.HasSuffix(pattern, "/*") {
+			prefix := strings.TrimSuffix(pattern, "*")
+			if strings.HasPrefix(agentModel, prefix) {
+				return nil
+			}
+		}
+	}
+
+	return fmt.Errorf("model %q not supported by ModelAPI %q (supported: %v)", agentModel, modelapi.Name, supportedModels)
 }

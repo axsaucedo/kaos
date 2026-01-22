@@ -73,3 +73,6 @@ hack/kind-e2e-values.yaml
 # Analysis reports (local only, not committed)
 MEMORY_REPORT.md
 REPORT.md
+
+# Planning documents (local only, not committed)
+PLAN.md

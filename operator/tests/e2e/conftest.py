@@ -317,16 +317,19 @@ def shared_modelapi(shared_namespace: str) -> Generator[str, None, None]:
     create_custom_resource(modelapi_spec, shared_namespace)
     wait_for_deployment(shared_namespace, f"modelapi-{name}", timeout=120)
 
-    # Wait for HTTPRoute to be ready
+    # Wait for HTTPRoute to be ready (LiteLLM uses /health/liveliness)
     url = gateway_url(shared_namespace, "modelapi", name)
-    wait_for_resource_ready(url, max_wait=30)
+    wait_for_resource_ready(url, max_wait=60, health_path="/health/liveliness")
     yield name
 
 
 def create_modelapi_resource(
     namespace: str, name: str = "mock-proxy"
 ) -> Dict[str, Any]:
-    """Create a ModelAPI resource spec for LiteLLM proxy (supports mock_response)."""
+    """Create a ModelAPI resource spec for LiteLLM proxy (supports mock_response).
+    
+    Uses wildcard models: ["*"] so any agent model can be validated against it.
+    """
     return {
         "apiVersion": "kaos.tools/v1alpha1",
         "kind": "ModelAPI",
@@ -334,7 +337,7 @@ def create_modelapi_resource(
         "spec": {
             "mode": "Proxy",
             "proxyConfig": {
-                "model": "gpt-3.5-turbo",
+                "models": ["*"],  # Wildcard for testing - accepts any model
                 "env": [
                     {"name": "OPENAI_API_KEY", "value": "sk-test"},
                     {"name": "LITELLM_LOG", "value": "WARN"},
@@ -383,8 +386,8 @@ def create_modelapi_proxy_ollama_resource(
         "spec": {
             "mode": "Proxy",
             "proxyConfig": {
+                "models": ["ollama/smollm2:135m"],
                 "apiBase": "http://host.docker.internal:11434",
-                "model": "ollama/smollm2:135m",
                 "env": [
                     {"name": "OPENAI_API_KEY", "value": "sk-test"},
                     {"name": "LITELLM_LOG", "value": "WARN"},
@@ -432,7 +435,6 @@ def create_agent_resource(
         "instructions": "You are a helpful test assistant.",
         "env": [
             {"name": "AGENT_LOG_LEVEL", "value": "INFO"},
-            {"name": "MODEL_NAME", "value": model_name},
         ],
     }
 
@@ -445,6 +447,7 @@ def create_agent_resource(
         "metadata": {"name": agent_name, "namespace": namespace},
         "spec": {
             "modelAPI": modelapi_name,
+            "model": model_name,  # Required: model to use
             "mcpServers": mcpserver_names,
             "config": config,
             "agentNetwork": {"access": sub_agents or []},

@@ -14,6 +14,9 @@ spec:
   # Required: Reference to ModelAPI for LLM access
   modelAPI: my-modelapi
   
+  # Required: Model to use (must be supported by the referenced ModelAPI)
+  model: "openai/gpt-4o"
+  
   # Optional: List of MCPServer references for tool access
   mcpServers:
   - echo-tools
@@ -45,8 +48,6 @@ spec:
     
     # Additional environment variables
     env:
-    - name: MODEL_NAME
-      value: "ollama/smollm2:135m"
     - name: CUSTOM_VAR
       value: "custom-value"
   
@@ -74,6 +75,7 @@ status:
   phase: Ready             # Pending, Ready, Failed, Waiting
   ready: true
   endpoint: "http://agent-my-agent.my-namespace.svc.cluster.local:8000"
+  model: "openai/gpt-4o"   # Model being used
   linkedResources:
     modelAPI: my-modelapi
   message: "Deployment ready replicas: 1/1"
@@ -101,6 +103,26 @@ spec:
 ```
 
 The agent waits for the ModelAPI to become Ready before starting (see `waitForDependencies`).
+
+### model (required)
+
+The LLM model to use. Must be supported by the referenced ModelAPI.
+
+```yaml
+spec:
+  modelAPI: my-modelapi
+  model: "openai/gpt-4o"
+```
+
+**Validation:**
+- The agent controller validates that this model is supported by the ModelAPI
+- Supports exact matches: `openai/gpt-4o` matches `openai/gpt-4o`
+- Supports provider wildcards: `openai/gpt-4o` matches `openai/*`
+- Supports full wildcards: any model matches `*`
+
+If the model is not supported, the agent status will show `Failed` with an error message.
+
+**Note:** Model validation happens at agent creation/update time. If a ModelAPI's supported models change after an agent is created, the agent continues running but may fail at runtime if the model is no longer available.
 
 ### mcpServers (optional)
 
@@ -205,14 +227,16 @@ Additional environment variables:
 ```yaml
 config:
   env:
-  - name: MODEL_NAME
-    value: "gpt-4"
+  - name: CUSTOM_VAR
+    value: "my-value"
   - name: API_KEY
     valueFrom:
       secretKeyRef:
         name: my-secrets
         key: api-key
 ```
+
+**Note:** The `MODEL_NAME` environment variable is automatically set from `spec.model`.
 
 ### agentNetwork (optional)
 
@@ -297,6 +321,7 @@ spec:
 | `phase` | string | Current phase: Pending, Ready, Failed, Waiting |
 | `ready` | bool | Whether agent is ready to serve |
 | `endpoint` | string | Service URL for A2A communication |
+| `model` | string | Model being used by this agent |
 | `linkedResources` | map | References to dependencies |
 | `message` | string | Additional status information |
 | `deployment` | object | Deployment status for rolling update visibility |
@@ -319,6 +344,7 @@ Example status during a rolling update:
 status:
   phase: Pending
   ready: false
+  model: "openai/gpt-4o"
   deployment:
     replicas: 2
     readyReplicas: 1
@@ -345,6 +371,7 @@ metadata:
   name: simple-agent
 spec:
   modelAPI: ollama
+  model: "ollama/smollm2:135m"
   config:
     description: "A simple chat agent"
     instructions: "You are a helpful assistant."
@@ -359,6 +386,7 @@ metadata:
   name: tool-agent
 spec:
   modelAPI: ollama
+  model: "ollama/llama3"
   mcpServers:
   - calculator
   - web-search
@@ -378,7 +406,8 @@ kind: Agent
 metadata:
   name: coordinator
 spec:
-  modelAPI: ollama
+  modelAPI: openai
+  model: "openai/gpt-4o"
   config:
     description: "Coordinator agent"
     instructions: |
@@ -401,6 +430,7 @@ metadata:
   name: resource-agent
 spec:
   modelAPI: ollama
+  model: "ollama/llama3"
   config:
     description: "Agent with custom resources"
   podSpec:
@@ -424,6 +454,7 @@ metadata:
   name: eager-agent
 spec:
   modelAPI: ollama
+  model: "ollama/smollm2:135m"
   waitForDependencies: false  # Start immediately
   config:
     description: "Agent that handles unavailable dependencies gracefully"
@@ -452,7 +483,19 @@ kubectl get mcpserver -n my-namespace
 
 Set `waitForDependencies: false` to allow the agent to start without waiting.
 
-### Agent Stuck in Failed
+### Agent in Failed State
+
+Check status message:
+
+```bash
+kubectl get agent my-agent -o jsonpath='{.status.message}'
+```
+
+Common causes:
+- Model not supported by ModelAPI (e.g., agent uses `openai/gpt-4o` but ModelAPI only supports `anthropic/*`)
+- Invalid configuration
+
+### Pod Errors
 
 Check pod logs:
 
@@ -462,7 +505,7 @@ kubectl logs -l agent=my-agent -n my-namespace
 
 Common causes:
 - Invalid MODEL_API_URL
-- Model not available
+- Model not available at backend
 - Image pull errors
 
 ### Sub-Agent Delegation Failing
@@ -474,6 +517,6 @@ Verify peer agent is accessible:
 kubectl get svc agent-worker-1 -n my-namespace
 
 # Check agent card endpoint
-kubectl exec -it deploy/agent-coordinator -n my-namespace -- \
+kubectl exec -it deploy/agent-coordinator -n my-namespace -- \\
   curl http://agent-worker-1:8000/.well-known/agent
 ```

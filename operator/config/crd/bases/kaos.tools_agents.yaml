@@ -21,6 +21,9 @@ spec:
     - jsonPath: .spec.modelAPI
       name: ModelAPI
       type: string
+    - jsonPath: .spec.model
+      name: Model
+      type: string
     - jsonPath: .status.ready
       name: Ready
       type: boolean
@@ -307,6 +310,11 @@ spec:
                 items:
                   type: string
                 type: array
+              model:
+                description: |-
+                  Model is the model identifier this agent uses (e.g., "openai/gpt-4", "ollama/smollm2:135m")
+                  Must be supported by the referenced ModelAPI
+                type: string
               modelAPI:
                 description: ModelAPI is the name of the ModelAPI resource this agent
                   uses
@@ -8702,6 +8710,7 @@ spec:
                   before creating the deployment. Default is true.
                 type: boolean
             required:
+            - model
             - modelAPI
             type: object
           status:

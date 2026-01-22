@@ -13,8 +13,7 @@ metadata:
 
 ---
 # ModelAPI: LiteLLM proxy to host Ollama (WILDCARD MODE)
-# When only apiBase is specified (no model), LiteLLM will proxy ANY model
-# to the backend. This allows agents to request any model available on Ollama.
+# Uses models: ["*"] to allow any model request to be proxied
 apiVersion: kaos.tools/v1alpha1
 kind: ModelAPI
 metadata:
@@ -23,12 +22,11 @@ metadata:
 spec:
   mode: Proxy
   proxyConfig:
-    # Wildcard mode: only specify apiBase, no model
-    # This proxies ANY model request to the backend
+    # Wildcard mode: allow any model to be proxied to host Ollama
+    models:
+    - "*"
     apiBase: "http://host.docker.internal:11434"
     env:
-    - name: OPENAI_API_KEY
-      value: "sk-test"
     - name: LITELLM_LOG
       value: "INFO"
 
@@ -57,6 +55,7 @@ metadata:
   namespace: kaos-dev
 spec:
   modelAPI: dev-ollama-proxy
+  model: "ollama/smollm2:135m"  # Required: any model works with wildcard
   mcpServers:
   - dev-echo-mcp
   config:
@@ -65,8 +64,5 @@ spec:
       You are a helpful assistant with access to an echo tool.
       Use the echo tool when asked to echo something.
     reasoningLoopMaxSteps: 10
-    env:
-    - name: MODEL_NAME
-      value: "ollama/smollm2:135m"
   agentNetwork:
     access: []

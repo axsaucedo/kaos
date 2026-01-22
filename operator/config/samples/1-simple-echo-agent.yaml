@@ -50,6 +50,7 @@ metadata:
   namespace: kaos-simple
 spec:
   modelAPI: simple-modelapi
+  model: "smollm2:135m"  # Required: must be supported by ModelAPI
   mcpServers:
   - simple-echo-mcp
   config:
@@ -59,8 +60,5 @@ spec:
       When asked to echo something, use the echo tool to return the message.
       Always provide clear and concise responses.
     reasoningLoopMaxSteps: 5
-    env:
-    - name: MODEL_NAME
-      value: "smollm2:135m"
   agentNetwork:
     access: []

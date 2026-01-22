@@ -251,7 +251,7 @@ When an agent delegates to a sub-agent:
 | `AGENT_DESCRIPTION` | Agent description |
 | `AGENT_INSTRUCTIONS` | System prompt |
 | `MODEL_API_URL` | LLM API base URL (required) |
-| `MODEL_NAME` | Model name (default: `smollm2:135m`) |
+| `MODEL_NAME` | Model name (required) |
 | `AGENT_SUB_AGENTS` | Direct format: `"name:url,name:url"` |
 | `PEER_AGENTS` | K8s format: `"worker-1,worker-2"` |
 | `PEER_AGENT_<NAME>_CARD_URL` | K8s format: individual URLs |
@@ -290,6 +290,7 @@ metadata:
   name: coordinator
 spec:
   modelAPI: ollama-proxy
+  model: "ollama/smollm2:135m"  # Required: must be supported by ModelAPI
   mcpServers: []
   waitForDependencies: true  # Default: wait for ModelAPI/MCPServers to be ready
   config:
@@ -302,9 +303,6 @@ spec:
       contextLimit: 6         # Messages for delegation context
       maxSessions: 1000       # Max sessions to keep
       maxSessionEvents: 500   # Max events per session
-    env:
-    - name: MODEL_NAME
-      value: "ollama/smollm2:135m"
   agentNetwork:
     # expose defaults to true - creates Service for A2A
     access:
@@ -385,29 +383,36 @@ gatewayAPI:
 The operator sets these env vars on agent pods:
 - `AGENT_NAME`, `AGENT_DESCRIPTION`, `AGENT_INSTRUCTIONS`
 - `MODEL_API_URL` - From ModelAPI.Status.Endpoint
-- `MODEL_NAME` - Default `smollm2:135m` (or from config.env)
+- `MODEL_NAME` - From Agent.Spec.Model (required)
 - `AGENT_DEBUG_MEMORY_ENDPOINTS=true` - Enabled by default
 - `PEER_AGENTS` - Comma-separated sub-agent names from `agentNetwork.access`
 - `PEER_AGENT_<NAME>_CARD_URL` - Each sub-agent's service URL
 - `AGENTIC_LOOP_MAX_STEPS` - From config.reasoningLoopMaxSteps
 
-### LiteLLM Configuration Architecture
-The ModelAPI controller supports three modes:
+### Agent Model Validation
+The agent controller validates `spec.model` against the ModelAPI's `status.supportedModels`:
+- Exact match: `openai/gpt-4o` matches `openai/gpt-4o`
+- Provider wildcard: `openai/gpt-4o` matches `openai/*`
+- Full wildcard: any model matches `*`
 
-1. **Wildcard Mode (Recommended)** - When only `proxyConfig.apiBase` is set:
-   - Auto-generates a wildcard config that proxies ANY model to backend
-   - ConfigMap is created with `model_name: "*"` pattern
-   - Agents can request any model (e.g., `ollama/smollm2:135m`, `ollama/llama2`)
+If validation fails, the agent status shows `Failed` with an error message.
+
+**Design Decision:** Model validation only happens at agent creation/update. If a ModelAPI's models change, existing agents are not automatically invalidated - they may fail at runtime.
+
+### LiteLLM Configuration Architecture
+The ModelAPI controller generates LiteLLM config based on `proxyConfig.models`:
+
+1. **Explicit Models** - When `proxyConfig.models` contains specific models:
+   - Generates config with each model in `model_list`
+   - Uses `PROXY_API_KEY` and `PROXY_API_BASE` env vars if apiKey/apiBase provided
+
+2. **Wildcard Mode** - When `proxyConfig.models: ["*"]`:
+   - Generates wildcard config that proxies any model to backend
    - Best for development and flexible setups
 
-2. **Mock Mode** - When only `proxyConfig.model` is set (no apiBase):
-   - Generates minimal config for mock testing
-   - Supports `mock_response` in request body for deterministic tests
-   - Best for E2E testing without real LLM backend
-
 3. **Config File Mode (Advanced)** - When `proxyConfig.configYaml.fromString` is provided:
-   - ConfigMap is created with user-provided config
-   - LiteLLM runs with `--config` argument
+   - Uses user-provided config directly
+   - Validates that `model_name` entries match `models` list
    - Best for multi-model routing, load balancing, etc.
 
 **WARNING: Don't add `completion_model` to general_settings - it causes periodic backend calls every 5 seconds.**
@@ -444,10 +449,10 @@ spec:
 - `env` - Environment variables for the Ollama container
 - `resources` - Resource requests/limits for the container
 
-### ModelAPI ProxyConfig (Simplified)
-The ProxyConfig supports multiple configuration patterns:
+### ModelAPI ProxyConfig
+The ProxyConfig requires a `models` list:
 
-**Wildcard Mode (Recommended for Development):**
+**Basic Configuration:**
 ```yaml
 apiVersion: kaos.tools/v1alpha1
 kind: ModelAPI
@@ -456,18 +461,34 @@ metadata:
 spec:
   mode: Proxy
   proxyConfig:
-    # Only apiBase - proxies ANY model to backend
-    apiBase: "http://host.docker.internal:11434"
-    # model: not specified - enables wildcard routing
+    models:
+    - "openai/gpt-4o"
+    - "openai/gpt-4o-mini"
+    apiBase: "https://api.openai.com"
+    apiKey:
+      valueFrom:
+        secretKeyRef:
+          name: openai-secrets
+          key: api-key
 ```
 
-**CLI Mode (Single Model):**
+**Wildcard Mode (Development):**
 ```yaml
 spec:
   mode: Proxy
   proxyConfig:
+    models: ["*"]  # Allow any model
     apiBase: "http://host.docker.internal:11434"
-    model: "ollama/smollm2:135m"  # Specific model only
+```
+
+**Provider Wildcards:**
+```yaml
+spec:
+  mode: Proxy
+  proxyConfig:
+    models:
+    - "openai/*"    # Any OpenAI model
+    - "anthropic/*" # Any Anthropic model
 ```
 
 For advanced multi-model routing, provide a full LiteLLM config:
@@ -475,19 +496,28 @@ For advanced multi-model routing, provide a full LiteLLM config:
 spec:
   mode: Proxy
   proxyConfig:
-    configYaml: |
-      model_list:
-        - model_name: "gpt-4"
-          litellm_params:
-            model: "openai/gpt-4"
-            api_key: "os.environ/OPENAI_API_KEY"
+    models:
+    - "gpt-4"
+    - "claude-3"
+    configYaml:
+      fromString: |
+        model_list:
+          - model_name: "gpt-4"
+            litellm_params:
+              model: "openai/gpt-4"
+              api_key: "os.environ/PROXY_API_KEY"
+          - model_name: "claude-3"
+            litellm_params:
+              model: "claude-3-sonnet-20240229"
+              api_key: "os.environ/ANTHROPIC_API_KEY"
 ```
 
 **ProxyConfig Fields:**
-- `apiBase` - Backend LLM API URL (e.g., `http://host.docker.internal:11434`)
-- `model` - Model identifier (e.g., `ollama/smollm2:135m`)
+- `models` (required) - List of supported models (used for agent validation)
+- `apiBase` - Backend LLM API URL, set as `PROXY_API_BASE` env var
+- `apiKey` - API key, set as `PROXY_API_KEY` env var (value or valueFrom)
 - `configYaml` - Full LiteLLM config YAML (optional, for advanced use)
-- `env` - Environment variables for the container
+- `env` - Additional environment variables for the container
 
 ### RBAC - CRITICAL DO NOT REMOVE
 The operator requires these RBAC permissions in `operator/config/rbac/role.yaml`:

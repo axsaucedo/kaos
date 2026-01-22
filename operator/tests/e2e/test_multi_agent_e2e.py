@@ -42,7 +42,6 @@ def create_multi_agent_resources(
         """Get env vars including DEBUG_MOCK_RESPONSES if configured."""
         env = [
             {"name": "AGENT_LOG_LEVEL", "value": "INFO"},
-            {"name": "MODEL_NAME", "value": "ollama/smollm2:135m"},
         ]
         if agent_name in mock_responses:
             env.append(
@@ -59,6 +58,7 @@ def create_multi_agent_resources(
         "metadata": {"name": worker1_name, "namespace": namespace},
         "spec": {
             "modelAPI": modelapi_name,
+            "model": "gpt-3.5-turbo",  # Required: must match ModelAPI's models
             "config": {
                 "description": "Worker agent 1",
                 "instructions": f"You are {worker1_name}. Always mention '{worker1_name}' in responses. Be brief.",
@@ -74,6 +74,7 @@ def create_multi_agent_resources(
         "metadata": {"name": worker2_name, "namespace": namespace},
         "spec": {
             "modelAPI": modelapi_name,
+            "model": "gpt-3.5-turbo",  # Required: must match ModelAPI's models
             "config": {
                 "description": "Worker agent 2",
                 "instructions": f"You are {worker2_name}. Always mention '{worker2_name}' in responses. Be brief.",
@@ -89,6 +90,7 @@ def create_multi_agent_resources(
         "metadata": {"name": coord_name, "namespace": namespace},
         "spec": {
             "modelAPI": modelapi_name,
+            "model": "gpt-3.5-turbo",  # Required: must match ModelAPI's models
             "config": {
                 "description": "Coordinator agent",
                 "instructions": f"You are the coordinator. You manage {worker1_name} and {worker2_name}.",

@@ -62,7 +62,6 @@ def create_agent_with_mcp(
     """
     env = [
         {"name": "AGENT_LOG_LEVEL", "value": "DEBUG"},
-        {"name": "MODEL_NAME", "value": "ollama/smollm2:135m"},
     ]
     if mock_responses:
         env.append(
@@ -75,6 +74,7 @@ def create_agent_with_mcp(
         "metadata": {"name": agent_name, "namespace": namespace},
         "spec": {
             "modelAPI": modelapi_name,
+            "model": "gpt-3.5-turbo",  # Required: must match ModelAPI's models
             "mcpServers": [mcp_server_name],
             "config": {
                 "description": "Agent with MCP tools",
@@ -326,13 +326,13 @@ def uppercase(text: str) -> str:
         "metadata": {"name": agent_name, "namespace": test_namespace},
         "spec": {
             "modelAPI": shared_modelapi,
+            "model": "gpt-3.5-turbo",  # Required: must match ModelAPI's models
             "mcpServers": [mcp1_name, mcp2_name],  # Both MCP servers
             "config": {
                 "description": "Agent with multiple MCP tools",
                 "instructions": "You have access to echo, reverse, and uppercase tools.",
                 "env": [
                     {"name": "AGENT_LOG_LEVEL", "value": "DEBUG"},
-                    {"name": "MODEL_NAME", "value": "ollama/smollm2:135m"},
                 ],
             },
             "agentNetwork": {"access": []},
