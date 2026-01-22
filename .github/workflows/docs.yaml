@@ -50,7 +50,11 @@ jobs:
 
       - name: Package Helm chart
         run: |
-          helm package operator/chart -d docs/.vitepress/dist/charts
+          VERSION=$(cat VERSION | tr -d '\n')
+          helm package operator/chart \
+            --version "$VERSION" \
+            --app-version "$VERSION" \
+            -d docs/.vitepress/dist/charts
           helm repo index docs/.vitepress/dist/charts --url https://axsaucedo.github.io/kaos/charts
 
       - name: Upload artifact
