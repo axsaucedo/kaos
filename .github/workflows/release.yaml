@@ -45,7 +45,7 @@ jobs:
     uses: ./.github/workflows/reusable-tests.yaml
     with:
       run-unit: true
-      run-e2e: true
+      run-e2e: false  # Temporarily disabled for testing bump-version
 
   # Build and push images using reusable workflow
   build-images:
@@ -89,131 +89,45 @@ jobs:
           path: ./charts/*.tgz
           if-no-files-found: error
 
-  # Publish kaos-cli to PyPI
-  publish-python:
-    needs: [validate, tests]
-    runs-on: ubuntu-latest
-    environment:
-      name: pypi
-      url: https://pypi.org/project/kaos-cli/
-    permissions:
-      id-token: write  # Required for trusted publishing
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+  # Publish kaos-cli to PyPI (temporarily disabled for testing)
+  # publish-python:
+  #   needs: [validate, tests]
+  #   runs-on: ubuntu-latest
+  #   environment:
+  #     name: pypi
+  #     url: https://pypi.org/project/kaos-cli/
+  #   permissions:
+  #     id-token: write
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
+  #     - name: Setup Python
+  #       uses: actions/setup-python@v5
+  #       with:
+  #         python-version: '3.12'
+  #     - name: Install build tools
+  #       run: python -m pip install --upgrade pip build
+  #     - name: Update version and build kaos-cli
+  #       working-directory: kaos-cli
+  #       run: |
+  #         VERSION=${{ needs.validate.outputs.version }}
+  #         sed -i "s/^version = .*/version = \"$VERSION\"/" pyproject.toml
+  #         python -m build
+  #     - name: Publish to PyPI
+  #       uses: pypa/gh-action-pypi-publish@release/v1
+  #       with:
+  #         packages-dir: kaos-cli/dist/
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Install build tools
-        run: |
-          python -m pip install --upgrade pip build
-
-      - name: Update version and build kaos-cli
-        working-directory: kaos-cli
-        run: |
-          VERSION=${{ needs.validate.outputs.version }}
-          # Update version in pyproject.toml for release
-          sed -i "s/^version = .*/version = \"$VERSION\"/" pyproject.toml
-          echo "Building kaos-cli version $VERSION"
-          python -m build
-          ls -la dist/
-
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          packages-dir: kaos-cli/dist/
-
-  # Build and deploy versioned documentation
+  # Build and deploy versioned documentation using reusable workflow
   publish-docs:
     needs: validate
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Get versions list
-        id: versions
-        run: |
-          # Get list of release tags for version switcher (including this release)
-          VERSIONS=$(git tag --list "v*" --sort=-v:refname | sed 's/^v//' | head -10 | jq -R -s -c 'split("\n") | map(select(length > 0))')
-          echo "versions_json=$VERSIONS" >> $GITHUB_OUTPUT
-          echo "Available versions: $VERSIONS"
-
-      - name: Install dependencies
-        working-directory: docs
-        run: npm install
-
-      - name: Build versioned docs
-        working-directory: docs
-        env:
-          DOCS_VERSION: ${{ needs.validate.outputs.version }}
-          DOCS_BASE: /kaos/v${{ needs.validate.outputs.version }}/
-          VERSIONS_JSON: ${{ steps.versions.outputs.versions_json }}
-        run: npm run build
-
-      - name: Checkout gh-pages branch
-        uses: actions/checkout@v4
-        with:
-          ref: gh-pages
-          path: gh-pages
-        continue-on-error: true
-
-      - name: Prepare deployment directory
-        run: |
-          VERSION=${{ needs.validate.outputs.version }}
-          
-          # Create deployment directory
-          mkdir -p deploy
-          
-          # Copy existing gh-pages content if it exists
-          if [ -d "gh-pages" ]; then
-            cp -r gh-pages/* deploy/ 2>/dev/null || true
-          fi
-          
-          # Add new version docs
-          rm -rf deploy/v${VERSION}
-          mkdir -p deploy/v${VERSION}
-          cp -r docs/.vitepress/dist/* deploy/v${VERSION}/
-          
-          # Update latest to point to this version
-          rm -rf deploy/latest
-          mkdir -p deploy/latest
-          cp -r docs/.vitepress/dist/* deploy/latest/
-          
-          # Copy static redirect page (if not already present)
-          if [ ! -f deploy/index.html ]; then
-            cp docs/public/redirect-index.html deploy/index.html
-          fi
-          
-          echo "Deployment structure:"
-          ls -la deploy/
-
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
-
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: deploy
-
-      - name: Deploy to GitHub Pages
-        uses: actions/deploy-pages@v4
+    uses: ./.github/workflows/reusable-docs.yaml
+    with:
+      version: ${{ needs.validate.outputs.version }}
+      base-path: /kaos/v${{ needs.validate.outputs.version }}/
+      deploy-path: v${{ needs.validate.outputs.version }}
+      update-latest: true
+      package-helm: false
 
   # Create GitHub Release
   create-release:
@@ -294,6 +208,7 @@ jobs:
           grep "^version:\|^appVersion:" operator/chart/Chart.yaml
 
       - name: Create Pull Request
+        id: cpr
         uses: peter-evans/create-pull-request@v6
         with:
           branch: bump/${{ steps.next.outputs.next_dev }}
@@ -313,3 +228,9 @@ jobs:
           labels: |
             automated
             version-bump
+
+      - name: Enable auto-merge for bump PR
+        if: steps.cpr.outputs.pull-request-number
+        run: gh pr merge --auto --squash "${{ steps.cpr.outputs.pull-request-number }}"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

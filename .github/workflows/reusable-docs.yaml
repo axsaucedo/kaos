@@ -1,0 +1,137 @@
+name: Build and Deploy Documentation
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: 'Version string to display in docs (e.g., "dev" or "1.0.0")'
+        required: true
+        type: string
+      base-path:
+        description: 'Base path for the docs (e.g., "/kaos/dev/" or "/kaos/v1.0.0/")'
+        required: true
+        type: string
+      deploy-path:
+        description: 'Path in gh-pages to deploy to (e.g., "dev" or "v1.0.0")'
+        required: true
+        type: string
+      update-latest:
+        description: 'Also update /latest/ to this version'
+        required: false
+        type: boolean
+        default: false
+      package-helm:
+        description: 'Package and publish Helm chart'
+        required: false
+        type: boolean
+        default: false
+      helm-version:
+        description: 'Version for Helm chart packaging'
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Helm
+        if: inputs.package-helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.14.0
+
+      - name: Get versions list
+        id: versions
+        run: |
+          VERSIONS=$(git tag --list "v*" --sort=-v:refname | sed 's/^v//' | head -10 | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "versions_json=$VERSIONS" >> $GITHUB_OUTPUT
+          echo "Available versions: $VERSIONS"
+
+      - name: Install dependencies
+        working-directory: docs
+        run: npm install
+
+      - name: Build docs
+        working-directory: docs
+        env:
+          DOCS_VERSION: ${{ inputs.version }}
+          DOCS_BASE: ${{ inputs.base-path }}
+          VERSIONS_JSON: ${{ steps.versions.outputs.versions_json }}
+        run: npm run build
+
+      - name: Checkout gh-pages branch
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: gh-pages
+        continue-on-error: true
+
+      - name: Prepare deployment directory
+        run: |
+          # Create deployment directory
+          mkdir -p deploy
+          
+          # Copy existing gh-pages content if it exists
+          if [ -d "gh-pages" ]; then
+            cp -r gh-pages/* deploy/ 2>/dev/null || true
+          fi
+          
+          # Deploy to the specified path
+          DEPLOY_PATH="${{ inputs.deploy-path }}"
+          rm -rf "deploy/${DEPLOY_PATH}"
+          mkdir -p "deploy/${DEPLOY_PATH}"
+          cp -r docs/.vitepress/dist/* "deploy/${DEPLOY_PATH}/"
+          
+          # Update latest if requested
+          if [ "${{ inputs.update-latest }}" = "true" ]; then
+            rm -rf deploy/latest
+            mkdir -p deploy/latest
+            cp -r docs/.vitepress/dist/* deploy/latest/
+          fi
+          
+          # Copy static redirect page (if not already present)
+          if [ ! -f deploy/index.html ]; then
+            cp docs/public/redirect-index.html deploy/index.html
+          fi
+          
+          echo "Deployment structure:"
+          ls -la deploy/
+
+      - name: Package Helm chart
+        if: inputs.package-helm && inputs.helm-version != ''
+        run: |
+          VERSION=${{ inputs.helm-version }}
+          mkdir -p deploy/charts
+          helm package operator/chart \
+            --version "$VERSION" \
+            --app-version "$VERSION" \
+            -d deploy/charts
+          helm repo index deploy/charts --url https://axsaucedo.github.io/kaos/charts
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: deploy
+
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v4

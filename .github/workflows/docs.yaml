@@ -8,110 +8,34 @@ on:
       - 'operator/chart/**'
       - 'VERSION'
       - '.github/workflows/docs.yaml'
+      - '.github/workflows/reusable-docs.yaml'
   workflow_dispatch:
-
-permissions:
-  contents: write
-  pages: write
-  id-token: write
 
 concurrency:
   group: pages
   cancel-in-progress: false
 
 jobs:
-  build-and-deploy:
+  read-version:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Install Helm
-        uses: azure/setup-helm@v4
-        with:
-          version: v3.14.0
-
-      - name: Get version info
+      - name: Read VERSION
         id: version
         run: |
           VERSION=$(cat VERSION | tr -d '\n')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
-          
-          # Get list of release tags for version switcher
-          VERSIONS=$(git tag --list "v*" --sort=-v:refname | sed 's/^v//' | head -10 | jq -R -s -c 'split("\n") | map(select(length > 0))')
-          echo "versions_json=$VERSIONS" >> $GITHUB_OUTPUT
-          echo "Version: $VERSION"
-          echo "Available versions: $VERSIONS"
 
-      - name: Install dependencies
-        working-directory: docs
-        run: npm install
-
-      - name: Build dev docs
-        working-directory: docs
-        env:
-          DOCS_VERSION: dev
-          DOCS_BASE: /kaos/dev/
-          VERSIONS_JSON: ${{ steps.version.outputs.versions_json }}
-        run: npm run build
-
-      - name: Checkout gh-pages branch
-        uses: actions/checkout@v4
-        with:
-          ref: gh-pages
-          path: gh-pages
-        continue-on-error: true
-
-      - name: Prepare deployment directory
-        run: |
-          # Create deployment directory
-          mkdir -p deploy
-          
-          # Copy existing gh-pages content if it exists
-          if [ -d "gh-pages" ]; then
-            cp -r gh-pages/* deploy/ 2>/dev/null || true
-          fi
-          
-          # Remove old dev docs and copy new
-          rm -rf deploy/dev
-          mkdir -p deploy/dev
-          cp -r docs/.vitepress/dist/* deploy/dev/
-          
-          # Package and copy Helm chart to charts folder
-          VERSION=${{ steps.version.outputs.version }}
-          mkdir -p deploy/charts
-          helm package operator/chart \
-            --version "$VERSION" \
-            --app-version "$VERSION" \
-            -d deploy/charts
-          helm repo index deploy/charts --url https://axsaucedo.github.io/kaos/charts
-          
-          # Copy static redirect page (if not already present)
-          if [ ! -f deploy/index.html ]; then
-            cp docs/public/redirect-index.html deploy/index.html
-          fi
-          
-          echo "Deployment structure:"
-          ls -la deploy/
-
-      - name: Setup Pages
-        uses: actions/configure-pages@v4
-
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: deploy
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+  deploy-docs:
+    needs: read-version
+    uses: ./.github/workflows/reusable-docs.yaml
+    with:
+      version: dev
+      base-path: /kaos/dev/
+      deploy-path: dev
+      update-latest: false
+      package-helm: true
+      helm-version: ${{ needs.read-version.outputs.version }}
