@@ -96,6 +96,35 @@ jobs:
             -d deploy/charts
           helm repo index deploy/charts --url https://axsaucedo.github.io/kaos/charts
           
+          # Create root redirect to latest (or dev if no releases yet)
+          cat > deploy/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <title>KAOS Documentation</title>
+            <script>
+              // Redirect to latest if it exists, otherwise dev
+              var latest = '/kaos/latest/';
+              var dev = '/kaos/dev/';
+              fetch(latest, { method: 'HEAD' })
+                .then(function(response) {
+                  window.location.href = response.ok ? latest : dev;
+                })
+                .catch(function() {
+                  window.location.href = dev;
+                });
+            </script>
+            <noscript>
+              <meta http-equiv="refresh" content="0; url=/kaos/dev/">
+            </noscript>
+          </head>
+          <body>
+            <p>Redirecting to <a href="/kaos/dev/">KAOS documentation</a>...</p>
+          </body>
+          </html>
+          EOF
+          
           echo "Deployment structure:"
           ls -la deploy/
 

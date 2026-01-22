@@ -410,10 +410,25 @@ jobs:
           mkdir -p deploy/v${VERSION}
           cp -r docs/.vitepress/dist/* deploy/v${VERSION}/
           
-          # Update latest to point to this version
+          # Update latest to point to this version (rebuild with latest base)
           rm -rf deploy/latest
           mkdir -p deploy/latest
           cp -r docs/.vitepress/dist/* deploy/latest/
+          
+          # Create/update root redirect to latest
+          cat > deploy/index.html << 'EOF'
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta charset="utf-8">
+            <title>KAOS Documentation</title>
+            <meta http-equiv="refresh" content="0; url=/kaos/latest/">
+          </head>
+          <body>
+            <p>Redirecting to <a href="/kaos/latest/">KAOS documentation</a>...</p>
+          </body>
+          </html>
+          EOF
           
           echo "Deployment structure:"
           ls -la deploy/
