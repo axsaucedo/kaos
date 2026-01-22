@@ -4,13 +4,8 @@ on:
   push:
     tags: ['v*']
 
-env:
-  REGISTRY: docker.io
-  OPERATOR_IMAGE: axsauze/kaos-operator
-  AGENT_IMAGE: axsauze/kaos-agent
-
 jobs:
-  # Validate tag and run tests
+  # Validate tag format
   validate:
     runs-on: ubuntu-latest
     outputs:
@@ -36,247 +31,25 @@ jobs:
           fi
           echo "✓ Version format valid: $VERSION"
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.22'
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Run Go tests
-        working-directory: operator
-        run: |
-          make test-unit
-
-      - name: Install Python dependencies
-        working-directory: python
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
-
-      - name: Run Python tests
-        working-directory: python
-        run: |
-          python -m pytest tests/ -v
-
-  # Build operator image on native runners for each platform
-  build-operator:
+  # Run all tests (unit + E2E) using reusable workflow
+  tests:
     needs: validate
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: linux/amd64
-            runner: ubuntu-latest
-          - platform: linux/arm64
-            runner: ubuntu-24.04-arm
-    runs-on: ${{ matrix.runner }}
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Prepare platform pair
-        run: |
-          platform=${{ matrix.platform }}
-          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
+    uses: ./.github/workflows/reusable-tests.yaml
+    with:
+      run-unit: true
+      run-e2e: false  # Temporarily disabled for testing release workflow
 
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.OPERATOR_IMAGE }}
-
-      - name: Build and push by digest
-        id: build
-        uses: docker/build-push-action@v6
-        with:
-          context: ./operator
-          platforms: ${{ matrix.platform }}
-          labels: ${{ steps.meta.outputs.labels }}
-          outputs: type=image,name=${{ env.OPERATOR_IMAGE }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=operator-${{ env.PLATFORM_PAIR }}
-          cache-to: type=gha,scope=operator-${{ env.PLATFORM_PAIR }},mode=max
-          github-token: ${{ github.token }}
-
-      - name: Export digest
-        run: |
-          mkdir -p ${{ runner.temp }}/digests/operator
-          digest="${{ steps.build.outputs.digest }}"
-          touch "${{ runner.temp }}/digests/operator/${digest#sha256:}"
-
-      - name: Upload digest
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-operator-digests-${{ env.PLATFORM_PAIR }}
-          path: ${{ runner.temp }}/digests/operator/*
-          if-no-files-found: error
-          retention-days: 1
-
-  # Build agent image on native runners for each platform
-  build-agent:
-    needs: validate
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: linux/amd64
-            runner: ubuntu-latest
-          - platform: linux/arm64
-            runner: ubuntu-24.04-arm
-    runs-on: ${{ matrix.runner }}
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Prepare platform pair
-        run: |
-          platform=${{ matrix.platform }}
-          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
-
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.AGENT_IMAGE }}
-
-      - name: Build and push by digest
-        id: build
-        uses: docker/build-push-action@v6
-        with:
-          context: ./python
-          platforms: ${{ matrix.platform }}
-          labels: ${{ steps.meta.outputs.labels }}
-          outputs: type=image,name=${{ env.AGENT_IMAGE }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=agent-${{ env.PLATFORM_PAIR }}
-          cache-to: type=gha,scope=agent-${{ env.PLATFORM_PAIR }},mode=max
-          github-token: ${{ github.token }}
-
-      - name: Export digest
-        run: |
-          mkdir -p ${{ runner.temp }}/digests/agent
-          digest="${{ steps.build.outputs.digest }}"
-          touch "${{ runner.temp }}/digests/agent/${digest#sha256:}"
-
-      - name: Upload digest
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-agent-digests-${{ env.PLATFORM_PAIR }}
-          path: ${{ runner.temp }}/digests/agent/*
-          if-no-files-found: error
-          retention-days: 1
-
-  # Merge operator manifests from all platforms
-  merge-operator:
-    runs-on: ubuntu-latest
-    needs: [validate, build-operator]
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Download digests
-        uses: actions/download-artifact@v4
-        with:
-          path: ${{ runner.temp }}/digests/operator
-          pattern: release-operator-digests-*
-          merge-multiple: true
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.OPERATOR_IMAGE }}
-          tags: |
-            type=raw,value=${{ needs.validate.outputs.version }}
-            type=raw,value=latest
-
-      - name: Create manifest list and push
-        working-directory: ${{ runner.temp }}/digests/operator
-        run: |
-          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf '${{ env.OPERATOR_IMAGE }}@sha256:%s ' *)
-
-      - name: Inspect image
-        run: |
-          docker buildx imagetools inspect ${{ env.OPERATOR_IMAGE }}:${{ needs.validate.outputs.version }}
-
-  # Merge agent manifests from all platforms
-  merge-agent:
-    runs-on: ubuntu-latest
-    needs: [validate, build-agent]
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Download digests
-        uses: actions/download-artifact@v4
-        with:
-          path: ${{ runner.temp }}/digests/agent
-          pattern: release-agent-digests-*
-          merge-multiple: true
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.AGENT_IMAGE }}
-          tags: |
-            type=raw,value=${{ needs.validate.outputs.version }}
-            type=raw,value=latest
-
-      - name: Create manifest list and push
-        working-directory: ${{ runner.temp }}/digests/agent
-        run: |
-          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
-            $(printf '${{ env.AGENT_IMAGE }}@sha256:%s ' *)
-
-      - name: Inspect image
-        run: |
-          docker buildx imagetools inspect ${{ env.AGENT_IMAGE }}:${{ needs.validate.outputs.version }}
+  # Build and push images using reusable workflow
+  build-images:
+    needs: [validate, tests]
+    uses: ./.github/workflows/reusable-build-images.yaml
+    with:
+      version: ${{ needs.validate.outputs.version }}
+      push-latest: true
+      artifact-prefix: 'release-'
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
   # Package Helm chart
   build-helm:
@@ -310,7 +83,7 @@ jobs:
 
   # Publish kaos-cli to PyPI
   publish-python:
-    needs: validate
+    needs: [validate, tests]
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -410,25 +183,15 @@ jobs:
           mkdir -p deploy/v${VERSION}
           cp -r docs/.vitepress/dist/* deploy/v${VERSION}/
           
-          # Update latest to point to this version (rebuild with latest base)
+          # Update latest to point to this version
           rm -rf deploy/latest
           mkdir -p deploy/latest
           cp -r docs/.vitepress/dist/* deploy/latest/
           
-          # Create/update root redirect to latest
-          cat > deploy/index.html << 'EOF'
-          <!DOCTYPE html>
-          <html>
-          <head>
-            <meta charset="utf-8">
-            <title>KAOS Documentation</title>
-            <meta http-equiv="refresh" content="0; url=/kaos/latest/">
-          </head>
-          <body>
-            <p>Redirecting to <a href="/kaos/latest/">KAOS documentation</a>...</p>
-          </body>
-          </html>
-          EOF
+          # Copy static redirect page (if not already present)
+          if [ ! -f deploy/index.html ]; then
+            cp docs/public/redirect-index.html deploy/index.html
+          fi
           
           echo "Deployment structure:"
           ls -la deploy/
@@ -446,7 +209,7 @@ jobs:
 
   # Create GitHub Release
   create-release:
-    needs: [validate, merge-operator, merge-agent, build-helm, publish-python, publish-docs]
+    needs: [validate, build-images, build-helm, publish-python, publish-docs]
     runs-on: ubuntu-latest
     permissions:
       contents: write
