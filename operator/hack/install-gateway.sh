@@ -3,6 +3,7 @@
 set -o errexit
 
 GATEWAY_API_VERSION="${GATEWAY_API_VERSION:-v1.4.1}"
+ENVOY_GATEWAY_VERSION="${ENVOY_GATEWAY_VERSION:-v1.4.6}"
 
 echo "Installing Gateway API CRDs (${GATEWAY_API_VERSION})..."
 kubectl apply -f "https://github.com/kubernetes-sigs/gateway-api/releases/download/${GATEWAY_API_VERSION}/standard-install.yaml"
@@ -12,8 +13,9 @@ kubectl wait --for condition=established --timeout=60s crd/gateways.gateway.netw
 kubectl wait --for condition=established --timeout=60s crd/httproutes.gateway.networking.k8s.io
 kubectl wait --for condition=established --timeout=60s crd/gatewayclasses.gateway.networking.k8s.io
 
-echo "Installing Envoy Gateway..."
+echo "Installing Envoy Gateway (${ENVOY_GATEWAY_VERSION})..."
 helm upgrade --install envoy-gateway oci://docker.io/envoyproxy/gateway-helm \
+  --version "${ENVOY_GATEWAY_VERSION}" \
   --namespace envoy-gateway-system --create-namespace \
   --wait --timeout 120s
 
