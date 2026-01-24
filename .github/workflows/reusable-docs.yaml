@@ -60,7 +60,8 @@ jobs:
       - name: Get versions list
         id: versions
         run: |
-          VERSIONS=$(git tag --list "v*" --sort=-v:refname | sed 's/^v//' | head -10 | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          # Filter out v0.0.x test tags from version list
+          VERSIONS=$(git tag --list "v*" --sort=-v:refname | grep -v '^v0\.0\.' | sed 's/^v//' | head -10 | jq -R -s -c 'split("\n") | map(select(length > 0))')
           echo "versions_json=$VERSIONS" >> $GITHUB_OUTPUT
           echo "Available versions: $VERSIONS"
 
