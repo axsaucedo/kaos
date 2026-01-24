@@ -134,34 +134,50 @@ litellm_settings:
   drop_params: true
 ```
 
-#### Wildcard Mode
+#### Wildcard Mode (Passthrough)
 
-Use wildcards to allow any model from a provider:
+When using wildcards in the `models` list, the ModelAPI generates a passthrough configuration that allows clients to specify any model:
 
 ```yaml
 spec:
   mode: Proxy
   proxyConfig:
     models:
-    - "*"  # Allow any model
+    - "*"  # Allow any model - generates passthrough config
     apiBase: "http://host.docker.internal:11434"
 ```
 
-Or provider-specific wildcards:
+Provider-specific wildcards also trigger passthrough mode:
 
 ```yaml
 spec:
   mode: Proxy
   proxyConfig:
     models:
-    - "openai/*"    # Any OpenAI model
-    - "anthropic/*" # Any Anthropic model
+    - "nebius/*"  # Allow any Nebius model
     apiKey:
       valueFrom:
         secretKeyRef:
-          name: llm-secrets
+          name: nebius-secrets
           key: api-key
 ```
+
+This generates the following LiteLLM passthrough config:
+
+```yaml
+model_list:
+  - model_name: "*"
+    litellm_params:
+      model: "*"
+      api_key: "os.environ/PROXY_API_KEY"
+litellm_settings:
+  drop_params: true
+```
+
+With passthrough mode:
+- Agents specify the full model name (e.g., `nebius/Qwen/Qwen3-235B-A22B`)
+- LiteLLM routes requests based on the model prefix (e.g., `nebius/` goes to Nebius provider)
+- The `models` list in the CRD is used for agent validation only
 
 #### Config File Mode (Advanced)
 
@@ -483,6 +499,8 @@ spec:
 
 ### Nebius AI Studio
 
+Use the wildcard pattern to allow any Nebius model. Agents specify the full model name (e.g., `nebius/Qwen/Qwen3-235B-A22B`):
+
 ```yaml
 apiVersion: kaos.tools/v1alpha1
 kind: ModelAPI
@@ -492,14 +510,26 @@ spec:
   mode: Proxy
   proxyConfig:
     models:
-    - "nebius/*"
-    apiBase: "https://api.studio.nebius.ai/v1"
+    - "nebius/*"  # Allows any Nebius model (passthrough mode)
     apiKey:
       valueFrom:
         secretKeyRef:
           name: nebius-secrets
           key: api-key
+---
+# Agent using this ModelAPI
+apiVersion: kaos.tools/v1alpha1
+kind: Agent
+metadata:
+  name: my-agent
+spec:
+  modelAPI: nebius
+  model: "nebius/Qwen/Qwen3-235B-A22B"  # Full model name
+  config:
+    description: "Agent using Nebius AI"
 ```
+
+See [LiteLLM Nebius docs](https://docs.litellm.ai/docs/providers/nebius) for supported models.
 
 ### LiteLLM Gateway Proxy
 
