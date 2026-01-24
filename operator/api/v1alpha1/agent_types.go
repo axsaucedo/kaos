@@ -56,6 +56,39 @@ type MemoryConfig struct {
 
 // +kubebuilder:object:generate=true
 
+// TelemetryConfig defines OpenTelemetry instrumentation settings
+type TelemetryConfig struct {
+	// Enabled controls whether OpenTelemetry is enabled (default: false)
+	// +kubebuilder:default=false
+	Enabled bool `json:"enabled,omitempty"`
+
+	// Endpoint is the OTLP endpoint URL (default: http://localhost:4317)
+	// +kubebuilder:default="http://localhost:4317"
+	Endpoint string `json:"endpoint,omitempty"`
+
+	// Insecure controls whether to use insecure connection (default: true)
+	// +kubebuilder:default=true
+	Insecure *bool `json:"insecure,omitempty"`
+
+	// ServiceName overrides the default service name (defaults to agent name)
+	// +kubebuilder:validation:Optional
+	ServiceName string `json:"serviceName,omitempty"`
+
+	// TracesEnabled controls whether traces are exported (default: true when enabled)
+	// +kubebuilder:default=true
+	TracesEnabled *bool `json:"tracesEnabled,omitempty"`
+
+	// MetricsEnabled controls whether metrics are exported (default: true when enabled)
+	// +kubebuilder:default=true
+	MetricsEnabled *bool `json:"metricsEnabled,omitempty"`
+
+	// LogCorrelation controls whether log correlation is enabled (default: true when enabled)
+	// +kubebuilder:default=true
+	LogCorrelation *bool `json:"logCorrelation,omitempty"`
+}
+
+// +kubebuilder:object:generate=true
+
 // AgentConfig defines agent-specific configuration
 type AgentConfig struct {
 	// Description is a human-readable description of the agent
@@ -75,6 +108,10 @@ type AgentConfig struct {
 	// Memory configures the agent's memory system
 	// +kubebuilder:validation:Optional
 	Memory *MemoryConfig `json:"memory,omitempty"`
+
+	// Telemetry configures OpenTelemetry instrumentation
+	// +kubebuilder:validation:Optional
+	Telemetry *TelemetryConfig `json:"telemetry,omitempty"`
 
 	// Env variables to pass to the agent runtime
 	// +kubebuilder:validation:Optional
