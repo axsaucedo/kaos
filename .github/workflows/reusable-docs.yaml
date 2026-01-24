@@ -141,7 +141,20 @@ jobs:
             --version "$VERSION" \
             --app-version "$VERSION" \
             -d deploy/charts
-          helm repo index deploy/charts --url https://axsaucedo.github.io/kaos/charts
+          
+          # Merge with existing index if present, otherwise create new
+          if [ -f "deploy/charts/index.yaml" ]; then
+            echo "Merging with existing Helm chart index..."
+            helm repo index deploy/charts \
+              --merge deploy/charts/index.yaml \
+              --url https://axsaucedo.github.io/kaos/charts
+          else
+            echo "Creating new Helm chart index..."
+            helm repo index deploy/charts --url https://axsaucedo.github.io/kaos/charts
+          fi
+          
+          echo "Helm chart index contents:"
+          cat deploy/charts/index.yaml
 
       - name: Push to gh-pages branch
         run: |
