@@ -1,0 +1,39 @@
+name: Test Release
+
+on:
+  push:
+    tags: ['v0.0.*']  # Only test tags
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.parse.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse tag
+        id: parse
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          VERSION=${TAG#v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Test release version: $VERSION"
+
+  # Publish docs and Helm chart - this is what we're testing
+  publish-docs:
+    needs: validate
+    uses: ./.github/workflows/reusable-docs.yaml
+    with:
+      version: ${{ needs.validate.outputs.version }}
+      base-path: /kaos/v${{ needs.validate.outputs.version }}/
+      deploy-path: v${{ needs.validate.outputs.version }}
+      update-latest: false  # Don't update latest for test releases
+      package-helm: true
+      helm-version: ${{ needs.validate.outputs.version }}

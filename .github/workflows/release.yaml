@@ -127,7 +127,8 @@ jobs:
       base-path: /kaos/v${{ needs.validate.outputs.version }}/
       deploy-path: v${{ needs.validate.outputs.version }}
       update-latest: true
-      package-helm: false
+      package-helm: true
+      helm-version: ${{ needs.validate.outputs.version }}
 
   # Create GitHub Release
   create-release:
