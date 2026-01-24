@@ -121,14 +121,12 @@ kind-e2e-install-kaos:
 		./hack/update-kind-e2e-values.sh
 	@echo "=== Installing KAOS operator ==="
 	@kubectl create namespace kaos-system 2>/dev/null || true
-	@kubectl apply --server-side -f config/crd/bases
 	@helm upgrade --install kaos chart/ \
 		--namespace kaos-system \
 		-f $(HELM_VALUES_FILE) \
 		--set gatewayAPI.enabled=true \
 		--set gatewayAPI.createGateway=true \
 		--set gatewayAPI.gatewayClassName=envoy-gateway \
-		--skip-crds \
 		--wait --timeout 120s
 	@echo "=== KAOS operator installed ==="
 

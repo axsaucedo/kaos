@@ -15,3 +15,11 @@ defaultImages:
   mcpServer: kind-local/kaos-mcp-server:dev
   litellm: kind-local/litellm:v1.56.5
   ollama: kind-local/ollama:latest
+
+# Enable Gateway API for E2E tests
+gatewayAPI:
+  enabled: true
+  createGateway: true
+  gatewayName: kaos-gateway
+  gatewayClassName: envoy-gateway
+  listenerPort: 80

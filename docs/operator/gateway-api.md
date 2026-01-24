@@ -32,16 +32,17 @@ flowchart TB
 
 1. **Gateway API CRDs** - Install the Gateway API CRDs:
    ```bash
-   kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.3.0/experimental-install.yaml
+   kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.4.1/standard-install.yaml
    ```
 
 2. **Gateway Controller** - Install a Gateway controller (e.g., Envoy Gateway, Kong, Nginx):
    ```bash
    # Example: Envoy Gateway
    helm install envoy-gateway oci://docker.io/envoyproxy/gateway-helm \
-     --version v1.3.0 \
+     --version v1.4.6 \
      --namespace envoy-gateway-system \
-     --create-namespace
+     --create-namespace \
+     --skip-crds
    ```
 
 3. **GatewayClass** - Create a GatewayClass:

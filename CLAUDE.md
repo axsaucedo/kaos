@@ -96,8 +96,8 @@ E2E tests use Gateway API for routing and Helm for operator installation.
 
 ```bash
 # Prerequisites: Gateway API CRDs and controller installed
-# kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.3.0/experimental-install.yaml
-# helm install envoy-gateway oci://docker.io/envoyproxy/gateway-helm --namespace envoy-gateway-system --create-namespace
+# kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.4.1/standard-install.yaml
+# helm install envoy-gateway oci://docker.io/envoyproxy/gateway-helm --version v1.4.6 --namespace envoy-gateway-system --create-namespace --skip-crds
 
 cd operator
 make e2e-test      # Parallel execution
