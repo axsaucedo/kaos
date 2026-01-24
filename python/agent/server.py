@@ -26,22 +26,44 @@ from mcptools.client import MCPClient
 from agent.telemetry.config import TelemetryConfig, init_telemetry, shutdown_telemetry
 
 
-def configure_logging(level: str = "INFO") -> None:
+def configure_logging(level: str = "INFO", otel_correlation: bool = False) -> None:
     """Configure logging for the application.
 
     Sets up a consistent logging format and ensures all application loggers
     are properly configured to output to stdout.
+
+    Args:
+        level: Log level (DEBUG, INFO, WARNING, ERROR)
+        otel_correlation: If True, include trace_id and span_id in log format
     """
     log_level = getattr(logging, level.upper(), logging.INFO)
+
+    # Log format with optional OTel correlation
+    if otel_correlation:
+        log_format = (
+            "%(asctime)s - %(name)s - %(levelname)s - "
+            "[trace_id=%(otelTraceID)s span_id=%(otelSpanID)s] - %(message)s"
+        )
+    else:
+        log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
     # Configure root logger
     logging.basicConfig(
         level=log_level,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        format=log_format,
         datefmt="%Y-%m-%d %H:%M:%S",
         stream=sys.stdout,
         force=True,  # Override any existing configuration
     )
+
+    # If OTel correlation is enabled, add the LoggingInstrumentor
+    if otel_correlation:
+        try:
+            from opentelemetry.instrumentation.logging import LoggingInstrumentor
+
+            LoggingInstrumentor().instrument(set_logging_format=False)
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Failed to enable OTel log correlation: {e}")
 
     # Ensure our application loggers are at the right level
     for logger_name in [
@@ -468,7 +490,11 @@ def create_agent_server(
         settings = AgentServerSettings()  # type: ignore[call-arg]
 
     # Configure logging before anything else
-    configure_logging(settings.agent_log_level)
+    # Configure logging with optional OTel correlation
+    configure_logging(
+        settings.agent_log_level,
+        otel_correlation=settings.otel_enabled and settings.otel_log_correlation,
+    )
 
     model_api = ModelAPI(model=settings.model_name, api_base=settings.model_api_url)
 
