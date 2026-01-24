@@ -25,9 +25,8 @@ spec:
     # - "openai/*"       # Provider wildcard: any openai model
     
     # Provider for LiteLLM routing (optional)
-    # When set, model names are prefixed with this provider
-    # Example: provider: "nebius" + model: "gpt-4" → litellm model: "nebius/gpt-4"
-    # provider: "nebius"
+    # Example: provider: "nebius" + model: "openai/gpt-oss" → litellm routes: "nebius/openai/gpt-oss"
+    provider: "nebius"
     
     # Backend API URL (optional - used as api_base for all models)
     apiBase: "https://api.openai.com"
@@ -271,13 +270,13 @@ List of supported models. Agents referencing this ModelAPI must use a model that
 proxyConfig:
   models:
   - "openai/gpt-4o"           # Specific model
-  - "anthropic/*"             # Provider wildcard
+  - "openai/*"                # Model wildcard
   - "*"                       # Full wildcard (any model)
 ```
 
 Models are validated against this list when Agents are created. Supports:
 - Exact match: `openai/gpt-4o`
-- Provider wildcards: `openai/*` matches `openai/gpt-4o`, `openai/gpt-4o-mini`
+- Model wildcards: `openai/*` matches `openai/gpt-4o`, `openai/gpt-4o-mini`
 - Full wildcard: `*` matches any model
 
 #### proxyConfig.apiBase (optional)

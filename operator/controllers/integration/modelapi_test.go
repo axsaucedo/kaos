@@ -440,6 +440,43 @@ var _ = Describe("ModelAPI Controller", func() {
 		Expect(configMap.Data["config.yaml"]).To(ContainSubstring("model: \"nebius/*\""))
 	})
 
+	It("should support provider wildcard patterns without provider field", func() {
+		// Test that patterns like "openai/*" and "anthropic/*" work without the provider field
+		// These are passed directly to LiteLLM which recognizes built-in providers
+		name := uniqueModelAPIName("provider-wildcards")
+		modelAPI := &kaosv1alpha1.ModelAPI{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: namespace,
+			},
+			Spec: kaosv1alpha1.ModelAPISpec{
+				Mode: kaosv1alpha1.ModelAPIModeProxy,
+				ProxyConfig: &kaosv1alpha1.ProxyConfig{
+					Models: []string{"openai/*", "anthropic/*"},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, modelAPI)).To(Succeed())
+		defer func() {
+			k8sClient.Delete(ctx, modelAPI)
+		}()
+
+		// Wait for configmap to be created
+		configMap := &corev1.ConfigMap{}
+		Eventually(func() error {
+			return k8sClient.Get(ctx, types.NamespacedName{
+				Name:      fmt.Sprintf("litellm-config-%s", name),
+				Namespace: namespace,
+			}, configMap)
+		}, timeout, interval).Should(Succeed())
+
+		// Without provider field, model and model_name should be the same
+		Expect(configMap.Data["config.yaml"]).To(ContainSubstring("model_name: \"openai/*\""))
+		Expect(configMap.Data["config.yaml"]).To(ContainSubstring("model: \"openai/*\""))
+		Expect(configMap.Data["config.yaml"]).To(ContainSubstring("model_name: \"anthropic/*\""))
+		Expect(configMap.Data["config.yaml"]).To(ContainSubstring("model: \"anthropic/*\""))
+	})
+
 	It("should delete ModelAPI without errors", func() {
 		name := uniqueModelAPIName("delete-api")
 		modelAPI := &kaosv1alpha1.ModelAPI{
