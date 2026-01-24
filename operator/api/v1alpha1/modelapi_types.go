@@ -59,10 +59,18 @@ type ApiKeySource struct {
 // ProxyConfig defines configuration for LiteLLM proxy mode
 type ProxyConfig struct {
 	// Models is the list of model identifiers supported by this proxy
-	// Examples: ["openai/gpt-5-mini", "gemini/*", "*"]
+	// These are the model names that agents will use (e.g., "gpt-4o", "qwen-coder")
+	// Examples: ["gpt-4o", "gpt-4o-mini"], ["*"] for wildcard
 	// +kubebuilder:validation:Required
 	// +kubebuilder:validation:MinItems=1
 	Models []string `json:"models"`
+
+	// Provider is the LiteLLM provider prefix to use for routing
+	// Examples: "nebius", "openai", "anthropic", "ollama"
+	// When set, LiteLLM config uses: model_name: <model> → model: <provider>/<model>
+	// This allows agents to use simple model names without provider prefix
+	// +kubebuilder:validation:Optional
+	Provider string `json:"provider,omitempty"`
 
 	// APIBase is the base URL of the backend LLM API to proxy to (e.g., http://host.docker.internal:11434)
 	// Set as PROXY_API_BASE environment variable

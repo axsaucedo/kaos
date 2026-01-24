@@ -24,6 +24,11 @@ spec:
     # - "*"              # Wildcard: any model
     # - "openai/*"       # Provider wildcard: any openai model
     
+    # Provider for LiteLLM routing (optional)
+    # When set, model names are prefixed with this provider
+    # Example: provider: "nebius" + model: "gpt-4" → litellm model: "nebius/gpt-4"
+    # provider: "nebius"
+    
     # Backend API URL (optional - used as api_base for all models)
     apiBase: "https://api.openai.com"
     
@@ -134,27 +139,17 @@ litellm_settings:
   drop_params: true
 ```
 
-#### Wildcard Mode (Passthrough)
+#### Wildcard Mode with Provider
 
-When using wildcards in the `models` list, the ModelAPI generates a passthrough configuration that allows clients to specify any model:
-
-```yaml
-spec:
-  mode: Proxy
-  proxyConfig:
-    models:
-    - "*"  # Allow any model - generates passthrough config
-    apiBase: "http://host.docker.internal:11434"
-```
-
-Provider-specific wildcards also trigger passthrough mode:
+When using wildcards with external providers like Nebius, use the `provider` field to route requests correctly:
 
 ```yaml
 spec:
   mode: Proxy
   proxyConfig:
     models:
-    - "nebius/*"  # Allow any Nebius model
+    - "*"  # Allow any model
+    provider: "nebius"  # Route all models via Nebius provider
     apiKey:
       valueFrom:
         secretKeyRef:
@@ -162,22 +157,39 @@ spec:
           key: api-key
 ```
 
-This generates the following LiteLLM passthrough config:
+This generates the following LiteLLM config:
 
 ```yaml
 model_list:
   - model_name: "*"
     litellm_params:
-      model: "*"
+      model: "nebius/*"
       api_key: "os.environ/PROXY_API_KEY"
 litellm_settings:
   drop_params: true
 ```
 
-With passthrough mode:
-- Agents specify the full model name (e.g., `nebius/Qwen/Qwen3-235B-A22B`)
-- LiteLLM routes requests based on the model prefix (e.g., `nebius/` goes to Nebius provider)
-- The `models` list in the CRD is used for agent validation only
+With provider mode:
+- Agents specify simple model names (e.g., `openai/gpt-oss-20b`)
+- The provider prefix is added automatically (e.g., `nebius/openai/gpt-oss-20b`)
+- The `models` list is used for agent validation only
+
+You can also use provider with specific models:
+
+```yaml
+spec:
+  mode: Proxy
+  proxyConfig:
+    models:
+    - "openai/gpt-oss-20b"
+    - "Qwen/Qwen3-235B-A22B"
+    provider: "nebius"
+    apiKey:
+      valueFrom:
+        secretKeyRef:
+          name: nebius-secrets
+          key: api-key
+```
 
 #### Config File Mode (Advanced)
 

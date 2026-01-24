@@ -379,18 +379,19 @@ var _ = Describe("ModelAPI Controller", func() {
 		}, timeout, interval).Should(Succeed())
 		Expect(configMap.Data["config.yaml"]).To(ContainSubstring("model_name: \"*\""))
 
-		// Update the models list
+		// Update the models list and add a provider
 		Eventually(func() error {
 			current := &kaosv1alpha1.ModelAPI{}
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, current); err != nil {
 				return err
 			}
-			current.Spec.ProxyConfig.Models = []string{"openai/*", "anthropic/*"}
+			current.Spec.ProxyConfig.Models = []string{"gpt-4o", "claude-3"}
+			current.Spec.ProxyConfig.Provider = "openai"
 			return k8sClient.Update(ctx, current)
 		}, timeout, interval).Should(Succeed())
 
-		// Verify configmap is updated - with wildcards, it generates passthrough mode
-		// with model_name: "*" and model: "*" (not the specific patterns)
+		// Verify configmap is updated with provider prefix in model field
+		// model_name: "gpt-4o" → model: "openai/gpt-4o"
 		Eventually(func() bool {
 			if err := k8sClient.Get(ctx, types.NamespacedName{
 				Name:      fmt.Sprintf("litellm-config-%s", name),
@@ -398,10 +399,45 @@ var _ = Describe("ModelAPI Controller", func() {
 			}, configMap); err != nil {
 				return false
 			}
-			// With wildcard patterns, the config should have model: "*" for passthrough
-			return containsSubstring(configMap.Data["config.yaml"], "model_name: \"*\"") &&
-				containsSubstring(configMap.Data["config.yaml"], "model: \"*\"")
-		}, timeout, interval).Should(BeTrue(), "ConfigMap should be updated with passthrough config for wildcards")
+			// With provider set, models should have provider prefix
+			return containsSubstring(configMap.Data["config.yaml"], "model_name: \"gpt-4o\"") &&
+				containsSubstring(configMap.Data["config.yaml"], "model: \"openai/gpt-4o\"") &&
+				containsSubstring(configMap.Data["config.yaml"], "model: \"openai/claude-3\"")
+		}, timeout, interval).Should(BeTrue(), "ConfigMap should be updated with provider-prefixed models")
+	})
+
+	It("should generate correct config for wildcard with provider", func() {
+		name := uniqueModelAPIName("wildcard-provider")
+		modelAPI := &kaosv1alpha1.ModelAPI{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: namespace,
+			},
+			Spec: kaosv1alpha1.ModelAPISpec{
+				Mode: kaosv1alpha1.ModelAPIModeProxy,
+				ProxyConfig: &kaosv1alpha1.ProxyConfig{
+					Models:   []string{"*"},
+					Provider: "nebius",
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, modelAPI)).To(Succeed())
+		defer func() {
+			k8sClient.Delete(ctx, modelAPI)
+		}()
+
+		// Wait for configmap to be created
+		configMap := &corev1.ConfigMap{}
+		Eventually(func() error {
+			return k8sClient.Get(ctx, types.NamespacedName{
+				Name:      fmt.Sprintf("litellm-config-%s", name),
+				Namespace: namespace,
+			}, configMap)
+		}, timeout, interval).Should(Succeed())
+
+		// With wildcard and provider, config should have model_name: "*" → model: "nebius/*"
+		Expect(configMap.Data["config.yaml"]).To(ContainSubstring("model_name: \"*\""))
+		Expect(configMap.Data["config.yaml"]).To(ContainSubstring("model: \"nebius/*\""))
 	})
 
 	It("should delete ModelAPI without errors", func() {

@@ -605,59 +605,45 @@ func (r *ModelAPIReconciler) constructConfigMap(modelapi *kaosv1alpha1.ModelAPI)
 }
 
 // generateLiteLLMConfig creates LiteLLM config YAML from ProxyConfig
-// Handles wildcard patterns properly for LiteLLM routing:
-// - "provider/*" → model_name: "*" with model: "*" (passthrough mode)
-//   Note: LiteLLM validates provider wildcards at startup, only some providers support it.
-//   Using model: "*" with NEBIUS_API_KEY env var allows the client to specify full model names.
-// - "*" → model_name: "*" with model: "*" (full passthrough for any model)
-// - "provider/model" → model_name: "provider/model" (explicit routing)
+// The `provider` field determines how models are routed:
+// - With provider: model_name: "<model>" → model: "<provider>/<model>"
+// - Without provider: model_name: "<model>" → model: "<model>"
+// Wildcard handling:
+// - models: ["*"] with provider: "nebius" → model_name: "*" → model: "nebius/*"
+// - models: ["*"] without provider → model_name: "*" → model: "*"
 func (r *ModelAPIReconciler) generateLiteLLMConfig(proxyConfig *kaosv1alpha1.ProxyConfig) string {
 	var sb strings.Builder
 
 	sb.WriteString("# Auto-generated LiteLLM config\n")
 	sb.WriteString("model_list:\n")
 
-	// Check if any wildcard pattern is used - if so, use passthrough mode
-	hasWildcard := false
-	for _, model := range proxyConfig.Models {
-		if strings.Contains(model, "*") {
-			hasWildcard = true
-			break
-		}
-	}
+	provider := proxyConfig.Provider
 
-	if hasWildcard {
-		// Wildcard mode: Use passthrough for all models
-		// When the models list contains wildcards like "nebius/*" or "*",
-		// we generate a single passthrough entry that lets clients specify
-		// the full model name (e.g., "nebius/Qwen/Qwen3-235B-A22B")
-		sb.WriteString("  - model_name: \"*\"\n")
+	// Generate model_list entries for each model
+	for _, model := range proxyConfig.Models {
+		// model_name is what clients request (e.g., "gpt-4o" or "*")
+		sb.WriteString(fmt.Sprintf("  - model_name: \"%s\"\n", model))
 		sb.WriteString("    litellm_params:\n")
-		sb.WriteString("      model: \"*\"\n")
+
+		// model is what LiteLLM uses internally (with provider prefix if set)
+		var litellmModel string
+		if provider != "" {
+			// Prepend provider prefix: "gpt-4o" → "nebius/gpt-4o"
+			litellmModel = fmt.Sprintf("%s/%s", provider, model)
+		} else {
+			// Use model as-is
+			litellmModel = model
+		}
+		sb.WriteString(fmt.Sprintf("      model: \"%s\"\n", litellmModel))
+
 		// Add api_base if configured
 		if proxyConfig.APIBase != "" {
 			sb.WriteString("      api_base: \"os.environ/PROXY_API_BASE\"\n")
 		}
+
 		// Add api_key if configured
 		if proxyConfig.APIKey != nil {
 			sb.WriteString("      api_key: \"os.environ/PROXY_API_KEY\"\n")
-		}
-	} else {
-		// Explicit mode: Generate entries for each specific model
-		for _, model := range proxyConfig.Models {
-			sb.WriteString(fmt.Sprintf("  - model_name: \"%s\"\n", model))
-			sb.WriteString("    litellm_params:\n")
-			sb.WriteString(fmt.Sprintf("      model: \"%s\"\n", model))
-
-			// Add api_base if configured
-			if proxyConfig.APIBase != "" {
-				sb.WriteString("      api_base: \"os.environ/PROXY_API_BASE\"\n")
-			}
-
-			// Add api_key if configured
-			if proxyConfig.APIKey != nil {
-				sb.WriteString("      api_key: \"os.environ/PROXY_API_KEY\"\n")
-			}
 		}
 	}
 
