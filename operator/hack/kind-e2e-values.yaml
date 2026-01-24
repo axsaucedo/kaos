@@ -23,3 +23,10 @@ gatewayAPI:
   gatewayName: kaos-gateway
   gatewayClassName: envoy-gateway
   listenerPort: 80
+
+# Gateway timeout configuration
+gateway:
+  defaultTimeouts:
+    agent: "120s"
+    modelAPI: "120s"
+    mcp: "30s"

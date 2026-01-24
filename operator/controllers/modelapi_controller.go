@@ -605,17 +605,36 @@ func (r *ModelAPIReconciler) constructConfigMap(modelapi *kaosv1alpha1.ModelAPI)
 }
 
 // generateLiteLLMConfig creates LiteLLM config YAML from ProxyConfig
+// The `provider` field determines how models are routed:
+// - With provider: model_name: "<model>" → model: "<provider>/<model>"
+// - Without provider: model_name: "<model>" → model: "<model>"
+// Wildcard handling:
+// - models: ["*"] with provider: "nebius" → model_name: "*" → model: "nebius/*"
+// - models: ["*"] without provider → model_name: "*" → model: "*"
 func (r *ModelAPIReconciler) generateLiteLLMConfig(proxyConfig *kaosv1alpha1.ProxyConfig) string {
 	var sb strings.Builder
 
 	sb.WriteString("# Auto-generated LiteLLM config\n")
 	sb.WriteString("model_list:\n")
 
+	provider := proxyConfig.Provider
+
 	// Generate model_list entries for each model
 	for _, model := range proxyConfig.Models {
+		// model_name is what clients request (e.g., "gpt-4o" or "*")
 		sb.WriteString(fmt.Sprintf("  - model_name: \"%s\"\n", model))
 		sb.WriteString("    litellm_params:\n")
-		sb.WriteString(fmt.Sprintf("      model: \"%s\"\n", model))
+
+		// model is what LiteLLM uses internally (with provider prefix if set)
+		var litellmModel string
+		if provider != "" {
+			// Prepend provider prefix: "gpt-4o" → "nebius/gpt-4o"
+			litellmModel = fmt.Sprintf("%s/%s", provider, model)
+		} else {
+			// Use model as-is
+			litellmModel = model
+		}
+		sb.WriteString(fmt.Sprintf("      model: \"%s\"\n", litellmModel))
 
 		// Add api_base if configured
 		if proxyConfig.APIBase != "" {

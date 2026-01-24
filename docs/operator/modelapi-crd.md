@@ -24,6 +24,10 @@ spec:
     # - "*"              # Wildcard: any model
     # - "openai/*"       # Provider wildcard: any openai model
     
+    # Provider for LiteLLM routing (optional)
+    # Example: provider: "nebius" + model: "openai/gpt-oss" → litellm routes: "nebius/openai/gpt-oss"
+    provider: "nebius"
+    
     # Backend API URL (optional - used as api_base for all models)
     apiBase: "https://api.openai.com"
     
@@ -134,9 +138,9 @@ litellm_settings:
   drop_params: true
 ```
 
-#### Wildcard Mode
+#### Wildcard Mode with Provider
 
-Use wildcards to allow any model from a provider:
+When using wildcards with external providers like Nebius, use the `provider` field to route requests correctly:
 
 ```yaml
 spec:
@@ -144,22 +148,45 @@ spec:
   proxyConfig:
     models:
     - "*"  # Allow any model
-    apiBase: "http://host.docker.internal:11434"
+    provider: "nebius"  # Route all models via Nebius provider
+    apiKey:
+      valueFrom:
+        secretKeyRef:
+          name: nebius-secrets
+          key: api-key
 ```
 
-Or provider-specific wildcards:
+This generates the following LiteLLM config:
+
+```yaml
+model_list:
+  - model_name: "*"
+    litellm_params:
+      model: "nebius/*"
+      api_key: "os.environ/PROXY_API_KEY"
+litellm_settings:
+  drop_params: true
+```
+
+With provider mode:
+- Agents specify simple model names (e.g., `openai/gpt-oss-20b`)
+- The provider prefix is added automatically (e.g., `nebius/openai/gpt-oss-20b`)
+- The `models` list is used for agent validation only
+
+You can also use provider with specific models:
 
 ```yaml
 spec:
   mode: Proxy
   proxyConfig:
     models:
-    - "openai/*"    # Any OpenAI model
-    - "anthropic/*" # Any Anthropic model
+    - "openai/gpt-oss-20b"
+    - "Qwen/Qwen3-235B-A22B"
+    provider: "nebius"
     apiKey:
       valueFrom:
         secretKeyRef:
-          name: llm-secrets
+          name: nebius-secrets
           key: api-key
 ```
 
@@ -243,13 +270,13 @@ List of supported models. Agents referencing this ModelAPI must use a model that
 proxyConfig:
   models:
   - "openai/gpt-4o"           # Specific model
-  - "anthropic/*"             # Provider wildcard
+  - "openai/*"                # Model wildcard
   - "*"                       # Full wildcard (any model)
 ```
 
 Models are validated against this list when Agents are created. Supports:
 - Exact match: `openai/gpt-4o`
-- Provider wildcards: `openai/*` matches `openai/gpt-4o`, `openai/gpt-4o-mini`
+- Model wildcards: `openai/*` matches `openai/gpt-4o`, `openai/gpt-4o-mini`
 - Full wildcard: `*` matches any model
 
 #### proxyConfig.apiBase (optional)
@@ -483,6 +510,8 @@ spec:
 
 ### Nebius AI Studio
 
+Use the wildcard pattern to allow any Nebius model. Agents specify the full model name (e.g., `nebius/Qwen/Qwen3-235B-A22B`):
+
 ```yaml
 apiVersion: kaos.tools/v1alpha1
 kind: ModelAPI
@@ -492,14 +521,26 @@ spec:
   mode: Proxy
   proxyConfig:
     models:
-    - "nebius/*"
-    apiBase: "https://api.studio.nebius.ai/v1"
+    - "nebius/*"  # Allows any Nebius model (passthrough mode)
     apiKey:
       valueFrom:
         secretKeyRef:
           name: nebius-secrets
           key: api-key
+---
+# Agent using this ModelAPI
+apiVersion: kaos.tools/v1alpha1
+kind: Agent
+metadata:
+  name: my-agent
+spec:
+  modelAPI: nebius
+  model: "nebius/Qwen/Qwen3-235B-A22B"  # Full model name
+  config:
+    description: "Agent using Nebius AI"
 ```
+
+See [LiteLLM Nebius docs](https://docs.litellm.ai/docs/providers/nebius) for supported models.
 
 ### LiteLLM Gateway Proxy
 
