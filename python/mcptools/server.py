@@ -2,7 +2,7 @@ import logging
 import sys
 import time
 from types import FunctionType
-from typing import Dict, Any, Callable, List, Literal
+from typing import Dict, Any, Callable, List, Literal, Optional
 from fastmcp import FastMCP
 import uvicorn
 from fastmcp.server.http import StarletteWithLifespan
@@ -11,22 +11,44 @@ from starlette.routing import Route
 from starlette.responses import JSONResponse
 
 
-def configure_logging(level: str = "INFO") -> None:
+def configure_logging(level: str = "INFO", otel_correlation: bool = False) -> None:
     """Configure logging for the application.
 
     Sets up a consistent logging format and ensures all application loggers
     are properly configured to output to stdout.
+
+    Args:
+        level: Log level (DEBUG, INFO, WARNING, ERROR)
+        otel_correlation: If True, include trace_id and span_id in log format
     """
     log_level = getattr(logging, level.upper(), logging.INFO)
+
+    # Log format with optional OTel correlation
+    if otel_correlation:
+        log_format = (
+            "%(asctime)s - %(name)s - %(levelname)s - "
+            "[trace_id=%(otelTraceID)s span_id=%(otelSpanID)s] - %(message)s"
+        )
+    else:
+        log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
     # Configure root logger
     logging.basicConfig(
         level=log_level,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        format=log_format,
         datefmt="%Y-%m-%d %H:%M:%S",
         stream=sys.stdout,
         force=True,  # Override any existing configuration
     )
+
+    # If OTel correlation is enabled, add the LoggingInstrumentor
+    if otel_correlation:
+        try:
+            from opentelemetry.instrumentation.logging import LoggingInstrumentor
+
+            LoggingInstrumentor().instrument(set_logging_format=False)
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Failed to enable OTel log correlation: {e}")
 
     # Ensure our application loggers are at the right level
     for logger_name in ["mcptools", "mcptools.server", "mcptools.client"]:
@@ -51,6 +73,16 @@ class MCPServerSettings(BaseSettings):
     mcp_log_level: str = "INFO"
     mcp_access_log: bool = False  # Mute uvicorn access logs by default
 
+    # OpenTelemetry configuration
+    otel_enabled: bool = False
+    otel_service_name: Optional[str] = None  # Defaults to "mcp-server"
+    otel_service_version: str = "0.0.1"
+    otel_exporter_otlp_endpoint: str = "http://localhost:4317"
+    otel_exporter_otlp_insecure: bool = True
+    otel_traces_enabled: bool = True
+    otel_metrics_enabled: bool = True
+    otel_log_correlation: bool = True
+
 
 class MCPServer:
     """MCP server that hosts tools via FastMCP Streamable HTTP protocol.
@@ -61,19 +93,47 @@ class MCPServer:
 
     def __init__(self, settings: MCPServerSettings):
         """Initialize MCP server."""
-        # Configure logging first
-        configure_logging(settings.mcp_log_level)
+        # Configure logging with optional OTel correlation
+        configure_logging(
+            settings.mcp_log_level,
+            otel_correlation=settings.otel_enabled and settings.otel_log_correlation,
+        )
 
         self._host = settings.mcp_host
         self._port = settings.mcp_port
         self._log_level = settings.mcp_log_level
         self._access_log = settings.mcp_access_log
+        self._otel_enabled = settings.otel_enabled
         self.mcp = FastMCP("Dynamic MCP Server")
         self.tools_registry: Dict[str, Callable] = {}
+
+        # Initialize OpenTelemetry if enabled
+        if settings.otel_enabled:
+            self._init_telemetry(settings)
 
         # Register provided tools
         if settings.mcp_tools_string:
             self.register_tools_from_string(settings.mcp_tools_string)
+
+    def _init_telemetry(self, settings: MCPServerSettings):
+        """Initialize OpenTelemetry for the MCP server."""
+        try:
+            from agent.telemetry.config import TelemetryConfig, init_telemetry
+
+            config = TelemetryConfig(
+                enabled=settings.otel_enabled,
+                service_name=settings.otel_service_name or "mcp-server",
+                service_version=settings.otel_service_version,
+                otlp_endpoint=settings.otel_exporter_otlp_endpoint,
+                otlp_insecure=settings.otel_exporter_otlp_insecure,
+                traces_enabled=settings.otel_traces_enabled,
+                metrics_enabled=settings.otel_metrics_enabled,
+                log_correlation=settings.otel_log_correlation,
+            )
+            init_telemetry(config)
+            logger.info("OpenTelemetry initialized for MCP server")
+        except Exception as e:
+            logger.warning(f"Failed to initialize OpenTelemetry: {e}")
 
     def _log_startup_config(self):
         """Log server configuration on startup for debugging."""
