@@ -1,6 +1,6 @@
 # OpenTelemetry
 
-KAOS supports OpenTelemetry for observability, including distributed tracing, metrics, and log correlation across all agent operations.
+KAOS supports OpenTelemetry for observability, including distributed tracing, metrics, and log correlation across all agent and MCP server operations.
 
 ## Overview
 
@@ -12,7 +12,7 @@ When enabled, OpenTelemetry instrumentation provides:
 
 ## Enabling Telemetry
 
-Add a `telemetry` section to your Agent's config:
+Add a `telemetry` section to your Agent's or MCPServer's config:
 
 ```yaml
 apiVersion: kaos.tools/v1alpha1
@@ -27,69 +27,115 @@ spec:
     telemetry:
       enabled: true
       endpoint: "http://otel-collector.monitoring.svc.cluster.local:4317"
-      insecure: true
+```
+
+```yaml
+apiVersion: kaos.tools/v1alpha1
+kind: MCPServer
+metadata:
+  name: my-tools
+spec:
+  type: python-runtime
+  config:
+    telemetry:
+      enabled: true
+      endpoint: "http://otel-collector.monitoring.svc.cluster.local:4317"
+    tools:
+      fromString: |
+        def echo(msg: str) -> str:
+            return msg
 ```
 
 ## Configuration Fields
 
+The CRD configuration is intentionally minimal. For advanced settings, use standard `OTEL_*` environment variables via `spec.config.env`.
+
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | bool | `false` | Enable OpenTelemetry instrumentation |
-| `endpoint` | string | `http://localhost:4317` | OTLP exporter endpoint |
-| `insecure` | bool | `true` | Use insecure connection (no TLS) |
-| `serviceName` | string | Agent name | Service name for traces/metrics |
-| `tracesEnabled` | bool | `true` | Enable trace collection |
-| `metricsEnabled` | bool | `true` | Enable metrics collection |
-| `logCorrelation` | bool | `true` | Inject trace context into logs |
+| `endpoint` | string | `http://localhost:4317` | OTLP exporter endpoint (gRPC) |
+
+### Advanced Configuration via Environment Variables
+
+For advanced configuration, use the standard [OpenTelemetry environment variables](https://opentelemetry-python.readthedocs.io/en/latest/sdk/environment_variables.html):
+
+```yaml
+spec:
+  config:
+    telemetry:
+      enabled: true
+      endpoint: "http://otel-collector:4317"
+    env:
+    - name: OTEL_EXPORTER_OTLP_INSECURE
+      value: "false"  # Use TLS
+    - name: OTEL_EXPORTER_OTLP_HEADERS
+      value: "x-api-key=YOUR_KEY"
+    - name: OTEL_TRACES_SAMPLER
+      value: "parentbased_traceidratio"
+    - name: OTEL_TRACES_SAMPLER_ARG
+      value: "0.1"  # Sample 10% of traces
+    - name: OTEL_RESOURCE_ATTRIBUTES
+      value: "deployment.environment=production"
+```
+
+The operator automatically sets:
+- `OTEL_ENABLED`: Set to "true" when telemetry is enabled
+- `OTEL_SERVICE_NAME`: Defaults to the CR name (e.g., agent name)
+- `OTEL_EXPORTER_OTLP_ENDPOINT`: From `telemetry.endpoint`
+- `OTEL_RESOURCE_ATTRIBUTES`: Includes `service.namespace` and `kaos.resource.name`
 
 ## Trace Spans
 
 The following spans are automatically created:
 
-### agent.process_message
+### HTTP Request (auto-instrumented)
 
-Root span for each request to the agent. Attributes:
+FastAPI/Starlette auto-instrumentation creates the root SERVER span for each HTTP request. This provides standard HTTP attributes like `http.method`, `http.url`, `http.status_code`.
+
+### agent.agentic_loop
+
+Main processing span for agent reasoning. Attributes:
 - `agent.name`: Name of the agent
 - `session.id`: Session identifier
+- `agent.max_steps`: Maximum reasoning steps
+- `stream`: Whether streaming is enabled
 
 ### agent.step.{n}
 
 Span for each iteration of the agentic reasoning loop. Attributes:
-- `agent.step`: Step number (1-based)
-- `agent.name`: Agent name
+- `step`: Step number (1-based)
+- `max_steps`: Maximum allowed steps
 
 ### model.inference
 
 Span for LLM API calls. Attributes:
-- `model.name`: Model identifier
-- `model.api_url`: API endpoint
+- `gen_ai.request.model`: Model identifier
 
 ### tool.{name}
 
 Span for MCP tool executions. Attributes:
 - `tool.name`: Tool name
-- `mcp.server`: MCP server name
 
 ### delegate.{agent}
 
 Span for agent-to-agent delegations. Attributes:
-- `delegation.target`: Target agent name
-- `delegation.task`: Task description
+- `agent.delegation.target`: Target agent name
 
 ## Span Hierarchy Example
 
 ```
-agent.process_message (SERVER)
-├── agent.step.1 (INTERNAL)
-│   └── model.inference (CLIENT)
-├── agent.step.2 (INTERNAL)
-│   ├── model.inference (CLIENT)
-│   └── tool.calculator (CLIENT)
-├── agent.step.3 (INTERNAL)
-│   ├── model.inference (CLIENT)
-│   └── delegate.researcher (CLIENT)
-└── agent.step.4 (INTERNAL)
-    └── model.inference (CLIENT)
+HTTP POST /v1/chat/completions (SERVER, auto-instrumented)
+└── agent.agentic_loop (INTERNAL)
+    ├── agent.step.1 (INTERNAL)
+    │   └── model.inference (CLIENT)
+    ├── agent.step.2 (INTERNAL)
+    │   ├── model.inference (CLIENT)
+    │   └── tool.calculator (CLIENT)
+    ├── agent.step.3 (INTERNAL)
+    │   ├── model.inference (CLIENT)
+    │   └── delegate.researcher (CLIENT)
+    └── agent.step.4 (INTERNAL)
+        └── model.inference (CLIENT)
 ```
 
 ## Metrics
@@ -120,7 +166,7 @@ Delegation metrics also include:
 
 ## Log Correlation
 
-When `logCorrelation` is enabled, log entries include trace context:
+When OpenTelemetry is enabled, log entries automatically include trace context:
 
 ```
 2024-01-15 10:30:45 INFO [trace_id=abc123 span_id=def456] Processing message...
@@ -146,11 +192,6 @@ spec:
     telemetry:
       enabled: true
       endpoint: "http://otel-collector.monitoring.svc.cluster.local:4317"
-      insecure: true
-      serviceName: "traced-agent"
-      tracesEnabled: true
-      metricsEnabled: true
-      logCorrelation: true
   agentNetwork:
     access:
     - researcher
@@ -284,17 +325,16 @@ config:
 
 ## Environment Variables
 
-For advanced configuration, the following environment variables are passed to agent pods when telemetry is enabled:
+The operator automatically sets these environment variables when telemetry is enabled:
 
 | Variable | Description |
 |----------|-------------|
 | `OTEL_ENABLED` | "true" when telemetry is enabled |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP endpoint URL |
-| `OTEL_EXPORTER_OTLP_INSECURE` | "true" for insecure connections |
-| `OTEL_SERVICE_NAME` | Service name for traces/metrics |
-| `OTEL_TRACES_ENABLED` | "true" when traces are enabled |
-| `OTEL_METRICS_ENABLED` | "true" when metrics are enabled |
-| `OTEL_LOG_CORRELATION` | "true" when log correlation is enabled |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP endpoint URL from `telemetry.endpoint` |
+| `OTEL_SERVICE_NAME` | Defaults to CR name (agent or MCP server name) |
+| `OTEL_RESOURCE_ATTRIBUTES` | Includes `service.namespace` and `kaos.resource.name` |
+
+For additional configuration, use standard [OpenTelemetry environment variables](https://opentelemetry-python.readthedocs.io/en/latest/sdk/environment_variables.html) via `spec.config.env`.
 
 ## Troubleshooting
 
@@ -319,11 +359,11 @@ kubectl exec -it deploy/agent-my-agent -- curl -v http://otel-collector.monitori
 
 If telemetry adds noticeable latency:
 - Use batching in the OTel collector
-- Consider sampling for high-throughput agents
-- Disable metrics if only traces are needed
+- Configure sampling via `OTEL_TRACES_SAMPLER` and `OTEL_TRACES_SAMPLER_ARG` env vars
 
 ### Missing spans
 
 Ensure all sub-agents and MCP servers are instrumented:
 - Each agent should have its own telemetry config
-- MCP servers share the agent's trace context via W3C Trace Context headers
+- MCP servers should also have telemetry enabled
+- Trace context propagates automatically via W3C Trace Context headers
