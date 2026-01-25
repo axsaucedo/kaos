@@ -19,6 +19,7 @@ dependencies = [
     "opentelemetry-instrumentation-fastapi>=0.41b0",
     "opentelemetry-instrumentation-httpx>=0.41b0",
     "opentelemetry-instrumentation-logging>=0.41b0",
+    "opentelemetry-instrumentation-starlette>=0.41b0",
     # OpenTelemetry exporters
     "opentelemetry-exporter-otlp>=1.20.0",
 ]
