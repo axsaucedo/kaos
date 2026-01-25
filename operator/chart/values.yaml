@@ -27,27 +27,33 @@ controllerManager:
   tolerations: []
   topologySpreadConstraints: []
 kubernetesClusterDomain: cluster.local
-serviceAccount:
-  annotations: {}
-  automount: true
-  create: true
-  name: ""
+
+# Default images for agent runtime and MCP servers
+defaultImages:
+  agentRuntime: axsauze/kaos-agent:latest
+  mcpServer: axsauze/kaos-mcp-server:latest
+  litellm: ghcr.io/berriai/litellm:main-stable
+  ollama: ollama/ollama:latest
+
 # Gateway API configuration
 gatewayAPI:
   enabled: false
   createGateway: false
   gatewayName: kaos-gateway
-  gatewayClassName: envoy-gateway
+  gatewayClassName: ""
+  gatewayNamespace: ""
   listenerPort: 80
-# Gateway timeout configuration
+  listenerProtocol: HTTP
+
+# Gateway timeout settings
 gateway:
   defaultTimeouts:
-    agent: "120s"
+    agent: "300s"
     modelAPI: "120s"
-    mcp: "30s"
-# Default container images
-defaultImages:
-  agentRuntime: "axsauze/kaos-agent:latest"
-  mcpServer: "axsauze/kaos-agent:latest"
-  litellm: "ghcr.io/berriai/litellm:main-latest"
-  ollama: "alpine/ollama:latest"
+    mcp: "60s"
+
+serviceAccount:
+  annotations: {}
+  automount: true
+  create: true
+  name: ""
