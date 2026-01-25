@@ -2,17 +2,22 @@
 OpenTelemetry Manager for KAOS.
 
 Provides a simplified interface for OpenTelemetry instrumentation using standard
-OTEL_* environment variables. When OTEL_ENABLED=true, traces, metrics, and log
-correlation are all enabled.
+OTEL_* environment variables. Uses OTEL_SDK_DISABLED (standard OTel env var) to
+control whether telemetry is enabled.
+
+Key design:
+- Process-global SDK initialization via _OtelSingleton (providers, propagators)
+- Lightweight KaosOtelManager instances for per-service span/metric creation
+- OtelConfig uses pydantic BaseSettings with OTEL-compliant env var names
 """
 
 import logging
 import os
 import time
 from contextlib import contextmanager
-from dataclasses import dataclass
 from typing import Any, Dict, Iterator, Optional
 
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from opentelemetry import trace, metrics
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
@@ -37,26 +42,101 @@ ATTR_MODEL_NAME = "gen_ai.request.model"
 ATTR_TOOL_NAME = "tool.name"
 ATTR_DELEGATION_TARGET = "agent.delegation.target"
 
-# Process-global initialization state
-_initialized: bool = False
+
+class OtelConfig(BaseSettings):
+    """OpenTelemetry configuration from standard OTEL_* environment variables.
+
+    Uses pydantic BaseSettings for automatic env var parsing.
+    OTEL_SDK_DISABLED=true disables telemetry (standard OTel env var).
+    """
+
+    model_config = SettingsConfigDict(env_prefix="", case_sensitive=False)
+
+    # Standard OTel env vars - required when telemetry enabled
+    otel_service_name: str
+    otel_exporter_otlp_endpoint: str
+
+    # Standard OTel env var for disabling SDK (default: false = enabled)
+    otel_sdk_disabled: bool = False
+
+    # Resource attributes (optional, we append to existing)
+    otel_resource_attributes: str = ""
+
+    @property
+    def enabled(self) -> bool:
+        """Check if OTel is enabled (not disabled)."""
+        return not self.otel_sdk_disabled
 
 
-@dataclass
-class OtelConfig:
-    """OpenTelemetry configuration from environment variables."""
+class _OtelSingleton:
+    """Private singleton holding process-global OTel state.
 
-    enabled: bool
-    service_name: str
-    endpoint: str
+    SDK providers are process-global and should only be initialized once.
+    This class ensures idempotent initialization.
+    """
 
-    @classmethod
-    def from_env(cls, default_service_name: str = "kaos") -> "OtelConfig":
-        """Create config from standard OTEL_* environment variables."""
-        return cls(
-            enabled=os.getenv("OTEL_ENABLED", "false").lower() in ("true", "1", "yes"),
-            service_name=os.getenv("OTEL_SERVICE_NAME", default_service_name),
-            endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317"),
+    _instance: Optional["_OtelSingleton"] = None
+    _initialized: bool = False
+
+    def __new__(cls) -> "_OtelSingleton":
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def initialize(self, config: OtelConfig) -> bool:
+        """Initialize OTel SDK with given config. Idempotent.
+
+        Returns True if initialization happened, False if already initialized or disabled.
+        """
+        if self._initialized:
+            return False
+
+        if not config.enabled:
+            logger.debug("OpenTelemetry disabled (OTEL_SDK_DISABLED=true)")
+            self._initialized = True
+            return False
+
+        # Create resource with service name
+        resource = Resource.create({SERVICE_NAME: config.otel_service_name})
+
+        # Set up W3C Trace Context propagation (standard)
+        set_global_textmap(
+            CompositePropagator([TraceContextTextMapPropagator(), W3CBaggagePropagator()])
         )
+
+        # Initialize tracing - let SDK use OTEL_EXPORTER_OTLP_* env vars for advanced config
+        tracer_provider = TracerProvider(resource=resource)
+        # Only set endpoint explicitly, let SDK handle insecure/headers via env vars
+        otlp_span_exporter = OTLPSpanExporter(endpoint=config.otel_exporter_otlp_endpoint)
+        tracer_provider.add_span_processor(BatchSpanProcessor(otlp_span_exporter))
+        trace.set_tracer_provider(tracer_provider)
+
+        # Initialize metrics
+        otlp_metric_exporter = OTLPMetricExporter(endpoint=config.otel_exporter_otlp_endpoint)
+        metric_reader = PeriodicExportingMetricReader(otlp_metric_exporter)
+        meter_provider = MeterProvider(resource=resource, metric_readers=[metric_reader])
+        metrics.set_meter_provider(meter_provider)
+
+        logger.info(
+            f"OpenTelemetry initialized: {config.otel_exporter_otlp_endpoint} "
+            f"(service: {config.otel_service_name})"
+        )
+        self._initialized = True
+        return True
+
+    @property
+    def is_initialized(self) -> bool:
+        """Check if OTel has been initialized."""
+        return self._initialized
+
+
+def is_otel_enabled() -> bool:
+    """Check if OTel is enabled via environment variable.
+
+    Uses standard OTEL_SDK_DISABLED env var (inverted logic).
+    """
+    disabled = os.getenv("OTEL_SDK_DISABLED", "false").lower() in ("true", "1", "yes")
+    return not disabled
 
 
 def init_otel(service_name: Optional[str] = None) -> bool:
@@ -65,56 +145,44 @@ def init_otel(service_name: Optional[str] = None) -> bool:
     Should be called once at process startup. Idempotent - safe to call multiple times.
 
     Args:
-        service_name: Default service name if OTEL_SERVICE_NAME not set
+        service_name: Default service name if OTEL_SERVICE_NAME not set (for backward compat)
 
     Returns:
         True if OTel was initialized, False if disabled or already initialized
     """
-    global _initialized
-    if _initialized:
+    # Check if OTel is disabled first
+    if not is_otel_enabled():
+        logger.debug("OpenTelemetry disabled (OTEL_SDK_DISABLED=true or not configured)")
         return False
 
-    config = OtelConfig.from_env(service_name or "kaos")
-    if not config.enabled:
-        logger.debug("OpenTelemetry disabled (OTEL_ENABLED != true)")
-        _initialized = True
+    # Try to load config from env vars
+    try:
+        # If service_name provided and OTEL_SERVICE_NAME not set, use it as fallback
+        if service_name and not os.getenv("OTEL_SERVICE_NAME"):
+            os.environ["OTEL_SERVICE_NAME"] = service_name
+
+        # Require endpoint and service_name when enabled
+        if not os.getenv("OTEL_SERVICE_NAME") or not os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"):
+            logger.debug(
+                "OpenTelemetry not configured: "
+                "OTEL_SERVICE_NAME and OTEL_EXPORTER_OTLP_ENDPOINT required"
+            )
+            return False
+
+        config = OtelConfig()  # type: ignore[call-arg]
+    except Exception as e:
+        logger.warning(f"OpenTelemetry config error: {e}")
         return False
 
-    # Create resource with service name
-    resource = Resource.create({SERVICE_NAME: config.service_name})
-
-    # Set up W3C Trace Context propagation
-    set_global_textmap(
-        CompositePropagator([TraceContextTextMapPropagator(), W3CBaggagePropagator()])
-    )
-
-    # Initialize tracing
-    tracer_provider = TracerProvider(resource=resource)
-    otlp_span_exporter = OTLPSpanExporter(endpoint=config.endpoint, insecure=True)
-    tracer_provider.add_span_processor(BatchSpanProcessor(otlp_span_exporter))
-    trace.set_tracer_provider(tracer_provider)
-
-    # Initialize metrics
-    otlp_metric_exporter = OTLPMetricExporter(endpoint=config.endpoint, insecure=True)
-    metric_reader = PeriodicExportingMetricReader(otlp_metric_exporter)
-    meter_provider = MeterProvider(resource=resource, metric_readers=[metric_reader])
-    metrics.set_meter_provider(meter_provider)
-
-    logger.info(f"OpenTelemetry initialized: {config.endpoint} (service: {config.service_name})")
-    _initialized = True
-    return True
-
-
-def is_otel_enabled() -> bool:
-    """Check if OTel is enabled via environment variable."""
-    return os.getenv("OTEL_ENABLED", "false").lower() in ("true", "1", "yes")
+    return _OtelSingleton().initialize(config)
 
 
 class KaosOtelManager:
     """Lightweight helper for creating spans and recording metrics.
 
     Provides convenience methods for KAOS-specific telemetry. Each server/client
-    should create one instance. The underlying providers are process-global.
+    creates one instance holding thin metadata. The underlying providers are
+    process-global via _OtelSingleton.
 
     Example:
         otel = KaosOtelManager("my-agent")

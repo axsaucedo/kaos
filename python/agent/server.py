@@ -23,7 +23,7 @@ from modelapi.client import ModelAPI
 from agent.client import Agent, RemoteAgent
 from agent.memory import LocalMemory
 from mcptools.client import MCPClient
-from agent.telemetry import init_otel, is_otel_enabled
+from telemetry.manager import init_otel, is_otel_enabled
 
 
 def configure_logging(level: str = "INFO", otel_correlation: bool = False) -> None:
@@ -547,16 +547,8 @@ def create_agent_server(
         memory = NullMemory()
 
     # Initialize OpenTelemetry if enabled (uses standard OTEL_* env vars)
+    # Note: LoggingInstrumentor is already called in configure_logging() above
     init_otel(settings.agent_name)
-
-    # Configure log correlation if OTel is enabled
-    if is_otel_enabled():
-        try:
-            from opentelemetry.instrumentation.logging import LoggingInstrumentor
-
-            LoggingInstrumentor().instrument(set_logging_format=False)
-        except Exception as e:
-            logger.warning(f"Failed to enable OTel log correlation: {e}")
 
     agent = Agent(
         name=settings.agent_name,

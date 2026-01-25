@@ -84,8 +84,9 @@ class MCPServer:
 
     def __init__(self, settings: MCPServerSettings):
         """Initialize MCP server."""
-        # Check if OTel enabled via env var
-        otel_enabled = os.getenv("OTEL_ENABLED", "false").lower() in ("true", "1", "yes")
+        # Check if OTel enabled via env var (OTEL_SDK_DISABLED=true disables)
+        otel_disabled = os.getenv("OTEL_SDK_DISABLED", "false").lower() in ("true", "1", "yes")
+        otel_enabled = not otel_disabled
 
         # Configure logging with optional OTel correlation
         configure_logging(settings.mcp_log_level, otel_correlation=otel_enabled)
@@ -109,7 +110,7 @@ class MCPServer:
     def _init_telemetry(self):
         """Initialize OpenTelemetry for the MCP server."""
         try:
-            from agent.telemetry import init_otel
+            from telemetry.manager import init_otel
 
             service_name = os.getenv("OTEL_SERVICE_NAME", "mcp-server")
             init_otel(service_name)

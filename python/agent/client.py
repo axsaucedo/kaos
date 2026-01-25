@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from modelapi.client import ModelAPI
 from agent.memory import LocalMemory, NullMemory
 from mcptools.client import MCPClient
-from agent.telemetry import KaosOtelManager, timed
+from telemetry.manager import KaosOtelManager, timed
 
 logger = logging.getLogger(__name__)
 
@@ -317,6 +317,7 @@ class Agent:
             that will be used instead of calling the model API.
         """
         # Use the KaosOtelManager for simpler telemetry
+        request_success = True
         with timed() as timing:
             # Get or create session
             if session_id:
@@ -375,6 +376,7 @@ class Agent:
                         yield chunk
 
                 except Exception as e:
+                    request_success = False
                     error_msg = f"Error processing message: {str(e)}"
                     logger.error(error_msg)
                     error_event = self.memory.create_event("error", error_msg)
@@ -382,7 +384,7 @@ class Agent:
                     yield f"Sorry, I encountered an error: {str(e)}"
 
         # Record request metrics after completion
-        self._otel.record_request(timing["duration_ms"], success=True)
+        self._otel.record_request(timing["duration_ms"], success=request_success)
 
     async def _agentic_loop(
         self,

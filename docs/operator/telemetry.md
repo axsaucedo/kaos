@@ -53,7 +53,7 @@ The CRD configuration is intentionally minimal. For advanced settings, use stand
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | bool | `false` | Enable OpenTelemetry instrumentation |
-| `endpoint` | string | `http://localhost:4317` | OTLP exporter endpoint (gRPC) |
+| `endpoint` | string | - | OTLP exporter endpoint (gRPC, required when enabled) |
 
 ### Advanced Configuration via Environment Variables
 
@@ -79,10 +79,10 @@ spec:
 ```
 
 The operator automatically sets:
-- `OTEL_ENABLED`: Set to "true" when telemetry is enabled
+- `OTEL_SDK_DISABLED`: Set to "false" when telemetry is enabled (standard OTel env var)
 - `OTEL_SERVICE_NAME`: Defaults to the CR name (e.g., agent name)
 - `OTEL_EXPORTER_OTLP_ENDPOINT`: From `telemetry.endpoint`
-- `OTEL_RESOURCE_ATTRIBUTES`: Includes `service.namespace` and `kaos.resource.name`
+- `OTEL_RESOURCE_ATTRIBUTES`: Appends `service.namespace` and `kaos.resource.name` to any user-provided values
 
 ## Trace Spans
 
@@ -329,10 +329,10 @@ The operator automatically sets these environment variables when telemetry is en
 
 | Variable | Description |
 |----------|-------------|
-| `OTEL_ENABLED` | "true" when telemetry is enabled |
+| `OTEL_SDK_DISABLED` | "false" when telemetry is enabled (standard OTel env var) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP endpoint URL from `telemetry.endpoint` |
 | `OTEL_SERVICE_NAME` | Defaults to CR name (agent or MCP server name) |
-| `OTEL_RESOURCE_ATTRIBUTES` | Includes `service.namespace` and `kaos.resource.name` |
+| `OTEL_RESOURCE_ATTRIBUTES` | Appends `service.namespace` and `kaos.resource.name` to user values |
 
 For additional configuration, use standard [OpenTelemetry environment variables](https://opentelemetry-python.readthedocs.io/en/latest/sdk/environment_variables.html) via `spec.config.env`.
 
