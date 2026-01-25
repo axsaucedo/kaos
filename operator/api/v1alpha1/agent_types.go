@@ -56,35 +56,18 @@ type MemoryConfig struct {
 
 // +kubebuilder:object:generate=true
 
-// TelemetryConfig defines OpenTelemetry instrumentation settings
+// TelemetryConfig defines OpenTelemetry instrumentation settings.
+// Advanced OTel settings can be configured via spec.config.env using standard
+// OTEL_* environment variables (e.g., OTEL_EXPORTER_OTLP_INSECURE, OTEL_TRACES_SAMPLER).
 type TelemetryConfig struct {
 	// Enabled controls whether OpenTelemetry is enabled (default: false)
+	// When enabled, traces, metrics, and log correlation are all active.
 	// +kubebuilder:default=false
 	Enabled bool `json:"enabled,omitempty"`
 
 	// Endpoint is the OTLP endpoint URL (default: http://localhost:4317)
 	// +kubebuilder:default="http://localhost:4317"
 	Endpoint string `json:"endpoint,omitempty"`
-
-	// Insecure controls whether to use insecure connection (default: true)
-	// +kubebuilder:default=true
-	Insecure *bool `json:"insecure,omitempty"`
-
-	// ServiceName overrides the default service name (defaults to agent name)
-	// +kubebuilder:validation:Optional
-	ServiceName string `json:"serviceName,omitempty"`
-
-	// TracesEnabled controls whether traces are exported (default: true when enabled)
-	// +kubebuilder:default=true
-	TracesEnabled *bool `json:"tracesEnabled,omitempty"`
-
-	// MetricsEnabled controls whether metrics are exported (default: true when enabled)
-	// +kubebuilder:default=true
-	MetricsEnabled *bool `json:"metricsEnabled,omitempty"`
-
-	// LogCorrelation controls whether log correlation is enabled (default: true when enabled)
-	// +kubebuilder:default=true
-	LogCorrelation *bool `json:"logCorrelation,omitempty"`
 }
 
 // +kubebuilder:object:generate=true

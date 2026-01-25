@@ -515,49 +515,12 @@ func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *
 
 	// OpenTelemetry configuration
 	if agent.Spec.Config != nil && agent.Spec.Config.Telemetry != nil {
-		tel := agent.Spec.Config.Telemetry
-		if tel.Enabled {
-			env = append(env, corev1.EnvVar{
-				Name:  "OTEL_ENABLED",
-				Value: "true",
-			})
-			if tel.Endpoint != "" {
-				env = append(env, corev1.EnvVar{
-					Name:  "OTEL_EXPORTER_OTLP_ENDPOINT",
-					Value: tel.Endpoint,
-				})
-			}
-			if tel.Insecure != nil {
-				env = append(env, corev1.EnvVar{
-					Name:  "OTEL_EXPORTER_OTLP_INSECURE",
-					Value: fmt.Sprintf("%t", *tel.Insecure),
-				})
-			}
-			if tel.ServiceName != "" {
-				env = append(env, corev1.EnvVar{
-					Name:  "OTEL_SERVICE_NAME",
-					Value: tel.ServiceName,
-				})
-			}
-			if tel.TracesEnabled != nil {
-				env = append(env, corev1.EnvVar{
-					Name:  "OTEL_TRACES_ENABLED",
-					Value: fmt.Sprintf("%t", *tel.TracesEnabled),
-				})
-			}
-			if tel.MetricsEnabled != nil {
-				env = append(env, corev1.EnvVar{
-					Name:  "OTEL_METRICS_ENABLED",
-					Value: fmt.Sprintf("%t", *tel.MetricsEnabled),
-				})
-			}
-			if tel.LogCorrelation != nil {
-				env = append(env, corev1.EnvVar{
-					Name:  "OTEL_LOG_CORRELATION",
-					Value: fmt.Sprintf("%t", *tel.LogCorrelation),
-				})
-			}
-		}
+		otelEnv := util.BuildTelemetryEnvVars(
+			agent.Spec.Config.Telemetry,
+			agent.Name,
+			agent.Namespace,
+		)
+		env = append(env, otelEnv...)
 	}
 
 	return env

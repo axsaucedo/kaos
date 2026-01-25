@@ -43,6 +43,10 @@ type MCPServerConfig struct {
 	// +kubebuilder:validation:Optional
 	Tools *MCPToolsConfig `json:"tools,omitempty"`
 
+	// Telemetry configures OpenTelemetry instrumentation
+	// +kubebuilder:validation:Optional
+	Telemetry *TelemetryConfig `json:"telemetry,omitempty"`
+
 	// Env variables to pass to the MCP server
 	// +kubebuilder:validation:Optional
 	Env []corev1.EnvVar `json:"env,omitempty"`

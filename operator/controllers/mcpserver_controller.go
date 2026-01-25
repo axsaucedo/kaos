@@ -305,6 +305,16 @@ func (r *MCPServerReconciler) constructPythonContainer(mcpserver *kaosv1alpha1.M
 		}
 	}
 
+	// OpenTelemetry configuration
+	if mcpserver.Spec.Config.Telemetry != nil {
+		otelEnv := util.BuildTelemetryEnvVars(
+			mcpserver.Spec.Config.Telemetry,
+			mcpserver.Name,
+			mcpserver.Namespace,
+		)
+		env = append(env, otelEnv...)
+	}
+
 	container := corev1.Container{
 		Name:            "mcp-server",
 		Image:           image,
