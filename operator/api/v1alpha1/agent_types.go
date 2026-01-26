@@ -65,8 +65,9 @@ type TelemetryConfig struct {
 	// +kubebuilder:default=false
 	Enabled bool `json:"enabled,omitempty"`
 
-	// Endpoint is the OTLP endpoint URL (default: http://localhost:4317)
-	// +kubebuilder:default="http://localhost:4317"
+	// Endpoint is the OTLP gRPC endpoint URL (required when enabled).
+	// Example: "http://otel-collector.observability:4317"
+	// +kubebuilder:validation:Optional
 	Endpoint string `json:"endpoint,omitempty"`
 }
 

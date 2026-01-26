@@ -61,7 +61,8 @@ class SpanState:
 
 
 # Async-safe span stack per context (supports nesting)
-_span_stack: ContextVar[List[SpanState]] = ContextVar("kaos_span_stack", default=[])
+# default=None to avoid shared mutable list across async contexts
+_span_stack: ContextVar[Optional[List[SpanState]]] = ContextVar("kaos_span_stack", default=None)
 
 
 class OtelConfig(BaseSettings):
@@ -95,6 +96,25 @@ def is_otel_enabled() -> bool:
     Returns True only if init_otel() was successfully called and OTel is active.
     """
     return _initialized
+
+
+def should_enable_otel() -> bool:
+    """Check if OTel should be enabled based on environment variables.
+
+    This checks env vars BEFORE init_otel() is called, useful for deciding
+    whether to enable log correlation before the SDK is initialized.
+
+    Returns True if OTEL_SDK_DISABLED is not set to true AND required env vars
+    (OTEL_SERVICE_NAME, OTEL_EXPORTER_OTLP_ENDPOINT) are configured.
+    """
+    disabled = os.getenv("OTEL_SDK_DISABLED", "false").lower() in ("true", "1", "yes")
+    if disabled:
+        return False
+
+    # Check if required env vars are set
+    service_name = os.getenv("OTEL_SERVICE_NAME", "")
+    endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+    return bool(service_name and endpoint)
 
 
 def init_otel(service_name: Optional[str] = None) -> bool:
@@ -146,14 +166,15 @@ def init_otel(service_name: Optional[str] = None) -> bool:
         CompositePropagator([TraceContextTextMapPropagator(), W3CBaggagePropagator()])
     )
 
-    # Initialize tracing - let SDK use OTEL_EXPORTER_OTLP_* env vars for advanced config
+    # Initialize tracing - let SDK use OTEL_EXPORTER_OTLP_* env vars for TLS, headers, etc.
+    # By not passing endpoint explicitly, SDK will read from OTEL_EXPORTER_OTLP_ENDPOINT
     tracer_provider = TracerProvider(resource=resource)
-    otlp_span_exporter = OTLPSpanExporter(endpoint=config.otel_exporter_otlp_endpoint)
+    otlp_span_exporter = OTLPSpanExporter()  # Uses OTEL_EXPORTER_OTLP_* env vars
     tracer_provider.add_span_processor(BatchSpanProcessor(otlp_span_exporter))
     trace.set_tracer_provider(tracer_provider)
 
-    # Initialize metrics
-    otlp_metric_exporter = OTLPMetricExporter(endpoint=config.otel_exporter_otlp_endpoint)
+    # Initialize metrics - also uses env vars for endpoint, TLS config, etc.
+    otlp_metric_exporter = OTLPMetricExporter()  # Uses OTEL_EXPORTER_OTLP_* env vars
     metric_reader = PeriodicExportingMetricReader(otlp_metric_exporter)
     meter_provider = MeterProvider(resource=resource, metric_readers=[metric_reader])
     metrics.set_meter_provider(meter_provider)
@@ -181,7 +202,7 @@ class KaosOtelManager:
         except Exception as e:
             otel.span_failure(e)
             raise
-        finally:
+        else:
             otel.span_success()
     """
 
@@ -236,13 +257,15 @@ class KaosOtelManager:
         )
 
     def _get_stack(self) -> List[SpanState]:
-        """Get or create the span stack for current async context."""
-        try:
-            return _span_stack.get()
-        except LookupError:
-            stack: List[SpanState] = []
+        """Get or create the span stack for current async context.
+
+        Allocates a new list per-context to avoid sharing mutable state.
+        """
+        stack = _span_stack.get()
+        if stack is None:
+            stack = []
             _span_stack.set(stack)
-            return stack
+        return stack
 
     def span_begin(
         self,

@@ -90,6 +90,20 @@ func (r *ModelAPIReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	needsConfigMap := modelapi.Spec.Mode == kaosv1alpha1.ModelAPIModeProxy &&
 		modelapi.Spec.ProxyConfig != nil
 
+	// Warn if telemetry is enabled for Ollama (Hosted mode) - OTel not supported
+	if modelapi.Spec.Mode == kaosv1alpha1.ModelAPIModeHosted {
+		telemetry := util.MergeTelemetryConfig(modelapi.Spec.Telemetry)
+		if telemetry != nil && telemetry.Enabled {
+			log.Info("WARNING: OpenTelemetry telemetry is not supported for Ollama (Hosted mode). "+
+				"Traces and metrics will not be collected.", "modelapi", modelapi.Name)
+			// Update status message to warn user
+			if modelapi.Status.Message == "" {
+				modelapi.Status.Message = "Warning: Telemetry enabled but Ollama does not support OTel natively"
+				r.Status().Update(ctx, modelapi)
+			}
+		}
+	}
+
 	// Validate configYaml against models list if both are provided
 	if needsConfigMap && modelapi.Spec.ProxyConfig.ConfigYaml != nil &&
 		modelapi.Spec.ProxyConfig.ConfigYaml.FromString != "" {
@@ -456,6 +470,27 @@ func (r *ModelAPIReconciler) constructContainer(modelapi *kaosv1alpha1.ModelAPI)
 			})
 		}
 
+		// Add OTel env vars for LiteLLM when telemetry is enabled
+		telemetry := util.MergeTelemetryConfig(modelapi.Spec.Telemetry)
+		if telemetry != nil && telemetry.Enabled {
+			// LiteLLM uses OTEL_EXPORTER="otlp" to enable OTel exporter
+			env = append(env, corev1.EnvVar{
+				Name:  "OTEL_EXPORTER",
+				Value: "otlp",
+			})
+			if telemetry.Endpoint != "" {
+				env = append(env, corev1.EnvVar{
+					Name:  "OTEL_ENDPOINT",
+					Value: telemetry.Endpoint,
+				})
+			}
+			// Standard OTel service name
+			env = append(env, corev1.EnvVar{
+				Name:  "OTEL_SERVICE_NAME",
+				Value: modelapi.Name,
+			})
+		}
+
 	} else {
 		// Ollama Hosted mode
 		image = os.Getenv("DEFAULT_OLLAMA_IMAGE")
@@ -583,7 +618,9 @@ func (r *ModelAPIReconciler) constructConfigMap(modelapi *kaosv1alpha1.ModelAPI)
 			configYaml = modelapi.Spec.ProxyConfig.ConfigYaml.FromString
 		} else {
 			// Generate config from models list (models is required with MinItems=1)
-			configYaml = r.generateLiteLLMConfig(modelapi.Spec.ProxyConfig)
+			// Pass merged telemetry config for OTel callback
+			telemetry := util.MergeTelemetryConfig(modelapi.Spec.Telemetry)
+			configYaml = r.generateLiteLLMConfig(modelapi.Spec.ProxyConfig, telemetry)
 		}
 	}
 
@@ -611,7 +648,8 @@ func (r *ModelAPIReconciler) constructConfigMap(modelapi *kaosv1alpha1.ModelAPI)
 // Wildcard handling:
 // - models: ["*"] with provider: "nebius" → model_name: "*" → model: "nebius/*"
 // - models: ["*"] without provider → model_name: "*" → model: "*"
-func (r *ModelAPIReconciler) generateLiteLLMConfig(proxyConfig *kaosv1alpha1.ProxyConfig) string {
+// When telemetry is enabled, adds OTel callback for traces/metrics.
+func (r *ModelAPIReconciler) generateLiteLLMConfig(proxyConfig *kaosv1alpha1.ProxyConfig, telemetry *kaosv1alpha1.TelemetryConfig) string {
 	var sb strings.Builder
 
 	sb.WriteString("# Auto-generated LiteLLM config\n")
@@ -649,6 +687,12 @@ func (r *ModelAPIReconciler) generateLiteLLMConfig(proxyConfig *kaosv1alpha1.Pro
 
 	sb.WriteString("\nlitellm_settings:\n")
 	sb.WriteString("  drop_params: true\n")
+
+	// Add OTel callback when telemetry is enabled
+	if telemetry != nil && telemetry.Enabled {
+		sb.WriteString("  success_callback: [\"otel\"]\n")
+		sb.WriteString("  failure_callback: [\"otel\"]\n")
+	}
 
 	return sb.String()
 }

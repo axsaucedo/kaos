@@ -23,7 +23,7 @@ from modelapi.client import ModelAPI
 from agent.client import Agent, RemoteAgent
 from agent.memory import LocalMemory
 from mcptools.client import MCPClient
-from telemetry.manager import init_otel, is_otel_enabled
+from telemetry.manager import init_otel, is_otel_enabled, should_enable_otel
 
 
 def configure_logging(level: str = "INFO", otel_correlation: bool = False) -> None:
@@ -473,11 +473,11 @@ def create_agent_server(
         # Load from environment variables - requires AGENT_NAME and MODEL_API_URL
         settings = AgentServerSettings()  # type: ignore[call-arg]
 
-    # Check if OTel enabled via env var
-    otel_enabled = is_otel_enabled()
+    # Check if OTel should be enabled based on env vars (before init_otel)
+    otel_should_enable = should_enable_otel()
 
     # Configure logging with optional OTel correlation
-    configure_logging(settings.agent_log_level, otel_correlation=otel_enabled)
+    configure_logging(settings.agent_log_level, otel_correlation=otel_should_enable)
 
     model_api = ModelAPI(model=settings.model_name, api_base=settings.model_api_url)
 

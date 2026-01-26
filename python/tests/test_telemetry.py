@@ -24,6 +24,57 @@ class TestIsOtelEnabled:
             tm._initialized = original
 
 
+class TestShouldEnableOtel:
+    """Tests for should_enable_otel utility."""
+
+    def test_returns_false_when_disabled(self):
+        """Test should_enable_otel returns False when OTEL_SDK_DISABLED=true."""
+        with patch.dict(
+            os.environ,
+            {
+                "OTEL_SDK_DISABLED": "true",
+                "OTEL_SERVICE_NAME": "test-agent",
+                "OTEL_EXPORTER_OTLP_ENDPOINT": "http://collector:4317",
+            },
+            clear=True,
+        ):
+            from telemetry.manager import should_enable_otel
+
+            assert should_enable_otel() is False
+
+    def test_returns_false_without_service_name(self):
+        """Test should_enable_otel returns False without OTEL_SERVICE_NAME."""
+        with patch.dict(
+            os.environ,
+            {"OTEL_EXPORTER_OTLP_ENDPOINT": "http://collector:4317"},
+            clear=True,
+        ):
+            from telemetry.manager import should_enable_otel
+
+            assert should_enable_otel() is False
+
+    def test_returns_false_without_endpoint(self):
+        """Test should_enable_otel returns False without OTEL_EXPORTER_OTLP_ENDPOINT."""
+        with patch.dict(os.environ, {"OTEL_SERVICE_NAME": "test-agent"}, clear=True):
+            from telemetry.manager import should_enable_otel
+
+            assert should_enable_otel() is False
+
+    def test_returns_true_with_required_vars(self):
+        """Test should_enable_otel returns True with required env vars."""
+        with patch.dict(
+            os.environ,
+            {
+                "OTEL_SERVICE_NAME": "test-agent",
+                "OTEL_EXPORTER_OTLP_ENDPOINT": "http://collector:4317",
+            },
+            clear=True,
+        ):
+            from telemetry.manager import should_enable_otel
+
+            assert should_enable_otel() is True
+
+
 class TestOtelConfig:
     """Tests for OtelConfig pydantic BaseSettings."""
 
@@ -102,7 +153,10 @@ class TestKaosOtelManager:
         manager.span_begin("test-operation")
         try:
             pass  # do work
-        finally:
+        except Exception as e:
+            manager.span_failure(e)
+            raise
+        else:
             manager.span_success()
 
     def test_span_begin_failure_pattern(self):
@@ -115,8 +169,8 @@ class TestKaosOtelManager:
             raise ValueError("test error")
         except ValueError as e:
             manager.span_failure(e)
-        finally:
-            manager.span_success()  # Should be no-op after failure
+        else:
+            manager.span_success()
 
     def test_nested_spans(self):
         """Test nested span_begin calls."""
@@ -128,9 +182,15 @@ class TestKaosOtelManager:
             manager.span_begin("inner")
             try:
                 pass
-            finally:
+            except Exception as e:
+                manager.span_failure(e)
+                raise
+            else:
                 manager.span_success()
-        finally:
+        except Exception as e:
+            manager.span_failure(e)
+            raise
+        else:
             manager.span_success()
 
     def test_span_with_metric_kind(self):
@@ -145,7 +205,10 @@ class TestKaosOtelManager:
         )
         try:
             pass
-        finally:
+        except Exception as e:
+            manager.span_failure(e)
+            raise
+        else:
             manager.span_success()
 
 
@@ -172,13 +235,19 @@ class TestContextPropagation:
 class TestMCPServerTelemetrySimplified:
     """Tests for MCPServer simplified telemetry settings."""
 
-    def test_otel_enabled_by_default(self):
-        """Test that OTel is enabled by default (OTEL_SDK_DISABLED not set)."""
+    def test_otel_not_disabled_by_default(self):
+        """Test that OTel is not disabled by default (OTEL_SDK_DISABLED not set).
+
+        Note: _otel_enabled=True means "not disabled", not "fully configured".
+        Actual telemetry requires OTEL_SERVICE_NAME and OTEL_EXPORTER_OTLP_ENDPOINT.
+        """
         with patch.dict(os.environ, {}, clear=True):
             from mcptools.server import MCPServer, MCPServerSettings
 
             settings = MCPServerSettings()
             server = MCPServer(settings)
+            # _otel_enabled means "not disabled", telemetry will be a no-op without
+            # OTEL_SERVICE_NAME and OTEL_EXPORTER_OTLP_ENDPOINT
             assert server._otel_enabled is True
 
     def test_otel_disabled_from_env(self):

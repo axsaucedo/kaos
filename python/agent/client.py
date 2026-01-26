@@ -390,7 +390,7 @@ class Agent:
             error_event = self.memory.create_event("error", error_msg)
             await self.memory.add_event(session_id, error_event)
             yield f"Sorry, I encountered an error: {str(e)}"
-        finally:
+        else:
             self._otel.span_success()
 
     async def _agentic_loop(
@@ -491,7 +491,7 @@ class Agent:
             except Exception as e:
                 self._otel.span_failure(e)
                 raise
-            finally:
+            else:
                 self._otel.span_success()
 
         # Max steps reached
@@ -510,12 +510,12 @@ class Agent:
         )
         try:
             content = cast(str, await self.model_api.process_message(messages, stream=False))
-            return content
         except Exception as e:
             self._otel.span_failure(e)
             raise
-        finally:
+        else:
             self._otel.span_success()
+            return content
 
     async def _execute_tool(self, tool_name: str, tool_args: Dict[str, Any]) -> Any:
         """Execute a tool with tracing."""
@@ -535,13 +535,12 @@ class Agent:
 
             if tool_result is None:
                 raise ValueError(f"Tool '{tool_name}' not found")
-
-            return tool_result
         except Exception as e:
             self._otel.span_failure(e)
             raise
-        finally:
+        else:
             self._otel.span_success()
+            return tool_result
 
     async def _execute_delegation(
         self,
@@ -562,12 +561,12 @@ class Agent:
             result = await self.delegate_to_sub_agent(
                 agent_name, task, context_messages, session_id
             )
-            return result
         except Exception as e:
             self._otel.span_failure(e)
             raise
-        finally:
+        else:
             self._otel.span_success()
+            return result
 
     async def delegate_to_sub_agent(
         self,

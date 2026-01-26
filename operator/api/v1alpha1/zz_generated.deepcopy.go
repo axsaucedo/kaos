@@ -601,6 +601,11 @@ func (in *ModelAPISpec) DeepCopyInto(out *ModelAPISpec) {
 		*out = new(GatewayRoute)
 		**out = **in
 	}
+	if in.Telemetry != nil {
+		in, out := &in.Telemetry, &out.Telemetry
+		*out = new(TelemetryConfig)
+		**out = **in
+	}
 	if in.PodSpec != nil {
 		in, out := &in.PodSpec, &out.PodSpec
 		*out = new(v1.PodSpec)

@@ -2,7 +2,6 @@ package util
 
 import (
 	"os"
-	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -35,7 +34,9 @@ func MergeTelemetryConfig(componentConfig *kaosv1alpha1.TelemetryConfig) *kaosv1
 // BuildTelemetryEnvVars creates environment variables for OpenTelemetry configuration.
 // Uses standard OTEL_* env vars so the SDK auto-configures.
 // serviceName is used as OTEL_SERVICE_NAME (typically the CR name).
-// namespace is added to OTEL_RESOURCE_ATTRIBUTES (appended to existing user values).
+// namespace is added to OTEL_RESOURCE_ATTRIBUTES as KAOS-specific attributes.
+// Note: If user sets OTEL_RESOURCE_ATTRIBUTES in spec.config.env, both will be present
+// and the user value takes precedence when they appear later in the env list.
 func BuildTelemetryEnvVars(tel *kaosv1alpha1.TelemetryConfig, serviceName, namespace string) []corev1.EnvVar {
 	if tel == nil || !tel.Enabled {
 		return nil
@@ -59,22 +60,13 @@ func BuildTelemetryEnvVars(tel *kaosv1alpha1.TelemetryConfig, serviceName, names
 		})
 	}
 
-	// Build resource attributes - append to existing user values if OTEL_RESOURCE_ATTRIBUTES is set
+	// Add KAOS-specific resource attributes
+	// These are added as a baseline; if user also sets OTEL_RESOURCE_ATTRIBUTES
+	// in spec.config.env, the container runtime merges them (later values win)
 	kaosAttrs := "service.namespace=" + namespace + ",kaos.resource.name=" + serviceName
-	existingAttrs := os.Getenv("OTEL_RESOURCE_ATTRIBUTES")
-	var finalAttrs string
-	if existingAttrs != "" {
-		// Append KAOS attrs to user attrs (user attrs take precedence for same keys)
-		finalAttrs = existingAttrs + "," + kaosAttrs
-	} else {
-		finalAttrs = kaosAttrs
-	}
-	// Remove any duplicate trailing/leading commas
-	finalAttrs = strings.Trim(finalAttrs, ",")
-
 	envVars = append(envVars, corev1.EnvVar{
 		Name:  "OTEL_RESOURCE_ATTRIBUTES",
-		Value: finalAttrs,
+		Value: kaosAttrs,
 	})
 
 	return envVars

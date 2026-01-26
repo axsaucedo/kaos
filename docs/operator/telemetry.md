@@ -72,7 +72,7 @@ spec:
 
 Component-level configuration always overrides global defaults:
 
-1. **Component-level telemetry** (highest priority): If `spec.config.telemetry` is set on the Agent or MCPServer, it is used
+1. **Component-level telemetry** (highest priority): If `spec.config.telemetry` is set on the Agent or MCPServer, or `spec.telemetry` on ModelAPI, it is used
 2. **Global Helm values** (default): If component-level telemetry is not set, the global `telemetry.enabled` and `telemetry.endpoint` values are used
 
 ## Configuration Fields
@@ -111,7 +111,38 @@ The operator automatically sets:
 - `OTEL_SDK_DISABLED`: Set to "false" when telemetry is enabled (standard OTel env var)
 - `OTEL_SERVICE_NAME`: Defaults to the CR name (e.g., agent name)
 - `OTEL_EXPORTER_OTLP_ENDPOINT`: From `telemetry.endpoint`
-- `OTEL_RESOURCE_ATTRIBUTES`: Appends `service.namespace` and `kaos.resource.name` to any user-provided values
+- `OTEL_RESOURCE_ATTRIBUTES`: Sets `service.namespace` and `kaos.resource.name`
+
+## ModelAPI Telemetry
+
+ModelAPI supports telemetry for the LiteLLM Proxy mode. For Ollama Hosted mode, telemetry is not supported (Ollama has no native OTel support).
+
+### LiteLLM Proxy Mode
+
+When `spec.telemetry.enabled: true` on a Proxy-mode ModelAPI:
+- LiteLLM config is automatically updated with `success_callback: ["otel"]` and `failure_callback: ["otel"]`
+- Environment variables `OTEL_EXPORTER`, `OTEL_ENDPOINT`, and `OTEL_SERVICE_NAME` are set
+- LiteLLM will send traces for each model call to the configured OTLP endpoint
+
+```yaml
+apiVersion: kaos.tools/v1alpha1
+kind: ModelAPI
+metadata:
+  name: my-modelapi
+spec:
+  mode: Proxy
+  telemetry:
+    enabled: true
+    endpoint: "http://otel-collector:4317"
+  proxyConfig:
+    models: ["*"]
+    provider: "openai"
+    apiBase: "https://api.openai.com/v1"
+```
+
+### Ollama Hosted Mode
+
+If telemetry is enabled for a Hosted-mode ModelAPI, the operator emits a warning in the status message. Ollama does not have native OpenTelemetry support, so traces and metrics will not be collected from the model server itself.
 
 ## Trace Spans
 

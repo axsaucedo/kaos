@@ -8905,6 +8905,24 @@ spec:
                 required:
                 - models
                 type: object
+              telemetry:
+                description: |-
+                  Telemetry configures OpenTelemetry instrumentation.
+                  For Proxy mode (LiteLLM): Enables OTel callbacks for traces/metrics.
+                  For Hosted mode (Ollama): Not supported; a warning is emitted if enabled.
+                properties:
+                  enabled:
+                    default: false
+                    description: |-
+                      Enabled controls whether OpenTelemetry is enabled (default: false)
+                      When enabled, traces, metrics, and log correlation are all active.
+                    type: boolean
+                  endpoint:
+                    description: |-
+                      Endpoint is the OTLP gRPC endpoint URL (required when enabled).
+                      Example: "http://otel-collector.observability:4317"
+                    type: string
+                type: object
             required:
             - mode
             type: object
