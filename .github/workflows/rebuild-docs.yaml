@@ -1,0 +1,57 @@
+name: Rebuild Version Docs
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to rebuild (e.g., "0.1.3" or "all")'
+        required: true
+        type: string
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  determine-versions:
+    runs-on: ubuntu-latest
+    outputs:
+      versions: ${{ steps.versions.outputs.versions }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine versions to rebuild
+        id: versions
+        run: |
+          INPUT="${{ github.event.inputs.version }}"
+          if [ "$INPUT" = "all" ]; then
+            # Get all version tags (excluding v0.0.x test tags)
+            VERSIONS=$(git tag --list "v*" --sort=-v:refname | grep -v '^v0\.0\.' | sed 's/^v//' | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          else
+            # Single version
+            VERSIONS=$(echo "[\"$INPUT\"]" | jq -c .)
+          fi
+          echo "versions=$VERSIONS" >> $GITHUB_OUTPUT
+          echo "Versions to rebuild: $VERSIONS"
+
+  rebuild-version:
+    needs: determine-versions
+    strategy:
+      matrix:
+        version: ${{ fromJson(needs.determine-versions.outputs.versions) }}
+      max-parallel: 1
+    uses: ./.github/workflows/reusable-docs.yaml
+    with:
+      version: ${{ matrix.version }}
+      base-path: /kaos/v${{ matrix.version }}/
+      deploy-path: v${{ matrix.version }}
+      update-latest: false
+      package-helm: false
