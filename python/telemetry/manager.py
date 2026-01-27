@@ -15,12 +15,13 @@ Key design:
 import logging
 import os
 import time
-from contextvars import ContextVar
+from contextvars import ContextVar, Token
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from opentelemetry import trace, metrics, context as otel_context
+from opentelemetry.context import Context
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.sdk.metrics import MeterProvider
@@ -53,7 +54,7 @@ class SpanState:
     """State for an active span on the stack."""
 
     span: Span
-    token: object  # Context token for detaching
+    token: Token[Context]  # Context token for detaching
     start_time: float
     metric_kind: Optional[str] = None  # "request", "model", "tool", "delegation"
     metric_attrs: Dict[str, Any] = field(default_factory=dict)
