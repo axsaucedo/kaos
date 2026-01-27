@@ -216,25 +216,27 @@ The following metrics are collected:
 
 | Metric | Type | Description |
 |--------|------|-------------|
-| `kaos.agent.requests` | Counter | Total requests processed |
-| `kaos.agent.request.duration` | Histogram | Request duration in seconds |
+| `kaos.requests` | Counter | Total requests processed |
+| `kaos.request.duration` | Histogram | Request duration in milliseconds |
 | `kaos.model.calls` | Counter | Total model API calls |
-| `kaos.model.duration` | Histogram | Model call duration in seconds |
+| `kaos.model.duration` | Histogram | Model call duration in milliseconds |
 | `kaos.tool.calls` | Counter | Total tool executions |
-| `kaos.tool.duration` | Histogram | Tool execution duration in seconds |
+| `kaos.tool.duration` | Histogram | Tool execution duration in milliseconds |
 | `kaos.delegations` | Counter | Total agent delegations |
-| `kaos.delegation.duration` | Histogram | Delegation duration in seconds |
+| `kaos.delegation.duration` | Histogram | Delegation duration in milliseconds |
 
 All metrics include labels:
-- `agent_name`: Name of the agent
-- `status`: "success" or "error"
+- `agent.name`: Name of the agent
+- `success`: "true" or "false"
+
+Model metrics also include:
+- `model`: Model identifier
 
 Tool metrics also include:
-- `tool_name`: Name of the tool
-- `mcp_server`: Name of the MCP server
+- `tool`: Name of the tool
 
 Delegation metrics also include:
-- `target_agent`: Name of the target agent
+- `target`: Name of the target agent
 
 ## Log Correlation
 
