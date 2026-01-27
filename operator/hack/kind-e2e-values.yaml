@@ -7,12 +7,12 @@ controllerManager:
   manager:
     image:
       repository: kind-local/kaos-operator
-      tag: dev
+      tag: v0.1.4-dev
     imagePullPolicy: IfNotPresent
 
 defaultImages:
-  agentRuntime: kind-local/kaos-agent:dev
-  mcpServer: kind-local/kaos-mcp-server:dev
+  agentRuntime: kind-local/kaos-agent:v0.1.4-dev
+  mcpServer: kind-local/kaos-mcp-server:v0.1.4-dev
   litellm: kind-local/litellm:v1.56.5
   ollama: kind-local/ollama:latest
 

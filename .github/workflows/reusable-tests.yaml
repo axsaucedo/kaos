@@ -19,8 +19,7 @@ env:
   CI: true
   KIND_CLUSTER: true
   REGISTRY: kind-local
-  OPERATOR_TAG: dev
-  AGENT_TAG: dev
+  # OPERATOR_TAG and AGENT_TAG are now read from VERSION file by scripts
 
 jobs:
   # Unit tests (Python + Go)

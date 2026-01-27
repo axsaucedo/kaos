@@ -4,11 +4,16 @@
 set -o errexit
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+OPERATOR_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+PROJECT_ROOT="$(cd "${OPERATOR_ROOT}/.." && pwd)"
 VALUES_FILE="${SCRIPT_DIR}/kind-e2e-values.yaml"
 
-# Default versions (single source of truth)
-OPERATOR_TAG="${OPERATOR_TAG:-dev}"
-AGENT_TAG="${AGENT_TAG:-dev}"
+# Read version from VERSION file
+DEFAULT_VERSION="$(cat "${PROJECT_ROOT}/VERSION" 2>/dev/null || echo "dev")"
+
+# Default versions (use VERSION file if not overridden)
+OPERATOR_TAG="${OPERATOR_TAG:-${DEFAULT_VERSION}}"
+AGENT_TAG="${AGENT_TAG:-${DEFAULT_VERSION}}"
 LITELLM_VERSION="${LITELLM_VERSION:-v1.56.5}"
 OLLAMA_TAG="${OLLAMA_TAG:-latest}"
 REGISTRY="${REGISTRY:-kind-local}"

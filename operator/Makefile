@@ -90,8 +90,9 @@ clean:
 
 # Configuration for KIND E2E
 REGISTRY ?= kind-local
-OPERATOR_TAG ?= dev
-AGENT_TAG ?= dev
+VERSION := $(shell cat $(shell pwd)/../VERSION 2>/dev/null || echo "dev")
+OPERATOR_TAG ?= $(VERSION)
+AGENT_TAG ?= $(VERSION)
 LITELLM_VERSION ?= v1.56.5
 OLLAMA_TAG ?= latest
 HELM_VALUES_FILE ?= $(shell pwd)/hack/kind-e2e-values.yaml

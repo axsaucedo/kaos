@@ -17,16 +17,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OPERATOR_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 PROJECT_ROOT="$(cd "${OPERATOR_ROOT}/.." && pwd)"
 
+# Read version from VERSION file
+DEFAULT_VERSION="$(cat "${PROJECT_ROOT}/VERSION" 2>/dev/null || echo "dev")"
+
 # Validate required variables
 if [ -z "${REGISTRY}" ]; then
     echo "ERROR: REGISTRY environment variable is required"
     exit 1
 fi
 
-# Set defaults
+# Set defaults (use VERSION file if not overridden)
 KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-kaos-e2e}"
-OPERATOR_TAG="${OPERATOR_TAG:-dev}"
-AGENT_TAG="${AGENT_TAG:-dev}"
+OPERATOR_TAG="${OPERATOR_TAG:-${DEFAULT_VERSION}}"
+AGENT_TAG="${AGENT_TAG:-${DEFAULT_VERSION}}"
 LITELLM_VERSION="${LITELLM_VERSION:-v1.56.5}"
 OLLAMA_TAG="${OLLAMA_TAG:-latest}"
 
