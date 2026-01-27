@@ -224,8 +224,9 @@ spec:
                           When enabled, traces, metrics, and log correlation are all active.
                         type: boolean
                       endpoint:
-                        default: http://localhost:4317
-                        description: 'Endpoint is the OTLP endpoint URL (default: http://localhost:4317)'
+                        description: |-
+                          Endpoint is the OTLP gRPC endpoint URL (required when enabled).
+                          Example: "http://otel-collector.observability:4317"
                         type: string
                     type: object
                   tools:

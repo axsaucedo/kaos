@@ -27,42 +27,8 @@ controllerManager:
   tolerations: []
   topologySpreadConstraints: []
 kubernetesClusterDomain: cluster.local
-
-# Default images for agent runtime and MCP servers
-defaultImages:
-  agentRuntime: axsauze/kaos-agent:latest
-  mcpServer: axsauze/kaos-mcp-server:latest
-  litellm: ghcr.io/berriai/litellm:main-stable
-  ollama: ollama/ollama:latest
-
-# Gateway API configuration
-gatewayAPI:
-  enabled: false
-  createGateway: false
-  gatewayName: kaos-gateway
-  gatewayClassName: ""
-  gatewayNamespace: ""
-  listenerPort: 80
-  listenerProtocol: HTTP
-
-# Gateway timeout settings
-gateway:
-  defaultTimeouts:
-    agent: "300s"
-    modelAPI: "120s"
-    mcp: "60s"
-
 serviceAccount:
   annotations: {}
   automount: true
   create: true
   name: ""
-
-# Global telemetry configuration (applies to all components)
-# Component-level telemetry config overrides these defaults
-telemetry:
-  # enabled controls whether telemetry is enabled by default for all components
-  enabled: false
-  # endpoint is the OTLP endpoint URL (required when enabled)
-  # Example: "http://otel-collector.observability:4317"
-  endpoint: ""
