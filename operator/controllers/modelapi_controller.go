@@ -479,8 +479,9 @@ func (r *ModelAPIReconciler) constructContainer(modelapi *kaosv1alpha1.ModelAPI)
 				Value: "otlp",
 			})
 			if telemetry.Endpoint != "" {
+				// Use standard OTEL_EXPORTER_OTLP_ENDPOINT env var
 				env = append(env, corev1.EnvVar{
-					Name:  "OTEL_ENDPOINT",
+					Name:  "OTEL_EXPORTER_OTLP_ENDPOINT",
 					Value: telemetry.Endpoint,
 				})
 			}

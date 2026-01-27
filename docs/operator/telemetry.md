@@ -121,7 +121,7 @@ ModelAPI supports telemetry for the LiteLLM Proxy mode. For Ollama Hosted mode, 
 
 When `spec.telemetry.enabled: true` on a Proxy-mode ModelAPI:
 - LiteLLM config is automatically updated with `success_callback: ["otel"]` and `failure_callback: ["otel"]`
-- Environment variables `OTEL_EXPORTER`, `OTEL_ENDPOINT`, and `OTEL_SERVICE_NAME` are set
+- Environment variables `OTEL_EXPORTER`, `OTEL_EXPORTER_OTLP_ENDPOINT`, and `OTEL_SERVICE_NAME` are set
 - LiteLLM will send traces for each model call to the configured OTLP endpoint
 
 ```yaml
@@ -139,6 +139,18 @@ spec:
     provider: "openai"
     apiBase: "https://api.openai.com/v1"
 ```
+
+::: warning Custom configYaml
+If you provide a custom LiteLLM configuration via `proxyConfig.configYaml`, you must manually add the OTel callbacks:
+
+```yaml
+litellm_settings:
+  success_callback: ["otel"]
+  failure_callback: ["otel"]
+```
+
+The operator only auto-injects callbacks when using the default generated config.
+:::
 
 ### Ollama Hosted Mode
 
