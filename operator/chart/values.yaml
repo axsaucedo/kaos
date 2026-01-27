@@ -33,7 +33,7 @@ defaultImages:
   agentRuntime: axsauze/kaos-agent:v0.1.4-dev
   mcpServer: axsauze/kaos-mcp-server:v0.1.4-dev
   litellm: ghcr.io/berriai/litellm:main-v1.72.5-stable
-  ollama: ollama/ollama:latest
+  ollama: alpine/ollama:latest
 
 # Gateway API configuration
 gatewayAPI:

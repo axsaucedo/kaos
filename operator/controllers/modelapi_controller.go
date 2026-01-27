@@ -169,7 +169,14 @@ func (r *ModelAPIReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	if err != nil && apierrors.IsNotFound(err) {
 		// Create new Deployment
-		deployment = r.constructDeployment(modelapi)
+		deployment, err = r.constructDeployment(modelapi)
+		if err != nil {
+			log.Error(err, "failed to construct Deployment")
+			modelapi.Status.Phase = "Failed"
+			modelapi.Status.Message = fmt.Sprintf("Failed to construct Deployment: %v", err)
+			r.Status().Update(ctx, modelapi)
+			return ctrl.Result{}, err
+		}
 		if err := controllerutil.SetControllerReference(modelapi, deployment, r.Scheme); err != nil {
 			log.Error(err, "failed to set controller reference")
 			return ctrl.Result{}, err
@@ -188,7 +195,11 @@ func (r *ModelAPIReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, err
 	} else {
 		// Deployment exists - check if spec has changed using hash annotation
-		desiredDeployment := r.constructDeployment(modelapi)
+		desiredDeployment, err := r.constructDeployment(modelapi)
+		if err != nil {
+			log.Error(err, "failed to construct Deployment for comparison")
+			return ctrl.Result{}, err
+		}
 		currentHash := ""
 		if deployment.Spec.Template.Annotations != nil {
 			currentHash = deployment.Spec.Template.Annotations[util.PodSpecHashAnnotation]
@@ -298,7 +309,7 @@ func (r *ModelAPIReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 }
 
 // constructDeployment creates a Deployment for the ModelAPI
-func (r *ModelAPIReconciler) constructDeployment(modelapi *kaosv1alpha1.ModelAPI) *appsv1.Deployment {
+func (r *ModelAPIReconciler) constructDeployment(modelapi *kaosv1alpha1.ModelAPI) (*appsv1.Deployment, error) {
 	labels := map[string]string{
 		"app":      "modelapi",
 		"modelapi": modelapi.Name,
@@ -324,8 +335,8 @@ func (r *ModelAPIReconciler) constructDeployment(modelapi *kaosv1alpha1.ModelAPI
 	// Build init containers for Hosted mode (pull the model)
 	initContainers := []corev1.Container{}
 	ollamaImage := os.Getenv("DEFAULT_OLLAMA_IMAGE")
-	if ollamaImage == "" {
-		ollamaImage = "ollama/ollama:latest"
+	if ollamaImage == "" && modelapi.Spec.Mode == kaosv1alpha1.ModelAPIModeHosted {
+		return nil, fmt.Errorf("DEFAULT_OLLAMA_IMAGE environment variable is required but not set")
 	}
 	if modelapi.Spec.Mode == kaosv1alpha1.ModelAPIModeHosted && modelapi.Spec.HostedConfig != nil && modelapi.Spec.HostedConfig.Model != "" {
 		// Init container starts Ollama server, pulls model, then exits
@@ -350,10 +361,15 @@ func (r *ModelAPIReconciler) constructDeployment(modelapi *kaosv1alpha1.ModelAPI
 		})
 	}
 
+	container, err := r.constructContainer(modelapi)
+	if err != nil {
+		return nil, err
+	}
+
 	basePodSpec := corev1.PodSpec{
 		InitContainers: initContainers,
 		Containers: []corev1.Container{
-			r.constructContainer(modelapi),
+			container,
 		},
 		Volumes: volumes,
 	}
@@ -393,11 +409,11 @@ func (r *ModelAPIReconciler) constructDeployment(modelapi *kaosv1alpha1.ModelAPI
 		},
 	}
 
-	return deployment
+	return deployment, nil
 }
 
 // constructContainer creates the container spec based on ModelAPI mode
-func (r *ModelAPIReconciler) constructContainer(modelapi *kaosv1alpha1.ModelAPI) corev1.Container {
+func (r *ModelAPIReconciler) constructContainer(modelapi *kaosv1alpha1.ModelAPI) (corev1.Container, error) {
 	var image string
 	var args []string
 	var env []corev1.EnvVar
@@ -408,7 +424,7 @@ func (r *ModelAPIReconciler) constructContainer(modelapi *kaosv1alpha1.ModelAPI)
 		// LiteLLM Proxy mode - always uses config file
 		image = os.Getenv("DEFAULT_LITELLM_IMAGE")
 		if image == "" {
-			image = "ghcr.io/berriai/litellm:main-latest"
+			return corev1.Container{}, fmt.Errorf("DEFAULT_LITELLM_IMAGE environment variable is required but not set")
 		}
 		port = 8000
 		// Use /health/liveliness for faster probe responses
@@ -501,7 +517,7 @@ func (r *ModelAPIReconciler) constructContainer(modelapi *kaosv1alpha1.ModelAPI)
 		// Ollama Hosted mode
 		image = os.Getenv("DEFAULT_OLLAMA_IMAGE")
 		if image == "" {
-			image = "ollama/ollama:latest"
+			return corev1.Container{}, fmt.Errorf("DEFAULT_OLLAMA_IMAGE environment variable is required but not set")
 		}
 		args = []string{}
 		port = 11434
@@ -571,7 +587,7 @@ func (r *ModelAPIReconciler) constructContainer(modelapi *kaosv1alpha1.ModelAPI)
 		},
 	}
 
-	return container
+	return container, nil
 }
 
 // constructService creates a Service for the ModelAPI

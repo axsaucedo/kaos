@@ -57,7 +57,7 @@ var _ = Describe("ModelAPI Controller", func() {
 
 		// Verify container uses litellm image
 		Expect(deployment.Spec.Template.Spec.Containers).To(HaveLen(1))
-		Expect(deployment.Spec.Template.Spec.Containers[0].Image).To(Equal("ghcr.io/berriai/litellm:main-latest"))
+		Expect(deployment.Spec.Template.Spec.Containers[0].Image).To(Equal("ghcr.io/berriai/litellm:test"))
 
 		// Verify PROXY_API_BASE env var is set
 		container := deployment.Spec.Template.Spec.Containers[0]
@@ -267,7 +267,7 @@ var _ = Describe("ModelAPI Controller", func() {
 		Expect(initContainer.Args[0]).To(ContainSubstring("smollm2:135m"))
 
 		// Verify main container uses ollama
-		Expect(deployment.Spec.Template.Spec.Containers[0].Image).To(Equal("ollama/ollama:latest"))
+		Expect(deployment.Spec.Template.Spec.Containers[0].Image).To(Equal("alpine/ollama:latest"))
 
 		// Verify Service uses port 11434
 		service := &corev1.Service{}
