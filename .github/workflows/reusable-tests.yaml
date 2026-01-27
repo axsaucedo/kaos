@@ -19,7 +19,6 @@ env:
   CI: true
   KIND_CLUSTER: true
   REGISTRY: kind-local
-  # OPERATOR_TAG and AGENT_TAG are now read from VERSION file by scripts
 
 jobs:
   # Unit tests (Python + Go)
@@ -107,6 +106,13 @@ jobs:
 
       - name: Install MetalLB for LoadBalancer support
         run: ./operator/hack/install-metallb.sh
+
+      - name: Set image tags from VERSION
+        run: |
+          VERSION=$(cat VERSION)
+          echo "OPERATOR_TAG=$VERSION" >> $GITHUB_ENV
+          echo "AGENT_TAG=$VERSION" >> $GITHUB_ENV
+          echo "Using VERSION: $VERSION"
 
       - name: Build operator image
         uses: docker/build-push-action@v6
