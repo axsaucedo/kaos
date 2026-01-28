@@ -1,0 +1,15 @@
+# Minimal LiteLLM proxy image (~200MB vs 1.5GB for upstream)
+# This image is tagged as ghcr.io/berriai/litellm:main-stable to override the upstream image
+FROM python:3.12-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+# Install LiteLLM proxy deps with pinned version
+RUN pip install --no-cache-dir "litellm[proxy]==1.56.5"
+
+EXPOSE 8000
+
+ENTRYPOINT ["litellm"]

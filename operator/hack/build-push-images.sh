@@ -9,8 +9,11 @@
 # Optional environment variables (with defaults matching chart/values.yaml):
 #   OPERATOR_TAG - Tag for operator image (default: from VERSION file)
 #   AGENT_TAG - Tag for agent image (default: from VERSION file)
-#   LITELLM_IMAGE - Full LiteLLM image (default: ghcr.io/berriai/litellm:main-stable)
+#   LITELLM_IMAGE - Full LiteLLM image tag (default: ghcr.io/berriai/litellm:main-stable)
 #   OLLAMA_IMAGE - Full Ollama image (default: alpine/ollama:latest)
+#
+# Note: LiteLLM is built from our minimal Dockerfile (~200MB) and tagged to override
+# the upstream image (1.5GB). This keeps the same image reference in values.yaml.
 set -o errexit
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -53,10 +56,12 @@ docker build -t "${REGISTRY}/kaos-agent:${AGENT_TAG}" "${PROJECT_ROOT}/python/"
 # Tag same image for MCP server (they use the same base)
 docker tag "${REGISTRY}/kaos-agent:${AGENT_TAG}" "${REGISTRY}/kaos-mcp-server:${AGENT_TAG}"
 
-# Pull external images (LiteLLM and Ollama)
-echo "Pulling LiteLLM image..."
-docker pull "${LITELLM_IMAGE}"
+# Build minimal LiteLLM image (~200MB vs 1.5GB upstream)
+# Tag it as the upstream image to override for local development
+echo "Building minimal LiteLLM image..."
+docker build -t "${LITELLM_IMAGE}" -f "${SCRIPT_DIR}/Dockerfile.litellm" "${SCRIPT_DIR}"
 
+# Pull Ollama image
 echo "Pulling Ollama image..."
 docker pull "${OLLAMA_IMAGE}"
 
