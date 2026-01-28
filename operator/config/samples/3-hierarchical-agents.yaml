@@ -19,7 +19,7 @@ metadata:
     app.kubernetes.io/part-of: kaos-sample-hierarchy
 
 ---
-# ModelAPI: Hosted Ollama with smollm2 model
+# ModelAPI: Proxy to Nebius with deepseek model
 apiVersion: kaos.tools/v1alpha1
 kind: ModelAPI
 metadata:

@@ -8,7 +8,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 # Install LiteLLM proxy deps with pinned version
-RUN pip install --no-cache-dir "litellm[proxy]==1.56.5"
+# 1.80.0 adds support for nebius provider and other improvements
+RUN pip install --no-cache-dir "litellm[proxy]==1.80.0"
 
 EXPOSE 8000
 
