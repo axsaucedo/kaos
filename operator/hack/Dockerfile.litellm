@@ -9,7 +9,11 @@ WORKDIR /app
 
 # Install LiteLLM proxy deps with pinned version
 # 1.80.0 adds support for nebius provider and other improvements
-RUN pip install --no-cache-dir "litellm[proxy]==1.80.0"
+# Include OpenTelemetry packages for OTEL tracing support
+RUN pip install --no-cache-dir "litellm[proxy]==1.80.0" \
+    opentelemetry-api \
+    opentelemetry-sdk \
+    opentelemetry-exporter-otlp
 
 EXPOSE 8000
 

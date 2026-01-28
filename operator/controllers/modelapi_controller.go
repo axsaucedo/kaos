@@ -494,10 +494,11 @@ func (r *ModelAPIReconciler) constructContainer(modelapi *kaosv1alpha1.ModelAPI)
 		// Add OTel env vars for LiteLLM when telemetry is enabled
 		telemetry := util.MergeTelemetryConfig(modelapi.Spec.Telemetry)
 		if telemetry != nil && telemetry.Enabled {
-			// LiteLLM uses OTEL_EXPORTER="otlp" to enable OTel exporter
+			// LiteLLM uses OTEL_EXPORTER to select exporter type
+			// Use "otlp_grpc" for gRPC collector (port 4317) or "otlp_http" for HTTP (port 4318)
 			env = append(env, corev1.EnvVar{
 				Name:  "OTEL_EXPORTER",
-				Value: "otlp",
+				Value: "otlp_grpc",
 			})
 			if telemetry.Endpoint != "" {
 				// Use standard OTEL_EXPORTER_OTLP_ENDPOINT env var

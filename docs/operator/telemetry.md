@@ -8,7 +8,7 @@ When enabled, OpenTelemetry instrumentation provides:
 
 - **Tracing**: Distributed traces across agent requests, model calls, tool executions, and delegations
 - **Metrics**: Counters and histograms for requests, latency, and error rates
-- **Log Correlation**: Automatic injection of trace_id and span_id into log entries
+- **Logs Export**: Automatic export of Python logs via OTLP (in addition to trace_id/span_id correlation)
 
 ## Global Telemetry Configuration
 
@@ -415,7 +415,7 @@ The operator automatically sets these environment variables when telemetry is en
 
 | Variable | Description |
 |----------|-------------|
-| `OTEL_EXPORTER` | "otlp" to enable OTLP exporter |
+| `OTEL_EXPORTER` | "otlp_grpc" for gRPC OTLP exporter (port 4317); use "otlp_http" for HTTP (port 4318) |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP endpoint URL from `telemetry.endpoint` |
 | `OTEL_SERVICE_NAME` | Defaults to ModelAPI CR name |
 | `OTEL_PYTHON_EXCLUDED_URLS` | Excludes `/health` endpoints from tracing (generic exclusion for all instrumentations) |
