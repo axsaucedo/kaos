@@ -98,5 +98,13 @@ func BuildTelemetryEnvVars(tel *kaosv1alpha1.TelemetryConfig, serviceName, names
 		Value: kaosAttrs,
 	})
 
+	// Exclude health check endpoints from FastAPI instrumentation traces
+	// Reduces noise from Kubernetes liveness/readiness probes
+	// Uses regex patterns: "^/health$" matches exactly /health, "^/ready$" matches exactly /ready
+	envVars = append(envVars, corev1.EnvVar{
+		Name:  "OTEL_PYTHON_FASTAPI_EXCLUDED_URLS",
+		Value: "^/health$,^/ready$",
+	})
+
 	return envVars
 }

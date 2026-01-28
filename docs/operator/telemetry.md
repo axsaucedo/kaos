@@ -407,8 +407,43 @@ The operator automatically sets these environment variables when telemetry is en
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP endpoint URL from `telemetry.endpoint` |
 | `OTEL_SERVICE_NAME` | Defaults to CR name (agent or MCP server name) |
 | `OTEL_RESOURCE_ATTRIBUTES` | Sets `service.namespace` and `kaos.resource.name`; if user sets same var in spec.config.env, their value takes precedence |
+| `OTEL_PYTHON_FASTAPI_EXCLUDED_URLS` | Excludes `/health` and `/ready` endpoints from tracing (reduces noise from Kubernetes probes) |
 
 For additional configuration, use standard [OpenTelemetry environment variables](https://opentelemetry-python.readthedocs.io/en/latest/sdk/environment_variables.html) via `spec.config.env`.
+
+## Health Check Exclusions
+
+By default, Kubernetes liveness and readiness probe endpoints are excluded from telemetry traces. This prevents excessive trace data from health checks that typically run every 10-30 seconds.
+
+### Excluded Endpoints
+
+**Agent and MCPServer (Python):**
+- `/health` - Kubernetes liveness probe
+- `/ready` - Kubernetes readiness probe
+
+These are excluded via the `OTEL_PYTHON_FASTAPI_EXCLUDED_URLS` environment variable, which is automatically set when telemetry is enabled.
+
+**ModelAPI (LiteLLM):**
+- `/health/liveliness`, `/health/liveness`, `/health/readiness`
+
+These endpoints are not traced because LiteLLM uses callback-based OpenTelemetry integration that only traces LLM completion requests, not HTTP endpoints.
+
+### Customizing Exclusions
+
+To exclude additional URLs from tracing, override the `OTEL_PYTHON_FASTAPI_EXCLUDED_URLS` environment variable:
+
+```yaml
+spec:
+  config:
+    telemetry:
+      enabled: true
+      endpoint: "http://otel-collector:4317"
+    env:
+    - name: OTEL_PYTHON_FASTAPI_EXCLUDED_URLS
+      value: "^/health$,^/ready$,^/metrics$,^/internal/.*"
+```
+
+The value is a comma-separated list of regex patterns. Note that when you override this variable, you must include the default patterns (`^/health$,^/ready$`) if you still want to exclude health checks.
 
 ## Troubleshooting
 

@@ -184,12 +184,12 @@ func TestBuildTelemetryEnvVars(t *testing.T) {
 	os.Unsetenv("OTEL_RESOURCE_ATTRIBUTES")
 
 	tests := []struct {
-		name         string
-		tel          *kaosv1alpha1.TelemetryConfig
-		serviceName  string
-		namespace    string
-		expectCount  int
-		expectOTEL   bool
+		name        string
+		tel         *kaosv1alpha1.TelemetryConfig
+		serviceName string
+		namespace   string
+		expectCount int
+		expectOTEL  bool
 	}{
 		{
 			name:        "nil config returns empty",
@@ -209,7 +209,7 @@ func TestBuildTelemetryEnvVars(t *testing.T) {
 			},
 			serviceName: "test-agent",
 			namespace:   "default",
-			expectCount: 4, // OTEL_SDK_DISABLED, OTEL_SERVICE_NAME, OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_RESOURCE_ATTRIBUTES
+			expectCount: 5, // OTEL_SDK_DISABLED, OTEL_SERVICE_NAME, OTEL_EXPORTER_OTLP_ENDPOINT, OTEL_RESOURCE_ATTRIBUTES, OTEL_PYTHON_FASTAPI_EXCLUDED_URLS
 			expectOTEL:  true,
 		},
 	}
@@ -225,6 +225,7 @@ func TestBuildTelemetryEnvVars(t *testing.T) {
 			if tt.expectOTEL {
 				hasSDKDisabled := false
 				hasServiceName := false
+				hasExcludedURLs := false
 				for _, env := range result {
 					if env.Name == "OTEL_SDK_DISABLED" && env.Value == "false" {
 						hasSDKDisabled = true
@@ -232,12 +233,18 @@ func TestBuildTelemetryEnvVars(t *testing.T) {
 					if env.Name == "OTEL_SERVICE_NAME" && env.Value == tt.serviceName {
 						hasServiceName = true
 					}
+					if env.Name == "OTEL_PYTHON_FASTAPI_EXCLUDED_URLS" && env.Value == "^/health$,^/ready$" {
+						hasExcludedURLs = true
+					}
 				}
 				if !hasSDKDisabled {
 					t.Error("expected OTEL_SDK_DISABLED=false")
 				}
 				if !hasServiceName {
 					t.Errorf("expected OTEL_SERVICE_NAME=%s", tt.serviceName)
+				}
+				if !hasExcludedURLs {
+					t.Error("expected OTEL_PYTHON_FASTAPI_EXCLUDED_URLS=^/health$,^/ready$")
 				}
 			}
 		})
