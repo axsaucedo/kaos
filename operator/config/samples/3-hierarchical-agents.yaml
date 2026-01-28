@@ -3,6 +3,13 @@
 # Complex multi-level hierarchy: supervisor -> team leads -> workers
 # Demonstrates toolsString for dynamic MCP tool creation
 # Deploy: kubectl apply -f 3-hierarchical-agents.yaml
+#
+# # IMPORTANT:
+# You need to create the nebius secret with the respective API key - you can use:
+# kubectl create secret generic nebius-secrets \
+#     -n kaos-hierarchy /
+#     --from-literal /
+#     "api-key=$NEBIUS_KEY"
 
 apiVersion: v1
 kind: Namespace
@@ -12,16 +19,23 @@ metadata:
     app.kubernetes.io/part-of: kaos-sample-hierarchy
 
 ---
-# ModelAPI: Hosted Ollama with smollm2 model
+# ModelAPI: Proxy to Nebius with deepseek model
 apiVersion: kaos.tools/v1alpha1
 kind: ModelAPI
 metadata:
   name: hierarchy-modelapi
   namespace: kaos-hierarchy
 spec:
-  mode: Hosted
-  hostedConfig:
-    model: "smollm2:135m"
+  mode: Proxy
+  proxyConfig:
+    models:
+    - deepseek-ai/DeepSeek-V3-0324
+    provider: nebius
+    apiKey:
+      valueFrom:
+        secretKeyRef:
+          name: nebius-secrets
+          key: api-key
 
 ---
 # MCPServer: Echo tool
@@ -69,7 +83,7 @@ metadata:
   namespace: kaos-hierarchy
 spec:
   modelAPI: hierarchy-modelapi
-  model: "smollm2:135m"  # Required: must match hosted model
+  model: deepseek-ai/DeepSeek-V3-0324
   mcpServers:
   - hierarchy-echo-mcp
   config:
@@ -91,7 +105,7 @@ metadata:
   namespace: kaos-hierarchy
 spec:
   modelAPI: hierarchy-modelapi
-  model: "smollm2:135m"  # Required: must match hosted model
+  model: deepseek-ai/DeepSeek-V3-0324
   mcpServers:
   - hierarchy-echo-mcp
   config:
@@ -113,7 +127,7 @@ metadata:
   namespace: kaos-hierarchy
 spec:
   modelAPI: hierarchy-modelapi
-  model: "smollm2:135m"  # Required: must match hosted model
+  model: deepseek-ai/DeepSeek-V3-0324
   mcpServers:
   - hierarchy-calc-mcp
   config:
@@ -134,7 +148,7 @@ metadata:
   namespace: kaos-hierarchy
 spec:
   modelAPI: hierarchy-modelapi
-  model: "smollm2:135m"  # Required: must match hosted model
+  model: deepseek-ai/DeepSeek-V3-0324
   mcpServers:
   - hierarchy-echo-mcp
   config:
@@ -152,7 +166,7 @@ metadata:
   namespace: kaos-hierarchy
 spec:
   modelAPI: hierarchy-modelapi
-  model: "smollm2:135m"  # Required: must match hosted model
+  model: deepseek-ai/DeepSeek-V3-0324
   mcpServers:
   - hierarchy-echo-mcp
   config:
@@ -170,7 +184,7 @@ metadata:
   namespace: kaos-hierarchy
 spec:
   modelAPI: hierarchy-modelapi
-  model: "smollm2:135m"  # Required: must match hosted model
+  model: deepseek-ai/DeepSeek-V3-0324
   mcpServers:
   - hierarchy-calc-mcp
   config:

@@ -40,7 +40,8 @@ echo "✓ Helm values file exists"
 
 # Check images are loaded (spot check operator image)
 REGISTRY="${REGISTRY:-kind-local}"
-OPERATOR_TAG="${OPERATOR_TAG:-dev}"
+DEFAULT_VERSION="$(cat "${PROJECT_ROOT}/VERSION" 2>/dev/null || echo "dev")"
+OPERATOR_TAG="${OPERATOR_TAG:-${DEFAULT_VERSION}}"
 if ! docker exec "${KIND_CLUSTER_NAME}-control-plane" crictl images 2>/dev/null | grep -q "${REGISTRY}/kaos-operator"; then
     echo "ERROR: Operator image not found in KIND cluster."
     echo "Run: make kind-load-images"

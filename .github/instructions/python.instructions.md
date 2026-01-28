@@ -17,6 +17,7 @@ make format                     # Auto-format code
 - `agent/client.py`: Agent, RemoteAgent, AgentCard classes
 - `agent/server.py`: AgentServer with A2A endpoints
 - `agent/memory.py`: LocalMemory for session/event management
+- `agent/telemetry/`: OpenTelemetry instrumentation (tracing, metrics)
 - `mcptools/`: MCP (Model Context Protocol) tools
 - `modelapi/`: Model API client for OpenAI-compatible servers
 
@@ -28,6 +29,8 @@ make format                     # Auto-format code
 | `MODEL_NAME` | Model name (required) |
 | `AGENT_SUB_AGENTS` | Direct format: `"name:url,name:url"` |
 | `DEBUG_MOCK_RESPONSES` | JSON array of mock responses for testing |
+| `OTEL_ENABLED` | Enable OpenTelemetry instrumentation |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP exporter endpoint |
 
 ## Testing Patterns
 - Use `DEBUG_MOCK_RESPONSES` for deterministic tests

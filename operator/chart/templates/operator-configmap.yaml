@@ -23,3 +23,10 @@ data:
   GATEWAY_DEFAULT_AGENT_TIMEOUT: {{ .Values.gateway.defaultTimeouts.agent | quote }}
   GATEWAY_DEFAULT_MODELAPI_TIMEOUT: {{ .Values.gateway.defaultTimeouts.modelAPI | quote }}
   GATEWAY_DEFAULT_MCP_TIMEOUT: {{ .Values.gateway.defaultTimeouts.mcp | quote }}
+  # Global telemetry configuration (defaults for all components)
+  {{- if .Values.telemetry.enabled }}
+  DEFAULT_TELEMETRY_ENABLED: "true"
+  DEFAULT_TELEMETRY_ENDPOINT: {{ .Values.telemetry.endpoint | quote }}
+  {{- else }}
+  DEFAULT_TELEMETRY_ENABLED: "false"
+  {{- end }}

@@ -12,6 +12,16 @@ dependencies = [
     "fastmcp>=1.0.0",
     "httpx>=0.25.0",
     "sse-starlette>=1.6.0",
+    # OpenTelemetry core
+    "opentelemetry-api>=1.20.0",
+    "opentelemetry-sdk>=1.20.0",
+    # OpenTelemetry instrumentation
+    "opentelemetry-instrumentation-fastapi>=0.41b0",
+    "opentelemetry-instrumentation-httpx>=0.41b0",
+    "opentelemetry-instrumentation-logging>=0.41b0",
+    "opentelemetry-instrumentation-starlette>=0.41b0",
+    # OpenTelemetry exporters
+    "opentelemetry-exporter-otlp>=1.20.0",
 ]
 
 [project.optional-dependencies]

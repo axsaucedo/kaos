@@ -26,6 +26,9 @@ spec:
         - /manager
         args:
         - --leader-elect
+        envFrom:
+        - configMapRef:
+            name: kaos-operator-config
         image: axsauze/kaos-operator:latest
         imagePullPolicy: IfNotPresent
         name: manager

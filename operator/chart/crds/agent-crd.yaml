@@ -286,6 +286,21 @@ spec:
                     maximum: 20
                     minimum: 1
                     type: integer
+                  telemetry:
+                    description: Telemetry configures OpenTelemetry instrumentation
+                    properties:
+                      enabled:
+                        default: false
+                        description: |-
+                          Enabled controls whether OpenTelemetry is enabled (default: false)
+                          When enabled, traces, metrics, and log correlation are all active.
+                        type: boolean
+                      endpoint:
+                        description: |-
+                          Endpoint is the OTLP gRPC endpoint URL (required when enabled).
+                          Example: "http://otel-collector.observability:4317"
+                        type: string
+                    type: object
                 type: object
               gatewayRoute:
                 description: GatewayRoute configures Gateway API routing (timeout, etc.)

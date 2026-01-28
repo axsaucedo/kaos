@@ -56,6 +56,23 @@ type MemoryConfig struct {
 
 // +kubebuilder:object:generate=true
 
+// TelemetryConfig defines OpenTelemetry instrumentation settings.
+// Advanced OTel settings can be configured via spec.config.env using standard
+// OTEL_* environment variables (e.g., OTEL_EXPORTER_OTLP_INSECURE, OTEL_TRACES_SAMPLER).
+type TelemetryConfig struct {
+	// Enabled controls whether OpenTelemetry is enabled (default: false)
+	// When enabled, traces, metrics, and log correlation are all active.
+	// +kubebuilder:default=false
+	Enabled bool `json:"enabled,omitempty"`
+
+	// Endpoint is the OTLP gRPC endpoint URL (required when enabled).
+	// Example: "http://otel-collector.observability:4317"
+	// +kubebuilder:validation:Optional
+	Endpoint string `json:"endpoint,omitempty"`
+}
+
+// +kubebuilder:object:generate=true
+
 // AgentConfig defines agent-specific configuration
 type AgentConfig struct {
 	// Description is a human-readable description of the agent
@@ -75,6 +92,10 @@ type AgentConfig struct {
 	// Memory configures the agent's memory system
 	// +kubebuilder:validation:Optional
 	Memory *MemoryConfig `json:"memory,omitempty"`
+
+	// Telemetry configures OpenTelemetry instrumentation
+	// +kubebuilder:validation:Optional
+	Telemetry *TelemetryConfig `json:"telemetry,omitempty"`
 
 	// Env variables to pass to the agent runtime
 	// +kubebuilder:validation:Optional

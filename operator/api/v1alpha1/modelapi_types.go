@@ -124,6 +124,12 @@ type ModelAPISpec struct {
 	// +kubebuilder:validation:Optional
 	GatewayRoute *GatewayRoute `json:"gatewayRoute,omitempty"`
 
+	// Telemetry configures OpenTelemetry instrumentation.
+	// For Proxy mode (LiteLLM): Enables OTel callbacks for traces/metrics.
+	// For Hosted mode (Ollama): Not supported; a warning is emitted if enabled.
+	// +kubebuilder:validation:Optional
+	Telemetry *TelemetryConfig `json:"telemetry,omitempty"`
+
 	// PodSpec allows overriding the generated pod spec using strategic merge patch
 	// +kubebuilder:validation:Optional
 	PodSpec *corev1.PodSpec `json:"podSpec,omitempty"`

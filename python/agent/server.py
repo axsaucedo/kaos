@@ -3,6 +3,7 @@ AgentServer implementation for OpenAI-compatible API.
 
 FastAPI server with health probes, agent discovery, and chat completions endpoint.
 Supports both streaming and non-streaming responses.
+Includes OpenTelemetry instrumentation for tracing, metrics, and log correlation.
 """
 
 import time
@@ -22,24 +23,47 @@ from modelapi.client import ModelAPI
 from agent.client import Agent, RemoteAgent
 from agent.memory import LocalMemory
 from mcptools.client import MCPClient
+from telemetry.manager import init_otel, is_otel_enabled, should_enable_otel
 
 
-def configure_logging(level: str = "INFO") -> None:
+def configure_logging(level: str = "INFO", otel_correlation: bool = False) -> None:
     """Configure logging for the application.
 
     Sets up a consistent logging format and ensures all application loggers
     are properly configured to output to stdout.
+
+    Args:
+        level: Log level (DEBUG, INFO, WARNING, ERROR)
+        otel_correlation: If True, include trace_id and span_id in log format
     """
     log_level = getattr(logging, level.upper(), logging.INFO)
+
+    # Log format with optional OTel correlation
+    if otel_correlation:
+        log_format = (
+            "%(asctime)s - %(name)s - %(levelname)s - "
+            "[trace_id=%(otelTraceID)s span_id=%(otelSpanID)s] - %(message)s"
+        )
+    else:
+        log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
     # Configure root logger
     logging.basicConfig(
         level=log_level,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        format=log_format,
         datefmt="%Y-%m-%d %H:%M:%S",
         stream=sys.stdout,
         force=True,  # Override any existing configuration
     )
+
+    # If OTel correlation is enabled, add the LoggingInstrumentor
+    if otel_correlation:
+        try:
+            from opentelemetry.instrumentation.logging import LoggingInstrumentor
+
+            LoggingInstrumentor().instrument(set_logging_format=False)
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Failed to enable OTel log correlation: {e}")
 
     # Ensure our application loggers are at the right level
     for logger_name in [
@@ -146,7 +170,21 @@ class AgentServer:
         )
 
         self._setup_routes()
+        self._setup_telemetry()
         logger.info(f"AgentServer initialized for {agent.name} on port {port}")
+
+    def _setup_telemetry(self):
+        """Setup OpenTelemetry instrumentation for FastAPI."""
+        if is_otel_enabled():
+            try:
+                from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+                from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+
+                FastAPIInstrumentor.instrument_app(self.app)
+                HTTPXClientInstrumentor().instrument()
+                logger.info("OpenTelemetry instrumentation enabled (FastAPI + HTTPX)")
+            except Exception as e:
+                logger.warning(f"Failed to enable OpenTelemetry instrumentation: {e}")
 
     @asynccontextmanager
     async def _lifespan(self, app: FastAPI):
@@ -435,8 +473,11 @@ def create_agent_server(
         # Load from environment variables - requires AGENT_NAME and MODEL_API_URL
         settings = AgentServerSettings()  # type: ignore[call-arg]
 
-    # Configure logging before anything else
-    configure_logging(settings.agent_log_level)
+    # Check if OTel should be enabled based on env vars (before init_otel)
+    otel_should_enable = should_enable_otel()
+
+    # Configure logging with optional OTel correlation
+    configure_logging(settings.agent_log_level, otel_correlation=otel_should_enable)
 
     model_api = ModelAPI(model=settings.model_name, api_base=settings.model_api_url)
 
@@ -504,6 +545,10 @@ def create_agent_server(
         )
     else:
         memory = NullMemory()
+
+    # Initialize OpenTelemetry if enabled (uses standard OTEL_* env vars)
+    # Note: LoggingInstrumentor is already called in configure_logging() above
+    init_otel(settings.agent_name)
 
     agent = Agent(
         name=settings.agent_name,

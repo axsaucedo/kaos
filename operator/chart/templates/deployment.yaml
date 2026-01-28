@@ -27,12 +27,12 @@ spec:
       - args: {{- toYaml .Values.controllerManager.manager.args | nindent 8 }}
         command:
         - /manager
-        envFrom:
-        - configMapRef:
-            name: kaos-operator-config
         env:
         - name: KUBERNETES_CLUSTER_DOMAIN
           value: {{ quote .Values.kubernetesClusterDomain }}
+        envFrom:
+        - configMapRef:
+            name: kaos-operator-config
         image: {{ .Values.controllerManager.manager.image.repository }}:{{ .Values.controllerManager.manager.image.tag
           | default .Chart.AppVersion }}
         imagePullPolicy: {{ .Values.controllerManager.manager.imagePullPolicy }}

@@ -24,8 +24,8 @@ help:
 	@echo "KIND E2E targets:"
 	@echo "  kind-create           - Create KIND cluster with registry, Gateway, MetalLB"
 	@echo "  kind-delete           - Delete KIND cluster"
-	@echo "  kind-load-images      - Build and load images into KIND"
-	@echo "  kind-e2e-install-kaos - Generate values and install KAOS operator"
+	@echo "  kind-load-images      - Build and load images into KIND (matches chart defaults)"
+	@echo "  kind-e2e-install-kaos - Install KAOS operator with Gateway API enabled"
 	@echo "  kind-e2e-run-tests    - Run E2E tests (depends on load-images + install-kaos)"
 	@echo "  e2e-test              - Run E2E tests (parallel, requires operator)"
 	@echo "  e2e-test-seq          - Run E2E tests sequentially"
@@ -88,13 +88,13 @@ clean:
 
 # === KIND E2E Test Targets ===
 
-# Configuration for KIND E2E
-REGISTRY ?= kind-local
-OPERATOR_TAG ?= dev
-AGENT_TAG ?= dev
-LITELLM_VERSION ?= v1.56.5
-OLLAMA_TAG ?= latest
-HELM_VALUES_FILE ?= $(shell pwd)/hack/kind-e2e-values.yaml
+# Configuration for KIND E2E - matches chart/values.yaml defaults
+REGISTRY ?= axsauze
+VERSION := $(shell cat $(shell pwd)/../VERSION 2>/dev/null || echo "dev")
+OPERATOR_TAG ?= $(VERSION)
+AGENT_TAG ?= $(VERSION)
+LITELLM_IMAGE ?= ghcr.io/berriai/litellm:main-stable
+OLLAMA_IMAGE ?= alpine/ollama:latest
 
 # Create KIND cluster with registry, Gateway, MetalLB
 kind-create:
@@ -110,20 +110,15 @@ kind-delete:
 kind-load-images:
 	@REGISTRY=$(REGISTRY) KIND_CLUSTER_NAME=$(KIND_CLUSTER_NAME) \
 		OPERATOR_TAG=$(OPERATOR_TAG) AGENT_TAG=$(AGENT_TAG) \
-		LITELLM_VERSION=$(LITELLM_VERSION) OLLAMA_TAG=$(OLLAMA_TAG) \
+		LITELLM_IMAGE=$(LITELLM_IMAGE) OLLAMA_IMAGE=$(OLLAMA_IMAGE) \
 		./hack/build-push-images.sh
 
-# Generate Helm values and install KAOS operator in KIND
+# Install KAOS operator in KIND (uses chart defaults, no special values file needed)
 kind-e2e-install-kaos:
-	@echo "=== Generating Helm values ==="
-	@REGISTRY=$(REGISTRY) OPERATOR_TAG=$(OPERATOR_TAG) AGENT_TAG=$(AGENT_TAG) \
-		LITELLM_VERSION=$(LITELLM_VERSION) OLLAMA_TAG=$(OLLAMA_TAG) \
-		./hack/update-kind-e2e-values.sh
 	@echo "=== Installing KAOS operator ==="
 	@kubectl create namespace kaos-system 2>/dev/null || true
 	@helm upgrade --install kaos chart/ \
 		--namespace kaos-system \
-		-f $(HELM_VALUES_FILE) \
 		--set gatewayAPI.enabled=true \
 		--set gatewayAPI.createGateway=true \
 		--set gatewayAPI.gatewayClassName=envoy-gateway \
