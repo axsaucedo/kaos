@@ -388,9 +388,9 @@ class Agent:
 
         except Exception as e:
             span_failed = True
-            self._otel.span_failure(e)
             error_msg = f"Error processing message: {str(e)}"
             logger.error(error_msg)
+            self._otel.span_failure(e)
             error_event = self.memory.create_event("error", error_msg)
             await self.memory.add_event(session_id, error_event)
             yield f"Sorry, I encountered an error: {str(e)}"
@@ -525,8 +525,8 @@ class Agent:
             return content
         except Exception as e:
             failed = True
-            self._otel.span_failure(e)
             logger.error(f"Model call failed: {type(e).__name__}: {e}")
+            self._otel.span_failure(e)
             raise
         finally:
             if not failed:
@@ -534,7 +534,6 @@ class Agent:
 
     async def _execute_tool(self, tool_name: str, tool_args: Dict[str, Any]) -> Any:
         """Execute a tool with tracing."""
-        logger.debug(f"Executing tool: {tool_name}, args: {list(tool_args.keys())}")
         self._otel.span_begin(
             f"tool.{tool_name}",
             kind=SpanKind.CLIENT,
@@ -542,6 +541,7 @@ class Agent:
             metric_kind="tool",
             metric_attrs={"tool": tool_name},
         )
+        logger.debug(f"Executing tool: {tool_name}, args: {list(tool_args.keys())}")
         failed = False
         try:
             tool_result = None
@@ -556,8 +556,8 @@ class Agent:
             return tool_result
         except Exception as e:
             failed = True
-            self._otel.span_failure(e)
             logger.error(f"Tool {tool_name} failed: {type(e).__name__}: {e}")
+            self._otel.span_failure(e)
             raise
         finally:
             if not failed:
@@ -571,7 +571,6 @@ class Agent:
         session_id: str,
     ) -> str:
         """Execute delegation to a sub-agent with tracing."""
-        logger.debug(f"Delegating to sub-agent: {agent_name}, task length: {len(task)}")
         self._otel.span_begin(
             f"delegate.{agent_name}",
             kind=SpanKind.CLIENT,
@@ -579,6 +578,7 @@ class Agent:
             metric_kind="delegation",
             metric_attrs={"target": agent_name},
         )
+        logger.debug(f"Delegating to sub-agent: {agent_name}, task length: {len(task)}")
         failed = False
         try:
             result = await self.delegate_to_sub_agent(
@@ -588,8 +588,8 @@ class Agent:
             return result
         except Exception as e:
             failed = True
-            self._otel.span_failure(e)
             logger.error(f"Delegation to {agent_name} failed: {type(e).__name__}: {e}")
+            self._otel.span_failure(e)
             raise
         finally:
             if not failed:
