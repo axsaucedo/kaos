@@ -95,7 +95,17 @@ def configure_logging(level: str = "INFO", otel_correlation: bool = False) -> No
     logging.getLogger("httpx").setLevel(http_log_level)
     logging.getLogger("httpcore").setLevel(http_log_level)
     logging.getLogger("mcp.client.streamable_http").setLevel(http_log_level)
+
+    # Uvicorn access logs: disabled by default, enable with OTEL_INCLUDE_HTTP_SERVER=true
+    include_http_server = os.getenv("OTEL_INCLUDE_HTTP_SERVER", "false").lower() in (
+        "true",
+        "1",
+        "yes",
+    )
     logging.getLogger("uvicorn.error").setLevel(log_level)
+    # Access logger at CRITICAL effectively disables it; at log_level enables it
+    uvicorn_access_level = log_level if include_http_server else logging.CRITICAL
+    logging.getLogger("uvicorn.access").setLevel(uvicorn_access_level)
 
 
 logger = logging.getLogger(__name__)
