@@ -43,13 +43,23 @@ from opentelemetry.context import Context
 logger = logging.getLogger(__name__)
 
 
-def _get_log_level() -> int:
+def get_log_level() -> str:
+    """Get the configured log level as a string.
+
+    Reads from LOG_LEVEL env var (with AGENT_LOG_LEVEL as fallback for backwards
+    compatibility) and returns the normalized level string.
+    Defaults to INFO if not set.
+    """
+    return os.getenv("LOG_LEVEL", os.getenv("AGENT_LOG_LEVEL", "INFO")).upper()
+
+
+def get_log_level_int() -> int:
     """Get the configured log level as a logging constant.
 
-    Reads from LOG_LEVEL env var and converts to logging.DEBUG/INFO/etc.
+    Converts the LOG_LEVEL string to logging.DEBUG/INFO/etc.
     Defaults to INFO if not set or invalid.
     """
-    level_str = os.getenv("LOG_LEVEL", "INFO").upper()
+    level_str = get_log_level()
     level_map = {
         "TRACE": logging.DEBUG,  # Python doesn't have TRACE
         "DEBUG": logging.DEBUG,
@@ -250,7 +260,7 @@ def init_otel(service_name: Optional[str] = None) -> bool:
     otel_logs.set_logger_provider(logger_provider)
     # Attach custom handler to root logger to export all logs at configured level
     # Uses KaosLoggingHandler which adds logger.name as explicit attribute
-    log_level = _get_log_level()
+    log_level = get_log_level_int()
     otel_handler = KaosLoggingHandler(level=log_level, logger_provider=logger_provider)
     logging.getLogger().addHandler(otel_handler)
 

@@ -39,10 +39,11 @@ When **enabled** (`true`):
 
 When **disabled** (default):
 - Uvicorn access logs are suppressed (no "GET /health 200" messages)
+- FastAPI request handling is NOT traced (no spans for incoming HTTP requests)
 - Reduces noise from Kubernetes health/readiness probes
-- FastAPI request handling is still traced
 
 When **enabled** (`true`):
+- FastAPI incoming requests create trace spans
 - Uvicorn access logs are emitted at configured LOG_LEVEL
 - Useful for debugging incoming request issues
 

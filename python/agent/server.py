@@ -24,12 +24,7 @@ from modelapi.client import ModelAPI
 from agent.client import Agent, RemoteAgent
 from agent.memory import LocalMemory
 from mcptools.client import MCPClient
-from telemetry.manager import init_otel, is_otel_enabled, should_enable_otel
-
-
-def get_log_level() -> str:
-    """Get log level from environment, preferring LOG_LEVEL over AGENT_LOG_LEVEL."""
-    return os.getenv("LOG_LEVEL", os.getenv("AGENT_LOG_LEVEL", "INFO")).upper()
+from telemetry.manager import init_otel, is_otel_enabled, should_enable_otel, get_log_level
 
 
 def configure_logging(level: str = "INFO", otel_correlation: bool = False) -> None:
@@ -200,14 +195,17 @@ class AgentServer:
     def _setup_telemetry(self):
         """Setup OpenTelemetry instrumentation for FastAPI.
 
-        HTTPX client tracing is disabled by default to reduce noise from MCP SSE
-        connections. Enable with OTEL_INCLUDE_HTTP_CLIENT=true.
+        HTTP server/client tracing is disabled by default to reduce noise.
+        Enable with OTEL_INCLUDE_HTTP_SERVER=true (FastAPI) or OTEL_INCLUDE_HTTP_CLIENT=true (HTTPX).
         """
         if is_otel_enabled():
             try:
-                from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-
-                FastAPIInstrumentor.instrument_app(self.app)
+                # FastAPI instrumentation is opt-in (noisy with health probes)
+                include_http_server = os.getenv("OTEL_INCLUDE_HTTP_SERVER", "false").lower() in (
+                    "true",
+                    "1",
+                    "yes",
+                )
 
                 # HTTPX instrumentation is opt-in (noisy with MCP SSE)
                 include_http_client = os.getenv("OTEL_INCLUDE_HTTP_CLIENT", "false").lower() in (
@@ -215,13 +213,26 @@ class AgentServer:
                     "1",
                     "yes",
                 )
+
+                instrumentations = []
+                if include_http_server:
+                    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+
+                    FastAPIInstrumentor.instrument_app(self.app)
+                    instrumentations.append("FastAPI")
+
                 if include_http_client:
                     from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
                     HTTPXClientInstrumentor().instrument()
-                    logger.info("OpenTelemetry instrumentation enabled (FastAPI + HTTPX)")
+                    instrumentations.append("HTTPX")
+
+                if instrumentations:
+                    logger.info(
+                        f"OpenTelemetry HTTP instrumentation enabled: {', '.join(instrumentations)}"
+                    )
                 else:
-                    logger.info("OpenTelemetry instrumentation enabled (FastAPI only)")
+                    logger.info("OpenTelemetry enabled (HTTP instrumentation disabled by default)")
             except Exception as e:
                 logger.warning(f"Failed to enable OpenTelemetry instrumentation: {e}")
 
