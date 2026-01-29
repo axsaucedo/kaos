@@ -277,6 +277,12 @@ class AgentServer:
             logger.info(
                 f"  OTEL_EXPORTER_OTLP_ENDPOINT: {os.getenv('OTEL_EXPORTER_OTLP_ENDPOINT', 'N/A')}"
             )
+            logger.info(
+                f"  OTEL_INCLUDE_HTTP_CLIENT: {getenv_bool('OTEL_INCLUDE_HTTP_CLIENT', False)}"
+            )
+            logger.info(
+                f"  OTEL_INCLUDE_HTTP_SERVER: {getenv_bool('OTEL_INCLUDE_HTTP_SERVER', False)}"
+            )
             logger.debug(
                 f"  OTEL_RESOURCE_ATTRIBUTES: {os.getenv('OTEL_RESOURCE_ATTRIBUTES', 'N/A')}"
             )

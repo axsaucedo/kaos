@@ -361,12 +361,16 @@ class Agent:
 
             # Build enhanced system prompt with tools/agents info
             system_prompt = await self._build_system_prompt(user_system_prompt)
+            logger.debug(f"System prompt built ({len(system_prompt)} chars)")
+            logger.debug(f"System prompt preview: {system_prompt[:300]}...")
             messages = [{"role": "system", "content": system_prompt}]
 
             # Handle both string and array input formats
             if isinstance(message, str):
+                logger.debug(f"User message: {message[:200]}...")
                 user_event = self.memory.create_event("user_message", message)
                 await self.memory.add_event(session_id, user_event)
+                logger.debug(f"Memory event created: user_message")
                 messages.append({"role": "user", "content": message})
             else:
                 for msg in message:
@@ -376,18 +380,23 @@ class Agent:
                         continue  # Already captured above
 
                     if role == "task-delegation":
+                        logger.debug(f"Received delegation task: {content[:200]}...")
                         delegation_event = self.memory.create_event(
                             "task_delegation_received", content
                         )
                         await self.memory.add_event(session_id, delegation_event)
+                        logger.debug(f"Memory event created: task_delegation_received")
                         messages.append({"role": "user", "content": content})
                     else:
                         messages.append({"role": role, "content": content})
                         if role == "user":
+                            logger.debug(f"User message: {content[:200]}...")
                             user_event = self.memory.create_event("user_message", content)
                             await self.memory.add_event(session_id, user_event)
+                            logger.debug(f"Memory event created: user_message")
 
             # Agentic loop - iterate up to max_steps
+            logger.debug(f"Starting agentic loop with {len(messages)} messages")
             async for chunk in self._agentic_loop(messages, session_id, stream):
                 yield chunk
 
@@ -525,8 +534,13 @@ class Agent:
         failed = False
         try:
             logger.debug(f"Model call: {model_name}, messages count: {len(messages)}")
+            # Log the last user message for debugging
+            for msg in reversed(messages):
+                if msg.get("role") in ("user", "task-delegation"):
+                    logger.debug(f"Model input (last user msg): {msg.get('content', '')[:200]}...")
+                    break
             content = cast(str, await self.model_api.process_message(messages, stream=False))
-            logger.debug(f"Model response length: {len(content)}")
+            logger.debug(f"Model response ({len(content)} chars): {content[:200]}...")
             return content
         except Exception as e:
             failed = True
@@ -546,7 +560,7 @@ class Agent:
             metric_kind="tool",
             metric_attrs={"tool": tool_name},
         )
-        logger.debug(f"Executing tool: {tool_name}, args: {list(tool_args.keys())}")
+        logger.debug(f"Executing tool: {tool_name}, args: {tool_args}")
         failed = False
         try:
             tool_result = None
@@ -557,7 +571,7 @@ class Agent:
 
             if tool_result is None:
                 raise ValueError(f"Tool '{tool_name}' not found")
-            logger.debug(f"Tool {tool_name} completed successfully")
+            logger.debug(f"Tool {tool_name} result: {str(tool_result)[:200]}...")
             return tool_result
         except Exception as e:
             failed = True
@@ -583,13 +597,14 @@ class Agent:
             metric_kind="delegation",
             metric_attrs={"target": agent_name},
         )
-        logger.debug(f"Delegating to sub-agent: {agent_name}, task length: {len(task)}")
+        logger.debug(f"Delegating to sub-agent: {agent_name}")
+        logger.debug(f"Delegation task: {task[:200]}...")
         failed = False
         try:
             result = await self.delegate_to_sub_agent(
                 agent_name, task, context_messages, session_id
             )
-            logger.debug(f"Delegation to {agent_name} completed, result length: {len(result)}")
+            logger.debug(f"Delegation to {agent_name} result: {result[:200]}...")
             return result
         except Exception as e:
             failed = True
