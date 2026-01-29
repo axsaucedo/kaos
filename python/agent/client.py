@@ -23,6 +23,7 @@ from modelapi.client import ModelAPI
 from agent.memory import LocalMemory, NullMemory
 from mcptools.client import MCPClient
 from telemetry.manager import (
+    otel,
     KaosOtelManager,
     ATTR_SESSION_ID,
     ATTR_MODEL_NAME,
@@ -201,9 +202,6 @@ class Agent:
         self.memory_context_limit = memory_context_limit
         self.memory_enabled = memory_enabled
 
-        # Telemetry manager (lightweight, always created - no-ops if OTel disabled)
-        self._otel = KaosOtelManager(name)
-
         logger.info(f"Agent initialized: {name}")
 
     async def _get_tools_prompt(self) -> Optional[str]:
@@ -345,7 +343,7 @@ class Agent:
             "stream": stream,
             ATTR_SESSION_ID: session_id,
         }
-        self._otel.span_begin(
+        otel.span_begin(
             "agent.agentic_loop",
             attrs=span_attrs,
             metric_kind="request",
@@ -397,13 +395,13 @@ class Agent:
             span_failed = True
             error_msg = f"Error processing message: {str(e)}"
             logger.error(error_msg)
-            self._otel.span_failure(e)
+            otel.span_failure(e)
             error_event = self.memory.create_event("error", error_msg)
             await self.memory.add_event(session_id, error_event)
             yield f"Sorry, I encountered an error: {str(e)}"
         finally:
             if not span_failed:
-                self._otel.span_success()
+                otel.span_success()
 
     async def _agentic_loop(
         self,
@@ -417,7 +415,7 @@ class Agent:
 
             # Start step span
             step_attrs = {"step": step + 1, "max_steps": self.max_steps}
-            self._otel.span_begin(f"agent.step.{step + 1}", attrs=step_attrs)
+            otel.span_begin(f"agent.step.{step + 1}", attrs=step_attrs)
             # Use failed flag pattern to ensure spans close on continue/return/yield
             step_failed = False
             try:
@@ -504,11 +502,11 @@ class Agent:
 
             except Exception as e:
                 step_failed = True
-                self._otel.span_failure(e)
+                otel.span_failure(e)
                 raise
             finally:
                 if not step_failed:
-                    self._otel.span_success()
+                    otel.span_success()
 
         # Max steps reached
         max_steps_msg = f"Reached maximum reasoning steps ({self.max_steps})"
@@ -517,7 +515,7 @@ class Agent:
 
     async def _call_model(self, messages: List[Dict[str, str]], model_name: str) -> str:
         """Call the model API with tracing."""
-        self._otel.span_begin(
+        otel.span_begin(
             "model.inference",
             kind=SpanKind.CLIENT,
             attrs={ATTR_MODEL_NAME: model_name},
@@ -533,15 +531,15 @@ class Agent:
         except Exception as e:
             failed = True
             logger.error(f"Model call failed: {type(e).__name__}: {e}")
-            self._otel.span_failure(e)
+            otel.span_failure(e)
             raise
         finally:
             if not failed:
-                self._otel.span_success()
+                otel.span_success()
 
     async def _execute_tool(self, tool_name: str, tool_args: Dict[str, Any]) -> Any:
         """Execute a tool with tracing."""
-        self._otel.span_begin(
+        otel.span_begin(
             f"tool.{tool_name}",
             kind=SpanKind.CLIENT,
             attrs={ATTR_TOOL_NAME: tool_name},
@@ -564,11 +562,11 @@ class Agent:
         except Exception as e:
             failed = True
             logger.error(f"Tool {tool_name} failed: {type(e).__name__}: {e}")
-            self._otel.span_failure(e)
+            otel.span_failure(e)
             raise
         finally:
             if not failed:
-                self._otel.span_success()
+                otel.span_success()
 
     async def _execute_delegation(
         self,
@@ -578,7 +576,7 @@ class Agent:
         session_id: str,
     ) -> str:
         """Execute delegation to a sub-agent with tracing."""
-        self._otel.span_begin(
+        otel.span_begin(
             f"delegate.{agent_name}",
             kind=SpanKind.CLIENT,
             attrs={ATTR_DELEGATION_TARGET: agent_name},
@@ -596,11 +594,11 @@ class Agent:
         except Exception as e:
             failed = True
             logger.error(f"Delegation to {agent_name} failed: {type(e).__name__}: {e}")
-            self._otel.span_failure(e)
+            otel.span_failure(e)
             raise
         finally:
             if not failed:
-                self._otel.span_success()
+                otel.span_success()
 
     async def delegate_to_sub_agent(
         self,

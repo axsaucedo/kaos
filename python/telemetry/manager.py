@@ -295,14 +295,22 @@ def init_otel(service_name: Optional[str] = None) -> bool:
     return True
 
 
+def _get_service_name() -> str:
+    """Get service name from environment variables."""
+    return os.getenv("OTEL_SERVICE_NAME", os.getenv("AGENT_NAME", "kaos-service"))
+
+
 class KaosOtelManager:
     """Lightweight helper for creating spans and recording metrics.
 
     Uses inline span management via span_begin/span_success/span_failure instead
     of context managers. Timing is handled internally via contextvars.
 
+    Can be used as a singleton via the module-level `otel` instance, or
+    instantiated with a specific service name for tests.
+
     Example:
-        otel = KaosOtelManager("my-agent")
+        from telemetry.manager import otel
         otel.span_begin("process_request", attrs={"session.id": "abc123"})
         try:
             # do work
@@ -314,15 +322,18 @@ class KaosOtelManager:
             otel.span_success()
     """
 
-    def __init__(self, service_name: str):
+    # Singleton instance (lazy initialized)
+    _instance: Optional["KaosOtelManager"] = None
+
+    def __init__(self, service_name: Optional[str] = None):
         """Initialize manager with service context.
 
         Args:
-            service_name: Name of the service (e.g., agent name)
+            service_name: Name of the service (reads from OTEL_SERVICE_NAME if not provided)
         """
-        self.service_name = service_name
-        self._tracer = trace.get_tracer(f"kaos.{service_name}")
-        self._meter = metrics.get_meter(f"kaos.{service_name}")
+        self.service_name = service_name or _get_service_name()
+        self._tracer = trace.get_tracer(f"kaos.{self.service_name}")
+        self._meter = metrics.get_meter(f"kaos.{self.service_name}")
 
         # Lazily initialized metrics
         self._request_counter: Optional[metrics.Counter] = None
@@ -574,3 +585,17 @@ class KaosOtelManager:
         carrier = dict(headers) if not isinstance(headers, dict) else headers
         ctx = extract(carrier)
         return otel_context.attach(ctx)
+
+    @classmethod
+    def get_instance(cls) -> "KaosOtelManager":
+        """Get or create the singleton instance.
+
+        Service name is read from OTEL_SERVICE_NAME or AGENT_NAME env var.
+        """
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+
+# Module-level singleton for easy import: `from telemetry.manager import otel`
+otel = KaosOtelManager.get_instance()
