@@ -556,3 +556,21 @@ class KaosOtelManager:
     def detach_context(token: Token[Context]) -> None:
         """Detach a previously attached context."""
         otel_context.detach(token)
+
+    @staticmethod
+    def extract_and_attach_context(headers: Any) -> Token[Context]:
+        """Extract trace context from headers and attach it as current context.
+
+        Convenience method that combines extract_context + attach_context.
+        Returns a token that must be passed to detach_context() in finally block.
+
+        Args:
+            headers: HTTP headers (dict, starlette Headers, or any mapping)
+
+        Returns:
+            Token for detaching context in finally block
+        """
+        # Convert to dict if needed (handles Starlette Headers, etc.)
+        carrier = dict(headers) if not isinstance(headers, dict) else headers
+        ctx = extract(carrier)
+        return otel_context.attach(ctx)

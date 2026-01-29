@@ -370,10 +370,8 @@ class AgentServer:
             Server only routes requests to the agent for processing.
             Extracts trace context from incoming headers for distributed tracing.
             """
-            # Extract trace context from incoming headers for distributed tracing
-            headers = dict(request.headers)
-            parent_ctx = KaosOtelManager.extract_context(headers)
-            ctx_token = KaosOtelManager.attach_context(parent_ctx)
+            # Extract and attach trace context for distributed tracing
+            ctx_token = KaosOtelManager.extract_and_attach_context(request.headers)
 
             try:
                 body = await request.json()
@@ -408,7 +406,6 @@ class AgentServer:
                 logger.error(f"Chat completion error: {e}")
                 raise HTTPException(status_code=500, detail=str(e))
             finally:
-                # Detach the parent context
                 KaosOtelManager.detach_context(ctx_token)
 
     async def _complete_chat_completion(self, messages: list, model_name: str) -> JSONResponse:
