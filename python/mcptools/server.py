@@ -12,6 +12,11 @@ from starlette.routing import Route
 from starlette.responses import JSONResponse
 
 
+def get_log_level() -> str:
+    """Get log level from environment, preferring LOG_LEVEL over MCP_LOG_LEVEL."""
+    return os.getenv("LOG_LEVEL", os.getenv("MCP_LOG_LEVEL", "INFO")).upper()
+
+
 def configure_logging(level: str = "INFO", otel_correlation: bool = False) -> None:
     """Configure logging for the application.
 
@@ -91,7 +96,9 @@ class MCPServer:
         otel_enabled = should_enable_otel()
 
         # Configure logging with optional OTel correlation
-        configure_logging(settings.mcp_log_level, otel_correlation=otel_enabled)
+        # Use LOG_LEVEL env var (preferred) or fallback to MCP_LOG_LEVEL
+        log_level = get_log_level()
+        configure_logging(log_level, otel_correlation=otel_enabled)
 
         self._host = settings.mcp_host
         self._port = settings.mcp_port

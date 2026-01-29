@@ -6,6 +6,7 @@ Supports both streaming and non-streaming responses.
 Includes OpenTelemetry instrumentation for tracing, metrics, and log correlation.
 """
 
+import os
 import time
 import uuid
 import logging
@@ -15,7 +16,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 from pydantic_settings import BaseSettings
 import uvicorn
 
@@ -24,6 +25,11 @@ from agent.client import Agent, RemoteAgent
 from agent.memory import LocalMemory
 from mcptools.client import MCPClient
 from telemetry.manager import init_otel, is_otel_enabled, should_enable_otel
+
+
+def get_log_level() -> str:
+    """Get log level from environment, preferring LOG_LEVEL over AGENT_LOG_LEVEL."""
+    return os.getenv("LOG_LEVEL", os.getenv("AGENT_LOG_LEVEL", "INFO")).upper()
 
 
 def configure_logging(level: str = "INFO", otel_correlation: bool = False) -> None:
@@ -477,7 +483,9 @@ def create_agent_server(
     otel_should_enable = should_enable_otel()
 
     # Configure logging with optional OTel correlation
-    configure_logging(settings.agent_log_level, otel_correlation=otel_should_enable)
+    # Use LOG_LEVEL env var (preferred) or fallback to AGENT_LOG_LEVEL
+    log_level = get_log_level()
+    configure_logging(log_level, otel_correlation=otel_should_enable)
 
     model_api = ModelAPI(model=settings.model_name, api_base=settings.model_api_url)
 
