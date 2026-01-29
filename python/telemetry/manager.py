@@ -61,6 +61,23 @@ def _get_log_level() -> int:
     return level_map.get(level_str, logging.INFO)
 
 
+class KaosLoggingHandler(LoggingHandler):
+    """Custom LoggingHandler that adds logger name as an explicit attribute.
+
+    The standard LoggingHandler uses logger name for InstrumentationScope but
+    excludes it from log record attributes. This subclass adds it back as
+    'logger.name' for better visibility in log viewers like SigNoz.
+    """
+
+    def emit(self, record: logging.LogRecord) -> None:
+        """Emit a log record with logger name as attribute."""
+        # Add logger name as attribute before translation
+        # This is safe because we're adding to the record, not modifying reserved attrs
+        if not hasattr(record, "logger_name"):
+            record.logger_name = record.name
+        super().emit(record)
+
+
 # Semantic conventions for KAOS spans
 ATTR_AGENT_NAME = "agent.name"
 ATTR_SESSION_ID = "session.id"
@@ -231,9 +248,10 @@ def init_otel(service_name: Optional[str] = None) -> bool:
     logger_provider = LoggerProvider(resource=resource)
     logger_provider.add_log_record_processor(BatchLogRecordProcessor(otlp_log_exporter))
     otel_logs.set_logger_provider(logger_provider)
-    # Attach OTEL handler to root logger to export all logs at configured level
+    # Attach custom handler to root logger to export all logs at configured level
+    # Uses KaosLoggingHandler which adds logger.name as explicit attribute
     log_level = _get_log_level()
-    otel_handler = LoggingHandler(level=log_level, logger_provider=logger_provider)
+    otel_handler = KaosLoggingHandler(level=log_level, logger_provider=logger_provider)
     logging.getLogger().addHandler(otel_handler)
 
     logger.info(
