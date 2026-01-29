@@ -11,10 +11,7 @@ from pydantic_settings import BaseSettings
 from starlette.routing import Route
 from starlette.responses import JSONResponse
 
-
-def get_log_level() -> str:
-    """Get log level from environment, preferring LOG_LEVEL over MCP_LOG_LEVEL."""
-    return os.getenv("LOG_LEVEL", os.getenv("MCP_LOG_LEVEL", "INFO")).upper()
+from telemetry.manager import get_log_level, getenv_bool
 
 
 def configure_logging(level: str = "INFO", otel_correlation: bool = False) -> None:
@@ -60,10 +57,16 @@ def configure_logging(level: str = "INFO", otel_correlation: bool = False) -> No
     for logger_name in ["mcptools", "mcptools.server", "mcptools.client"]:
         logging.getLogger(logger_name).setLevel(log_level)
 
-    # Reduce noise from third-party libraries
-    logging.getLogger("httpx").setLevel(logging.WARNING)
-    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    # Reduce noise from third-party libraries based on OTEL_INCLUDE_HTTP_* settings
+    include_http_client = getenv_bool("OTEL_INCLUDE_HTTP_CLIENT", False)
+    http_log_level = log_level if include_http_client else logging.WARNING
+    logging.getLogger("httpx").setLevel(http_log_level)
+    logging.getLogger("httpcore").setLevel(http_log_level)
+
+    include_http_server = getenv_bool("OTEL_INCLUDE_HTTP_SERVER", False)
     logging.getLogger("uvicorn.error").setLevel(log_level)
+    uvicorn_access_level = log_level if include_http_server else logging.CRITICAL
+    logging.getLogger("uvicorn.access").setLevel(uvicorn_access_level)
 
 
 logger = logging.getLogger(__name__)
