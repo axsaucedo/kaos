@@ -1,83 +1,68 @@
-# Go
-bin/
-dist/
-*.o
-*.a
-*.so
-.DS_Store
-vendor/
-go.sum
 
-# Python
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-.pytest_cache/
 .coverage
-htmlcov/
-*.egg-info/
+.DS_Store
+.eggs/
 .env
 .env.local
-.venv
-venv/
-ENV/
-env/
-
-# IDE
-.vscode/
 .idea/
-*.swp
+.operator-sdk/
+.pytest_cache/
+.Python
+.venv
+.vscode/
+*.a
+*.egg-info/
+*.log
+*.o
+*.py[cod]
+*.so
 *.swo
+*.swp
 *~
-.DS_Store
-
+*$py.class
+# Analysis reports (local only, not committed)
+# Build artifacts
+# Docker
+# Generated KIND E2E values (created by hack/update-kind-e2e-values.sh)
+# Go
+# IDE
 # Kubernetes
+# Operator SDK
+# Planning documents (local only, not committed)
+# Python
+# Test outputs
+awesome-ai-apps
+bin/
+build/
+CLAUDE.md
+cover.out
+develop-eggs/
+dist/
+docker-compose.override.yml
+downloads/
+eggs/
+env/
+ENV/
+go.sum
+hack/kind-e2e-values.yaml
+htmlcov/
 kubeconfig
 kubeconfig.yaml
-
-# Docker
-docker-compose.override.yml
-
-# Test outputs
-*.log
-cover.out
-
-# Operator SDK
-bin/
-dist/
-.operator-sdk/
-
-# Build artifacts
-build/
-dist/
-CLAUDE.md
-TASKS.md
-
-# Generated KIND E2E values (created by hack/update-kind-e2e-values.sh)
-hack/kind-e2e-values.yaml
-
-# Analysis reports (local only, not committed)
+lib/
+lib64/
 MEMORY_REPORT.md
-
-# Planning documents (local only, not committed)
-PLAN.md
-PLAN-*.md
-awesome-ai-apps
-REPORT.md
+parts/
 PLAN_*
+PLAN-*.md
+PLAN-OTEL-RESULTS.md
+PLAN.md
 REPORT_*.md
 REPORT-*.md
+REPORT.md
+sdist/
+TASKS.md
+var/
+vendor/
+venv/
+wheels/
