@@ -66,3 +66,11 @@ telemetry:
   # endpoint is the OTLP endpoint URL (required when enabled)
   # Example: "http://otel-collector.observability:4317"
   endpoint: ""
+
+# Global log level for all components (control plane and data plane)
+# Supported values: TRACE, DEBUG, INFO, WARNING, ERROR
+# - Control plane (operator): Uses Go slog levels
+# - Data plane (Agent, MCPServer): Uses Python logging levels
+# - ModelAPI (LiteLLM): Maps to LITELLM_LOG
+# - ModelAPI (Ollama): Maps to OLLAMA_DEBUG
+logLevel: INFO

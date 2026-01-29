@@ -30,3 +30,5 @@ data:
   {{- else }}
   DEFAULT_TELEMETRY_ENABLED: "false"
   {{- end }}
+  # Global log level for all components
+  DEFAULT_LOG_LEVEL: {{ .Values.logLevel | default "INFO" | upper | quote }}
