@@ -153,6 +153,7 @@ class RemoteAgent:
             return data["choices"][0]["message"]["content"]
         except Exception as e:
             self._active = False
+            logger.error(f"RemoteAgent {self.name} request failed: {type(e).__name__}: {e}")
             raise RuntimeError(f"Agent {self.name}: {type(e).__name__}: {e}")
 
     async def close(self):
@@ -525,7 +526,7 @@ class Agent:
         except Exception as e:
             failed = True
             self._otel.span_failure(e)
-            logger.debug(f"Model call failed: {type(e).__name__}: {e}")
+            logger.error(f"Model call failed: {type(e).__name__}: {e}")
             raise
         finally:
             if not failed:
@@ -556,7 +557,7 @@ class Agent:
         except Exception as e:
             failed = True
             self._otel.span_failure(e)
-            logger.debug(f"Tool {tool_name} failed: {type(e).__name__}: {e}")
+            logger.error(f"Tool {tool_name} failed: {type(e).__name__}: {e}")
             raise
         finally:
             if not failed:
@@ -588,7 +589,7 @@ class Agent:
         except Exception as e:
             failed = True
             self._otel.span_failure(e)
-            logger.debug(f"Delegation to {agent_name} failed: {type(e).__name__}: {e}")
+            logger.error(f"Delegation to {agent_name} failed: {type(e).__name__}: {e}")
             raise
         finally:
             if not failed:
