@@ -129,6 +129,8 @@ class RemoteAgent:
     ) -> str:
         """Process messages via remote agent's /v1/chat/completions.
 
+        Injects trace context headers for distributed tracing across agents.
+
         Args:
             messages: List of messages providing context. The last message
                      should have role "task-delegation" with the delegated task.
@@ -144,9 +146,14 @@ class RemoteAgent:
                 raise RuntimeError(f"Agent {self.name} unavailable at {self.card_url}")
 
         try:
+            # Inject trace context for distributed tracing
+            headers: Dict[str, str] = {}
+            KaosOtelManager.inject_context(headers)
+
             response = await self._request_client.post(
                 f"{self.card_url}/v1/chat/completions",
                 json={"model": self.name, "messages": messages, "stream": False},
+                headers=headers,
             )
             response.raise_for_status()
             data = response.json()

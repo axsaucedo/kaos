@@ -71,6 +71,29 @@ def get_log_level_int() -> int:
     return level_map.get(level_str, logging.INFO)
 
 
+def getenv_bool(name: str, default: bool = False) -> bool:
+    """Get a boolean value from an environment variable.
+
+    Args:
+        name: Environment variable name
+        default: Default value if not set (default: False)
+
+    Returns:
+        True if the env var is set to 'true', '1', or 'yes' (case-insensitive)
+        False if set to 'false', '0', or 'no'
+        default if not set or unrecognized value
+    """
+    value = os.getenv(name)
+    if value is None:
+        return default
+    value = value.lower()
+    if value in ("true", "1", "yes"):
+        return True
+    if value in ("false", "0", "no"):
+        return False
+    return default
+
+
 class KaosLoggingHandler(LoggingHandler):
     """Custom LoggingHandler that adds logger name as an explicit attribute.
 
@@ -520,3 +543,16 @@ class KaosOtelManager:
     def extract_context(carrier: Dict[str, str]) -> Context:
         """Extract trace context from headers."""
         return extract(carrier)
+
+    @staticmethod
+    def attach_context(ctx: Context) -> Token[Context]:
+        """Attach a context to make it current.
+
+        Returns a token that should be passed to detach_context() when done.
+        """
+        return otel_context.attach(ctx)
+
+    @staticmethod
+    def detach_context(token: Token[Context]) -> None:
+        """Detach a previously attached context."""
+        otel_context.detach(token)

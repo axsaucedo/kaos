@@ -24,7 +24,14 @@ from modelapi.client import ModelAPI
 from agent.client import Agent, RemoteAgent
 from agent.memory import LocalMemory
 from mcptools.client import MCPClient
-from telemetry.manager import init_otel, is_otel_enabled, should_enable_otel, get_log_level
+from telemetry.manager import (
+    init_otel,
+    is_otel_enabled,
+    should_enable_otel,
+    get_log_level,
+    getenv_bool,
+    KaosOtelManager,
+)
 
 
 def configure_logging(level: str = "INFO", otel_correlation: bool = False) -> None:
@@ -81,22 +88,14 @@ def configure_logging(level: str = "INFO", otel_correlation: bool = False) -> No
 
     # Reduce noise from third-party libraries
     # HTTPX/HTTPCORE: set to WARNING by default, or log_level if OTEL_INCLUDE_HTTP_CLIENT=true
-    include_http_client = os.getenv("OTEL_INCLUDE_HTTP_CLIENT", "false").lower() in (
-        "true",
-        "1",
-        "yes",
-    )
+    include_http_client = getenv_bool("OTEL_INCLUDE_HTTP_CLIENT", False)
     http_log_level = log_level if include_http_client else logging.WARNING
     logging.getLogger("httpx").setLevel(http_log_level)
     logging.getLogger("httpcore").setLevel(http_log_level)
     logging.getLogger("mcp.client.streamable_http").setLevel(http_log_level)
 
     # Uvicorn access logs: disabled by default, enable with OTEL_INCLUDE_HTTP_SERVER=true
-    include_http_server = os.getenv("OTEL_INCLUDE_HTTP_SERVER", "false").lower() in (
-        "true",
-        "1",
-        "yes",
-    )
+    include_http_server = getenv_bool("OTEL_INCLUDE_HTTP_SERVER", False)
     logging.getLogger("uvicorn.error").setLevel(log_level)
     # Access logger at CRITICAL effectively disables it; at log_level enables it
     uvicorn_access_level = log_level if include_http_server else logging.CRITICAL
@@ -201,18 +200,10 @@ class AgentServer:
         if is_otel_enabled():
             try:
                 # FastAPI instrumentation is opt-in (noisy with health probes)
-                include_http_server = os.getenv("OTEL_INCLUDE_HTTP_SERVER", "false").lower() in (
-                    "true",
-                    "1",
-                    "yes",
-                )
+                include_http_server = getenv_bool("OTEL_INCLUDE_HTTP_SERVER", False)
 
                 # HTTPX instrumentation is opt-in (noisy with MCP SSE)
-                include_http_client = os.getenv("OTEL_INCLUDE_HTTP_CLIENT", "false").lower() in (
-                    "true",
-                    "1",
-                    "yes",
-                )
+                include_http_client = getenv_bool("OTEL_INCLUDE_HTTP_CLIENT", False)
 
                 instrumentations = []
                 if include_http_server:
@@ -377,7 +368,13 @@ class AgentServer:
 
             The agent decides when to delegate or call tools based on model response.
             Server only routes requests to the agent for processing.
+            Extracts trace context from incoming headers for distributed tracing.
             """
+            # Extract trace context from incoming headers for distributed tracing
+            headers = dict(request.headers)
+            parent_ctx = KaosOtelManager.extract_context(headers)
+            ctx_token = KaosOtelManager.attach_context(parent_ctx)
+
             try:
                 body = await request.json()
 
@@ -410,6 +407,9 @@ class AgentServer:
             except Exception as e:
                 logger.error(f"Chat completion error: {e}")
                 raise HTTPException(status_code=500, detail=str(e))
+            finally:
+                # Detach the parent context
+                KaosOtelManager.detach_context(ctx_token)
 
     async def _complete_chat_completion(self, messages: list, model_name: str) -> JSONResponse:
         """Handle non-streaming chat completion.
