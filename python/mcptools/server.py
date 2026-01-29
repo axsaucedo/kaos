@@ -129,6 +129,8 @@ class MCPServer:
 
     def _log_startup_config(self):
         """Log server configuration on startup for debugging."""
+        from telemetry.manager import is_otel_enabled
+
         logger.info("=" * 60)
         logger.info("MCPServer Starting (Streamable HTTP)")
         logger.info("=" * 60)
@@ -142,6 +144,19 @@ class MCPServer:
             func = self.tools_registry[tool_name]
             doc = func.__doc__.split("\n")[0] if func.__doc__ else "No description"
             logger.info(f"  - {tool_name}: {doc}")
+
+        # Log OpenTelemetry configuration
+        otel_enabled = is_otel_enabled()
+        logger.info(f"OpenTelemetry Enabled: {otel_enabled}")
+        if otel_enabled:
+            logger.info(f"  OTEL_SERVICE_NAME: {os.getenv('OTEL_SERVICE_NAME', 'N/A')}")
+            logger.info(
+                f"  OTEL_EXPORTER_OTLP_ENDPOINT: {os.getenv('OTEL_EXPORTER_OTLP_ENDPOINT', 'N/A')}"
+            )
+            logger.debug(
+                f"  OTEL_RESOURCE_ATTRIBUTES: {os.getenv('OTEL_RESOURCE_ATTRIBUTES', 'N/A')}"
+            )
+
         logger.info("=" * 60)
 
     def register_tools(self, tools: Dict[str, Callable]):

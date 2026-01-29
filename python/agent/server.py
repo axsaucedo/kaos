@@ -211,6 +211,7 @@ class AgentServer:
         logger.info(f"Max Steps: {self.agent.max_steps}")
         logger.info(f"Memory Context Limit: {self.agent.memory_context_limit}")
         logger.info(f"Memory Enabled: {self.agent.memory_enabled}")
+        logger.info(f"Log Level: {get_log_level()}")
 
         # Log model API info
         if self.agent.model_api:
@@ -232,6 +233,18 @@ class AgentServer:
                 logger.info(f"  - {name}: {sub.card_url}")
         else:
             logger.info("Sub-agents: None")
+
+        # Log OpenTelemetry configuration
+        otel_enabled = is_otel_enabled()
+        logger.info(f"OpenTelemetry Enabled: {otel_enabled}")
+        if otel_enabled:
+            logger.info(f"  OTEL_SERVICE_NAME: {os.getenv('OTEL_SERVICE_NAME', 'N/A')}")
+            logger.info(
+                f"  OTEL_EXPORTER_OTLP_ENDPOINT: {os.getenv('OTEL_EXPORTER_OTLP_ENDPOINT', 'N/A')}"
+            )
+            logger.debug(
+                f"  OTEL_RESOURCE_ATTRIBUTES: {os.getenv('OTEL_RESOURCE_ATTRIBUTES', 'N/A')}"
+            )
 
         logger.info(f"Access Log: {self.access_log}")
         logger.info("=" * 60)

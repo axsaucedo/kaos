@@ -518,11 +518,14 @@ class Agent:
         )
         failed = False
         try:
+            logger.debug(f"Model call: {model_name}, messages count: {len(messages)}")
             content = cast(str, await self.model_api.process_message(messages, stream=False))
+            logger.debug(f"Model response length: {len(content)}")
             return content
         except Exception as e:
             failed = True
             self._otel.span_failure(e)
+            logger.debug(f"Model call failed: {type(e).__name__}: {e}")
             raise
         finally:
             if not failed:
@@ -530,6 +533,7 @@ class Agent:
 
     async def _execute_tool(self, tool_name: str, tool_args: Dict[str, Any]) -> Any:
         """Execute a tool with tracing."""
+        logger.debug(f"Executing tool: {tool_name}, args: {list(tool_args.keys())}")
         self._otel.span_begin(
             f"tool.{tool_name}",
             kind=SpanKind.CLIENT,
@@ -547,10 +551,12 @@ class Agent:
 
             if tool_result is None:
                 raise ValueError(f"Tool '{tool_name}' not found")
+            logger.debug(f"Tool {tool_name} completed successfully")
             return tool_result
         except Exception as e:
             failed = True
             self._otel.span_failure(e)
+            logger.debug(f"Tool {tool_name} failed: {type(e).__name__}: {e}")
             raise
         finally:
             if not failed:
@@ -564,6 +570,7 @@ class Agent:
         session_id: str,
     ) -> str:
         """Execute delegation to a sub-agent with tracing."""
+        logger.debug(f"Delegating to sub-agent: {agent_name}, task length: {len(task)}")
         self._otel.span_begin(
             f"delegate.{agent_name}",
             kind=SpanKind.CLIENT,
@@ -576,10 +583,12 @@ class Agent:
             result = await self.delegate_to_sub_agent(
                 agent_name, task, context_messages, session_id
             )
+            logger.debug(f"Delegation to {agent_name} completed, result length: {len(result)}")
             return result
         except Exception as e:
             failed = True
             self._otel.span_failure(e)
+            logger.debug(f"Delegation to {agent_name} failed: {type(e).__name__}: {e}")
             raise
         finally:
             if not failed:
