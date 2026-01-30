@@ -83,7 +83,7 @@ metadata:
   namespace: kaos-hierarchy
 spec:
   modelAPI: hierarchy-modelapi
-  model: meta-llama/Meta-Llama-3.1-8B-Instruct-fast
+  model: deepseek-ai/DeepSeek-V3-0324-fast
   mcpServers:
   - hierarchy-echo-mcp
   config:
@@ -105,7 +105,7 @@ metadata:
   namespace: kaos-hierarchy
 spec:
   modelAPI: hierarchy-modelapi
-  model: meta-llama/Meta-Llama-3.1-8B-Instruct-fast
+  model: deepseek-ai/DeepSeek-V3-0324-fast
   mcpServers:
   - hierarchy-echo-mcp
   config:
@@ -127,7 +127,7 @@ metadata:
   namespace: kaos-hierarchy
 spec:
   modelAPI: hierarchy-modelapi
-  model: meta-llama/Meta-Llama-3.1-8B-Instruct-fast
+  model: deepseek-ai/DeepSeek-V3-0324-fast
   mcpServers:
   - hierarchy-calc-mcp
   config:
@@ -148,7 +148,7 @@ metadata:
   namespace: kaos-hierarchy
 spec:
   modelAPI: hierarchy-modelapi
-  model: meta-llama/Meta-Llama-3.1-8B-Instruct-fast
+  model: deepseek-ai/DeepSeek-V3-0324-fast
   mcpServers:
   - hierarchy-echo-mcp
   config:
@@ -166,7 +166,7 @@ metadata:
   namespace: kaos-hierarchy
 spec:
   modelAPI: hierarchy-modelapi
-  model: meta-llama/Meta-Llama-3.1-8B-Instruct-fast
+  model: deepseek-ai/DeepSeek-V3-0324-fast
   mcpServers:
   - hierarchy-echo-mcp
   config:
@@ -184,7 +184,7 @@ metadata:
   namespace: kaos-hierarchy
 spec:
   modelAPI: hierarchy-modelapi
-  model: meta-llama/Meta-Llama-3.1-8B-Instruct-fast
+  model: deepseek-ai/DeepSeek-V3-0324-fast
   mcpServers:
   - hierarchy-calc-mcp
   config:
