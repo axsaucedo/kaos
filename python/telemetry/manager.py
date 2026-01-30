@@ -306,11 +306,15 @@ class KaosOtelManager:
     Uses inline span management via span_begin/span_success/span_failure instead
     of context managers. Timing is handled internally via contextvars.
 
-    Can be used as a singleton via the module-level `otel` instance, or
-    instantiated with a specific service name for tests.
+    This is a singleton class - instantiate it in each module as:
+        otel = KaosOtelManager()
+
+    The first instantiation sets the service name (from env var or parameter).
+    Subsequent instantiations return the same instance; if a different service_name
+    is passed, a warning is logged and ignored.
 
     Example:
-        from telemetry.manager import otel
+        otel = KaosOtelManager()
         otel.span_begin("process_request", attrs={"session.id": "abc123"})
         try:
             # do work
@@ -322,15 +326,34 @@ class KaosOtelManager:
             otel.span_success()
     """
 
-    # Singleton instance (lazy initialized)
     _instance: Optional["KaosOtelManager"] = None
+    _initialized: bool = False
+
+    def __new__(cls, service_name: Optional[str] = None) -> "KaosOtelManager":
+        """Ensure only one instance exists (singleton pattern)."""
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        elif service_name is not None:
+            # Warn if trying to re-init with different service name
+            existing_name = getattr(cls._instance, "service_name", None)
+            if existing_name and service_name != existing_name:
+                logger.warning(
+                    f"KaosOtelManager already initialized with service '{existing_name}', "
+                    f"ignoring new service_name '{service_name}'"
+                )
+        return cls._instance
 
     def __init__(self, service_name: Optional[str] = None):
         """Initialize manager with service context.
 
         Args:
-            service_name: Name of the service (reads from OTEL_SERVICE_NAME if not provided)
+            service_name: Name of the service (reads from OTEL_SERVICE_NAME if not provided).
+                          Only used on first initialization; ignored on subsequent calls.
         """
+        if self.__class__._initialized:
+            return
+        self.__class__._initialized = True
+
         self.service_name = service_name or _get_service_name()
         self._tracer = trace.get_tracer(f"kaos.{self.service_name}")
         self._meter = metrics.get_meter(f"kaos.{self.service_name}")
@@ -344,6 +367,16 @@ class KaosOtelManager:
         self._tool_duration: Optional[metrics.Histogram] = None
         self._delegation_counter: Optional[metrics.Counter] = None
         self._delegation_duration: Optional[metrics.Histogram] = None
+
+    @classmethod
+    def _reset_for_testing(cls) -> None:
+        """Reset singleton state for testing purposes only.
+
+        This allows tests to create fresh instances with specific service names.
+        Should NOT be used in production code.
+        """
+        cls._instance = None
+        cls._initialized = False
 
     def _ensure_metrics(self) -> None:
         """Lazily initialize metric instruments."""
@@ -586,16 +619,7 @@ class KaosOtelManager:
         ctx = extract(carrier)
         return otel_context.attach(ctx)
 
-    @classmethod
-    def get_instance(cls) -> "KaosOtelManager":
-        """Get or create the singleton instance.
-
-        Service name is read from OTEL_SERVICE_NAME or AGENT_NAME env var.
-        """
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
-
 
 # Module-level singleton for easy import: `from telemetry.manager import otel`
-otel = KaosOtelManager.get_instance()
+# Can also be instantiated in any module as `otel = KaosOtelManager()` - returns same instance
+otel = KaosOtelManager()

@@ -124,6 +124,18 @@ class TestOtelConfig:
 class TestKaosOtelManager:
     """Tests for KaosOtelManager class."""
 
+    def setup_method(self):
+        """Reset singleton before each test."""
+        from telemetry.manager import KaosOtelManager
+
+        KaosOtelManager._reset_for_testing()
+
+    def teardown_method(self):
+        """Reset singleton after each test."""
+        from telemetry.manager import KaosOtelManager
+
+        KaosOtelManager._reset_for_testing()
+
     def test_manager_creation(self):
         """Test creating a KaosOtelManager."""
         from telemetry.manager import KaosOtelManager
