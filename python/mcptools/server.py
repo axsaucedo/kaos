@@ -68,6 +68,10 @@ def configure_logging(level: str = "INFO", otel_correlation: bool = False) -> No
     uvicorn_access_level = log_level if include_http_server else logging.CRITICAL
     logging.getLogger("uvicorn.access").setLevel(uvicorn_access_level)
 
+    # Suppress noisy internal libraries (docket/fakeredis used by FastMCP)
+    logging.getLogger("docket.worker").setLevel(logging.WARNING)
+    logging.getLogger("fakeredis").setLevel(logging.WARNING)
+
 
 logger = logging.getLogger(__name__)
 
