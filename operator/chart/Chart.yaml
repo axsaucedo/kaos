@@ -2,8 +2,8 @@ apiVersion: v2
 name: kaos-operator
 description: Kubernetes operator for managing AI agents with A2A protocol support
 type: application
-version: 0.0.2-dev
-appVersion: "0.0.2-dev"
+version: 0.1.4-dev
+appVersion: "v0.1.4-dev"
 keywords:
   - kubernetes
   - operator

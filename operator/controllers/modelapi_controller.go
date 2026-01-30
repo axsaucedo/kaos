@@ -90,6 +90,25 @@ func (r *ModelAPIReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	needsConfigMap := modelapi.Spec.Mode == kaosv1alpha1.ModelAPIModeProxy &&
 		modelapi.Spec.ProxyConfig != nil
 
+	// Validate telemetry config
+	telemetry := util.MergeTelemetryConfig(modelapi.Spec.Telemetry)
+	if !util.IsTelemetryConfigValid(telemetry) {
+		log.Info("WARNING: telemetry.enabled=true but endpoint is empty; telemetry will not function", "modelapi", modelapi.Name)
+	}
+
+	// Warn if telemetry is enabled for Ollama (Hosted mode) - OTel not supported
+	if modelapi.Spec.Mode == kaosv1alpha1.ModelAPIModeHosted {
+		if telemetry != nil && telemetry.Enabled {
+			log.Info("WARNING: OpenTelemetry telemetry is not supported for Ollama (Hosted mode). "+
+				"Traces and metrics will not be collected.", "modelapi", modelapi.Name)
+			// Update status message to warn user
+			if modelapi.Status.Message == "" {
+				modelapi.Status.Message = "Warning: Telemetry enabled but Ollama does not support OTel natively"
+				r.Status().Update(ctx, modelapi)
+			}
+		}
+	}
+
 	// Validate configYaml against models list if both are provided
 	if needsConfigMap && modelapi.Spec.ProxyConfig.ConfigYaml != nil &&
 		modelapi.Spec.ProxyConfig.ConfigYaml.FromString != "" {
@@ -150,7 +169,14 @@ func (r *ModelAPIReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	if err != nil && apierrors.IsNotFound(err) {
 		// Create new Deployment
-		deployment = r.constructDeployment(modelapi)
+		deployment, err = r.constructDeployment(modelapi)
+		if err != nil {
+			log.Error(err, "failed to construct Deployment")
+			modelapi.Status.Phase = "Failed"
+			modelapi.Status.Message = fmt.Sprintf("Failed to construct Deployment: %v", err)
+			r.Status().Update(ctx, modelapi)
+			return ctrl.Result{}, err
+		}
 		if err := controllerutil.SetControllerReference(modelapi, deployment, r.Scheme); err != nil {
 			log.Error(err, "failed to set controller reference")
 			return ctrl.Result{}, err
@@ -169,7 +195,11 @@ func (r *ModelAPIReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, err
 	} else {
 		// Deployment exists - check if spec has changed using hash annotation
-		desiredDeployment := r.constructDeployment(modelapi)
+		desiredDeployment, err := r.constructDeployment(modelapi)
+		if err != nil {
+			log.Error(err, "failed to construct Deployment for comparison")
+			return ctrl.Result{}, err
+		}
 		currentHash := ""
 		if deployment.Spec.Template.Annotations != nil {
 			currentHash = deployment.Spec.Template.Annotations[util.PodSpecHashAnnotation]
@@ -279,7 +309,7 @@ func (r *ModelAPIReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 }
 
 // constructDeployment creates a Deployment for the ModelAPI
-func (r *ModelAPIReconciler) constructDeployment(modelapi *kaosv1alpha1.ModelAPI) *appsv1.Deployment {
+func (r *ModelAPIReconciler) constructDeployment(modelapi *kaosv1alpha1.ModelAPI) (*appsv1.Deployment, error) {
 	labels := map[string]string{
 		"app":      "modelapi",
 		"modelapi": modelapi.Name,
@@ -305,8 +335,8 @@ func (r *ModelAPIReconciler) constructDeployment(modelapi *kaosv1alpha1.ModelAPI
 	// Build init containers for Hosted mode (pull the model)
 	initContainers := []corev1.Container{}
 	ollamaImage := os.Getenv("DEFAULT_OLLAMA_IMAGE")
-	if ollamaImage == "" {
-		ollamaImage = "alpine/ollama:latest"
+	if ollamaImage == "" && modelapi.Spec.Mode == kaosv1alpha1.ModelAPIModeHosted {
+		return nil, fmt.Errorf("DEFAULT_OLLAMA_IMAGE environment variable is required but not set")
 	}
 	if modelapi.Spec.Mode == kaosv1alpha1.ModelAPIModeHosted && modelapi.Spec.HostedConfig != nil && modelapi.Spec.HostedConfig.Model != "" {
 		// Init container starts Ollama server, pulls model, then exits
@@ -331,10 +361,15 @@ func (r *ModelAPIReconciler) constructDeployment(modelapi *kaosv1alpha1.ModelAPI
 		})
 	}
 
+	container, err := r.constructContainer(modelapi)
+	if err != nil {
+		return nil, err
+	}
+
 	basePodSpec := corev1.PodSpec{
 		InitContainers: initContainers,
 		Containers: []corev1.Container{
-			r.constructContainer(modelapi),
+			container,
 		},
 		Volumes: volumes,
 	}
@@ -374,11 +409,11 @@ func (r *ModelAPIReconciler) constructDeployment(modelapi *kaosv1alpha1.ModelAPI
 		},
 	}
 
-	return deployment
+	return deployment, nil
 }
 
 // constructContainer creates the container spec based on ModelAPI mode
-func (r *ModelAPIReconciler) constructContainer(modelapi *kaosv1alpha1.ModelAPI) corev1.Container {
+func (r *ModelAPIReconciler) constructContainer(modelapi *kaosv1alpha1.ModelAPI) (corev1.Container, error) {
 	var image string
 	var args []string
 	var env []corev1.EnvVar
@@ -389,7 +424,7 @@ func (r *ModelAPIReconciler) constructContainer(modelapi *kaosv1alpha1.ModelAPI)
 		// LiteLLM Proxy mode - always uses config file
 		image = os.Getenv("DEFAULT_LITELLM_IMAGE")
 		if image == "" {
-			image = "ghcr.io/berriai/litellm:main-latest"
+			return corev1.Container{}, fmt.Errorf("DEFAULT_LITELLM_IMAGE environment variable is required but not set")
 		}
 		port = 8000
 		// Use /health/liveliness for faster probe responses
@@ -450,9 +485,45 @@ func (r *ModelAPIReconciler) constructContainer(modelapi *kaosv1alpha1.ModelAPI)
 			}
 		}
 		if !hasLiteLLMLog {
+			// Map LOG_LEVEL to LITELLM_LOG (LiteLLM supports DEBUG, INFO, WARNING, ERROR)
+			litellmLogLevel := util.GetDefaultLogLevel()
+			// TRACE -> DEBUG for LiteLLM (no TRACE level)
+			if litellmLogLevel == "TRACE" {
+				litellmLogLevel = "DEBUG"
+			}
 			env = append(env, corev1.EnvVar{
 				Name:  "LITELLM_LOG",
-				Value: "INFO",
+				Value: litellmLogLevel,
+			})
+		}
+
+		// Add OTel env vars for LiteLLM when telemetry is enabled
+		telemetry := util.MergeTelemetryConfig(modelapi.Spec.Telemetry)
+		if telemetry != nil && telemetry.Enabled {
+			// LiteLLM uses OTEL_EXPORTER to select exporter type
+			// Use "otlp_grpc" for gRPC collector (port 4317) or "otlp_http" for HTTP (port 4318)
+			env = append(env, corev1.EnvVar{
+				Name:  "OTEL_EXPORTER",
+				Value: "otlp_grpc",
+			})
+			if telemetry.Endpoint != "" {
+				// Use standard OTEL_EXPORTER_OTLP_ENDPOINT env var
+				env = append(env, corev1.EnvVar{
+					Name:  "OTEL_EXPORTER_OTLP_ENDPOINT",
+					Value: telemetry.Endpoint,
+				})
+			}
+			// Standard OTel service name
+			env = append(env, corev1.EnvVar{
+				Name:  "OTEL_SERVICE_NAME",
+				Value: modelapi.Name,
+			})
+			// Exclude health check endpoints from OTEL traces (reduces noise from K8s probes)
+			// Uses OTEL_PYTHON_EXCLUDED_URLS (generic) since LiteLLM may use various instrumentations
+			// LiteLLM health endpoints: /health/liveliness, /health/liveness, /health/readiness
+			env = append(env, corev1.EnvVar{
+				Name:  "OTEL_PYTHON_EXCLUDED_URLS",
+				Value: "/health",
 			})
 		}
 
@@ -460,7 +531,7 @@ func (r *ModelAPIReconciler) constructContainer(modelapi *kaosv1alpha1.ModelAPI)
 		// Ollama Hosted mode
 		image = os.Getenv("DEFAULT_OLLAMA_IMAGE")
 		if image == "" {
-			image = "alpine/ollama:latest"
+			return corev1.Container{}, fmt.Errorf("DEFAULT_OLLAMA_IMAGE environment variable is required but not set")
 		}
 		args = []string{}
 		port = 11434
@@ -469,6 +540,33 @@ func (r *ModelAPIReconciler) constructContainer(modelapi *kaosv1alpha1.ModelAPI)
 		// Add user-provided env vars for hosted
 		if modelapi.Spec.HostedConfig != nil {
 			env = append(env, modelapi.Spec.HostedConfig.Env...)
+		}
+
+		// Map LOG_LEVEL to OLLAMA_DEBUG (Ollama uses 0=INFO, 1=DEBUG, 2=TRACE)
+		hasOllamaDebug := false
+		for _, e := range env {
+			if e.Name == "OLLAMA_DEBUG" {
+				hasOllamaDebug = true
+				break
+			}
+		}
+		if !hasOllamaDebug {
+			logLevel := util.GetDefaultLogLevel()
+			var ollamaDebugLevel string
+			switch logLevel {
+			case "TRACE":
+				ollamaDebugLevel = "2"
+			case "DEBUG":
+				ollamaDebugLevel = "1"
+			default:
+				ollamaDebugLevel = "0" // INFO, WARNING, ERROR -> no debug
+			}
+			if ollamaDebugLevel != "0" { // Only set if enabling debug
+				env = append(env, corev1.EnvVar{
+					Name:  "OLLAMA_DEBUG",
+					Value: ollamaDebugLevel,
+				})
+			}
 		}
 	}
 
@@ -530,7 +628,7 @@ func (r *ModelAPIReconciler) constructContainer(modelapi *kaosv1alpha1.ModelAPI)
 		},
 	}
 
-	return container
+	return container, nil
 }
 
 // constructService creates a Service for the ModelAPI
@@ -583,7 +681,9 @@ func (r *ModelAPIReconciler) constructConfigMap(modelapi *kaosv1alpha1.ModelAPI)
 			configYaml = modelapi.Spec.ProxyConfig.ConfigYaml.FromString
 		} else {
 			// Generate config from models list (models is required with MinItems=1)
-			configYaml = r.generateLiteLLMConfig(modelapi.Spec.ProxyConfig)
+			// Pass merged telemetry config for OTel callback
+			telemetry := util.MergeTelemetryConfig(modelapi.Spec.Telemetry)
+			configYaml = r.generateLiteLLMConfig(modelapi.Spec.ProxyConfig, telemetry)
 		}
 	}
 
@@ -611,7 +711,8 @@ func (r *ModelAPIReconciler) constructConfigMap(modelapi *kaosv1alpha1.ModelAPI)
 // Wildcard handling:
 // - models: ["*"] with provider: "nebius" → model_name: "*" → model: "nebius/*"
 // - models: ["*"] without provider → model_name: "*" → model: "*"
-func (r *ModelAPIReconciler) generateLiteLLMConfig(proxyConfig *kaosv1alpha1.ProxyConfig) string {
+// When telemetry is enabled, adds OTel callback for traces/metrics.
+func (r *ModelAPIReconciler) generateLiteLLMConfig(proxyConfig *kaosv1alpha1.ProxyConfig, telemetry *kaosv1alpha1.TelemetryConfig) string {
 	var sb strings.Builder
 
 	sb.WriteString("# Auto-generated LiteLLM config\n")
@@ -649,6 +750,12 @@ func (r *ModelAPIReconciler) generateLiteLLMConfig(proxyConfig *kaosv1alpha1.Pro
 
 	sb.WriteString("\nlitellm_settings:\n")
 	sb.WriteString("  drop_params: true\n")
+
+	// Add OTel callback when telemetry is enabled
+	if telemetry != nil && telemetry.Enabled {
+		sb.WriteString("  success_callback: [\"otel\"]\n")
+		sb.WriteString("  failure_callback: [\"otel\"]\n")
+	}
 
 	return sb.String()
 }

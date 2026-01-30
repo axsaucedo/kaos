@@ -57,7 +57,7 @@ var _ = Describe("ModelAPI Controller", func() {
 
 		// Verify container uses litellm image
 		Expect(deployment.Spec.Template.Spec.Containers).To(HaveLen(1))
-		Expect(deployment.Spec.Template.Spec.Containers[0].Image).To(Equal("ghcr.io/berriai/litellm:main-latest"))
+		Expect(deployment.Spec.Template.Spec.Containers[0].Image).To(Equal("ghcr.io/berriai/litellm:test"))
 
 		// Verify PROXY_API_BASE env var is set
 		container := deployment.Spec.Template.Spec.Containers[0]

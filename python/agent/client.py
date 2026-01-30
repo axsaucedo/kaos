@@ -3,6 +3,7 @@ Agent client implementation for OpenAI-compatible API.
 
 Clean, simple implementation with proper streaming support and tool integration.
 Includes agentic loop for tool calling and agent delegation.
+Instrumented with OpenTelemetry for tracing and metrics.
 
 Key design principles:
 - Agent decides when to delegate/call tools based on model response
@@ -21,6 +22,15 @@ from dataclasses import dataclass
 from modelapi.client import ModelAPI
 from agent.memory import LocalMemory, NullMemory
 from mcptools.client import MCPClient
+from telemetry.manager import (
+    otel,
+    KaosOtelManager,
+    ATTR_SESSION_ID,
+    ATTR_MODEL_NAME,
+    ATTR_TOOL_NAME,
+    ATTR_DELEGATION_TARGET,
+)
+from opentelemetry.trace import SpanKind
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +130,8 @@ class RemoteAgent:
     ) -> str:
         """Process messages via remote agent's /v1/chat/completions.
 
+        Injects trace context headers for distributed tracing across agents.
+
         Args:
             messages: List of messages providing context. The last message
                      should have role "task-delegation" with the delegated task.
@@ -135,15 +147,21 @@ class RemoteAgent:
                 raise RuntimeError(f"Agent {self.name} unavailable at {self.card_url}")
 
         try:
+            # Inject trace context for distributed tracing
+            headers: Dict[str, str] = {}
+            KaosOtelManager.inject_context(headers)
+
             response = await self._request_client.post(
                 f"{self.card_url}/v1/chat/completions",
                 json={"model": self.name, "messages": messages, "stream": False},
+                headers=headers,
             )
             response.raise_for_status()
             data = response.json()
             return data["choices"][0]["message"]["content"]
         except Exception as e:
             self._active = False
+            logger.error(f"RemoteAgent {self.name} request failed: {type(e).__name__}: {e}")
             raise RuntimeError(f"Agent {self.name}: {type(e).__name__}: {e}")
 
     async def close(self):
@@ -319,47 +337,100 @@ class Agent:
 
         logger.debug(f"Processing message for session {session_id}, streaming={stream}")
 
-        # Extract user-provided system prompt (if any) from message array
-        user_system_prompt: Optional[str] = None
-        if isinstance(message, list):
-            for msg in message:
-                if msg.get("role") == "system":
-                    user_system_prompt = msg.get("content", "")
-                    break
-
-        # Build enhanced system prompt with tools/agents info
-        system_prompt = await self._build_system_prompt(user_system_prompt)
-        messages = [{"role": "system", "content": system_prompt}]
-
-        # Handle both string and array input formats
-        if isinstance(message, str):
-            user_event = self.memory.create_event("user_message", message)
-            await self.memory.add_event(session_id, user_event)
-            messages.append({"role": "user", "content": message})
-        else:
-            for msg in message:
-                role = msg.get("role", "user")
-                content = msg.get("content", "")
-                if role == "system":
-                    continue  # Already captured above
-
-                if role == "task-delegation":
-                    delegation_event = self.memory.create_event("task_delegation_received", content)
-                    await self.memory.add_event(session_id, delegation_event)
-                    messages.append({"role": "user", "content": content})
-                else:
-                    messages.append({"role": role, "content": content})
-                    if role == "user":
-                        user_event = self.memory.create_event("user_message", content)
-                        await self.memory.add_event(session_id, user_event)
-
+        # Start agentic loop span (INTERNAL - FastAPI auto-instruments SERVER span)
+        span_attrs = {
+            "agent.max_steps": self.max_steps,
+            "stream": stream,
+            ATTR_SESSION_ID: session_id,
+        }
+        otel.span_begin(
+            "agent.agentic_loop",
+            attrs=span_attrs,
+            metric_kind="request",
+        )
+        # Use failed flag pattern to ensure spans close on return/yield/early exit
+        span_failed = False
         try:
-            # Agentic loop - iterate up to max_steps
-            for step in range(self.max_steps):
-                logger.debug(f"Agentic loop step {step + 1}/{self.max_steps}")
+            # Extract user-provided system prompt (if any) from message array
+            user_system_prompt: Optional[str] = None
+            if isinstance(message, list):
+                for msg in message:
+                    if msg.get("role") == "system":
+                        user_system_prompt = msg.get("content", "")
+                        break
 
-                # Get model response (stream=False always returns str)
-                content = cast(str, await self.model_api.process_message(messages, stream=False))
+            # Build enhanced system prompt with tools/agents info
+            system_prompt = await self._build_system_prompt(user_system_prompt)
+            logger.debug(f"System prompt built ({len(system_prompt)} chars)")
+            logger.debug(f"System prompt preview: {system_prompt[:300]}...")
+            messages = [{"role": "system", "content": system_prompt}]
+
+            # Handle both string and array input formats
+            if isinstance(message, str):
+                logger.debug(f"User message: {message[:200]}...")
+                user_event = self.memory.create_event("user_message", message)
+                await self.memory.add_event(session_id, user_event)
+                logger.debug(f"Memory event created: user_message")
+                messages.append({"role": "user", "content": message})
+            else:
+                for msg in message:
+                    role = msg.get("role", "user")
+                    content = msg.get("content", "")
+                    if role == "system":
+                        continue  # Already captured above
+
+                    if role == "task-delegation":
+                        logger.debug(f"Received delegation task: {content[:200]}...")
+                        delegation_event = self.memory.create_event(
+                            "task_delegation_received", content
+                        )
+                        await self.memory.add_event(session_id, delegation_event)
+                        logger.debug(f"Memory event created: task_delegation_received")
+                        messages.append({"role": "user", "content": content})
+                    else:
+                        messages.append({"role": role, "content": content})
+                        if role == "user":
+                            logger.debug(f"User message: {content[:200]}...")
+                            user_event = self.memory.create_event("user_message", content)
+                            await self.memory.add_event(session_id, user_event)
+                            logger.debug(f"Memory event created: user_message")
+
+            # Agentic loop - iterate up to max_steps
+            logger.debug(f"Starting agentic loop with {len(messages)} messages")
+            async for chunk in self._agentic_loop(messages, session_id, stream):
+                yield chunk
+
+        except Exception as e:
+            span_failed = True
+            error_msg = f"Error processing message: {str(e)}"
+            logger.error(error_msg)
+            otel.span_failure(e)
+            error_event = self.memory.create_event("error", error_msg)
+            await self.memory.add_event(session_id, error_event)
+            yield f"Sorry, I encountered an error: {str(e)}"
+        finally:
+            if not span_failed:
+                otel.span_success()
+
+    async def _agentic_loop(
+        self,
+        messages: List[Dict[str, str]],
+        session_id: str,
+        stream: bool,
+    ) -> AsyncIterator[str]:
+        """Execute the agentic loop with tracing."""
+        for step in range(self.max_steps):
+            logger.debug(f"Agentic loop step {step + 1}/{self.max_steps}")
+
+            # Start step span
+            step_attrs = {"step": step + 1, "max_steps": self.max_steps}
+            otel.span_begin(f"agent.step.{step + 1}", attrs=step_attrs)
+            # Use failed flag pattern to ensure spans close on continue/return/yield
+            step_failed = False
+            try:
+                # Get model response
+                model_name = self.model_api.model if self.model_api else "unknown"
+                content = await self._call_model(messages, model_name)
 
                 # Check for tool call
                 tool_call = self._parse_block(content, "tool_call")
@@ -373,14 +444,8 @@ class Agent:
                         if not tool_name:
                             raise ValueError("Tool name not specified")
 
-                        # Execute tool inline
-                        tool_result = None
-                        for mcp_client in self.mcp_clients:
-                            if tool_name in mcp_client._tools:
-                                tool_result = await mcp_client.call_tool(tool_name, tool_args)
-                                break
-                        if tool_result is None:
-                            raise ValueError(f"Tool '{tool_name}' not found")
+                        # Execute tool
+                        tool_result = await self._execute_tool(tool_name, tool_args)
 
                         result_event = self.memory.create_event(
                             "tool_result", {"tool": tool_name, "result": tool_result}
@@ -416,7 +481,9 @@ class Agent:
 
                     try:
                         context_messages = [m for m in messages if m.get("role") != "system"]
-                        delegation_result = await self.delegate_to_sub_agent(
+
+                        # Delegate to sub-agent
+                        delegation_result = await self._execute_delegation(
                             agent_name, task, context_messages, session_id
                         )
 
@@ -442,17 +509,111 @@ class Agent:
                     yield content
                 return
 
-            # Max steps reached
-            max_steps_msg = f"Reached maximum reasoning steps ({self.max_steps})"
-            logger.warning(max_steps_msg)
-            yield max_steps_msg
+            except Exception as e:
+                step_failed = True
+                otel.span_failure(e)
+                raise
+            finally:
+                if not step_failed:
+                    otel.span_success()
 
+        # Max steps reached
+        max_steps_msg = f"Reached maximum reasoning steps ({self.max_steps})"
+        logger.warning(max_steps_msg)
+        yield max_steps_msg
+
+    async def _call_model(self, messages: List[Dict[str, str]], model_name: str) -> str:
+        """Call the model API with tracing."""
+        otel.span_begin(
+            "model.inference",
+            kind=SpanKind.CLIENT,
+            attrs={ATTR_MODEL_NAME: model_name},
+            metric_kind="model",
+            metric_attrs={"model": model_name},
+        )
+        failed = False
+        try:
+            logger.debug(f"Model call: {model_name}, messages count: {len(messages)}")
+            # Log the last user message for debugging
+            for msg in reversed(messages):
+                if msg.get("role") in ("user", "task-delegation"):
+                    logger.debug(f"Model input (last user msg): {msg.get('content', '')[:200]}...")
+                    break
+            content = cast(str, await self.model_api.process_message(messages, stream=False))
+            logger.debug(f"Model response ({len(content)} chars): {content[:200]}...")
+            return content
         except Exception as e:
-            error_msg = f"Error processing message: {str(e)}"
-            logger.error(error_msg)
-            error_event = self.memory.create_event("error", error_msg)
-            await self.memory.add_event(session_id, error_event)
-            yield f"Sorry, I encountered an error: {str(e)}"
+            failed = True
+            logger.error(f"Model call failed: {type(e).__name__}: {e}")
+            otel.span_failure(e)
+            raise
+        finally:
+            if not failed:
+                otel.span_success()
+
+    async def _execute_tool(self, tool_name: str, tool_args: Dict[str, Any]) -> Any:
+        """Execute a tool with tracing."""
+        otel.span_begin(
+            f"tool.{tool_name}",
+            kind=SpanKind.CLIENT,
+            attrs={ATTR_TOOL_NAME: tool_name},
+            metric_kind="tool",
+            metric_attrs={"tool": tool_name},
+        )
+        logger.debug(f"Executing tool: {tool_name}, args: {tool_args}")
+        failed = False
+        try:
+            tool_result = None
+            for mcp_client in self.mcp_clients:
+                if tool_name in mcp_client._tools:
+                    tool_result = await mcp_client.call_tool(tool_name, tool_args)
+                    break
+
+            if tool_result is None:
+                raise ValueError(f"Tool '{tool_name}' not found")
+            logger.debug(f"Tool {tool_name} result: {str(tool_result)[:200]}...")
+            return tool_result
+        except Exception as e:
+            failed = True
+            logger.error(f"Tool {tool_name} failed: {type(e).__name__}: {e}")
+            otel.span_failure(e)
+            raise
+        finally:
+            if not failed:
+                otel.span_success()
+
+    async def _execute_delegation(
+        self,
+        agent_name: str,
+        task: str,
+        context_messages: List[Dict[str, str]],
+        session_id: str,
+    ) -> str:
+        """Execute delegation to a sub-agent with tracing."""
+        otel.span_begin(
+            f"delegate.{agent_name}",
+            kind=SpanKind.CLIENT,
+            attrs={ATTR_DELEGATION_TARGET: agent_name},
+            metric_kind="delegation",
+            metric_attrs={"target": agent_name},
+        )
+        logger.debug(f"Delegating to sub-agent: {agent_name}")
+        logger.debug(f"Delegation task: {task[:200]}...")
+        failed = False
+        try:
+            result = await self.delegate_to_sub_agent(
+                agent_name, task, context_messages, session_id
+            )
+            logger.debug(f"Delegation to {agent_name} result: {result[:200]}...")
+            return result
+        except Exception as e:
+            failed = True
+            logger.error(f"Delegation to {agent_name} failed: {type(e).__name__}: {e}")
+            otel.span_failure(e)
+            raise
+        finally:
+            if not failed:
+                otel.span_success()
 
     async def delegate_to_sub_agent(
         self,

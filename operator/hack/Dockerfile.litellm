@@ -1,18 +1,16 @@
+# Minimal LiteLLM proxy image (~200MB vs 1.5GB for upstream)
+# This image is tagged as ghcr.io/berriai/litellm:main-stable to override the upstream image
 FROM python:3.12-slim
 
-# Avoid .pyc, enable unbuffered logs
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
 # Install LiteLLM proxy deps with pinned version
-# Using cache mount for pip to speed up rebuilds
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install "litellm[proxy]==1.56.5"
-
-# Port 8000 to match operator controller expectations
+# 1.80.0 adds support for nebius provider and other improvements
+# Include OpenTelemetry packages for OTEL tracing support
+RUN pip install --no-cache-dir "litellm[proxy]==1.81.4"
 EXPOSE 8000
 
-# Use ENTRYPOINT only - let the operator provide the args via deployment spec
 ENTRYPOINT ["litellm"]

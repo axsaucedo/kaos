@@ -237,13 +237,26 @@ class LocalMemory:
 
         Returns:
             MemoryEvent instance
+
+        If OpenTelemetry is enabled, automatically includes trace_id and span_id
+        in the metadata for log correlation.
         """
+        from telemetry.manager import is_otel_enabled, get_current_trace_context
+
+        event_metadata = metadata.copy() if metadata else {}
+
+        # Add trace context if OTel is enabled
+        if is_otel_enabled():
+            trace_ctx = get_current_trace_context()
+            if trace_ctx:
+                event_metadata.update(trace_ctx)
+
         return MemoryEvent(
             event_id=f"event_{uuid.uuid4().hex[:8]}",
             timestamp=datetime.now(timezone.utc),
             event_type=event_type,
             content=content,
-            metadata=metadata or {},
+            metadata=event_metadata,
         )
 
     async def list_sessions(self, user_id: Optional[str] = None) -> List[str]:

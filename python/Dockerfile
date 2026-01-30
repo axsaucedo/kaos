@@ -19,6 +19,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 COPY agent/ agent/
 COPY mcptools/ mcptools/
 COPY modelapi/ modelapi/
+COPY telemetry/ telemetry/
 
 # Create non-root user
 RUN useradd -m -u 65532 agentic && chown -R agentic:agentic /app
@@ -32,5 +33,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 EXPOSE 8000
 
 # Run the agent server using factory pattern
-# --no-access-log disables uvicorn access logs (less noise from /health, /ready)
-CMD ["python", "-m", "uvicorn", "agent.server:get_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
+# Access logs are controlled by OTEL_INCLUDE_HTTP_SERVER env var in Python code
+CMD ["python", "-m", "uvicorn", "agent.server:get_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]

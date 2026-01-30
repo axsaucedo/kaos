@@ -18,9 +18,7 @@ env:
   KIND_CLUSTER_NAME: kaos-e2e
   CI: true
   KIND_CLUSTER: true
-  REGISTRY: kind-local
-  OPERATOR_TAG: dev
-  AGENT_TAG: dev
+  REGISTRY: axsauze
 
 jobs:
   # Unit tests (Python + Go)
@@ -109,6 +107,13 @@ jobs:
       - name: Install MetalLB for LoadBalancer support
         run: ./operator/hack/install-metallb.sh
 
+      - name: Set image tags from VERSION
+        run: |
+          VERSION=$(cat VERSION)
+          echo "OPERATOR_TAG=$VERSION" >> $GITHUB_ENV
+          echo "AGENT_TAG=$VERSION" >> $GITHUB_ENV
+          echo "Using VERSION: $VERSION"
+
       - name: Build operator image
         uses: docker/build-push-action@v6
         with:
@@ -135,15 +140,13 @@ jobs:
           context: ./operator/hack
           file: ./operator/hack/Dockerfile.litellm
           load: true
-          tags: ${{ env.REGISTRY }}/litellm:v1.56.5
+          tags: ghcr.io/berriai/litellm:main-stable
           cache-from: type=gha,scope=litellm-e2e
           cache-to: type=gha,scope=litellm-e2e,mode=max
           github-token: ${{ github.token }}
 
-      - name: Pull and tag Ollama image
-        run: |
-          docker pull alpine/ollama:latest
-          docker tag alpine/ollama:latest ${{ env.REGISTRY }}/ollama:latest
+      - name: Pull Ollama image
+        run: docker pull alpine/ollama:latest
 
       - name: Tag MCP server image
         run: |
@@ -154,8 +157,8 @@ jobs:
           kind load docker-image ${{ env.REGISTRY }}/kaos-operator:${{ env.OPERATOR_TAG }} --name ${{ env.KIND_CLUSTER_NAME }}
           kind load docker-image ${{ env.REGISTRY }}/kaos-agent:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }}
           kind load docker-image ${{ env.REGISTRY }}/kaos-mcp-server:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }}
-          kind load docker-image ${{ env.REGISTRY }}/litellm:v1.56.5 --name ${{ env.KIND_CLUSTER_NAME }}
-          kind load docker-image ${{ env.REGISTRY }}/ollama:latest --name ${{ env.KIND_CLUSTER_NAME }}
+          kind load docker-image ghcr.io/berriai/litellm:main-stable --name ${{ env.KIND_CLUSTER_NAME }}
+          kind load docker-image alpine/ollama:latest --name ${{ env.KIND_CLUSTER_NAME }}
 
       - name: Install KAOS operator
         run: make -C operator kind-e2e-install-kaos
@@ -173,7 +176,6 @@ jobs:
           export GATEWAY_URL="http://localhost:8888"
           export OPERATOR_MANAGED_EXTERNALLY=1
           export KIND_CLUSTER=true
-          export HELM_VALUES_FILE="$(pwd)/../hack/kind-e2e-values.yaml"
           
           # Run tests for this shard (2 workers on 2-core runner)
           uv run pytest ${{ matrix.shard.files }} -v -n 2 --dist loadscope

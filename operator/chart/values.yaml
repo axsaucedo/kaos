@@ -10,7 +10,7 @@ controllerManager:
       readOnlyRootFilesystem: true
     image:
       repository: axsauze/kaos-operator
-      tag: latest
+      tag: v0.1.4-dev
     imagePullPolicy: IfNotPresent
     resources:
       limits:
@@ -27,27 +27,50 @@ controllerManager:
   tolerations: []
   topologySpreadConstraints: []
 kubernetesClusterDomain: cluster.local
-serviceAccount:
-  annotations: {}
-  automount: true
-  create: true
-  name: ""
+
+# Default images for agent runtime and MCP servers
+defaultImages:
+  agentRuntime: axsauze/kaos-agent:v0.1.4-dev
+  mcpServer: axsauze/kaos-mcp-server:v0.1.4-dev
+  litellm: ghcr.io/berriai/litellm:main-stable
+  ollama: alpine/ollama:latest
+
 # Gateway API configuration
 gatewayAPI:
   enabled: false
   createGateway: false
   gatewayName: kaos-gateway
-  gatewayClassName: envoy-gateway
+  gatewayClassName: ""
+  gatewayNamespace: ""
   listenerPort: 80
-# Gateway timeout configuration
+  listenerProtocol: HTTP
+
+# Gateway timeout settings
 gateway:
   defaultTimeouts:
-    agent: "120s"
+    agent: "300s"
     modelAPI: "120s"
-    mcp: "30s"
-# Default container images
-defaultImages:
-  agentRuntime: "axsauze/kaos-agent:latest"
-  mcpServer: "axsauze/kaos-agent:latest"
-  litellm: "ghcr.io/berriai/litellm:main-latest"
-  ollama: "alpine/ollama:latest"
+    mcp: "60s"
+
+serviceAccount:
+  annotations: {}
+  automount: true
+  create: true
+  name: ""
+
+# Global telemetry configuration (applies to all components)
+# Component-level telemetry config overrides these defaults
+telemetry:
+  # enabled controls whether telemetry is enabled by default for all components
+  enabled: false
+  # endpoint is the OTLP endpoint URL (required when enabled)
+  # Example: "http://otel-collector.observability:4317"
+  endpoint: ""
+
+# Global log level for all components (control plane and data plane)
+# Supported values: TRACE, DEBUG, INFO, WARNING, ERROR
+# - Control plane (operator): Uses Go slog levels
+# - Data plane (Agent, MCPServer): Uses Python logging levels
+# - ModelAPI (LiteLLM): Maps to LITELLM_LOG
+# - ModelAPI (Ollama): Maps to OLLAMA_DEBUG
+logLevel: INFO

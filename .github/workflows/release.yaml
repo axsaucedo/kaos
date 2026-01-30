@@ -205,15 +205,21 @@ jobs:
           sed -i "s/^version = .*/version = \"$PYTHON_DEV\"/" python/pyproject.toml
           sed -i "s/^version = .*/version = \"$PYTHON_DEV\"/" kaos-cli/pyproject.toml
 
-          # Update Helm chart
+          # Update Helm chart version
           sed -i "s/^version: .*/version: $NEXT_DEV/" operator/chart/Chart.yaml
           sed -i "s/^appVersion: .*/appVersion: \"$NEXT_DEV\"/" operator/chart/Chart.yaml
+
+          # Update Helm values.yaml image tags (use v prefix for image tags)
+          sed -i "s|axsauze/kaos-operator:v[0-9]*\.[0-9]*\.[0-9]*[^\"]*|axsauze/kaos-operator:v$NEXT_DEV|g" operator/chart/values.yaml
+          sed -i "s|axsauze/kaos-agent:v[0-9]*\.[0-9]*\.[0-9]*[^\"]*|axsauze/kaos-agent:v$NEXT_DEV|g" operator/chart/values.yaml
+          sed -i "s|axsauze/kaos-mcp-server:v[0-9]*\.[0-9]*\.[0-9]*[^\"]*|axsauze/kaos-mcp-server:v$NEXT_DEV|g" operator/chart/values.yaml
 
           echo "Updated files:"
           cat VERSION
           grep "^version" python/pyproject.toml
           grep "^version" kaos-cli/pyproject.toml
           grep "^version:\|^appVersion:" operator/chart/Chart.yaml
+          grep -E "kaos-(operator|agent|mcp-server):" operator/chart/values.yaml
 
       - name: Create Pull Request
         id: cpr
@@ -228,6 +234,7 @@ jobs:
             - `VERSION` → `${{ steps.next.outputs.next_dev }}`
             - Python packages → `${{ steps.next.outputs.python_dev }}`
             - Helm chart → `${{ steps.next.outputs.next_dev }}`
+            - Helm values.yaml image tags → `v${{ steps.next.outputs.next_dev }}`
 
             ## What's Next
             This PR should be merged to prepare for the next development cycle.

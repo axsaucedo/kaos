@@ -71,13 +71,16 @@ spec:
 ## Building Images Locally
 
 ```bash
+# Get version from VERSION file
+VERSION=$(cat VERSION)
+
 # Build operator
 cd operator
-docker build -t kaos-operator:dev .
+docker build -t kaos-operator:${VERSION} .
 
 # Build agent
 cd python
-docker build -t kaos-agent:dev .
+docker build -t kaos-agent:${VERSION} .
 ```
 
 ## CI/CD Pipeline

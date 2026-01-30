@@ -88,6 +88,16 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 	}
 
+	// Validate telemetry config
+	var componentTelemetry *kaosv1alpha1.TelemetryConfig
+	if agent.Spec.Config != nil {
+		componentTelemetry = agent.Spec.Config.Telemetry
+	}
+	telemetryConfig := util.MergeTelemetryConfig(componentTelemetry)
+	if !util.IsTelemetryConfigValid(telemetryConfig) {
+		log.Info("WARNING: telemetry.enabled=true but endpoint is empty; telemetry will not function", "agent", agent.Name)
+	}
+
 	// Resolve ModelAPI reference
 	modelapi := &kaosv1alpha1.ModelAPI{}
 	err := r.Get(ctx, types.NamespacedName{Name: agent.Spec.ModelAPI, Namespace: agent.Namespace}, modelapi)
@@ -168,7 +178,14 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	if err != nil && apierrors.IsNotFound(err) {
 		// Create new Deployment
-		deployment = r.constructDeployment(agent, modelapi, mcpServers, peerAgents)
+		deployment, err = r.constructDeployment(agent, modelapi, mcpServers, peerAgents)
+		if err != nil {
+			log.Error(err, "failed to construct Deployment")
+			agent.Status.Phase = "Failed"
+			agent.Status.Message = fmt.Sprintf("Failed to construct Deployment: %v", err)
+			r.Status().Update(ctx, agent)
+			return ctrl.Result{}, err
+		}
 		if err := controllerutil.SetControllerReference(agent, deployment, r.Scheme); err != nil {
 			log.Error(err, "failed to set controller reference")
 			return ctrl.Result{}, err
@@ -187,7 +204,11 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, err
 	} else {
 		// Deployment exists - check if spec has changed using hash annotation
-		desiredDeployment := r.constructDeployment(agent, modelapi, mcpServers, peerAgents)
+		desiredDeployment, err := r.constructDeployment(agent, modelapi, mcpServers, peerAgents)
+		if err != nil {
+			log.Error(err, "failed to construct Deployment for comparison")
+			return ctrl.Result{}, err
+		}
 		currentHash := ""
 		if deployment.Spec.Template.Annotations != nil {
 			currentHash = deployment.Spec.Template.Annotations[util.PodSpecHashAnnotation]
@@ -284,7 +305,7 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 }
 
 // constructDeployment creates a Deployment for the Agent
-func (r *AgentReconciler) constructDeployment(agent *kaosv1alpha1.Agent, modelapi *kaosv1alpha1.ModelAPI, mcpServers map[string]string, peerAgents map[string]string) *appsv1.Deployment {
+func (r *AgentReconciler) constructDeployment(agent *kaosv1alpha1.Agent, modelapi *kaosv1alpha1.ModelAPI, mcpServers map[string]string, peerAgents map[string]string) (*appsv1.Deployment, error) {
 	labels := map[string]string{
 		"app":   "agent",
 		"agent": agent.Name,
@@ -295,10 +316,10 @@ func (r *AgentReconciler) constructDeployment(agent *kaosv1alpha1.Agent, modelap
 	// Build environment variables
 	env := r.constructEnvVars(agent, modelapi, mcpServers, peerAgents)
 
-	// Get agent image from environment or use default
+	// Get agent image from environment (required - set via ConfigMap)
 	agentImage := os.Getenv("DEFAULT_AGENT_IMAGE")
 	if agentImage == "" {
-		agentImage = "axsauze/kaos-agent:latest"
+		return nil, fmt.Errorf("DEFAULT_AGENT_IMAGE environment variable is required but not set")
 	}
 
 	container := corev1.Container{
@@ -376,7 +397,7 @@ func (r *AgentReconciler) constructDeployment(agent *kaosv1alpha1.Agent, modelap
 		},
 	}
 
-	return deployment
+	return deployment, nil
 }
 
 // constructEnvVars builds environment variables for the agent
@@ -511,6 +532,26 @@ func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *
 				Value: endpoint,
 			})
 		}
+	}
+
+	// OpenTelemetry configuration - merge with global defaults
+	var componentTelemetry *kaosv1alpha1.TelemetryConfig
+	if agent.Spec.Config != nil {
+		componentTelemetry = agent.Spec.Config.Telemetry
+	}
+	telemetryConfig := util.MergeTelemetryConfig(componentTelemetry)
+	if telemetryConfig != nil {
+		otelEnv := util.BuildTelemetryEnvVars(
+			telemetryConfig,
+			agent.Name,
+			agent.Namespace,
+		)
+		env = append(env, otelEnv...)
+	}
+
+	// Add LOG_LEVEL env var (if not already set by user in spec.config.env)
+	if logLevelEnv := util.BuildLogLevelEnvVar(env); logLevelEnv != nil {
+		env = append(env, logLevelEnv...)
 	}
 
 	return env

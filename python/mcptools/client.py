@@ -3,6 +3,7 @@ MCP Client using the official MCP SDK for protocol-compliant communication.
 
 This client uses the MCP SDK's Streamable HTTP client to connect to any
 MCP-compliant server (FastMCP servers, external MCP servers, etc.).
+Instrumented with OpenTelemetry for distributed tracing.
 """
 
 import logging
@@ -13,6 +14,8 @@ from contextlib import asynccontextmanager
 from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 from mcp import types as mcp_types
+from telemetry.manager import otel, ATTR_TOOL_NAME
+from opentelemetry.trace import SpanKind
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +106,7 @@ class MCPClient:
             return False
 
     async def call_tool(self, name: str, args: Optional[Dict[str, Any]] = None) -> Any:
-        """Call a tool on the MCP server.
+        """Call a tool on the MCP server with tracing.
 
         Args:
             name: Name of the tool to call
@@ -123,6 +126,21 @@ class MCPClient:
         if name not in self._tools:
             raise ValueError(f"Tool '{name}' not found. Available: {list(self._tools.keys())}")
 
+        # Start span for MCP tool call
+        otel.span_begin(
+            f"mcp.tool.{name}",
+            kind=SpanKind.CLIENT,
+            attrs={
+                ATTR_TOOL_NAME: name,
+                "mcp.server": self.name,
+                "mcp.url": self._mcp_url,
+            },
+            metric_kind="tool",
+            metric_attrs={"tool": name, "server": self.name},
+        )
+        logger.debug(f"MCPClient calling tool: {name} with args: {args}")
+        failed = False
+
         try:
             async with self._connect() as session:
                 result = await session.call_tool(name, args or {})
@@ -130,11 +148,15 @@ class MCPClient:
                 # Extract result from CallToolResult
                 # Prefer structured content if available
                 if result.structuredContent:
+                    logger.debug(f"MCPClient tool {name} returned structured content")
                     return result.structuredContent
                 elif result.content:
                     # Return text content from first content block
                     for content in result.content:
                         if hasattr(content, "text"):
+                            logger.debug(
+                                f"MCPClient tool {name} returned text: {content.text[:100]}..."
+                            )
                             return {"result": content.text}
                     return {"result": str(result.content)}
                 else:
@@ -142,7 +164,13 @@ class MCPClient:
 
         except Exception as e:
             self._active = False
+            failed = True
+            logger.error(f"MCPClient tool {name} failed: {type(e).__name__}: {e}")
+            otel.span_failure(e)
             raise RuntimeError(f"Tool {name}: {type(e).__name__}: {e}")
+        finally:
+            if not failed:
+                otel.span_success()
 
     def get_tools(self) -> List[Tool]:
         """Get list of discovered tools."""

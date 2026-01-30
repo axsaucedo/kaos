@@ -66,6 +66,12 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
 
+	// Set required environment variables for controller operation
+	os.Setenv("DEFAULT_AGENT_IMAGE", "axsauze/kaos-agent:test")
+	os.Setenv("DEFAULT_MCP_SERVER_IMAGE", "axsauze/kaos-mcp-server:test")
+	os.Setenv("DEFAULT_LITELLM_IMAGE", "ghcr.io/berriai/litellm:test")
+	os.Setenv("DEFAULT_OLLAMA_IMAGE", "alpine/ollama:latest")
+
 	// Start controller manager with all controllers
 	k8sManager, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme: scheme.Scheme,
