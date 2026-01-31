@@ -38,11 +38,15 @@ def create_app():
     fastmcp_app = mcp.http_app()
 
     # Create wrapper app with health route and mount FastMCP
-    app = Starlette(routes=[
-        Route("/health", health),
-        Route("/ready", ready),
-        Mount("/", app=fastmcp_app),
-    ])
+    # IMPORTANT: Must pass fastmcp_app.lifespan to initialize FastMCP's task group
+    app = Starlette(
+        routes=[
+            Route("/health", health),
+            Route("/ready", ready),
+            Mount("/", app=fastmcp_app),
+        ],
+        lifespan=fastmcp_app.lifespan,
+    )
     return app
 
 
