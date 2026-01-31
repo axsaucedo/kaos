@@ -135,7 +135,7 @@ jobs:
         id: build
         uses: docker/build-push-action@v6
         with:
-          context: ./python
+          context: ./data-plane/kaos-framework
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=${{ env.AGENT_IMAGE }},push-by-digest=true,name-canonical=true,push=true
