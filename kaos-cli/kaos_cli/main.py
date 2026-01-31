@@ -11,6 +11,7 @@ from kaos_cli.install import (
     uninstall_command,
 )
 from kaos_cli.ui import ui_command
+from kaos_cli.system import app as system_app
 
 # Disable shell completion message
 app = typer.Typer(
@@ -18,6 +19,9 @@ app = typer.Typer(
     help="KAOS - K8s Agent Orchestration System CLI",
     no_args_is_help=True,
 )
+
+# Add system subcommand
+app.add_typer(system_app, name="system")
 
 
 @app.command(name="ui")
