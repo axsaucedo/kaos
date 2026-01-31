@@ -7,13 +7,12 @@ from pathlib import Path
 import typer
 
 
-DOCKERFILE_PYPROJECT = '''FROM python:3.12-slim
+DOCKERFILE_TEMPLATE = '''FROM python:3.12-slim
 
 WORKDIR /app
 
 # Install dependencies from pyproject.toml
-COPY pyproject.toml .
-COPY README.md* ./
+COPY pyproject.toml README.md* ./
 RUN pip install --no-cache-dir .
 
 # Copy server code
@@ -21,23 +20,7 @@ COPY . .
 
 EXPOSE 8000
 
-CMD ["fastmcp", "run", "{entry_point}", "--transport", "streamable-http", "--host", "0.0.0.0", "--port", "8000"]
-'''
-
-DOCKERFILE_REQUIREMENTS = '''FROM python:3.12-slim
-
-WORKDIR /app
-
-# Install dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy server code
-COPY . .
-
-EXPOSE 8000
-
-CMD ["fastmcp", "run", "{entry_point}", "--transport", "streamable-http", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["fastmcp", "run", "{entry_point}:mcp", "--transport", "streamable-http", "--host", "0.0.0.0", "--port", "8000"]
 '''
 
 
@@ -63,26 +46,24 @@ def build_command(
         typer.echo(f"Error: Entry point '{entry_point}' not found in {directory}", err=True)
         sys.exit(1)
     
-    # Check for dependencies - prefer pyproject.toml, fallback to requirements.txt
+    # Check for pyproject.toml (required)
     pyproject_path = source_dir / "pyproject.toml"
-    requirements_path = source_dir / "requirements.txt"
-    
-    if pyproject_path.exists():
-        dockerfile_template = DOCKERFILE_PYPROJECT
-        typer.echo(f"📦 Using pyproject.toml for dependencies")
-    elif requirements_path.exists():
-        dockerfile_template = DOCKERFILE_REQUIREMENTS
-        typer.echo(f"📦 Using requirements.txt for dependencies")
-    else:
-        typer.echo(f"Error: No pyproject.toml or requirements.txt found in {directory}", err=True)
+    if not pyproject_path.exists():
+        typer.echo(f"Error: pyproject.toml not found in {directory}", err=True)
+        typer.echo("Run 'kaos mcp init' to create a new project with pyproject.toml", err=True)
         sys.exit(1)
+    
+    typer.echo(f"📦 Using pyproject.toml for dependencies")
     
     # Generate or use existing Dockerfile
     dockerfile_path = source_dir / "Dockerfile"
     generated_dockerfile = False
     
+    # Remove .py extension for fastmcp run command
+    entry_name = entry_point.replace(".py", "")
+    
     if not dockerfile_path.exists() or create_dockerfile:
-        dockerfile_content = dockerfile_template.format(entry_point=entry_point)
+        dockerfile_content = DOCKERFILE_TEMPLATE.format(entry_point=entry_name)
         dockerfile_path.write_text(dockerfile_content)
         generated_dockerfile = True
         typer.echo(f"📝 Generated Dockerfile")

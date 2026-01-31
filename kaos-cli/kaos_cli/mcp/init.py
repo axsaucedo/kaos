@@ -27,7 +27,21 @@ if __name__ == "__main__":
     mcp.run(transport="streamable-http", host="0.0.0.0", port=8000)
 '''
 
-TEMPLATE_REQUIREMENTS_TXT = '''fastmcp>=2.0.0
+TEMPLATE_PYPROJECT_TOML = '''[project]
+name = "my-mcp-server"
+version = "0.1.0"
+description = "A FastMCP server created with kaos mcp init"
+requires-python = ">=3.11"
+dependencies = [
+    "fastmcp>=2.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["."]
 '''
 
 TEMPLATE_README_MD = '''# My MCP Server
@@ -39,7 +53,7 @@ A FastMCP server created with `kaos mcp init`.
 Install dependencies:
 
 ```bash
-pip install -r requirements.txt
+pip install -e .
 ```
 
 Run locally:
@@ -53,7 +67,7 @@ python server.py
 Build Docker image:
 
 ```bash
-kaos mcp build --name my-mcp-server --tag my-mcp-server:latest
+kaos mcp build --name my-mcp-server
 ```
 
 Deploy to Kubernetes:
@@ -76,7 +90,7 @@ def init_command(
     
     files = {
         "server.py": TEMPLATE_SERVER_PY,
-        "requirements.txt": TEMPLATE_REQUIREMENTS_TXT,
+        "pyproject.toml": TEMPLATE_PYPROJECT_TOML,
         "README.md": TEMPLATE_README_MD,
     }
     
@@ -93,5 +107,5 @@ def init_command(
     typer.echo("\nNext steps:")
     typer.echo("  1. Edit server.py to add your tools")
     typer.echo("  2. Run locally: python server.py")
-    typer.echo("  3. Build: kaos mcp build --name my-mcp --tag my-mcp:v1")
-    typer.echo("  4. Deploy: kaos mcp deploy --name my-mcp --image my-mcp:v1")
+    typer.echo("  3. Build: kaos mcp build --name my-mcp")
+    typer.echo("  4. Deploy: kaos mcp deploy --name my-mcp --image my-mcp:latest")
