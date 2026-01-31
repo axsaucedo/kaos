@@ -2,7 +2,8 @@
 
 import typer
 
-from kaos_cli.agent.crud import list_command, get_command, logs_command, delete_command, deploy_command
+from kaos_cli.agent.crud import list_command, get_command, logs_command, delete_command
+from kaos_cli.agent.deploy import deploy_from_yaml, deploy_agent
 from kaos_cli.agent.invoke import invoke_command
 
 app = typer.Typer(
@@ -95,17 +96,42 @@ def delete_agent(
 
 
 @app.command(name="deploy")
-def deploy_agent(
-    file: str = typer.Argument(..., help="Path to Agent YAML file."),
+def deploy_agent_cmd(
+    file: str = typer.Argument(None, help="Path to Agent YAML file."),
+    name: str = typer.Option(None, "--name", help="Name for the Agent."),
+    modelapi: str = typer.Option(None, "--modelapi", "-m", help="ModelAPI reference."),
     namespace: str = typer.Option(
-        None,
+        "default",
         "--namespace",
         "-n",
-        help="Namespace to deploy to (overrides YAML metadata).",
+        help="Namespace to deploy to.",
     ),
+    system_prompt: str = typer.Option(None, "--prompt", "-p", help="System prompt."),
+    mcp_servers: list[str] = typer.Option(None, "--mcp", help="MCP server references."),
+    sub_agents: list[str] = typer.Option(None, "--sub-agent", help="Sub-agent references."),
 ) -> None:
-    """Deploy an Agent from a YAML file."""
-    deploy_command(file=file, namespace=namespace)
+    """Deploy an Agent from YAML file or flags.
+    
+    Examples:
+      kaos agent deploy config.yaml                  # Deploy from YAML file
+      kaos agent deploy --name my-agent --modelapi my-model  # Deploy with flags
+    """
+    import sys
+    
+    if file:
+        deploy_from_yaml(file=file, namespace=namespace)
+    elif name and modelapi:
+        deploy_agent(
+            name=name,
+            modelapi=modelapi,
+            namespace=namespace,
+            system_prompt=system_prompt,
+            mcp_servers=mcp_servers,
+            sub_agents=sub_agents,
+        )
+    else:
+        typer.echo("Error: Provide FILE, or --name and --modelapi", err=True)
+        sys.exit(1)
 
 
 @app.command(name="invoke")
