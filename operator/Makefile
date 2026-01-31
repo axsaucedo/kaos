@@ -113,6 +113,10 @@ kind-load-images:
 		LITELLM_IMAGE=$(LITELLM_IMAGE) OLLAMA_IMAGE=$(OLLAMA_IMAGE) \
 		./hack/build-push-images.sh
 
+# Image tag configuration (defaults to chart values, override for CI)
+IMAGE_TAG ?= $(shell cat ../VERSION 2>/dev/null || echo "v0.1.4-dev")
+REGISTRY ?= axsauze
+
 # Install KAOS operator in KIND (uses chart defaults, no special values file needed)
 kind-e2e-install-kaos:
 	@echo "=== Installing KAOS operator ==="
@@ -122,6 +126,11 @@ kind-e2e-install-kaos:
 		--set gatewayAPI.enabled=true \
 		--set gatewayAPI.createGateway=true \
 		--set gatewayAPI.gatewayClassName=envoy-gateway \
+		--set controllerManager.manager.image.repository=$(REGISTRY)/kaos-operator \
+		--set controllerManager.manager.image.tag=$(IMAGE_TAG) \
+		--set defaultImages.agentRuntime=$(REGISTRY)/kaos-agent:$(IMAGE_TAG) \
+		--set defaultImages.mcpServer=$(REGISTRY)/kaos-mcp-server:$(IMAGE_TAG) \
+		--set defaultImages.mcpPythonString=$(REGISTRY)/kaos-mcp-python-string:$(IMAGE_TAG) \
 		--wait --timeout 120s
 	@echo "=== KAOS operator installed ==="
 

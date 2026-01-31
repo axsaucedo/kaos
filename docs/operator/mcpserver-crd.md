@@ -11,47 +11,35 @@ metadata:
   name: my-mcp
   namespace: my-namespace
 spec:
-  # Required: Runtime type
-  type: python-runtime  # or node-runtime (future)
+  # Required: Runtime identifier
+  # Use a registered runtime (python-string, kubernetes, slack) or "custom"
+  runtime: python-string
   
-  # Required: Server configuration
-  config:
-    # Tools configuration (one of the following)
-    tools:
-      # Option 1: PyPI package name
-      fromPackage: "test-mcp-echo-server"
-      
-      # Option 2: Dynamic Python tools defined inline
-      fromString: |
-        def echo(text: str) -> str:
-            """Echo the input text."""
-            return f"Echo: {text}"
-        
-        def add(a: int, b: int) -> int:
-            """Add two numbers."""
-            return a + b
-      
-      # Option 3: Tools from a Secret
-      fromSecretKeyRef:
-        name: my-tools-secret
-        key: tools.py
-    
-    # Environment variables
+  # Optional: Runtime-specific parameters
+  # Passed to container via runtime's paramsEnvVar (e.g., MCP_TOOLS_STRING for python-string)
+  params: |
+    def echo(text: str) -> str:
+        """Echo the input text."""
+        return f"Echo: {text}"
+  
+  # Optional: ServiceAccount for RBAC (e.g., kubernetes runtime)
+  serviceAccountName: my-mcp-sa
+  
+  # Optional: Container overrides
+  container:
+    image: my-custom-image:v1  # Required for "custom" runtime
     env:
     - name: LOG_LEVEL
       value: "INFO"
+    resources:
+      requests:
+        memory: "128Mi"
+        cpu: "100m"
   
-  # Optional: PodSpec override using strategic merge patch
+  # Optional: Full PodSpec override
   podSpec:
-    containers:
-    - name: mcp-server  # Must match generated container name
-      resources:
-        requests:
-          memory: "128Mi"
-          cpu: "100m"
-        limits:
-          memory: "256Mi"
-          cpu: "500m"
+    nodeSelector:
+      gpu: "true"
 
 status:
   phase: Ready           # Pending, Ready, Failed
@@ -59,57 +47,52 @@ status:
   endpoint: "http://mcpserver-my-mcp.my-namespace.svc.cluster.local:8000"
   availableTools:
   - "echo"
-  - "add"
   message: ""
 ```
 
 ## Spec Fields
 
-### type (required)
+### runtime (required)
 
-Runtime type for the MCP server:
+Runtime identifier for the MCP server. Can be:
 
 | Value | Description |
 |-------|-------------|
-| `python-runtime` | Python-based MCP server |
-| `node-runtime` | Node.js-based (future) |
+| `python-string` | Python code execution via MCP_TOOLS_STRING |
+| `kubernetes` | Kubernetes CRUD operations |
+| `slack` | Slack integration |
+| `custom` | User-provided container image |
 
-### config (required)
+Additional runtimes can be registered via the `kaos-mcp-runtimes` ConfigMap.
 
-#### config.tools
+### params (optional)
 
-Tools configuration - use one of the following options:
+Runtime-specific configuration passed to the container. The delivery method depends on the runtime:
 
-##### tools.fromPackage
+| Runtime | Params Environment Variable |
+|---------|---------------------------|
+| `python-string` | `MCP_TOOLS_STRING` |
+| `kubernetes` | `MCP_PARAMS` |
+| `slack` | `MCP_PARAMS` |
 
-PyPI package name to run as MCP server:
+#### python-string params
 
-```yaml
-config:
-  tools:
-    fromPackage: "test-mcp-echo-server"
-```
-
-The package is installed via pip and executed. It must expose MCP-compatible endpoints.
-
-##### tools.fromString
-
-Dynamic Python tools defined inline:
+For the python-string runtime, define Python functions inline:
 
 ```yaml
-config:
-  tools:
-    fromString: |
-      def greet(name: str) -> str:
-          """Greet a person by name."""
-          return f"Hello, {name}!"
-      
-      def calculate(expression: str) -> str:
-          """Evaluate a math expression."""
-          try:
-              return str(eval(expression))
-          except Exception as e:
-              return f"Error: {e}"
+spec:
+  runtime: python-string
+  params: |
+    def greet(name: str) -> str:
+        """Greet a person by name."""
+        return f"Hello, {name}!"
+    
+    def calculate(expression: str) -> str:
+        """Evaluate a math expression."""
+        try:
+            return str(eval(expression))
+        except Exception as e:
+            return f"Error: {e}"
 ```
 
 **Requirements:**
@@ -117,50 +100,41 @@ config:
 - Functions must have docstrings (used as descriptions)
 - Supported types: `str`, `int`, `dict`, `list`
 
-**Security Note:** `fromString` uses `exec()` to define functions. Only use with trusted input.
+**Security Note:** python-string uses `exec()` to define functions. Only use with trusted input.
 
-##### tools.fromSecretKeyRef
+### serviceAccountName (optional)
 
-Load tools from a Kubernetes Secret:
+ServiceAccount for the MCPServer pod. Required for runtimes that need Kubernetes API access (e.g., kubernetes runtime).
 
-```yaml
-config:
-  tools:
-    fromSecretKeyRef:
-      name: my-tools-secret
-      key: tools.py
+Create RBAC using:
+```bash
+kaos system create-rbac --name my-mcp-sa --namespace my-namespace
 ```
 
-#### config.env
+### container (optional)
 
-Environment variables for the MCP server:
+Override container configuration. For "custom" runtime, `container.image` is required.
 
 ```yaml
-config:
-  env:
-  - name: LOG_LEVEL
-    value: "DEBUG"
-  - name: API_KEY
-    valueFrom:
-      secretKeyRef:
-        name: mcp-secrets
-        key: api-key
+spec:
+  runtime: custom
+  container:
+    image: my-mcp-server:v1
+    env:
+    - name: API_KEY
+      valueFrom:
+        secretKeyRef:
+          name: mcp-secrets
+          key: api-key
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "100m"
 ```
 
 ### podSpec (optional)
 
 Override the generated pod spec using Kubernetes strategic merge patch.
-
-```yaml
-spec:
-  podSpec:
-    containers:
-    - name: mcp-server  # Must match the generated container name
-      resources:
-        requests:
-          memory: "256Mi"
-          cpu: "100m"
-```
 
 ### gatewayRoute (optional)
 
@@ -169,19 +143,60 @@ Configure Gateway API routing, including request timeout:
 ```yaml
 spec:
   gatewayRoute:
-    # Request timeout for the HTTPRoute (Gateway API Duration format)
-    # Default: "30s" for MCPServer (tool calls are typically fast)
-    # Set to "0s" to use Gateway's default timeout
-    timeout: "30s"
+    timeout: "30s"  # Default for MCPServer
 ```
 
-## Container Images
+## Available Runtimes
 
-| Tool Source | Image | Command |
-|-------------|-------|---------|
-| `tools.fromPackage` | `python:3.12-slim` | `pip install <package> && <package>` |
-| `tools.fromString` | `kaos-agent:latest` | `python -m mcptools.server` |
-| `tools.fromSecretKeyRef` | `kaos-agent:latest` | `python -m mcptools.server` |
+### python-string
+
+Execute Python functions defined in params.
+
+```yaml
+spec:
+  runtime: python-string
+  params: |
+    def echo(message: str) -> str:
+        """Echo back the message."""
+        return f"Echo: {message}"
+```
+
+### kubernetes
+
+Kubernetes CRUD operations. Requires serviceAccountName with appropriate RBAC.
+
+```yaml
+spec:
+  runtime: kubernetes
+  serviceAccountName: k8s-mcp-sa
+```
+
+### slack
+
+Slack integration. Configure via container environment variables.
+
+```yaml
+spec:
+  runtime: slack
+  container:
+    env:
+    - name: SLACK_BOT_TOKEN
+      valueFrom:
+        secretKeyRef:
+          name: slack-secrets
+          key: bot-token
+```
+
+### custom
+
+User-provided MCP server image. Must expose HTTP on port 8000.
+
+```yaml
+spec:
+  runtime: custom
+  container:
+    image: my-mcp-server:v1
+```
 
 ## Status Fields
 
@@ -192,23 +207,11 @@ spec:
 | `endpoint` | string | Service URL for agents |
 | `availableTools` | []string | List of tool names |
 | `message` | string | Additional status info |
-| `deployment` | object | Deployment status for rolling update visibility |
-
-### deployment (status)
-
-Mirrors key status fields from the underlying Kubernetes Deployment:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `replicas` | int32 | Total number of non-terminated pods |
-| `readyReplicas` | int32 | Number of pods with Ready condition |
-| `availableReplicas` | int32 | Number of available pods |
-| `updatedReplicas` | int32 | Number of pods with desired template (rolling update progress) |
-| `conditions` | array | Deployment conditions (Available, Progressing, ReplicaFailure) |
+| `deployment` | object | Deployment status |
 
 ## Examples
 
-### Echo Tool (PyPI Package)
+### Echo Tool (python-string)
 
 ```yaml
 apiVersion: kaos.tools/v1alpha1
@@ -216,13 +219,14 @@ kind: MCPServer
 metadata:
   name: echo-tools
 spec:
-  type: python-runtime
-  config:
-    tools:
-      fromPackage: "test-mcp-echo-server"
+  runtime: python-string
+  params: |
+    def echo(message: str) -> str:
+        """Echo the message back."""
+        return f"Echo: {message}"
 ```
 
-### Calculator Tool (Dynamic)
+### Calculator (python-string)
 
 ```yaml
 apiVersion: kaos.tools/v1alpha1
@@ -230,93 +234,46 @@ kind: MCPServer
 metadata:
   name: calculator
 spec:
-  type: python-runtime
-  config:
-    tools:
-      fromString: |
-        def add(a: int, b: int) -> int:
-            """Add two numbers together."""
-            return a + b
-        
-        def subtract(a: int, b: int) -> int:
-            """Subtract b from a."""
-            return a - b
-        
-        def multiply(a: int, b: int) -> int:
-            """Multiply two numbers."""
-            return a * b
-        
-        def divide(a: int, b: int) -> str:
-            """Divide a by b."""
-            if b == 0:
-                return "Error: Division by zero"
-            return str(a / b)
-```
-
-### String Utilities with Resources
-
-```yaml
-apiVersion: kaos.tools/v1alpha1
-kind: MCPServer
-metadata:
-  name: string-utils
-spec:
-  type: python-runtime
-  config:
-    tools:
-      fromString: |
-        def uppercase(text: str) -> str:
-            """Convert text to uppercase."""
-            return text.upper()
-        
-        def lowercase(text: str) -> str:
-            """Convert text to lowercase."""
-            return text.lower()
-        
-        def reverse(text: str) -> str:
-            """Reverse the text."""
-            return text[::-1]
-  podSpec:
-    containers:
-    - name: mcp-server
-      resources:
-        requests:
-          memory: "128Mi"
-```
-
-### External API Tool with Secret
-
-```yaml
-apiVersion: kaos.tools/v1alpha1
-kind: MCPServer
-metadata:
-  name: weather-api
-spec:
-  type: python-runtime
-  config:
-    tools:
-      fromString: |
-        import os
-        import urllib.request
-        import json
-        
-        def get_weather(city: str) -> str:
-            """Get current weather for a city."""
-            api_key = os.environ.get("WEATHER_API_KEY", "")
-            url = f"https://api.weather.com/v1/current?city={city}&key={api_key}"
-            try:
-                with urllib.request.urlopen(url) as response:
-                    data = json.loads(response.read())
-                    return f"{city}: {data['temp']}°C, {data['conditions']}"
-            except Exception as e:
-                return f"Error: {e}"
+  runtime: python-string
+  params: |
+    def add(a: int, b: int) -> int:
+        """Add two numbers together."""
+        return a + b
     
+    def subtract(a: int, b: int) -> int:
+        """Subtract b from a."""
+        return a - b
+```
+
+### Kubernetes CRUD
+
+```yaml
+apiVersion: kaos.tools/v1alpha1
+kind: MCPServer
+metadata:
+  name: k8s-tools
+spec:
+  runtime: kubernetes
+  serviceAccountName: k8s-mcp-sa
+```
+
+### Custom MCP Server
+
+```yaml
+apiVersion: kaos.tools/v1alpha1
+kind: MCPServer
+metadata:
+  name: my-custom
+spec:
+  runtime: custom
+  container:
+    image: ghcr.io/myorg/my-mcp-server:v1
     env:
-    - name: WEATHER_API_KEY
+    - name: API_KEY
       valueFrom:
         secretKeyRef:
-          name: api-keys
-          key: weather
+          name: api-secrets
+          key: key
 ```
 
 ## Integration with Agent
@@ -330,44 +287,61 @@ metadata:
   name: my-agent
 spec:
   modelAPI: my-modelapi
+  model: gpt-4
   mcpServers:
   - echo-tools
   - calculator
   config:
     instructions: |
       You have access to echo and calculator tools.
-      Use echo to repeat messages.
-      Use calculator for math operations.
 ```
 
-The operator:
-1. Waits for MCPServers to be Ready (if `waitForDependencies: true`)
-2. Sets `MCP_SERVERS=[echo-tools, calculator]`
-3. Sets `MCP_SERVER_<NAME>_URL=http://mcpserver-<name>:8000`
-
-## HTTP Endpoints
-
-MCPServer exposes:
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/health` | GET | Liveness probe |
-| `/ready` | GET | Readiness probe |
-| `/mcp/tools` | GET | List available tools |
-| `/mcp/tools` | POST | Execute a tool |
-
-### Tool Listing
+## CLI Commands
 
 ```bash
-curl http://mcpserver-my-mcp:8000/mcp/tools
+# List MCPServers
+kaos mcp list
+
+# Deploy from YAML
+kaos mcp deploy mcpserver.yaml
+
+# Deploy custom image directly
+kaos mcp deploy --name my-mcp --image my-image:v1
+
+# Deploy registered runtime
+kaos mcp deploy --name my-mcp --runtime slack
+
+# Get details
+kaos mcp get my-mcp
+
+# View logs
+kaos mcp logs my-mcp
+
+# Invoke a tool
+kaos mcp invoke my-mcp --tool echo --args '{"message": "hello"}'
+
+# Delete
+kaos mcp delete my-mcp
 ```
 
-### Tool Execution
+## Creating Custom MCP Servers
+
+Use the CLI to scaffold and build custom MCP servers:
 
 ```bash
-curl -X POST http://mcpserver-my-mcp:8000/mcp/tools \
-  -H "Content-Type: application/json" \
-  -d '{"tool": "echo", "arguments": {"text": "Hello"}}'
+# Initialize project
+kaos mcp init my-server
+
+# Edit server.py with your tools
+
+# Build image
+kaos mcp build --name my-server --tag v1
+
+# Load to KIND (for local testing)
+kaos mcp build --name my-server --tag v1 --kind-load
+
+# Deploy
+kaos mcp deploy --name my-server --image my-server:v1
 ```
 
 ## Troubleshooting
@@ -375,43 +349,26 @@ curl -X POST http://mcpserver-my-mcp:8000/mcp/tools \
 ### MCPServer CrashLoopBackOff
 
 Check pod logs:
-
 ```bash
-kubectl logs -l mcpserver=my-mcp -n my-namespace
+kaos mcp logs my-mcp
 ```
 
 Common causes:
-- Invalid `fromString` Python syntax
-- Package not found (for `fromPackage` option)
-- Missing dependencies
+- Invalid Python syntax in params
+- Missing serviceAccountName for kubernetes runtime
+- Image pull errors for custom runtime
 
-### Tools Not Discovered by Agent
+### Tools Not Discovered
 
 Verify MCPServer is Ready:
-
 ```bash
-kubectl get mcpserver my-mcp -n my-namespace
+kaos mcp get my-mcp
 ```
 
-Test endpoint manually:
+### RBAC Errors (kubernetes runtime)
 
+Create appropriate permissions:
 ```bash
-kubectl exec -it deploy/agent-my-agent -n my-namespace -- \
-  curl http://mcpserver-my-mcp:8000/mcp/tools
-```
-
-### fromString Syntax Errors
-
-Test your Python code locally:
-
-```python
-tools_string = '''
-def my_tool(x: str) -> str:
-    """My tool description."""
-    return x
-'''
-
-namespace = {}
-exec(tools_string, {}, namespace)
-print(namespace)  # Should show your function
+kaos system create-rbac --name my-mcp-sa --namespace my-ns
+kubectl apply -f rbac.yaml
 ```

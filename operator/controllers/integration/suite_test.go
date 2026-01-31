@@ -13,6 +13,8 @@ import (
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -66,6 +68,35 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(k8sClient).NotTo(BeNil())
 
+	// Create MCP runtimes ConfigMap for controller operation
+	runtimesConfigMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "kaos-mcp-runtimes",
+			Namespace: "default",
+		},
+		Data: map[string]string{
+			"runtimes.yaml": `
+runtimes:
+  python-string:
+    type: python
+    image: axsauze/kaos-mcp-python-string:test
+    paramsEnvVar: MCP_TOOLS_STRING
+    transport: http
+  kubernetes:
+    type: go
+    image: ghcr.io/manusa/kubernetes-mcp-server:latest
+    args: ["--port", "8000"]
+    transport: http
+  slack:
+    type: nodejs
+    image: zencoderai/slack-mcp:latest
+    command: ["--transport", "http", "--port", "8000"]
+    transport: http
+`,
+		},
+	}
+	Expect(k8sClient.Create(context.Background(), runtimesConfigMap)).To(Succeed())
+
 	// Set required environment variables for controller operation
 	os.Setenv("DEFAULT_AGENT_IMAGE", "axsauze/kaos-agent:test")
 	os.Setenv("DEFAULT_MCP_SERVER_IMAGE", "axsauze/kaos-mcp-server:test")
@@ -85,8 +116,9 @@ var _ = BeforeSuite(func() {
 	Expect(err).ToNot(HaveOccurred())
 
 	err = (&controllers.MCPServerReconciler{
-		Client: k8sManager.GetClient(),
-		Scheme: k8sManager.GetScheme(),
+		Client:          k8sManager.GetClient(),
+		Scheme:          k8sManager.GetScheme(),
+		SystemNamespace: "default",
 	}).SetupWithManager(k8sManager)
 	Expect(err).ToNot(HaveOccurred())
 

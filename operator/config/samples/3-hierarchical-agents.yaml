@@ -1,7 +1,7 @@
 ---
 # Sample 3: Hierarchical Agent System
 # Complex multi-level hierarchy: supervisor -> team leads -> workers
-# Demonstrates toolsString for dynamic MCP tool creation
+# Demonstrates python-string runtime for dynamic MCP tool creation
 # Deploy: kubectl apply -f 3-hierarchical-agents.yaml
 #
 # # IMPORTANT:
@@ -45,34 +45,33 @@ metadata:
   name: hierarchy-echo-mcp
   namespace: kaos-hierarchy
 spec:
-  type: python-runtime
-  config:
-    tools:
-      fromPackage: "test-mcp-echo-server"
+  runtime: python-string
+  params: |
+    def echo(message: str) -> str:
+        """Echo the provided message back."""
+        return f"Echo: {message}"
 
 ---
-# MCPServer: Calculator tool using fromString
+# MCPServer: Calculator tool using params
 apiVersion: kaos.tools/v1alpha1
 kind: MCPServer
 metadata:
   name: hierarchy-calc-mcp
   namespace: kaos-hierarchy
 spec:
-  type: python-runtime
-  config:
-    tools:
-      fromString: |
-        def calculate(expression: str) -> str:
-            """Evaluate a mathematical expression safely."""
-            try:
-                # Only allow safe math operations
-                allowed = set('0123456789+-*/.() ')
-                if not all(c in allowed for c in expression):
-                    return "Error: Invalid characters in expression"
-                result = eval(expression)
-                return str(result)
-            except Exception as e:
-                return f"Error: {str(e)}"
+  runtime: python-string
+  params: |
+    def calculate(expression: str) -> str:
+        """Evaluate a mathematical expression safely."""
+        try:
+            # Only allow safe math operations
+            allowed = set('0123456789+-*/.() ')
+            if not all(c in allowed for c in expression):
+                return "Error: Invalid characters in expression"
+            result = eval(expression)
+            return str(result)
+        except Exception as e:
+            return f"Error: {str(e)}"
 
 ---
 # Agent: Supervisor - top of hierarchy

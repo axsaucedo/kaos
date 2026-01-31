@@ -76,10 +76,33 @@ make e2e-test                     # Run E2E tests
 
 ### Test Structure
 - `conftest.py`: Fixtures, namespace management, Gateway URL setup
-- `test_agent.py`: Agent CRD tests
-- `test_mcpserver.py`: MCPServer CRD tests  
-- `test_modelapi.py`: ModelAPI CRD tests
-- `test_multi_agent.py`: Multi-agent delegation tests
+- `test_agentic_loop_e2e.py`: Agent with MCP tools tests
+- `test_mcp_tools_e2e.py`: MCPServer runtime tests (python-string)
+- `test_modelapi_e2e.py`: ModelAPI CRD tests
+- `test_multi_agent_e2e.py`: Multi-agent delegation tests
+- `test_base_func_e2e.py`: Basic functionality tests
+
+### CRD Patterns in Tests
+MCPServer uses runtime-based architecture:
+```yaml
+spec:
+  runtime: python-string
+  params: |
+    def tool_name(): ...
+  container:
+    env:
+    - name: LOG_LEVEL
+      value: DEBUG
+```
+
+Agent/ModelAPI use container.env for environment variables:
+```yaml
+spec:
+  container:
+    env:
+    - name: LOG_LEVEL
+      value: DEBUG
+```
 
 ### Key Patterns
 - Tests create unique namespaces per session

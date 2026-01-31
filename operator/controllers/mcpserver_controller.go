@@ -3,10 +3,9 @@ package controllers
 import (
 	"context"
 	"fmt"
-	"os"
-	"strings"
 
 	"github.com/go-logr/logr"
+	"gopkg.in/yaml.v3"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -27,11 +26,29 @@ import (
 
 const mcpServerFinalizerName = "kaos.tools/mcpserver-finalizer"
 
+// RuntimeConfig represents a runtime definition from the ConfigMap
+type RuntimeConfig struct {
+	Type         string   `yaml:"type"`
+	Image        string   `yaml:"image"`
+	Description  string   `yaml:"description,omitempty"`
+	Command      []string `yaml:"command,omitempty"`
+	Args         []string `yaml:"args,omitempty"`
+	ParamsEnvVar string   `yaml:"paramsEnvVar,omitempty"`
+	Transport    string   `yaml:"transport,omitempty"`
+	RequiredEnv  []string `yaml:"requiredEnv,omitempty"`
+}
+
+// RuntimeRegistry represents the full runtime registry from ConfigMap
+type RuntimeRegistry struct {
+	Runtimes map[string]RuntimeConfig `yaml:"runtimes"`
+}
+
 // MCPServerReconciler reconciles a MCPServer object
 type MCPServerReconciler struct {
 	client.Client
-	Log    logr.Logger
-	Scheme *runtime.Scheme
+	Log             logr.Logger
+	Scheme          *runtime.Scheme
+	SystemNamespace string
 }
 
 //+kubebuilder:rbac:groups=kaos.tools,resources=mcpservers,verbs=get;list;watch;create;update;patch;delete
@@ -39,6 +56,7 @@ type MCPServerReconciler struct {
 //+kubebuilder:rbac:groups=kaos.tools,resources=mcpservers/finalizers,verbs=update
 //+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -84,7 +102,7 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 	}
 
 	// Validate telemetry config
-	telemetryConfig := util.MergeTelemetryConfig(mcpserver.Spec.Config.Telemetry)
+	telemetryConfig := util.MergeTelemetryConfig(mcpserver.Spec.Telemetry)
 	if !util.IsTelemetryConfigValid(telemetryConfig) {
 		log.Info("WARNING: telemetry.enabled=true but endpoint is empty; telemetry will not function", "mcpserver", mcpserver.Name)
 	}
@@ -96,7 +114,7 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 
 	if err != nil && apierrors.IsNotFound(err) {
 		// Create new Deployment
-		deployment, err = r.constructDeployment(mcpserver)
+		deployment, err = r.constructDeployment(ctx, mcpserver)
 		if err != nil {
 			log.Error(err, "failed to construct Deployment")
 			mcpserver.Status.Phase = "Failed"
@@ -122,7 +140,7 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		return ctrl.Result{}, err
 	} else {
 		// Deployment exists - check if spec has changed using hash annotation
-		desiredDeployment, err := r.constructDeployment(mcpserver)
+		desiredDeployment, err := r.constructDeployment(ctx, mcpserver)
 		if err != nil {
 			log.Error(err, "failed to construct Deployment for comparison")
 			return ctrl.Result{}, err
@@ -217,7 +235,7 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 }
 
 // constructDeployment creates a Deployment for the MCPServer
-func (r *MCPServerReconciler) constructDeployment(mcpserver *kaosv1alpha1.MCPServer) (*appsv1.Deployment, error) {
+func (r *MCPServerReconciler) constructDeployment(ctx context.Context, mcpserver *kaosv1alpha1.MCPServer) (*appsv1.Deployment, error) {
 	labels := map[string]string{
 		"app":       "mcpserver",
 		"mcpserver": mcpserver.Name,
@@ -225,21 +243,19 @@ func (r *MCPServerReconciler) constructDeployment(mcpserver *kaosv1alpha1.MCPSer
 
 	replicas := int32(1)
 
-	// Construct container based on server type
-	var container corev1.Container
-	var err error
-	if mcpserver.Spec.Type == kaosv1alpha1.MCPServerTypePython {
-		container, err = r.constructPythonContainer(mcpserver)
-	} else {
-		// Default to Python if type is unknown
-		container, err = r.constructPythonContainer(mcpserver)
-	}
+	// Construct container based on runtime
+	container, err := r.constructContainerFromRuntime(ctx, mcpserver)
 	if err != nil {
 		return nil, err
 	}
 
 	basePodSpec := corev1.PodSpec{
 		Containers: []corev1.Container{container},
+	}
+
+	// Set ServiceAccountName if provided
+	if mcpserver.Spec.ServiceAccountName != "" {
+		basePodSpec.ServiceAccountName = mcpserver.Spec.ServiceAccountName
 	}
 
 	// Apply podSpec override using strategic merge patch if provided
@@ -280,54 +296,98 @@ func (r *MCPServerReconciler) constructDeployment(mcpserver *kaosv1alpha1.MCPSer
 	return deployment, nil
 }
 
-// constructPythonContainer creates a container that runs MCP server
-func (r *MCPServerReconciler) constructPythonContainer(mcpserver *kaosv1alpha1.MCPServer) (corev1.Container, error) {
-	env := append([]corev1.EnvVar{}, mcpserver.Spec.Config.Env...)
-
-	var image string
-	var command []string
-
-	// Get default MCP server image from environment (required - set via ConfigMap)
-	defaultMcpImage := os.Getenv("DEFAULT_MCP_SERVER_IMAGE")
-	if defaultMcpImage == "" {
-		return corev1.Container{}, fmt.Errorf("DEFAULT_MCP_SERVER_IMAGE environment variable is required but not set")
+// getRuntimeRegistry fetches and parses the runtime registry ConfigMap
+func (r *MCPServerReconciler) getRuntimeRegistry(ctx context.Context) (*RuntimeRegistry, error) {
+	cm := &corev1.ConfigMap{}
+	cmName := types.NamespacedName{
+		Name:      "kaos-mcp-runtimes",
+		Namespace: r.SystemNamespace,
 	}
 
-	// Check if using tools config
-	if mcpserver.Spec.Config.Tools != nil {
-		if mcpserver.Spec.Config.Tools.FromString != "" {
-			// Use the kaos-mcp-server image with MCP_TOOLS_STRING
-			image = defaultMcpImage
-			command = []string{"python", "-m", "mcptools.server"}
+	if err := r.Get(ctx, cmName, cm); err != nil {
+		return nil, fmt.Errorf("failed to get runtime registry ConfigMap: %w", err)
+	}
+
+	yamlData, ok := cm.Data["runtimes.yaml"]
+	if !ok {
+		return nil, fmt.Errorf("runtimes.yaml key not found in ConfigMap")
+	}
+
+	var registry RuntimeRegistry
+	if err := yaml.Unmarshal([]byte(yamlData), &registry); err != nil {
+		return nil, fmt.Errorf("failed to parse runtime registry: %w", err)
+	}
+
+	return &registry, nil
+}
+
+// constructContainerFromRuntime creates a container based on the runtime configuration
+func (r *MCPServerReconciler) constructContainerFromRuntime(ctx context.Context, mcpserver *kaosv1alpha1.MCPServer) (corev1.Container, error) {
+	var env []corev1.EnvVar
+	var image string
+	var command []string
+	var args []string
+
+	runtime := mcpserver.Spec.Runtime
+
+	// Handle custom runtime - requires container.image
+	if runtime == "custom" {
+		if mcpserver.Spec.Container == nil || mcpserver.Spec.Container.Image == "" {
+			return corev1.Container{}, fmt.Errorf("custom runtime requires container.image to be set")
+		}
+		image = mcpserver.Spec.Container.Image
+		if mcpserver.Spec.Container.Command != nil {
+			command = mcpserver.Spec.Container.Command
+		}
+		if mcpserver.Spec.Container.Args != nil {
+			args = mcpserver.Spec.Container.Args
+		}
+	} else {
+		// Lookup runtime from registry
+		registry, err := r.getRuntimeRegistry(ctx)
+		if err != nil {
+			return corev1.Container{}, fmt.Errorf("failed to get runtime registry: %w", err)
+		}
+
+		runtimeConfig, ok := registry.Runtimes[runtime]
+		if !ok {
+			return corev1.Container{}, fmt.Errorf("unknown runtime: %s (not found in registry)", runtime)
+		}
+
+		image = runtimeConfig.Image
+		command = runtimeConfig.Command
+		args = runtimeConfig.Args
+
+		// Pass params via runtime-specific env var if defined
+		if runtimeConfig.ParamsEnvVar != "" && mcpserver.Spec.Params != "" {
 			env = append(env, corev1.EnvVar{
-				Name:  "MCP_TOOLS_STRING",
-				Value: mcpserver.Spec.Config.Tools.FromString,
+				Name:  runtimeConfig.ParamsEnvVar,
+				Value: mcpserver.Spec.Params,
 			})
-		} else if mcpserver.Spec.Config.Tools.FromSecretKeyRef != nil {
-			// Use the kaos-mcp-server image with MCP_TOOLS_STRING from secret
-			image = defaultMcpImage
-			command = []string{"python", "-m", "mcptools.server"}
-			env = append(env, corev1.EnvVar{
-				Name: "MCP_TOOLS_STRING",
-				ValueFrom: &corev1.EnvVarSource{
-					SecretKeyRef: mcpserver.Spec.Config.Tools.FromSecretKeyRef,
-				},
-			})
-		} else if mcpserver.Spec.Config.Tools.FromPackage != "" {
-			// Use uvx with the package name
-			packageName := mcpserver.Spec.Config.Tools.FromPackage
-			moduleName := strings.ReplaceAll(packageName, "-", "_")
-			image = "python:3.12-slim"
-			command = []string{
-				"sh",
-				"-c",
-				fmt.Sprintf("pip install %s && ( %s || python -m %s )", packageName, packageName, moduleName),
-			}
 		}
 	}
 
+	// Allow container override for image, command, args (for all runtimes, not just custom)
+	if mcpserver.Spec.Container != nil {
+		if mcpserver.Spec.Container.Image != "" && runtime != "custom" {
+			// Only override if it wasn't already set by custom runtime
+			image = mcpserver.Spec.Container.Image
+		}
+		if mcpserver.Spec.Container.Command != nil && runtime != "custom" {
+			command = mcpserver.Spec.Container.Command
+		}
+		if mcpserver.Spec.Container.Args != nil && runtime != "custom" {
+			args = mcpserver.Spec.Container.Args
+		}
+	}
+
+	// Add user-provided env vars from container
+	if mcpserver.Spec.Container != nil {
+		env = append(env, mcpserver.Spec.Container.Env...)
+	}
+
 	// OpenTelemetry configuration - merge with global defaults
-	telemetryConfig := util.MergeTelemetryConfig(mcpserver.Spec.Config.Telemetry)
+	telemetryConfig := util.MergeTelemetryConfig(mcpserver.Spec.Telemetry)
 	if telemetryConfig != nil {
 		otelEnv := util.BuildTelemetryEnvVars(
 			telemetryConfig,
@@ -337,7 +397,7 @@ func (r *MCPServerReconciler) constructPythonContainer(mcpserver *kaosv1alpha1.M
 		env = append(env, otelEnv...)
 	}
 
-	// Add LOG_LEVEL env var (if not already set by user in spec.config.env)
+	// Add LOG_LEVEL env var (if not already set by user)
 	if logLevelEnv := util.BuildLogLevelEnvVar(env); logLevelEnv != nil {
 		env = append(env, logLevelEnv...)
 	}
@@ -347,6 +407,7 @@ func (r *MCPServerReconciler) constructPythonContainer(mcpserver *kaosv1alpha1.M
 		Image:           image,
 		ImagePullPolicy: corev1.PullIfNotPresent,
 		Command:         command,
+		Args:            args,
 		Ports: []corev1.ContainerPort{
 			{
 				Name:          "http",
@@ -377,6 +438,17 @@ func (r *MCPServerReconciler) constructPythonContainer(mcpserver *kaosv1alpha1.M
 			TimeoutSeconds:      3,
 			FailureThreshold:    2,
 		},
+	}
+
+	// Apply container overrides (resources, etc.)
+	if mcpserver.Spec.Container != nil {
+		if mcpserver.Spec.Container.Resources != nil {
+			container.Resources = *mcpserver.Spec.Container.Resources
+		}
+		// Image override for non-custom runtimes
+		if runtime != "custom" && mcpserver.Spec.Container.Image != "" {
+			container.Image = mcpserver.Spec.Container.Image
+		}
 	}
 
 	return container, nil

@@ -7,6 +7,7 @@ Tests the MCP server and agent tool calling via Gateway API:
 - Memory verification for tool call events
 """
 
+import asyncio
 import time
 import json
 import pytest
@@ -21,18 +22,28 @@ from e2e.conftest import (
 )
 
 
+async def wait_for_mcp_server_ready(mcp_url: str, max_wait: int = 30):
+    """Wait for MCPServer to be reachable via Gateway.
+    
+    MCPServer uses vanilla FastMCP which returns 400/406 for GET requests
+    to /mcp endpoint (requires proper MCP protocol headers). This is expected
+    and indicates the server is running.
+    """
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        for _ in range(max_wait):
+            try:
+                response = await client.get(f"{mcp_url}/mcp")
+                if response.status_code in [400, 406]:
+                    return  # Server is running
+            except Exception:
+                pass
+            await asyncio.sleep(1)
+    raise TimeoutError(f"MCPServer not reachable at {mcp_url}/mcp after {max_wait}s")
+
+
 def create_echo_mcp_server(namespace: str, name: str = "echo-mcp"):
-    """Create an MCPServer with echo tool using tools.fromString."""
-    return {
-        "apiVersion": "kaos.tools/v1alpha1",
-        "kind": "MCPServer",
-        "metadata": {"name": name, "namespace": namespace},
-        "spec": {
-            "type": "python-runtime",
-            "config": {
-                "tools": {
-                    "fromString": '''
-def echo(message: str) -> str:
+    """Create an MCPServer with echo tool using python-string runtime."""
+    tools_code = '''def echo(message: str) -> str:
     """Echo the provided message back."""
     return f"Echo: {message}"
 
@@ -40,9 +51,13 @@ def reverse(text: str) -> str:
     """Reverse the provided text."""
     return text[::-1]
 '''
-                },
-                "env": [{"name": "MCP_LOG_LEVEL", "value": "INFO"}],
-            },
+    return {
+        "apiVersion": "kaos.tools/v1alpha1",
+        "kind": "MCPServer",
+        "metadata": {"name": name, "namespace": namespace},
+        "spec": {
+            "runtime": "python-string",
+            "params": tools_code,
         },
     }
 
@@ -80,44 +95,45 @@ def create_agent_with_mcp(
                 "description": "Agent with MCP tools",
                 "instructions": "You have access to echo and reverse tools. Use them to help users.",
                 "reasoningLoopMaxSteps": 5,
-                "env": env,
             },
+            "container": {"env": env},
             "agentNetwork": {"access": []},
         },
     }
 
 
 @pytest.mark.asyncio
-async def test_mcpserver_deployment_and_health(test_namespace: str):
-    """Test MCPServer deploys and is healthy."""
+async def test_mcpserver_deployment_ready(test_namespace: str):
+    """Test MCPServer deploys and is ready (uses K8s deployment rollout)."""
     mcp_name = "mcp-health"
     mcp_spec = create_echo_mcp_server(test_namespace, mcp_name)
 
     create_custom_resource(mcp_spec, test_namespace)
     wait_for_deployment(test_namespace, f"mcpserver-{mcp_name}", timeout=120)
 
+    # MCPServer uses vanilla FastMCP - no custom /health endpoint
+    # Readiness is verified via K8s deployment rollout (TCP probe)
+    # Verify the MCP endpoint responds (will return 406 without proper headers, but that's OK)
     mcp_url = gateway_url(test_namespace, "mcp", mcp_name)
-    wait_for_resource_ready(mcp_url)
-
+    
     async with httpx.AsyncClient(timeout=30.0) as client:
-        # Health check
-        response = await client.get(f"{mcp_url}/health")
-        assert response.status_code == 200
-        health = response.json()
-        assert health.get("status") == "healthy"
-
-        # Ready check - also shows registered tools
-        response = await client.get(f"{mcp_url}/ready")
-        assert response.status_code == 200
-        ready = response.json()
-        assert ready.get("status") == "ready"
-        assert "echo" in ready.get("tools", [])
-        assert "reverse" in ready.get("tools", [])
+        # The /mcp endpoint exists - FastMCP returns 400/406 for GET without proper headers
+        # but this confirms the server is running and reachable via Gateway
+        for _ in range(30):
+            try:
+                response = await client.get(f"{mcp_url}/mcp")
+                # 400 or 406 means server is running but request format is wrong (expected)
+                if response.status_code in [400, 406]:
+                    return  # Success - server is running
+            except Exception:
+                pass
+            await asyncio.sleep(1)
+        pytest.fail(f"MCPServer not reachable at {mcp_url}/mcp after 30s")
 
 
 @pytest.mark.asyncio
-async def test_mcpserver_ready_shows_tools(test_namespace: str):
-    """Test MCPServer /ready endpoint shows registered tools."""
+async def test_mcpserver_mcp_endpoint_reachable(test_namespace: str):
+    """Test MCPServer /mcp endpoint is reachable via Gateway."""
     mcp_name = "mcp-ready"
     mcp_spec = create_echo_mcp_server(test_namespace, mcp_name)
 
@@ -125,17 +141,18 @@ async def test_mcpserver_ready_shows_tools(test_namespace: str):
     wait_for_deployment(test_namespace, f"mcpserver-{mcp_name}", timeout=120)
 
     mcp_url = gateway_url(test_namespace, "mcp", mcp_name)
-    wait_for_resource_ready(mcp_url)
 
     async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.get(f"{mcp_url}/ready")
-        assert response.status_code == 200
-        ready = response.json()
-
-        # Verify tools are listed
-        tools = ready.get("tools", [])
-        assert "echo" in tools, f"echo not in tools: {tools}"
-        assert "reverse" in tools, f"reverse not in tools: {tools}"
+        # Verify /mcp endpoint responds (400/406 is expected without proper MCP headers)
+        for _ in range(30):
+            try:
+                response = await client.get(f"{mcp_url}/mcp")
+                if response.status_code in [400, 406]:
+                    return  # Success - server is running and reachable
+            except Exception:
+                pass
+            await asyncio.sleep(1)
+        pytest.fail(f"MCPServer /mcp endpoint not reachable after 30s")
 
 
 @pytest.mark.asyncio
@@ -152,7 +169,7 @@ async def test_agent_with_mcp_tools_discovery(
     wait_for_deployment(test_namespace, f"mcpserver-{mcp_name}", timeout=120)
 
     mcp_url = gateway_url(test_namespace, "mcp", mcp_name)
-    wait_for_resource_ready(mcp_url)
+    await wait_for_mcp_server_ready(mcp_url)
 
     # Deploy Agent connected to MCPServer (no mock responses - just testing discovery)
     agent_spec = create_agent_with_mcp(
@@ -207,7 +224,7 @@ async def test_agent_tool_calling_with_memory(
     wait_for_deployment(test_namespace, f"mcpserver-{mcp_name}", timeout=120)
 
     mcp_url = gateway_url(test_namespace, "mcp", mcp_name)
-    wait_for_resource_ready(mcp_url)
+    await wait_for_mcp_server_ready(mcp_url)
 
     # Deploy Agent with mock response that triggers tool call
     mock_responses = [
@@ -297,17 +314,11 @@ async def test_agent_multiple_mcp_servers(test_namespace: str, shared_modelapi: 
         "kind": "MCPServer",
         "metadata": {"name": mcp2_name, "namespace": test_namespace},
         "spec": {
-            "type": "python-runtime",
-            "config": {
-                "tools": {
-                    "fromString": '''
-def uppercase(text: str) -> str:
+            "runtime": "python-string",
+            "params": '''def uppercase(text: str) -> str:
     """Convert text to uppercase."""
     return text.upper()
-'''
-                },
-                "env": [{"name": "MCP_LOG_LEVEL", "value": "INFO"}],
-            },
+''',
         },
     }
     create_custom_resource(mcp2_spec, test_namespace)
@@ -316,8 +327,8 @@ def uppercase(text: str) -> str:
     wait_for_deployment(test_namespace, f"mcpserver-{mcp1_name}", timeout=120)
     wait_for_deployment(test_namespace, f"mcpserver-{mcp2_name}", timeout=120)
 
-    wait_for_resource_ready(gateway_url(test_namespace, "mcp", mcp1_name))
-    wait_for_resource_ready(gateway_url(test_namespace, "mcp", mcp2_name))
+    await wait_for_mcp_server_ready(gateway_url(test_namespace, "mcp", mcp1_name))
+    await wait_for_mcp_server_ready(gateway_url(test_namespace, "mcp", mcp2_name))
 
     # Deploy Agent connected to both MCPServers
     agent_spec = {
@@ -331,6 +342,8 @@ def uppercase(text: str) -> str:
             "config": {
                 "description": "Agent with multiple MCP tools",
                 "instructions": "You have access to echo, reverse, and uppercase tools.",
+            },
+            "container": {
                 "env": [
                     {"name": "AGENT_LOG_LEVEL", "value": "DEBUG"},
                 ],

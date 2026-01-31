@@ -86,10 +86,6 @@ type ProxyConfig struct {
 	// When provided, used directly for LiteLLM config; models list is still used for Agent validation
 	// +kubebuilder:validation:Optional
 	ConfigYaml *ConfigYamlSource `json:"configYaml,omitempty"`
-
-	// Env variables to pass to the proxy container
-	// +kubebuilder:validation:Optional
-	Env []corev1.EnvVar `json:"env,omitempty"`
 }
 
 // +kubebuilder:object:generate=true
@@ -98,10 +94,6 @@ type ProxyConfig struct {
 type HostedConfig struct {
 	// Model is the Ollama model to run (e.g., smollm2:135m)
 	Model string `json:"model"`
-
-	// Env variables to pass to the Ollama server
-	// +kubebuilder:validation:Optional
-	Env []corev1.EnvVar `json:"env,omitempty"`
 }
 
 // +kubebuilder:object:generate=true
@@ -129,6 +121,10 @@ type ModelAPISpec struct {
 	// For Hosted mode (Ollama): Not supported; a warning is emitted if enabled.
 	// +kubebuilder:validation:Optional
 	Telemetry *TelemetryConfig `json:"telemetry,omitempty"`
+
+	// Container provides shorthand container overrides (image, env, resources)
+	// +kubebuilder:validation:Optional
+	Container *ContainerOverride `json:"container,omitempty"`
 
 	// PodSpec allows overriding the generated pod spec using strategic merge patch
 	// +kubebuilder:validation:Optional

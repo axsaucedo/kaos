@@ -77,8 +77,92 @@ spec:
                     description: Description is a human-readable description of the
                       agent
                     type: string
+                  instructions:
+                    description: Instructions are the system instructions for the
+                      agent
+                    type: string
+                  memory:
+                    description: Memory configures the agent's memory system
+                    properties:
+                      contextLimit:
+                        default: 6
+                        description: 'ContextLimit is the number of messages to include
+                          in delegation context (default: 6)'
+                        format: int32
+                        maximum: 100
+                        minimum: 1
+                        type: integer
+                      enabled:
+                        default: true
+                        description: |-
+                          Enabled controls whether memory is enabled (default: true)
+                          When disabled, NullMemory is used (no-op implementation)
+                        type: boolean
+                      maxSessionEvents:
+                        default: 500
+                        description: 'MaxSessionEvents is the maximum events per session
+                          before eviction (default: 500)'
+                        format: int32
+                        maximum: 10000
+                        minimum: 1
+                        type: integer
+                      maxSessions:
+                        default: 1000
+                        description: 'MaxSessions is the maximum number of sessions
+                          to keep in memory (default: 1000)'
+                        format: int32
+                        maximum: 100000
+                        minimum: 1
+                        type: integer
+                      type:
+                        default: local
+                        description: |-
+                          Type specifies the memory implementation (default: "local")
+                          Currently only "local" is supported
+                        enum:
+                        - local
+                        type: string
+                    type: object
+                  reasoningLoopMaxSteps:
+                    default: 5
+                    description: ReasoningLoopMaxSteps is the maximum number of reasoning
+                      steps before stopping
+                    format: int32
+                    maximum: 20
+                    minimum: 1
+                    type: integer
+                  telemetry:
+                    description: Telemetry configures OpenTelemetry instrumentation
+                    properties:
+                      enabled:
+                        default: false
+                        description: |-
+                          Enabled controls whether OpenTelemetry is enabled (default: false)
+                          When enabled, traces, metrics, and log correlation are all active.
+                        type: boolean
+                      endpoint:
+                        description: |-
+                          Endpoint is the OTLP gRPC endpoint URL (required when enabled).
+                          Example: "http://otel-collector.observability:4317"
+                        type: string
+                    type: object
+                type: object
+              container:
+                description: Container provides shorthand container overrides (image,
+                  env, resources)
+                properties:
+                  args:
+                    description: Args overrides the container arguments
+                    items:
+                      type: string
+                    type: array
+                  command:
+                    description: Command overrides the container entrypoint
+                    items:
+                      type: string
+                    type: array
                   env:
-                    description: Env variables to pass to the agent runtime
+                    description: Env sets environment variables
                     items:
                       description: EnvVar represents an environment variable present
                         in a Container.
@@ -235,74 +319,67 @@ spec:
                       - name
                       type: object
                     type: array
-                  instructions:
-                    description: Instructions are the system instructions for the
-                      agent
+                  image:
+                    description: Image overrides the container image
                     type: string
-                  memory:
-                    description: Memory configures the agent's memory system
+                  resources:
+                    description: Resources overrides compute resources
                     properties:
-                      contextLimit:
-                        default: 6
-                        description: 'ContextLimit is the number of messages to include
-                          in delegation context (default: 6)'
-                        format: int32
-                        maximum: 100
-                        minimum: 1
-                        type: integer
-                      enabled:
-                        default: true
+                      claims:
                         description: |-
-                          Enabled controls whether memory is enabled (default: true)
-                          When disabled, NullMemory is used (no-op implementation)
-                        type: boolean
-                      maxSessionEvents:
-                        default: 500
-                        description: 'MaxSessionEvents is the maximum events per session
-                          before eviction (default: 500)'
-                        format: int32
-                        maximum: 10000
-                        minimum: 1
-                        type: integer
-                      maxSessions:
-                        default: 1000
-                        description: 'MaxSessions is the maximum number of sessions
-                          to keep in memory (default: 1000)'
-                        format: int32
-                        maximum: 100000
-                        minimum: 1
-                        type: integer
-                      type:
-                        default: local
+                          Claims lists the names of resources, defined in spec.resourceClaims,
+                          that are used by this container.
+
+                          This field depends on the
+                          DynamicResourceAllocation feature gate.
+
+                          This field is immutable. It can only be set for containers.
+                        items:
+                          description: ResourceClaim references one entry in PodSpec.ResourceClaims.
+                          properties:
+                            name:
+                              description: |-
+                                Name must match the name of one entry in pod.spec.resourceClaims of
+                                the Pod where this field is used. It makes that resource available
+                                inside a container.
+                              type: string
+                            request:
+                              description: |-
+                                Request is the name chosen for a request in the referenced claim.
+                                If empty, everything from the claim is made available, otherwise
+                                only the result of this request.
+                              type: string
+                          required:
+                          - name
+                          type: object
+                        type: array
+                        x-kubernetes-list-map-keys:
+                        - name
+                        x-kubernetes-list-type: map
+                      limits:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
                         description: |-
-                          Type specifies the memory implementation (default: "local")
-                          Currently only "local" is supported
-                        enum:
-                        - local
-                        type: string
-                    type: object
-                  reasoningLoopMaxSteps:
-                    default: 5
-                    description: ReasoningLoopMaxSteps is the maximum number of reasoning
-                      steps before stopping
-                    format: int32
-                    maximum: 20
-                    minimum: 1
-                    type: integer
-                  telemetry:
-                    description: Telemetry configures OpenTelemetry instrumentation
-                    properties:
-                      enabled:
-                        default: false
+                          Limits describes the maximum amount of compute resources allowed.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
+                      requests:
+                        additionalProperties:
+                          anyOf:
+                          - type: integer
+                          - type: string
+                          pattern: ^(\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))(([KMGTPE]i)|[numkMGTPE]|([eE](\+|-)?(([0-9]+(\.[0-9]*)?)|(\.[0-9]+))))?$
+                          x-kubernetes-int-or-string: true
                         description: |-
-                          Enabled controls whether OpenTelemetry is enabled (default: false)
-                          When enabled, traces, metrics, and log correlation are all active.
-                        type: boolean
-                      endpoint:
-                        description: |-
-                          Endpoint is the OTLP gRPC endpoint URL (required when enabled).
-                          Example: "http://otel-collector.observability:4317"
-                        type: string
+                          Requests describes the minimum amount of compute resources required.
+                          If Requests is omitted for a container, it defaults to Limits if that is explicitly specified,
+                          otherwise to an implementation-defined value. Requests cannot exceed Limits.
+                          More info: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+                        type: object
                     type: object
                 type: object
               gatewayRoute:

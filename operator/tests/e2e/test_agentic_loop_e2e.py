@@ -57,8 +57,8 @@ def create_agentic_loop_worker(
                 "description": "Worker for agentic loop tests",
                 "instructions": "You are a worker. Process tasks and respond briefly.",
                 "reasoningLoopMaxSteps": 3,
-                "env": env,
             },
+            "container": {"env": env},
             "agentNetwork": {"access": []},
         },
     }, name
@@ -99,8 +99,8 @@ def create_agentic_loop_coordinator(
                 "description": "Coordinator for agentic loop tests",
                 "instructions": f"You are a coordinator. You can delegate tasks to {worker_name}.",
                 "reasoningLoopMaxSteps": 5,
-                "env": env,
             },
+            "container": {"env": env},
             "agentNetwork": {"access": [worker_name]},
         },
     }, name

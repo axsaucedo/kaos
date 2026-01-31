@@ -39,11 +39,6 @@ spec:
       #   secretKeyRef:
       #     name: api-secrets
       #     key: openai-key
-      # Or from configmap:
-      # valueFrom:
-      #   configMapKeyRef:
-      #     name: api-config
-      #     key: api-key
     
     # Full config YAML (optional - for advanced multi-model routing)
     # When provided, models list is used for agent validation only
@@ -54,33 +49,26 @@ spec:
             litellm_params:
               model: "openai/gpt-4o"
               api_key: "os.environ/PROXY_API_KEY"
-    
-    # Environment variables
-    env:
-    - name: CUSTOM_ENV
-      value: "value"
   
   # For Hosted mode: Ollama configuration
   hostedConfig:
     # Model to pull and serve (loaded in an initContainer)
     model: "smollm2:135m"
-    
-    # Environment variables
+
+  # Optional: Container overrides (env, resources)
+  container:
     env:
-    - name: OLLAMA_DEBUG
-      value: "false"
+    - name: LITELLM_LOG
+      value: "DEBUG"
+    resources:
+      requests:
+        memory: "2Gi"
+        cpu: "1000m"
 
   # Optional: PodSpec override using strategic merge patch
   podSpec:
-    containers:
-    - name: model-api  # Must match generated container name
-      resources:
-        requests:
-          memory: "2Gi"
-          cpu: "1000m"
-        limits:
-          memory: "8Gi"
-          cpu: "4000m"
+    nodeSelector:
+      gpu: "true"
 
 status:
   phase: Ready           # Pending, Ready, Failed
@@ -350,17 +338,6 @@ When provided:
 - `apiKey` and `apiBase` are available as `PROXY_API_KEY` and `PROXY_API_BASE` env vars
 - The provided config is used directly (not generated)
 
-#### proxyConfig.env
-
-Additional environment variables for the LiteLLM container:
-
-```yaml
-proxyConfig:
-  env:
-  - name: CUSTOM_HEADER
-    value: "my-value"
-```
-
 ### hostedConfig (for Hosted mode)
 
 #### hostedConfig.model
@@ -374,15 +351,33 @@ hostedConfig:
   # model: "mistral"
 ```
 
-#### hostedConfig.env
+### container (optional)
 
-Environment variables for Ollama:
+Container overrides for the ModelAPI pod.
+
+#### container.env
+
+Additional environment variables:
 
 ```yaml
-hostedConfig:
+container:
   env:
+  - name: LITELLM_LOG
+    value: "DEBUG"
   - name: OLLAMA_DEBUG
     value: "true"
+```
+
+#### container.resources
+
+Resource requests and limits:
+
+```yaml
+container:
+  resources:
+    requests:
+      memory: "4Gi"
+      cpu: "2000m"
 ```
 
 ### podSpec (optional)

@@ -45,11 +45,18 @@ spec:
       contextLimit: 6         # Messages for delegation context
       maxSessions: 1000       # Max sessions to keep
       maxSessionEvents: 500   # Max events per session
-    
-    # Additional environment variables
+  
+  # Optional: Container overrides (image, env, resources)
+  container:
     env:
+    - name: AGENT_LOG_LEVEL
+      value: "DEBUG"
     - name: CUSTOM_VAR
       value: "custom-value"
+    resources:
+      requests:
+        memory: "256Mi"
+        cpu: "200m"
   
   # Optional: Agent-to-Agent networking
   agentNetwork:
@@ -61,15 +68,8 @@ spec:
   
   # Optional: PodSpec override using strategic merge patch
   podSpec:
-    containers:
-    - name: agent
-      resources:
-        requests:
-          memory: "256Mi"
-          cpu: "200m"
-        limits:
-          memory: "512Mi"
-          cpu: "1000m"
+    nodeSelector:
+      gpu: "true"
 
 status:
   phase: Ready             # Pending, Ready, Failed, Waiting
@@ -220,15 +220,19 @@ config:
 - Resource-constrained environments
 - High-throughput agents where memory overhead matters
 
-#### config.env
+### container (optional)
+
+Container overrides for the agent pod.
+
+#### container.env
 
 Additional environment variables:
 
 ```yaml
-config:
+container:
   env:
-  - name: CUSTOM_VAR
-    value: "my-value"
+  - name: AGENT_LOG_LEVEL
+    value: "DEBUG"
   - name: API_KEY
     valueFrom:
       secretKeyRef:
@@ -237,6 +241,20 @@ config:
 ```
 
 **Note:** The `MODEL_NAME` environment variable is automatically set from `spec.model`.
+
+#### container.resources
+
+Resource requests and limits:
+
+```yaml
+container:
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "200m"
+    limits:
+      memory: "512Mi"
+```
 
 ### agentNetwork (optional)
 

@@ -5,14 +5,14 @@ on:
     branches: [main]
     paths:
       - 'operator/**'
-      - 'python/**'
+      - 'data-plane/kaos-framework/**'
       - '.github/workflows/e2e-tests.yaml'
       - '.github/workflows/reusable-tests.yaml'
   push:
     branches: [main]
     paths:
       - 'operator/**'
-      - 'python/**'
+      - 'data-plane/kaos-framework/**'
       - '.github/workflows/e2e-tests.yaml'
       - '.github/workflows/reusable-tests.yaml'
   workflow_dispatch:

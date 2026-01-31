@@ -21,6 +21,7 @@ spec:
   mode: Hosted
   hostedConfig:
     model: "smollm2:135m"
+  container:
     env:
     - name: OLLAMA_DEBUG
       value: "false"
@@ -33,13 +34,11 @@ metadata:
   name: multi-echo-mcp
   namespace: kaos-multi
 spec:
-  type: python-runtime
-  config:
-    tools:
-      fromPackage: "test-mcp-echo-server"
-    env:
-    - name: LOG_LEVEL
-      value: "INFO"
+  runtime: python-string
+  params: |
+    def echo(message: str) -> str:
+        """Echo the provided message back."""
+        return f"Echo: {message}"
 
 ---
 # Agent: Coordinator - orchestrates worker agents

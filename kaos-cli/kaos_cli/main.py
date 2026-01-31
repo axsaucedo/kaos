@@ -11,6 +11,10 @@ from kaos_cli.install import (
     uninstall_command,
 )
 from kaos_cli.ui import ui_command
+from kaos_cli.system import app as system_app
+from kaos_cli.mcp import app as mcp_app
+from kaos_cli.agent import app as agent_app
+from kaos_cli.modelapi import app as modelapi_app
 
 # Disable shell completion message
 app = typer.Typer(
@@ -18,6 +22,12 @@ app = typer.Typer(
     help="KAOS - K8s Agent Orchestration System CLI",
     no_args_is_help=True,
 )
+
+# Add subcommands
+app.add_typer(system_app, name="system")
+app.add_typer(mcp_app, name="mcp")
+app.add_typer(agent_app, name="agent")
+app.add_typer(modelapi_app, name="modelapi")
 
 
 @app.command(name="ui")
