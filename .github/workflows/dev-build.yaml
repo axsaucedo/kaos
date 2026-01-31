@@ -5,7 +5,7 @@ on:
     branches: [main]
     paths:
       - 'operator/**'
-      - 'python/**'
+      - 'data-plane/kaos-framework/**'
       - 'VERSION'
       - '.github/workflows/dev-build.yaml'
   workflow_dispatch:

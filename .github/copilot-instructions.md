@@ -41,7 +41,7 @@ make kind-delete                # Cleanup
 
 ## Project Structure
 ```
-python/                    # Agent runtime (pytest, black, ty)
+data-plane/kaos-framework/                    # Agent runtime (pytest, black, ty)
 ├── agent/                 # Agent, RemoteAgent, AgentServer
 ├── mcptools/              # MCP tool client/server
 └── modelapi/              # Model API client
@@ -65,7 +65,7 @@ operator/                  # K8s operator (Go, kubebuilder)
 - `operator/api/v1alpha1/*_types.go`: CRD schemas
 - `operator/controllers/*_controller.go`: Reconciliation logic
 - `operator/chart/`: Helm chart (generated from kustomize)
-- `python/agent/client.py`: Agent runtime core
+- `data-plane/kaos-framework/agent/client.py`: Agent runtime core
 
 ## Testing Notes
 

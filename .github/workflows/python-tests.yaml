@@ -4,12 +4,12 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - 'python/**'
+      - 'data-plane/kaos-framework/**'
       - '.github/workflows/python-tests.yaml'
   push:
     branches: [main]
     paths:
-      - 'python/**'
+      - 'data-plane/kaos-framework/**'
       - '.github/workflows/python-tests.yaml'
   workflow_dispatch:
 
@@ -72,6 +72,6 @@ jobs:
       - name: Upload coverage
         uses: codecov/codecov-action@v4
         with:
-          files: python/coverage.xml
+          files: data-plane/kaos-framework/coverage.xml
           flags: python
           fail_ci_if_error: false

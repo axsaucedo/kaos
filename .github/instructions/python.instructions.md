@@ -1,12 +1,12 @@
 ---
-applyTo: "python/**"
+applyTo: "data-plane/kaos-framework/**"
 ---
 
 # Python Agent Framework Instructions
 
 ## Quick Reference
 ```bash
-cd python
+cd data-plane/kaos-framework
 source .venv/bin/activate
 python -m pytest tests/ -v      # Run all tests
 make lint                       # Run linting (black + ty check)
