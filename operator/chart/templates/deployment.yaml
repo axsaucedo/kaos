@@ -30,8 +30,6 @@ spec:
         env:
         - name: KUBERNETES_CLUSTER_DOMAIN
           value: {{ quote .Values.kubernetesClusterDomain }}
-        - name: SYSTEM_NAMESPACE
-          value: {{ .Release.Namespace }}
         envFrom:
         - configMapRef:
             name: kaos-operator-config
