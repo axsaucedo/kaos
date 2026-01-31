@@ -12,6 +12,7 @@ from kaos_cli.install import (
 )
 from kaos_cli.ui import ui_command
 from kaos_cli.system import app as system_app
+from kaos_cli.mcp import app as mcp_app
 
 # Disable shell completion message
 app = typer.Typer(
@@ -20,8 +21,9 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
-# Add system subcommand
+# Add subcommands
 app.add_typer(system_app, name="system")
+app.add_typer(mcp_app, name="mcp")
 
 
 @app.command(name="ui")
