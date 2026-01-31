@@ -3,6 +3,7 @@
 import typer
 
 from kaos_cli.system.install import install_command, uninstall_command
+from kaos_cli.system.create_rbac import create_rbac_command
 
 app = typer.Typer(
     help="System management commands for KAOS operator.",
@@ -65,3 +66,50 @@ def uninstall(
 ) -> None:
     """Uninstall the KAOS operator."""
     uninstall_command(namespace=namespace, release_name=release_name)
+
+
+@app.command(name="create-rbac")
+def create_rbac(
+    name: str = typer.Argument(..., help="Name for the ServiceAccount and Role."),
+    namespace: str = typer.Option(
+        "default",
+        "--namespace",
+        "-n",
+        help="Namespace for the ServiceAccount.",
+    ),
+    namespaces: list[str] = typer.Option(
+        [],
+        "--namespaces",
+        help="Additional namespaces for RoleBindings (can be used multiple times).",
+    ),
+    resources: list[str] = typer.Option(
+        [],
+        "--resources",
+        help="Kubernetes resources to grant access to.",
+    ),
+    verbs: list[str] = typer.Option(
+        [],
+        "--verbs",
+        help="Kubernetes verbs to grant.",
+    ),
+    read_only: bool = typer.Option(
+        False,
+        "--read-only",
+        help="Grant only get/list/watch permissions.",
+    ),
+    cluster_wide: bool = typer.Option(
+        False,
+        "--cluster-wide",
+        help="Create ClusterRole and ClusterRoleBinding instead of Role.",
+    ),
+) -> None:
+    """Create RBAC resources for MCPServer Kubernetes runtime."""
+    create_rbac_command(
+        name=name,
+        namespace=namespace,
+        namespaces=list(namespaces),
+        resources=list(resources),
+        verbs=list(verbs),
+        read_only=read_only,
+        cluster_wide=cluster_wide,
+    )
