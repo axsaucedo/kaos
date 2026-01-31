@@ -2,7 +2,7 @@
 
 import typer
 
-from kaos_cli.modelapi.crud import list_command, get_command, logs_command, delete_command
+from kaos_cli.utils.crud import list_resources, get_resource, logs_resource, delete_resource
 from kaos_cli.modelapi.deploy import deploy_from_yaml, deploy_modelapi
 from kaos_cli.modelapi.invoke import invoke_command
 
@@ -28,7 +28,7 @@ def list_modelapis(
     ),
 ) -> None:
     """List ModelAPI resources."""
-    list_command(namespace=namespace, output=output)
+    list_resources("modelapi", namespace, output)
 
 
 @app.command(name="get")
@@ -48,7 +48,7 @@ def get_modelapi(
     ),
 ) -> None:
     """Get a specific ModelAPI resource."""
-    get_command(name=name, namespace=namespace, output=output)
+    get_resource("modelapi", name, namespace, output)
 
 
 @app.command(name="logs")
@@ -73,7 +73,7 @@ def logs_modelapi(
     ),
 ) -> None:
     """View logs from a ModelAPI pod."""
-    logs_command(name=name, namespace=namespace, follow=follow, tail=tail)
+    logs_resource("modelapi", name, namespace, follow, tail)
 
 
 @app.command(name="delete")
@@ -92,7 +92,7 @@ def delete_modelapi(
     ),
 ) -> None:
     """Delete a ModelAPI resource."""
-    delete_command(name=name, namespace=namespace, force=force)
+    delete_resource("modelapi", name, namespace, force)
 
 
 @app.command(name="deploy")

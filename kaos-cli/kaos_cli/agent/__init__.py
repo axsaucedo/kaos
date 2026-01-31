@@ -2,7 +2,7 @@
 
 import typer
 
-from kaos_cli.agent.crud import list_command, get_command, logs_command, delete_command
+from kaos_cli.utils.crud import list_resources, get_resource, logs_resource, delete_resource
 from kaos_cli.agent.deploy import deploy_from_yaml, deploy_agent
 from kaos_cli.agent.invoke import invoke_command
 
@@ -28,7 +28,7 @@ def list_agents(
     ),
 ) -> None:
     """List Agent resources."""
-    list_command(namespace=namespace, output=output)
+    list_resources("agent", namespace, output)
 
 
 @app.command(name="get")
@@ -48,7 +48,7 @@ def get_agent(
     ),
 ) -> None:
     """Get a specific Agent resource."""
-    get_command(name=name, namespace=namespace, output=output)
+    get_resource("agent", name, namespace, output)
 
 
 @app.command(name="logs")
@@ -73,7 +73,7 @@ def logs_agent(
     ),
 ) -> None:
     """View logs from an Agent pod."""
-    logs_command(name=name, namespace=namespace, follow=follow, tail=tail)
+    logs_resource("agent", name, namespace, follow, tail)
 
 
 @app.command(name="delete")
@@ -92,7 +92,7 @@ def delete_agent(
     ),
 ) -> None:
     """Delete an Agent resource."""
-    delete_command(name=name, namespace=namespace, force=force)
+    delete_resource("agent", name, namespace, force)
 
 
 @app.command(name="deploy")
