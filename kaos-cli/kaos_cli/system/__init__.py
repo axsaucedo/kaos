@@ -4,6 +4,8 @@ import typer
 
 from kaos_cli.system.install import install_command, uninstall_command
 from kaos_cli.system.create_rbac import create_rbac_command
+from kaos_cli.system.status import status_command
+from kaos_cli.system.runtimes import runtimes_command
 
 app = typer.Typer(
     help="System management commands for KAOS operator.",
@@ -113,3 +115,29 @@ def create_rbac(
         read_only=read_only,
         cluster_wide=cluster_wide,
     )
+
+
+@app.command(name="status")
+def status(
+    namespace: str = typer.Option(
+        "kaos",
+        "--namespace",
+        "-n",
+        help="Namespace where KAOS operator is installed.",
+    ),
+) -> None:
+    """Show KAOS system status."""
+    status_command(namespace=namespace)
+
+
+@app.command(name="runtimes")
+def runtimes(
+    namespace: str = typer.Option(
+        "kaos",
+        "--namespace",
+        "-n",
+        help="Namespace where KAOS operator is installed.",
+    ),
+) -> None:
+    """List available MCP runtimes."""
+    runtimes_command(namespace=namespace)
