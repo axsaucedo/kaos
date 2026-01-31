@@ -30,20 +30,20 @@ jobs:
         uses: astral-sh/setup-uv@v4
 
       - name: Install dependencies
-        working-directory: python
+        working-directory: data-plane/kaos-framework
         run: |
           uv venv
           source .venv/bin/activate
           uv pip install -e .[dev]
 
       - name: Check formatting with black
-        working-directory: python
+        working-directory: data-plane/kaos-framework
         run: |
           source .venv/bin/activate
           black --check .
 
       - name: Run type checking
-        working-directory: python
+        working-directory: data-plane/kaos-framework
         run: uvx ty check
 
   python-tests:
@@ -62,7 +62,7 @@ jobs:
         uses: astral-sh/setup-uv@v4
 
       - name: Run Python tests
-        working-directory: python
+        working-directory: data-plane/kaos-framework
         run: |
           uv venv
           source .venv/bin/activate
