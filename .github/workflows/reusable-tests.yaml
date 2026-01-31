@@ -158,8 +158,8 @@ jobs:
           context: ./data-plane/mcp-servers/rawpython
           load: true
           tags: ${{ env.REGISTRY }}/kaos-mcp-rawpython:${{ env.AGENT_TAG }}
-          cache-from: type=gha,scope=mcp-rawpython-e2e
-          cache-to: type=gha,scope=mcp-rawpython-e2e,mode=max
+          cache-from: type=gha,scope=mcp-rawpython-e2e-v2
+          cache-to: type=gha,scope=mcp-rawpython-e2e-v2,mode=max
           github-token: ${{ github.token }}
 
       - name: Load images into KIND
