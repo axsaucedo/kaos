@@ -77,7 +77,7 @@ make e2e-test                     # Run E2E tests
 ### Test Structure
 - `conftest.py`: Fixtures, namespace management, Gateway URL setup
 - `test_agentic_loop_e2e.py`: Agent with MCP tools tests
-- `test_mcp_tools_e2e.py`: MCPServer runtime tests (rawpython)
+- `test_mcp_tools_e2e.py`: MCPServer runtime tests (python-string)
 - `test_modelapi_e2e.py`: ModelAPI CRD tests
 - `test_multi_agent_e2e.py`: Multi-agent delegation tests
 - `test_base_func_e2e.py`: Basic functionality tests
@@ -86,7 +86,7 @@ make e2e-test                     # Run E2E tests
 MCPServer uses runtime-based architecture:
 ```yaml
 spec:
-  runtime: rawpython
+  runtime: python-string
   params: |
     def tool_name(): ...
   container:

@@ -130,7 +130,7 @@ kind-e2e-install-kaos:
 		--set controllerManager.manager.image.tag=$(IMAGE_TAG) \
 		--set defaultImages.agentRuntime=$(REGISTRY)/kaos-agent:$(IMAGE_TAG) \
 		--set defaultImages.mcpServer=$(REGISTRY)/kaos-mcp-server:$(IMAGE_TAG) \
-		--set defaultImages.mcpRawPython=$(REGISTRY)/kaos-mcp-rawpython:$(IMAGE_TAG) \
+		--set defaultImages.mcpPythonString=$(REGISTRY)/kaos-mcp-python-string:$(IMAGE_TAG) \
 		--wait --timeout 120s
 	@echo "=== KAOS operator installed ==="
 

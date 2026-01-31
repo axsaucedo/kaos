@@ -25,8 +25,8 @@ var _ = Describe("MCPServer Controller", func() {
 	ctx := context.Background()
 	const namespace = "default"
 
-	It("should create Deployment with MCP_TOOLS_STRING env var for rawpython runtime with params", func() {
-		name := uniqueMCPServerName("mcp-rawpython")
+	It("should create Deployment with MCP_TOOLS_STRING env var for python-string runtime with params", func() {
+		name := uniqueMCPServerName("mcp-python-string")
 		toolsString := `
 def echo(message: str) -> str:
     """Echo the message back."""
@@ -38,7 +38,7 @@ def echo(message: str) -> str:
 				Namespace: namespace,
 			},
 			Spec: kaosv1alpha1.MCPServerSpec{
-				Runtime: "rawpython",
+				Runtime: "python-string",
 				Params:  toolsString,
 			},
 		}
@@ -134,7 +134,7 @@ def echo(message: str) -> str:
 				Namespace: namespace,
 			},
 			Spec: kaosv1alpha1.MCPServerSpec{
-				Runtime: "rawpython",
+				Runtime: "python-string",
 				Params:  initialTools,
 			},
 		}
@@ -193,7 +193,7 @@ def greet(name: str) -> str:
 				Namespace: namespace,
 			},
 			Spec: kaosv1alpha1.MCPServerSpec{
-				Runtime:            "rawpython",
+				Runtime:            "python-string",
 				Params:             "def test(): pass",
 				ServiceAccountName: "my-service-account",
 			},
@@ -228,7 +228,7 @@ def echo(message: str) -> str:
 				Namespace: namespace,
 			},
 			Spec: kaosv1alpha1.MCPServerSpec{
-				Runtime: "rawpython",
+				Runtime: "python-string",
 				Params:  toolsString,
 			},
 		}

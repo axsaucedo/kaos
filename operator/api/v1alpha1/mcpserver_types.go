@@ -10,12 +10,12 @@ import (
 // MCPServerSpec defines the desired state of MCPServer
 type MCPServerSpec struct {
 	// Runtime identifier from ConfigMap registry or "custom"
-	// Examples: "rawpython", "kubernetes", "slack", "custom"
+	// Examples: "python-string", "kubernetes", "slack", "custom"
 	// +kubebuilder:validation:Required
 	Runtime string `json:"runtime"`
 
 	// Params is runtime-specific configuration (string, typically YAML)
-	// Passed to container via runtime's paramsEnvVar (e.g., MCP_TOOLS_STRING for rawpython)
+	// Passed to container via runtime's paramsEnvVar (e.g., MCP_TOOLS_STRING for python-string)
 	// +kubebuilder:validation:Optional
 	Params string `json:"params,omitempty"`
 

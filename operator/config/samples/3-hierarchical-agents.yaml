@@ -1,7 +1,7 @@
 ---
 # Sample 3: Hierarchical Agent System
 # Complex multi-level hierarchy: supervisor -> team leads -> workers
-# Demonstrates rawpython runtime for dynamic MCP tool creation
+# Demonstrates python-string runtime for dynamic MCP tool creation
 # Deploy: kubectl apply -f 3-hierarchical-agents.yaml
 #
 # # IMPORTANT:
@@ -45,7 +45,7 @@ metadata:
   name: hierarchy-echo-mcp
   namespace: kaos-hierarchy
 spec:
-  runtime: rawpython
+  runtime: python-string
   params: |
     def echo(message: str) -> str:
         """Echo the provided message back."""
@@ -59,7 +59,7 @@ metadata:
   name: hierarchy-calc-mcp
   namespace: kaos-hierarchy
 spec:
-  runtime: rawpython
+  runtime: python-string
   params: |
     def calculate(expression: str) -> str:
         """Evaluate a mathematical expression safely."""

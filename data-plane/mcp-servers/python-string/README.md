@@ -1,4 +1,4 @@
-# RawPython MCP Server
+# Python-String MCP Server
 
 A simple MCP server that loads Python functions from an environment variable and exposes them as MCP tools.
 
@@ -22,6 +22,6 @@ fastmcp run server:mcp --transport streamable-http --port 8000
 ## Docker
 
 ```bash
-docker build -t kaos-mcp-rawpython .
-docker run -e MCP_TOOLS_STRING='def echo(x: str) -> str: return x' -p 8000:8000 kaos-mcp-rawpython
+docker build -t kaos-mcp-python-string .
+docker run -e MCP_TOOLS_STRING='def echo(x: str) -> str: return x' -p 8000:8000 kaos-mcp-python-string
 ```

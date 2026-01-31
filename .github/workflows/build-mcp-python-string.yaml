@@ -1,11 +1,11 @@
-name: Build MCP RawPython
+name: Build MCP Python-String
 
 on:
   push:
     branches: [main]
     paths:
-      - 'data-plane/mcp-servers/rawpython/**'
-      - '.github/workflows/build-mcp-rawpython.yaml'
+      - 'data-plane/mcp-servers/python-string/**'
+      - '.github/workflows/build-mcp-python-string.yaml'
   workflow_dispatch:
     inputs:
       tag:
@@ -18,7 +18,7 @@ permissions:
 
 env:
   REGISTRY: docker.io
-  IMAGE_NAME: axsauze/kaos-mcp-rawpython
+  IMAGE_NAME: axsauze/kaos-mcp-python-string
 
 jobs:
   build-and-push:
@@ -70,12 +70,12 @@ jobs:
         id: build
         uses: docker/build-push-action@v6
         with:
-          context: ./data-plane/mcp-servers/rawpython
+          context: ./data-plane/mcp-servers/python-string
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true
-          cache-from: type=gha,scope=mcp-rawpython-${{ env.PLATFORM_PAIR }}
-          cache-to: type=gha,scope=mcp-rawpython-${{ env.PLATFORM_PAIR }},mode=max
+          cache-from: type=gha,scope=mcp-python-string-${{ env.PLATFORM_PAIR }}
+          cache-to: type=gha,scope=mcp-python-string-${{ env.PLATFORM_PAIR }},mode=max
           github-token: ${{ github.token }}
 
       - name: Export digest
@@ -87,7 +87,7 @@ jobs:
       - name: Upload digest
         uses: actions/upload-artifact@v4
         with:
-          name: mcp-rawpython-digests-${{ env.PLATFORM_PAIR }}
+          name: mcp-python-string-digests-${{ env.PLATFORM_PAIR }}
           path: ${{ runner.temp }}/digests/*
           if-no-files-found: error
           retention-days: 1
@@ -112,7 +112,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: ${{ runner.temp }}/digests
-          pattern: mcp-rawpython-digests-*
+          pattern: mcp-python-string-digests-*
           merge-multiple: true
 
       - name: Set up Docker Buildx

@@ -152,14 +152,14 @@ jobs:
         run: |
           docker tag ${{ env.REGISTRY }}/kaos-agent:${{ env.AGENT_TAG }} ${{ env.REGISTRY }}/kaos-mcp-server:${{ env.AGENT_TAG }}
 
-      - name: Build MCP rawpython image
+      - name: Build MCP python-string image
         uses: docker/build-push-action@v6
         with:
-          context: ./data-plane/mcp-servers/rawpython
+          context: ./data-plane/mcp-servers/python-string
           load: true
-          tags: ${{ env.REGISTRY }}/kaos-mcp-rawpython:${{ env.AGENT_TAG }}
-          cache-from: type=gha,scope=mcp-rawpython-e2e-v2
-          cache-to: type=gha,scope=mcp-rawpython-e2e-v2,mode=max
+          tags: ${{ env.REGISTRY }}/kaos-mcp-python-string:${{ env.AGENT_TAG }}
+          cache-from: type=gha,scope=mcp-python-string-e2e
+          cache-to: type=gha,scope=mcp-python-string-e2e,mode=max
           github-token: ${{ github.token }}
 
       - name: Load images into KIND
@@ -167,7 +167,7 @@ jobs:
           kind load docker-image ${{ env.REGISTRY }}/kaos-operator:${{ env.OPERATOR_TAG }} --name ${{ env.KIND_CLUSTER_NAME }}
           kind load docker-image ${{ env.REGISTRY }}/kaos-agent:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }}
           kind load docker-image ${{ env.REGISTRY }}/kaos-mcp-server:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }}
-          kind load docker-image ${{ env.REGISTRY }}/kaos-mcp-rawpython:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }}
+          kind load docker-image ${{ env.REGISTRY }}/kaos-mcp-python-string:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }}
           kind load docker-image ghcr.io/berriai/litellm:main-stable --name ${{ env.KIND_CLUSTER_NAME }}
           kind load docker-image alpine/ollama:latest --name ${{ env.KIND_CLUSTER_NAME }}
 

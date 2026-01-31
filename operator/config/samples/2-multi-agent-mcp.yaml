@@ -34,7 +34,7 @@ metadata:
   name: multi-echo-mcp
   namespace: kaos-multi
 spec:
-  runtime: rawpython
+  runtime: python-string
   params: |
     def echo(message: str) -> str:
         """Echo the provided message back."""

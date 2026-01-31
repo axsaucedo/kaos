@@ -10,9 +10,9 @@ data:
     runtimes:
       # === SYSTEM RUNTIMES (built by KAOS) ===
       
-      rawpython:
+      python-string:
         type: python
-        image: {{ .Values.defaultImages.mcpRawPython }}
+        image: {{ .Values.defaultImages.mcpPythonString }}
         description: "Execute Python code strings as MCP tools"
         paramsEnvVar: MCP_TOOLS_STRING
         transport: http

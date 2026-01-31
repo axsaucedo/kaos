@@ -1,5 +1,5 @@
 """
-RawPython MCP Server - Execute Python code strings as MCP tools.
+Python-String MCP Server - Execute Python code strings as MCP tools.
 
 This MCP server loads Python functions from the MCP_TOOLS_STRING environment
 variable and exposes them as MCP tools via streamable HTTP.
@@ -9,7 +9,7 @@ import os
 from types import FunctionType
 from fastmcp import FastMCP
 
-mcp = FastMCP("RawPython MCP Server")
+mcp = FastMCP("Python-String MCP Server")
 
 tools_string = os.getenv("MCP_TOOLS_STRING", "")
 if tools_string:

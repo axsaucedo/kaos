@@ -47,7 +47,7 @@ data-plane/
 │   ├── mcptools/          # MCP tool client
 │   └── modelapi/          # Model API client
 └── mcp-servers/           # Standalone MCP server implementations
-    └── rawpython/         # Python code execution runtime
+    └── python-string/     # Python code execution runtime
 
 kaos-cli/                  # CLI tool
 ├── kaos_cli/system/       # System commands (install, create-rbac)
@@ -69,7 +69,7 @@ tmp/                       # Local work files (gitignored)
 
 ## CRDs Overview
 - **Agent**: AI agent with model API, MCP tools, and sub-agent delegation
-- **MCPServer**: MCP tool server with runtime-based architecture (rawpython, kubernetes, slack, custom)
+- **MCPServer**: MCP tool server with runtime-based architecture (python-string, kubernetes, slack, custom)
 - **ModelAPI**: LLM proxy (LiteLLM) or hosted (Ollama) mode
 
 ## Key Files

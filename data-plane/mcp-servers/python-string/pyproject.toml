@@ -1,7 +1,7 @@
 [project]
-name = "kaos-mcp-rawpython"
+name = "kaos-mcp-python-string"
 version = "0.1.4-dev"
-description = "RawPython MCP Server - Execute Python code strings as MCP tools"
+description = "Python-String MCP Server - Execute Python code strings as MCP tools"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

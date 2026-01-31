@@ -305,7 +305,7 @@ spec:
               params:
                 description: |-
                   Params is runtime-specific configuration (string, typically YAML)
-                  Passed to container via runtime's paramsEnvVar (e.g., MCP_TOOLS_STRING for rawpython)
+                  Passed to container via runtime's paramsEnvVar (e.g., MCP_TOOLS_STRING for python-string)
                 type: string
               podSpec:
                 description: PodSpec allows overriding the generated pod spec using
@@ -8694,7 +8694,7 @@ spec:
               runtime:
                 description: |-
                   Runtime identifier from ConfigMap registry or "custom"
-                  Examples: "rawpython", "kubernetes", "slack", "custom"
+                  Examples: "python-string", "kubernetes", "slack", "custom"
                 type: string
               serviceAccountName:
                 description: |-

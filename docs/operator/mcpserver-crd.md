@@ -12,11 +12,11 @@ metadata:
   namespace: my-namespace
 spec:
   # Required: Runtime identifier
-  # Use a registered runtime (rawpython, kubernetes, slack) or "custom"
-  runtime: rawpython
+  # Use a registered runtime (python-string, kubernetes, slack) or "custom"
+  runtime: python-string
   
   # Optional: Runtime-specific parameters
-  # Passed to container via runtime's paramsEnvVar (e.g., MCP_TOOLS_STRING for rawpython)
+  # Passed to container via runtime's paramsEnvVar (e.g., MCP_TOOLS_STRING for python-string)
   params: |
     def echo(text: str) -> str:
         """Echo the input text."""
@@ -58,7 +58,7 @@ Runtime identifier for the MCP server. Can be:
 
 | Value | Description |
 |-------|-------------|
-| `rawpython` | Python code execution via MCP_TOOLS_STRING |
+| `python-string` | Python code execution via MCP_TOOLS_STRING |
 | `kubernetes` | Kubernetes CRUD operations |
 | `slack` | Slack integration |
 | `custom` | User-provided container image |
@@ -71,17 +71,17 @@ Runtime-specific configuration passed to the container. The delivery method depe
 
 | Runtime | Params Environment Variable |
 |---------|---------------------------|
-| `rawpython` | `MCP_TOOLS_STRING` |
+| `python-string` | `MCP_TOOLS_STRING` |
 | `kubernetes` | `MCP_PARAMS` |
 | `slack` | `MCP_PARAMS` |
 
-#### rawpython params
+#### python-string params
 
-For the rawpython runtime, define Python functions inline:
+For the python-string runtime, define Python functions inline:
 
 ```yaml
 spec:
-  runtime: rawpython
+  runtime: python-string
   params: |
     def greet(name: str) -> str:
         """Greet a person by name."""
@@ -100,7 +100,7 @@ spec:
 - Functions must have docstrings (used as descriptions)
 - Supported types: `str`, `int`, `dict`, `list`
 
-**Security Note:** rawpython uses `exec()` to define functions. Only use with trusted input.
+**Security Note:** python-string uses `exec()` to define functions. Only use with trusted input.
 
 ### serviceAccountName (optional)
 
@@ -148,13 +148,13 @@ spec:
 
 ## Available Runtimes
 
-### rawpython
+### python-string
 
 Execute Python functions defined in params.
 
 ```yaml
 spec:
-  runtime: rawpython
+  runtime: python-string
   params: |
     def echo(message: str) -> str:
         """Echo back the message."""
@@ -211,7 +211,7 @@ spec:
 
 ## Examples
 
-### Echo Tool (rawpython)
+### Echo Tool (python-string)
 
 ```yaml
 apiVersion: kaos.tools/v1alpha1
@@ -219,14 +219,14 @@ kind: MCPServer
 metadata:
   name: echo-tools
 spec:
-  runtime: rawpython
+  runtime: python-string
   params: |
     def echo(message: str) -> str:
         """Echo the message back."""
         return f"Echo: {message}"
 ```
 
-### Calculator (rawpython)
+### Calculator (python-string)
 
 ```yaml
 apiVersion: kaos.tools/v1alpha1
@@ -234,7 +234,7 @@ kind: MCPServer
 metadata:
   name: calculator
 spec:
-  runtime: rawpython
+  runtime: python-string
   params: |
     def add(a: int, b: int) -> int:
         """Add two numbers together."""

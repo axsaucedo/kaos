@@ -77,9 +77,9 @@ var _ = BeforeSuite(func() {
 		Data: map[string]string{
 			"runtimes.yaml": `
 runtimes:
-  rawpython:
+  python-string:
     type: python
-    image: axsauze/kaos-mcp-rawpython:test
+    image: axsauze/kaos-mcp-python-string:test
     paramsEnvVar: MCP_TOOLS_STRING
     transport: http
   kubernetes:

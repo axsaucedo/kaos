@@ -93,14 +93,14 @@ var _ = Describe("MCPServer Runtime Registry", func() {
 
 	It("should allow container override even for registered runtimes", func() {
 		name := uniqueRuntimeTestName("mcp-override-runtime")
-		customImage := "my-custom-rawpython:v1.0.0"
+		customImage := "my-custom-python-string:v1.0.0"
 		mcp := &kaosv1alpha1.MCPServer{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      name,
 				Namespace: namespace,
 			},
 			Spec: kaosv1alpha1.MCPServerSpec{
-				Runtime: "rawpython",
+				Runtime: "python-string",
 				Params:  "def test(): pass",
 				Container: &kaosv1alpha1.ContainerOverride{
 					Image: customImage,

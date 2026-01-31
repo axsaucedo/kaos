@@ -22,7 +22,7 @@ from e2e.conftest import (
 
 
 def create_echo_mcp_server(namespace: str, name: str = "echo-mcp"):
-    """Create an MCPServer with echo tool using rawpython runtime."""
+    """Create an MCPServer with echo tool using python-string runtime."""
     tools_code = '''def echo(message: str) -> str:
     """Echo the provided message back."""
     return f"Echo: {message}"
@@ -36,7 +36,7 @@ def reverse(text: str) -> str:
         "kind": "MCPServer",
         "metadata": {"name": name, "namespace": namespace},
         "spec": {
-            "runtime": "rawpython",
+            "runtime": "python-string",
             "params": tools_code,
         },
     }
@@ -292,7 +292,7 @@ async def test_agent_multiple_mcp_servers(test_namespace: str, shared_modelapi: 
         "kind": "MCPServer",
         "metadata": {"name": mcp2_name, "namespace": test_namespace},
         "spec": {
-            "runtime": "rawpython",
+            "runtime": "python-string",
             "params": '''def uppercase(text: str) -> str:
     """Convert text to uppercase."""
     return text.upper()

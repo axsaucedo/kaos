@@ -1,11 +1,11 @@
-"""Tests for RawPython MCP Server."""
+"""Tests for Python-String MCP Server."""
 
 import os
 import pytest
 
 
-class TestRawPythonServerModule:
-    """Tests for RawPython MCP server module."""
+class TestPythonStringServerModule:
+    """Tests for Python-String MCP server module."""
 
     def test_mcp_server_loads_without_tools(self):
         """Test server module loads without MCP_TOOLS_STRING."""

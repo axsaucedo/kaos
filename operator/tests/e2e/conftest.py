@@ -422,7 +422,7 @@ def create_mcpserver_resource(
         "kind": "MCPServer",
         "metadata": {"name": name, "namespace": namespace},
         "spec": {
-            "runtime": "rawpython",
+            "runtime": "python-string",
             "params": '''def echo_test(message: str) -> str:
     """Echo the provided message back."""
     return f"Echo: {message}"
