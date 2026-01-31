@@ -52,6 +52,8 @@ operator/                  # K8s operator (Go, kubebuilder)
 ├── config/                # CRD YAML, samples
 └── tests/e2e/             # E2E tests (pytest)
 
+tmp/                       # Local work files (gitignored)
+
 .github/workflows/         # CI pipelines
 .github/instructions/      # Path-specific instructions
 ```
