@@ -2,7 +2,8 @@
 
 import typer
 
-from kaos_cli.mcp.crud import list_command, get_command, logs_command, delete_command, deploy_command
+from kaos_cli.mcp.crud import list_command, get_command, logs_command, delete_command
+from kaos_cli.mcp.deploy import deploy_from_yaml, deploy_custom_image, deploy_runtime
 from kaos_cli.mcp.invoke import invoke_command
 from kaos_cli.mcp.init import init_command
 from kaos_cli.mcp.build import build_command
@@ -137,16 +138,49 @@ def delete_mcpserver(
 
 @app.command(name="deploy")
 def deploy_mcpserver(
-    file: str = typer.Argument(..., help="Path to MCPServer YAML file."),
+    file: str = typer.Argument(None, help="Path to MCPServer YAML file."),
+    name: str = typer.Option(None, "--name", help="Name for the MCPServer (for image/runtime deploy)."),
+    image: str = typer.Option(None, "--image", "-i", help="Custom image to deploy."),
+    runtime: str = typer.Option(None, "--runtime", "-r", help="Registered runtime to deploy."),
     namespace: str = typer.Option(
-        None,
+        "default",
         "--namespace",
         "-n",
-        help="Namespace to deploy to (overrides YAML metadata).",
+        help="Namespace to deploy to.",
     ),
+    params: str = typer.Option(None, "--params", "-p", help="Parameters for the runtime."),
+    service_account: str = typer.Option(None, "--sa", help="ServiceAccount name for the pod."),
 ) -> None:
-    """Deploy an MCPServer from a YAML file."""
-    deploy_command(file=file, namespace=namespace)
+    """Deploy an MCPServer from YAML, image, or runtime.
+    
+    Examples:
+      kaos mcp deploy config.yaml                    # Deploy from YAML file
+      kaos mcp deploy --name my-mcp --image img:v1   # Deploy custom image
+      kaos mcp deploy --name my-mcp --runtime slack  # Deploy registered runtime
+    """
+    import sys
+    
+    if file:
+        deploy_from_yaml(file=file, namespace=namespace)
+    elif image and name:
+        deploy_custom_image(
+            name=name,
+            image=image,
+            namespace=namespace,
+            params=params,
+            service_account=service_account,
+        )
+    elif runtime and name:
+        deploy_runtime(
+            name=name,
+            runtime=runtime,
+            namespace=namespace,
+            params=params,
+            service_account=service_account,
+        )
+    else:
+        typer.echo("Error: Provide either FILE, or --name with --image or --runtime", err=True)
+        sys.exit(1)
 
 
 @app.command(name="invoke")

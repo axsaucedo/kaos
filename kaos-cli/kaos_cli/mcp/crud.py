@@ -67,14 +67,3 @@ def delete_command(name: str, namespace: str, force: bool) -> None:
     args = ["delete", "mcpserver", name, "-n", namespace]
     result = run_kubectl(args)
     typer.echo(result.stdout)
-
-
-def deploy_command(file: str, namespace: str | None) -> None:
-    """Deploy an MCPServer from YAML file."""
-    args = ["apply", "-f", file]
-    
-    if namespace:
-        args.extend(["-n", namespace])
-    
-    result = run_kubectl(args)
-    typer.echo(result.stdout)
