@@ -21,6 +21,7 @@ spec:
   mode: Hosted
   hostedConfig:
     model: "smollm2:135m"
+  container:
     env:
     - name: OLLAMA_DEBUG
       value: "false"
@@ -33,13 +34,11 @@ metadata:
   name: simple-echo-mcp
   namespace: kaos-simple
 spec:
-  type: python-runtime
-  config:
-    tools:
-      fromPackage: "test-mcp-echo-server"
-    env:
-    - name: LOG_LEVEL
-      value: "INFO"
+  runtime: rawpython
+  params: |
+    def echo(message: str) -> str:
+        """Echo the provided message back."""
+        return f"Echo: {message}"
 
 ---
 # Agent: Simple echo agent with MCP tool access
