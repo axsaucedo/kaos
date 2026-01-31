@@ -4,11 +4,28 @@ import typer
 
 from kaos_cli.mcp.crud import list_command, get_command, logs_command, delete_command, deploy_command
 from kaos_cli.mcp.invoke import invoke_command
+from kaos_cli.mcp.init import init_command
 
 app = typer.Typer(
     help="MCP server management commands.",
     no_args_is_help=True,
 )
+
+
+@app.command(name="init")
+def init_mcp(
+    directory: str = typer.Argument(
+        None,
+        help="Directory to initialize. Defaults to current directory.",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Overwrite existing files.",
+    ),
+) -> None:
+    """Initialize a new FastMCP server project."""
+    init_command(directory=directory, force=force)
 
 
 @app.command(name="list")
