@@ -7,6 +7,32 @@ import (
 
 // +kubebuilder:object:generate=true
 
+// ContainerOverride provides shorthand container configuration.
+// Applied as strategic merge patch to the generated container.
+type ContainerOverride struct {
+	// Image overrides the container image
+	// +kubebuilder:validation:Optional
+	Image string `json:"image,omitempty"`
+
+	// Command overrides the container entrypoint
+	// +kubebuilder:validation:Optional
+	Command []string `json:"command,omitempty"`
+
+	// Args overrides the container arguments
+	// +kubebuilder:validation:Optional
+	Args []string `json:"args,omitempty"`
+
+	// Resources overrides compute resources
+	// +kubebuilder:validation:Optional
+	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// Env sets environment variables
+	// +kubebuilder:validation:Optional
+	Env []corev1.EnvVar `json:"env,omitempty"`
+}
+
+// +kubebuilder:object:generate=true
+
 // AgentNetworkConfig defines A2A communication settings
 type AgentNetworkConfig struct {
 	// Expose indicates if this agent exposes an Agent Card endpoint for A2A
@@ -133,6 +159,10 @@ type AgentSpec struct {
 	// GatewayRoute configures Gateway API routing (timeout, etc.)
 	// +kubebuilder:validation:Optional
 	GatewayRoute *GatewayRoute `json:"gatewayRoute,omitempty"`
+
+	// Container provides shorthand container overrides (image, env, resources)
+	// +kubebuilder:validation:Optional
+	Container *ContainerOverride `json:"container,omitempty"`
 
 	// PodSpec allows overriding the generated pod spec using strategic merge patch
 	// +kubebuilder:validation:Optional
