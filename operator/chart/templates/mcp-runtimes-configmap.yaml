@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kaos-mcp-runtimes
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+data:
+  runtimes.yaml: |
+    runtimes:
+      # === SYSTEM RUNTIMES (built by KAOS) ===
+      
+      rawpython:
+        type: python
+        image: {{ .Values.defaultImages.mcpRawPython }}
+        description: "Execute Python code strings as MCP tools"
+        paramsEnvVar: MCP_TOOLS_STRING
+        transport: http
+        
+      # === ECOSYSTEM RUNTIMES (external images) ===
+      
+      kubernetes:
+        type: go
+        image: {{ .Values.defaultImages.mcpKubernetes }}
+        description: "Kubernetes API operations"
+        args: ["--port", "8000"]
+        transport: http
+        
+      slack:
+        type: nodejs
+        image: {{ .Values.defaultImages.mcpSlack }}
+        description: "Slack messaging integration"
+        command: ["--transport", "http", "--port", "8000"]
+        transport: http
+        requiredEnv:
+        - SLACK_BOT_TOKEN
+        - SLACK_TEAM_ID
+      
+      # === DEFERRED RUNTIMES (stdio only - require adapter) ===
+      # discord, fetch - require stdio-to-HTTP adapter (future)
+      
+      # === USER-DEFINED RUNTIMES ===
+      # Add custom runtimes via Helm values or kubectl edit
+      {{- range $name, $config := .Values.mcpRuntimes.custom }}
+      {{ $name }}:
+        {{- toYaml $config | nindent 8 }}
+      {{- end }}

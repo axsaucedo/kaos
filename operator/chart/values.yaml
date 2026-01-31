@@ -32,8 +32,22 @@ kubernetesClusterDomain: cluster.local
 defaultImages:
   agentRuntime: axsauze/kaos-agent:v0.1.4-dev
   mcpServer: axsauze/kaos-mcp-server:v0.1.4-dev
+  mcpRawPython: axsauze/kaos-mcp-rawpython:v0.1.4-dev
+  mcpKubernetes: ghcr.io/manusa/kubernetes-mcp-server:latest
+  mcpSlack: zencoderai/slack-mcp:latest
   litellm: ghcr.io/berriai/litellm:main-stable
   ollama: alpine/ollama:latest
+
+# MCP Runtime registry configuration
+mcpRuntimes:
+  # Add custom runtimes here (will be merged into ConfigMap)
+  custom: {}
+  # Example:
+  # custom:
+  #   myruntime:
+  #     type: python
+  #     image: myregistry/my-mcp:v1
+  #     description: "My custom MCP server"
 
 # Gateway API configuration
 gatewayAPI:
