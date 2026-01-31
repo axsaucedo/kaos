@@ -122,10 +122,6 @@ type AgentConfig struct {
 	// Telemetry configures OpenTelemetry instrumentation
 	// +kubebuilder:validation:Optional
 	Telemetry *TelemetryConfig `json:"telemetry,omitempty"`
-
-	// Env variables to pass to the agent runtime
-	// +kubebuilder:validation:Optional
-	Env []corev1.EnvVar `json:"env,omitempty"`
 }
 
 // +kubebuilder:object:generate=true

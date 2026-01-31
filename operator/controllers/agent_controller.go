@@ -424,9 +424,11 @@ func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *
 				Value: agent.Spec.Config.Instructions,
 			})
 		}
+	}
 
-		// Add user-provided config env vars
-		env = append(env, agent.Spec.Config.Env...)
+	// Add user-provided container env vars
+	if agent.Spec.Container != nil {
+		env = append(env, agent.Spec.Container.Env...)
 	}
 
 	// ModelAPI configuration
