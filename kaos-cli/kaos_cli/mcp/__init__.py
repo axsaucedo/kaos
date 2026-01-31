@@ -5,6 +5,7 @@ import typer
 from kaos_cli.mcp.crud import list_command, get_command, logs_command, delete_command, deploy_command
 from kaos_cli.mcp.invoke import invoke_command
 from kaos_cli.mcp.init import init_command
+from kaos_cli.mcp.build import build_command
 
 app = typer.Typer(
     help="MCP server management commands.",
@@ -27,6 +28,29 @@ def init_mcp(
     """Initialize a new FastMCP server project."""
     init_command(directory=directory, force=force)
 
+
+@app.command(name="build")
+def build_mcp(
+    name: str = typer.Option(..., "--name", "-n", help="Name for the image."),
+    tag: str = typer.Option("latest", "--tag", "-t", help="Tag for the image."),
+    directory: str = typer.Option(".", "--dir", "-d", help="Source directory."),
+    entry_point: str = typer.Option("server.py", "--entry", "-e", help="Entry point file."),
+    use_fastmcp_run: bool = typer.Option(False, "--fastmcp-run", help="Use 'fastmcp run' command."),
+    kind_load: bool = typer.Option(False, "--kind-load", help="Load image to KIND cluster."),
+    create_dockerfile: bool = typer.Option(False, "--create-dockerfile", help="Create/overwrite Dockerfile."),
+    platform: str = typer.Option(None, "--platform", help="Docker platform (e.g., linux/amd64)."),
+) -> None:
+    """Build a Docker image from a FastMCP server."""
+    build_command(
+        name=name,
+        tag=tag,
+        directory=directory,
+        entry_point=entry_point,
+        use_fastmcp_run=use_fastmcp_run,
+        kind_load=kind_load,
+        create_dockerfile=create_dockerfile,
+        platform=platform,
+    )
 
 @app.command(name="list")
 def list_mcpservers(
