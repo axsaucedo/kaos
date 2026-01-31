@@ -3,6 +3,7 @@
 import typer
 
 from kaos_cli.mcp.crud import list_command, get_command, logs_command, delete_command, deploy_command
+from kaos_cli.mcp.invoke import invoke_command
 
 app = typer.Typer(
     help="MCP server management commands.",
@@ -105,3 +106,30 @@ def deploy_mcpserver(
 ) -> None:
     """Deploy an MCPServer from a YAML file."""
     deploy_command(file=file, namespace=namespace)
+
+
+@app.command(name="invoke")
+def invoke_mcpserver(
+    name: str = typer.Argument(..., help="Name of the MCPServer."),
+    tool: str = typer.Option(..., "--tool", "-t", help="Name of the MCP tool to invoke."),
+    args: str = typer.Option(
+        None,
+        "--args",
+        "-a",
+        help="JSON arguments for the tool.",
+    ),
+    namespace: str = typer.Option(
+        "default",
+        "--namespace",
+        "-n",
+        help="Namespace of the MCPServer.",
+    ),
+    port: int = typer.Option(
+        9000,
+        "--port",
+        "-p",
+        help="Local port for port-forwarding.",
+    ),
+) -> None:
+    """Invoke an MCP tool via port-forward."""
+    invoke_command(name=name, namespace=namespace, tool=tool, args=args, port=port)
