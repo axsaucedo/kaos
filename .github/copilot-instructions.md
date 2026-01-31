@@ -23,7 +23,7 @@ Running local tests for python and golang operator is possible, and running indi
 
 ```bash
 # Python (agent framework)
-cd python && source .venv/bin/activate
+cd data-plane/kaos-framework && source .venv/bin/activate
 python -m pytest tests/ -v      # Tests
 make lint                       # Linting (required for CI)
 
@@ -41,10 +41,19 @@ make kind-delete                # Cleanup
 
 ## Project Structure
 ```
-data-plane/kaos-framework/                    # Agent runtime (pytest, black, ty)
-├── agent/                 # Agent, RemoteAgent, AgentServer
-├── mcptools/              # MCP tool client/server
-└── modelapi/              # Model API client
+data-plane/
+├── kaos-framework/        # Agent runtime (pytest, black, ty)
+│   ├── agent/             # Agent, RemoteAgent, AgentServer
+│   ├── mcptools/          # MCP tool client
+│   └── modelapi/          # Model API client
+└── mcp-servers/           # Standalone MCP server implementations
+    └── rawpython/         # Python code execution runtime
+
+kaos-cli/                  # CLI tool
+├── kaos_cli/system/       # System commands (install, create-rbac)
+├── kaos_cli/mcp/          # MCP commands (init, build, deploy)
+├── kaos_cli/agent/        # Agent commands
+└── kaos_cli/modelapi/     # ModelAPI commands
 
 operator/                  # K8s operator (Go, kubebuilder)
 ├── api/v1alpha1/          # CRD definitions
@@ -52,13 +61,15 @@ operator/                  # K8s operator (Go, kubebuilder)
 ├── config/                # CRD YAML, samples
 └── tests/e2e/             # E2E tests (pytest)
 
+tmp/                       # Local work files (gitignored)
+
 .github/workflows/         # CI pipelines
 .github/instructions/      # Path-specific instructions
 ```
 
 ## CRDs Overview
 - **Agent**: AI agent with model API, MCP tools, and sub-agent delegation
-- **MCPServer**: MCP tool server with Python runtime support
+- **MCPServer**: MCP tool server with runtime-based architecture (rawpython, kubernetes, slack, custom)
 - **ModelAPI**: LLM proxy (LiteLLM) or hosted (Ollama) mode
 
 ## Key Files
