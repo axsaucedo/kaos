@@ -78,9 +78,10 @@ func main() {
 	}
 
 	if err = (&controllers.MCPServerReconciler{
-		Client: mgr.GetClient(),
-		Log:    setupLog,
-		Scheme: mgr.GetScheme(),
+		Client:          mgr.GetClient(),
+		Log:             setupLog,
+		Scheme:          mgr.GetScheme(),
+		SystemNamespace: getEnvWithDefault("SYSTEM_NAMESPACE", "kaos"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "MCPServer")
 		os.Exit(1)
@@ -112,4 +113,11 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+func getEnvWithDefault(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
 }
