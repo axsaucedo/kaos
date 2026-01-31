@@ -6,6 +6,8 @@ metadata:
   labels:
     {{- include "chart.labels" . | nindent 4 }}
 data:
+  # System namespace where operator resources are deployed
+  SYSTEM_NAMESPACE: {{ .Release.Namespace | quote }}
   # Default images for operator-managed resources
   DEFAULT_AGENT_IMAGE: {{ .Values.defaultImages.agentRuntime | quote }}
   DEFAULT_MCP_SERVER_IMAGE: {{ .Values.defaultImages.mcpServer | quote }}
