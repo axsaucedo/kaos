@@ -2,174 +2,414 @@
 
 Complete reference for all KAOS CLI commands.
 
-## kaos install
+## Command Structure
 
-Install the KAOS operator to your Kubernetes cluster using Helm.
-
-```bash
-kaos install [OPTIONS]
+```
+kaos <subcommand> <action> [OPTIONS]
 ```
 
-### Options
+Subcommands:
+- `system` - Operator and cluster management
+- `mcp` - MCPServer management
+- `agent` - Agent management  
+- `modelapi` - ModelAPI management
+- `ui` - Web UI
+
+---
+
+## kaos system
+
+Operator installation and cluster management.
+
+### kaos system install
+
+Install the KAOS operator.
+
+```bash
+kaos system install [OPTIONS]
+```
 
 | Option | Short | Default | Description |
 |--------|-------|---------|-------------|
-| `--namespace` | `-n` | `kaos-system` | Kubernetes namespace to install into |
+| `--namespace` | `-n` | `kaos-system` | Installation namespace |
 | `--release-name` | | `kaos` | Helm release name |
-| `--version` | | latest | Specific chart version to install |
-| `--set` | | | Set Helm values (can be repeated) |
-| `--wait` | | false | Wait for pods to be ready |
+| `--version` | | latest | Chart version |
+| `--set` | | | Helm values |
+| `--wait` | | false | Wait for ready |
 
-### Examples
+### kaos system uninstall
 
-**Basic installation:**
+Uninstall the KAOS operator.
+
 ```bash
-kaos install
+kaos system uninstall [OPTIONS]
 ```
 
-**Install to custom namespace:**
+### kaos system status
+
+Show cluster status.
+
 ```bash
-kaos install -n my-agents
+kaos system status
 ```
 
-**Install with custom values:**
+Shows operator health, CRDs, resources, and gateway status.
+
+### kaos system runtimes
+
+List registered MCP runtimes.
+
 ```bash
-kaos install --set gateway.enabled=true --set controllerManager.replicas=2
+kaos system runtimes [OPTIONS]
 ```
 
-**Install specific version and wait:**
+| Option | Short | Default | Description |
+|--------|-------|---------|-------------|
+| `--namespace` | `-n` | `kaos-system` | Operator namespace |
+
+### kaos system create-rbac
+
+Generate RBAC YAML for MCPServer ServiceAccounts.
+
 ```bash
-kaos install --version 0.1.0 --wait
+kaos system create-rbac [OPTIONS]
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--name` | `-n` | ServiceAccount name (required) |
+| `--namespace` | `-ns` | Namespace(s) to access |
+| `--read-only` | | Read-only permissions |
+| `--cluster-wide` | | ClusterRole instead of Role |
+| `--output` | `-o` | Output file (default: stdout) |
+
+**Example:**
+```bash
+kaos system create-rbac --name k8s-mcp-sa --namespace my-ns > rbac.yaml
+kubectl apply -f rbac.yaml
 ```
 
 ---
 
-## kaos uninstall
+## kaos mcp
 
-Remove the KAOS operator from your Kubernetes cluster.
+MCPServer lifecycle management.
+
+### kaos mcp init
+
+Scaffold a new FastMCP server project.
 
 ```bash
-kaos uninstall [OPTIONS]
+kaos mcp init [DIRECTORY] [OPTIONS]
 ```
 
-### Options
+| Option | Description |
+|--------|-------------|
+| `--force` | Overwrite existing files |
+
+Creates: `server.py`, `requirements.txt`, `README.md`
+
+### kaos mcp build
+
+Build a Docker image from FastMCP server.
+
+```bash
+kaos mcp build [OPTIONS]
+```
 
 | Option | Short | Default | Description |
 |--------|-------|---------|-------------|
-| `--namespace` | `-n` | `kaos-system` | Namespace to uninstall from |
-| `--release-name` | | `kaos` | Helm release name |
+| `--name` | `-n` | (required) | Image name |
+| `--tag` | `-t` | `latest` | Image tag |
+| `--dir` | `-d` | `.` | Source directory |
+| `--entry` | `-e` | `server.py` | Entry point |
+| `--kind-load` | | | Load to KIND cluster |
+| `--create-dockerfile` | | | Generate Dockerfile |
+| `--platform` | | | Docker platform |
 
-### Examples
+**Example:**
+```bash
+kaos mcp build --name my-mcp --tag v1 --kind-load
+```
+
+### kaos mcp deploy
+
+Deploy an MCPServer.
 
 ```bash
-kaos uninstall
-kaos uninstall -n my-agents
+kaos mcp deploy [FILE] [OPTIONS]
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `FILE` | | YAML file path |
+| `--name` | | MCPServer name (for image/runtime) |
+| `--image` | `-i` | Custom image |
+| `--runtime` | `-r` | Registered runtime |
+| `--namespace` | `-n` | Target namespace |
+| `--params` | `-p` | Runtime parameters |
+| `--sa` | | ServiceAccount name |
+
+**Examples:**
+```bash
+# From YAML file
+kaos mcp deploy mcpserver.yaml
+
+# From custom image
+kaos mcp deploy --name my-mcp --image my-image:v1
+
+# From registered runtime
+kaos mcp deploy --name slack-mcp --runtime slack
+```
+
+### kaos mcp list
+
+List MCPServers.
+
+```bash
+kaos mcp list [OPTIONS]
+```
+
+| Option | Short | Default | Description |
+|--------|-------|---------|-------------|
+| `--namespace` | `-n` | all | Filter by namespace |
+| `--output` | `-o` | `wide` | Output format |
+
+### kaos mcp get
+
+Get MCPServer details.
+
+```bash
+kaos mcp get NAME [OPTIONS]
+```
+
+### kaos mcp logs
+
+View MCPServer logs.
+
+```bash
+kaos mcp logs NAME [OPTIONS]
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--follow` | `-f` | Stream logs |
+| `--tail` | | Number of lines |
+
+### kaos mcp invoke
+
+Invoke an MCP tool.
+
+```bash
+kaos mcp invoke NAME [OPTIONS]
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--tool` | `-t` | Tool name (required) |
+| `--args` | `-a` | JSON arguments |
+| `--port` | `-p` | Local port (default: 9000) |
+
+**Example:**
+```bash
+kaos mcp invoke echo-mcp --tool echo --args '{"message": "hello"}'
+```
+
+### kaos mcp delete
+
+Delete an MCPServer.
+
+```bash
+kaos mcp delete NAME [OPTIONS]
+```
+
+---
+
+## kaos agent
+
+Agent lifecycle management.
+
+### kaos agent deploy
+
+Deploy an Agent from YAML.
+
+```bash
+kaos agent deploy FILE [OPTIONS]
+```
+
+### kaos agent list
+
+List Agents.
+
+```bash
+kaos agent list [OPTIONS]
+```
+
+### kaos agent get
+
+Get Agent details.
+
+```bash
+kaos agent get NAME [OPTIONS]
+```
+
+### kaos agent logs
+
+View Agent logs.
+
+```bash
+kaos agent logs NAME [OPTIONS]
+```
+
+### kaos agent invoke
+
+Send a message to an Agent.
+
+```bash
+kaos agent invoke NAME [OPTIONS]
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--message` | `-m` | Message (required) |
+| `--port` | `-p` | Local port (default: 9001) |
+| `--stream` | `-s` | Stream response |
+
+**Example:**
+```bash
+kaos agent invoke my-agent --message "Hello, how are you?"
+```
+
+### kaos agent delete
+
+Delete an Agent.
+
+```bash
+kaos agent delete NAME [OPTIONS]
+```
+
+---
+
+## kaos modelapi
+
+ModelAPI lifecycle management.
+
+### kaos modelapi deploy
+
+Deploy a ModelAPI from YAML.
+
+```bash
+kaos modelapi deploy FILE [OPTIONS]
+```
+
+### kaos modelapi list
+
+List ModelAPIs.
+
+```bash
+kaos modelapi list [OPTIONS]
+```
+
+### kaos modelapi get
+
+Get ModelAPI details.
+
+```bash
+kaos modelapi get NAME [OPTIONS]
+```
+
+### kaos modelapi logs
+
+View ModelAPI logs.
+
+```bash
+kaos modelapi logs NAME [OPTIONS]
+```
+
+### kaos modelapi invoke
+
+Send a chat completion request.
+
+```bash
+kaos modelapi invoke NAME [OPTIONS]
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--message` | `-m` | Message (required) |
+| `--model` | | Model name (required) |
+| `--port` | `-p` | Local port (default: 9002) |
+
+**Example:**
+```bash
+kaos modelapi invoke my-api --model gpt-4 --message "Hello"
+```
+
+### kaos modelapi delete
+
+Delete a ModelAPI.
+
+```bash
+kaos modelapi delete NAME [OPTIONS]
 ```
 
 ---
 
 ## kaos ui
 
-Start a CORS-enabled proxy to the Kubernetes API and open the KAOS web UI.
+Start the KAOS web UI.
 
 ```bash
 kaos ui [OPTIONS]
 ```
 
-### Options
-
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--k8s-url` | auto | Kubernetes API server URL. Uses kubeconfig if not specified |
-| `--expose-port` | `8080` | Port for the local CORS proxy |
-| `--no-browser` | false | Don't automatically open the browser |
-
-### How it Works
-
-The `kaos ui` command:
-
-1. Reads your kubeconfig to find the Kubernetes API server
-2. Starts a local CORS-enabled reverse proxy on the specified port
-3. Opens the KAOS UI in your default browser
-4. The UI connects to your cluster through the local proxy
-
-### Examples
-
-**Start with defaults:**
-```bash
-kaos ui
-```
-
-**Use custom port:**
-```bash
-kaos ui --expose-port 9090
-```
-
-**Connect to specific cluster:**
-```bash
-kaos ui --k8s-url https://my-cluster.example.com:6443
-```
-
-**Start without opening browser:**
-```bash
-kaos ui --no-browser
-```
-
----
-
-## kaos version
-
-Display the KAOS CLI version.
-
-```bash
-kaos version
-```
-
-### Output
-
-```
-kaos-cli 0.1.0
-```
+| `--k8s-url` | auto | Kubernetes API URL |
+| `--expose-port` | `8080` | Local proxy port |
+| `--no-browser` | false | Don't open browser |
 
 ---
 
 ## Environment Variables
 
-The CLI respects standard Kubernetes environment variables:
-
 | Variable | Description |
 |----------|-------------|
-| `KUBECONFIG` | Path to kubeconfig file |
+| `KUBECONFIG` | Path to kubeconfig |
 | `KUBERNETES_SERVICE_HOST` | In-cluster API host |
-| `KUBERNETES_SERVICE_PORT` | In-cluster API port |
 
 ## Exit Codes
 
 | Code | Meaning |
 |------|---------|
 | 0 | Success |
-| 1 | Error (see error message) |
+| 1 | Error |
 
-## Troubleshooting
+## Common Workflows
 
-### Helm not found
+### Create and deploy custom MCP server
 
-```
-Error: helm is not installed. Please install helm first.
-```
-
-Install Helm from https://helm.sh/docs/intro/install/
-
-### Cannot connect to cluster
-
-Ensure kubectl is configured correctly:
 ```bash
-kubectl cluster-info
+# 1. Scaffold project
+kaos mcp init my-tools
+cd my-tools
+
+# 2. Edit server.py with your tools
+
+# 3. Build and load to KIND
+kaos mcp build --name my-tools --tag v1 --kind-load
+
+# 4. Deploy
+kaos mcp deploy --name my-tools --image my-tools:v1
 ```
 
-### Port already in use
+### Deploy Kubernetes MCP with RBAC
 
-Use a different port for the UI proxy:
 ```bash
-kaos ui --expose-port 9090
+# 1. Generate RBAC
+kaos system create-rbac --name k8s-sa --namespace default > rbac.yaml
+kubectl apply -f rbac.yaml
+
+# 2. Deploy
+kaos mcp deploy --name k8s-tools --runtime kubernetes --sa k8s-sa
 ```
