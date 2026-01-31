@@ -152,16 +152,27 @@ jobs:
         run: |
           docker tag ${{ env.REGISTRY }}/kaos-agent:${{ env.AGENT_TAG }} ${{ env.REGISTRY }}/kaos-mcp-server:${{ env.AGENT_TAG }}
 
+      - name: Build MCP rawpython image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./data-plane/mcp-servers/rawpython
+          load: true
+          tags: ${{ env.REGISTRY }}/kaos-mcp-rawpython:${{ env.AGENT_TAG }}
+          cache-from: type=gha,scope=mcp-rawpython-e2e
+          cache-to: type=gha,scope=mcp-rawpython-e2e,mode=max
+          github-token: ${{ github.token }}
+
       - name: Load images into KIND
         run: |
           kind load docker-image ${{ env.REGISTRY }}/kaos-operator:${{ env.OPERATOR_TAG }} --name ${{ env.KIND_CLUSTER_NAME }}
           kind load docker-image ${{ env.REGISTRY }}/kaos-agent:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }}
           kind load docker-image ${{ env.REGISTRY }}/kaos-mcp-server:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }}
+          kind load docker-image ${{ env.REGISTRY }}/kaos-mcp-rawpython:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }}
           kind load docker-image ghcr.io/berriai/litellm:main-stable --name ${{ env.KIND_CLUSTER_NAME }}
           kind load docker-image alpine/ollama:latest --name ${{ env.KIND_CLUSTER_NAME }}
 
       - name: Install KAOS operator
-        run: make -C operator kind-e2e-install-kaos
+        run: make -C operator kind-e2e-install-kaos IMAGE_TAG=${{ env.AGENT_TAG }} REGISTRY=${{ env.REGISTRY }}
 
       - name: Run E2E tests (${{ matrix.shard.name }})
         run: |
