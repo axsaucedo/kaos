@@ -7,23 +7,24 @@ from pathlib import Path
 import typer
 
 
-DOCKERFILE_TEMPLATE = '''FROM python:3.12-slim
+DOCKERFILE_PYPROJECT = '''FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install dependencies
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Install dependencies from pyproject.toml
+COPY pyproject.toml .
+COPY README.md* ./
+RUN pip install --no-cache-dir .
 
 # Copy server code
 COPY . .
 
 EXPOSE 8000
 
-CMD ["python", "{entry_point}", "--transport", "streamable-http", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["fastmcp", "run", "{entry_point}", "--transport", "streamable-http", "--host", "0.0.0.0", "--port", "8000"]
 '''
 
-DOCKERFILE_FASTMCP_RUN = '''FROM python:3.12-slim
+DOCKERFILE_REQUIREMENTS = '''FROM python:3.12-slim
 
 WORKDIR /app
 
@@ -45,7 +46,6 @@ def build_command(
     tag: str,
     directory: str,
     entry_point: str,
-    use_fastmcp_run: bool,
     kind_load: bool,
     create_dockerfile: bool,
     platform: str | None,
@@ -63,10 +63,18 @@ def build_command(
         typer.echo(f"Error: Entry point '{entry_point}' not found in {directory}", err=True)
         sys.exit(1)
     
-    # Check for requirements.txt
+    # Check for dependencies - prefer pyproject.toml, fallback to requirements.txt
+    pyproject_path = source_dir / "pyproject.toml"
     requirements_path = source_dir / "requirements.txt"
-    if not requirements_path.exists():
-        typer.echo(f"Error: requirements.txt not found in {directory}", err=True)
+    
+    if pyproject_path.exists():
+        dockerfile_template = DOCKERFILE_PYPROJECT
+        typer.echo(f"📦 Using pyproject.toml for dependencies")
+    elif requirements_path.exists():
+        dockerfile_template = DOCKERFILE_REQUIREMENTS
+        typer.echo(f"📦 Using requirements.txt for dependencies")
+    else:
+        typer.echo(f"Error: No pyproject.toml or requirements.txt found in {directory}", err=True)
         sys.exit(1)
     
     # Generate or use existing Dockerfile
@@ -74,11 +82,7 @@ def build_command(
     generated_dockerfile = False
     
     if not dockerfile_path.exists() or create_dockerfile:
-        if use_fastmcp_run:
-            dockerfile_content = DOCKERFILE_FASTMCP_RUN.format(entry_point=entry_point)
-        else:
-            dockerfile_content = DOCKERFILE_TEMPLATE.format(entry_point=entry_point)
-        
+        dockerfile_content = dockerfile_template.format(entry_point=entry_point)
         dockerfile_path.write_text(dockerfile_content)
         generated_dockerfile = True
         typer.echo(f"📝 Generated Dockerfile")
