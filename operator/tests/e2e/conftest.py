@@ -116,15 +116,19 @@ def wait_for_resource_ready(
         health_path: Health endpoint path (default: /health)
             For LiteLLM ModelAPI, use /health/liveliness for faster response
     """
+    last_error = None
+    last_status = None
     for _ in range(max_wait * 4):
         try:
             response = httpx.get(f"{url}{health_path}", timeout=2.0)
+            last_status = response.status_code
             if response.status_code == 200:
                 return True
-        except Exception:
-            pass
+        except Exception as e:
+            last_error = str(e)
         time.sleep(0.25)
-    raise TimeoutError(f"Resource not ready at {url} after {max_wait}s")
+    detail = f" (last_status={last_status}, last_error={last_error})"
+    raise TimeoutError(f"Resource not ready at {url} after {max_wait}s{detail}")
 
 
 def _install_operator():
