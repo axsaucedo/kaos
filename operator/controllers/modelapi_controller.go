@@ -471,9 +471,9 @@ func (r *ModelAPIReconciler) constructContainer(modelapi *kaosv1alpha1.ModelAPI)
 			}
 		}
 
-		// Add user-provided env vars for proxy
-		if modelapi.Spec.ProxyConfig != nil {
-			env = append(env, modelapi.Spec.ProxyConfig.Env...)
+		// Add user-provided env vars from container
+		if modelapi.Spec.Container != nil {
+			env = append(env, modelapi.Spec.Container.Env...)
 		}
 
 		// Add default proxy env vars only if not already set by user
@@ -537,9 +537,9 @@ func (r *ModelAPIReconciler) constructContainer(modelapi *kaosv1alpha1.ModelAPI)
 		port = 11434
 		healthPath = "/"
 
-		// Add user-provided env vars for hosted
-		if modelapi.Spec.HostedConfig != nil {
-			env = append(env, modelapi.Spec.HostedConfig.Env...)
+		// Add user-provided env vars from container
+		if modelapi.Spec.Container != nil {
+			env = append(env, modelapi.Spec.Container.Env...)
 		}
 
 		// Map LOG_LEVEL to OLLAMA_DEBUG (Ollama uses 0=INFO, 1=DEBUG, 2=TRACE)
