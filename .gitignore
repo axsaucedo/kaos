@@ -62,6 +62,8 @@ REPORT-*.md
 REPORT.md
 sdist/
 TASKS.md
+# Temporary files for local work (blog posts, research, etc)
+tmp/
 var/
 vendor/
 venv/
