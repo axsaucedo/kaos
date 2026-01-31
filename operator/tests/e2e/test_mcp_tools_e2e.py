@@ -22,17 +22,8 @@ from e2e.conftest import (
 
 
 def create_echo_mcp_server(namespace: str, name: str = "echo-mcp"):
-    """Create an MCPServer with echo tool using tools.fromString."""
-    return {
-        "apiVersion": "kaos.tools/v1alpha1",
-        "kind": "MCPServer",
-        "metadata": {"name": name, "namespace": namespace},
-        "spec": {
-            "type": "python-runtime",
-            "config": {
-                "tools": {
-                    "fromString": '''
-def echo(message: str) -> str:
+    """Create an MCPServer with echo tool using rawpython runtime."""
+    tools_code = '''def echo(message: str) -> str:
     """Echo the provided message back."""
     return f"Echo: {message}"
 
@@ -40,9 +31,13 @@ def reverse(text: str) -> str:
     """Reverse the provided text."""
     return text[::-1]
 '''
-                },
-                "env": [{"name": "MCP_LOG_LEVEL", "value": "INFO"}],
-            },
+    return {
+        "apiVersion": "kaos.tools/v1alpha1",
+        "kind": "MCPServer",
+        "metadata": {"name": name, "namespace": namespace},
+        "spec": {
+            "runtime": "rawpython",
+            "params": tools_code,
         },
     }
 
@@ -80,8 +75,8 @@ def create_agent_with_mcp(
                 "description": "Agent with MCP tools",
                 "instructions": "You have access to echo and reverse tools. Use them to help users.",
                 "reasoningLoopMaxSteps": 5,
-                "env": env,
             },
+            "container": {"env": env},
             "agentNetwork": {"access": []},
         },
     }
@@ -297,17 +292,11 @@ async def test_agent_multiple_mcp_servers(test_namespace: str, shared_modelapi: 
         "kind": "MCPServer",
         "metadata": {"name": mcp2_name, "namespace": test_namespace},
         "spec": {
-            "type": "python-runtime",
-            "config": {
-                "tools": {
-                    "fromString": '''
-def uppercase(text: str) -> str:
+            "runtime": "rawpython",
+            "params": '''def uppercase(text: str) -> str:
     """Convert text to uppercase."""
     return text.upper()
-'''
-                },
-                "env": [{"name": "MCP_LOG_LEVEL", "value": "INFO"}],
-            },
+''',
         },
     }
     create_custom_resource(mcp2_spec, test_namespace)
@@ -331,6 +320,8 @@ def uppercase(text: str) -> str:
             "config": {
                 "description": "Agent with multiple MCP tools",
                 "instructions": "You have access to echo, reverse, and uppercase tools.",
+            },
+            "container": {
                 "env": [
                     {"name": "AGENT_LOG_LEVEL", "value": "DEBUG"},
                 ],

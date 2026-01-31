@@ -101,6 +101,8 @@ async def test_modelapi_proxy_with_hosted_backend(test_namespace: str):
             "mode": "Hosted",
             "hostedConfig": {
                 "model": "smollm2:135m",
+            },
+            "container": {
                 "env": [{"name": "OLLAMA_DEBUG", "value": "false"}],
             },
         },
@@ -126,6 +128,8 @@ async def test_modelapi_proxy_with_hosted_backend(test_namespace: str):
             "proxyConfig": {
                 "models": ["ollama/smollm2:135m"],
                 "apiBase": f"http://modelapi-{backend_name}.{test_namespace}:11434",
+            },
+            "container": {
                 "env": [{"name": "OPENAI_API_KEY", "value": "sk-test"}],
             },
             "gatewayRoute": {
@@ -181,6 +185,8 @@ async def test_modelapi_hosted_ollama(test_namespace: str):
             "mode": "Hosted",
             "hostedConfig": {
                 "model": "smollm2:135m",
+            },
+            "container": {
                 "env": [{"name": "OLLAMA_DEBUG", "value": "false"}],
             },
         },

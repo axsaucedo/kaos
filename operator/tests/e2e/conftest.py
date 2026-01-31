@@ -344,6 +344,8 @@ def create_modelapi_resource(
             "mode": "Proxy",
             "proxyConfig": {
                 "models": ["*"],  # Wildcard for testing - accepts any model
+            },
+            "container": {
                 "env": [
                     {"name": "OPENAI_API_KEY", "value": "sk-test"},
                     {"name": "LITELLM_LOG", "value": "WARN"},
@@ -369,6 +371,8 @@ def create_modelapi_hosted_resource(
             "mode": "Hosted",
             "hostedConfig": {
                 "model": "smollm2:135m",
+            },
+            "container": {
                 "env": [
                     {"name": "OLLAMA_DEBUG", "value": "false"},
                 ],
@@ -394,6 +398,8 @@ def create_modelapi_proxy_ollama_resource(
             "proxyConfig": {
                 "models": ["ollama/smollm2:135m"],
                 "apiBase": "http://host.docker.internal:11434",
+            },
+            "container": {
                 "env": [
                     {"name": "OPENAI_API_KEY", "value": "sk-test"},
                     {"name": "LITELLM_LOG", "value": "WARN"},
@@ -412,11 +418,11 @@ def create_mcpserver_resource(
         "kind": "MCPServer",
         "metadata": {"name": name, "namespace": namespace},
         "spec": {
-            "type": "python-runtime",
-            "config": {
-                "tools": {"fromPackage": "test-mcp-echo-server"},
-                "env": [{"name": "LOG_LEVEL", "value": "INFO"}],
-            },
+            "runtime": "rawpython",
+            "params": '''def echo_test(message: str) -> str:
+    """Echo the provided message back."""
+    return f"Echo: {message}"
+''',
         },
     }
 
@@ -439,9 +445,6 @@ def create_agent_resource(
     config = {
         "description": "E2E test echo agent",
         "instructions": "You are a helpful test assistant.",
-        "env": [
-            {"name": "AGENT_LOG_LEVEL", "value": "INFO"},
-        ],
     }
 
     if reasoning_loop_max_steps is not None:
@@ -456,6 +459,11 @@ def create_agent_resource(
             "model": model_name,  # Required: model to use
             "mcpServers": mcpserver_names,
             "config": config,
+            "container": {
+                "env": [
+                    {"name": "AGENT_LOG_LEVEL", "value": "INFO"},
+                ],
+            },
             "agentNetwork": {"access": sub_agents or []},
         },
     }
