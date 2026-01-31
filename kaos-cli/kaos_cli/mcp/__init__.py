@@ -36,7 +36,6 @@ def build_mcp(
     tag: str = typer.Option("latest", "--tag", "-t", help="Tag for the image."),
     directory: str = typer.Option(".", "--dir", "-d", help="Source directory."),
     entry_point: str = typer.Option("server.py", "--entry", "-e", help="Entry point file."),
-    use_fastmcp_run: bool = typer.Option(False, "--fastmcp-run", help="Use 'fastmcp run' command."),
     kind_load: bool = typer.Option(False, "--kind-load", help="Load image to KIND cluster."),
     create_dockerfile: bool = typer.Option(False, "--create-dockerfile", help="Create/overwrite Dockerfile."),
     platform: str = typer.Option(None, "--platform", help="Docker platform (e.g., linux/amd64)."),
@@ -47,7 +46,6 @@ def build_mcp(
         tag=tag,
         directory=directory,
         entry_point=entry_point,
-        use_fastmcp_run=use_fastmcp_run,
         kind_load=kind_load,
         create_dockerfile=create_dockerfile,
         platform=platform,
@@ -139,8 +137,8 @@ def delete_mcpserver(
 @app.command(name="deploy")
 def deploy_mcpserver(
     file: str = typer.Argument(None, help="Path to MCPServer YAML file."),
-    name: str = typer.Option(None, "--name", help="Name for the MCPServer (for image/runtime deploy)."),
-    image: str = typer.Option(None, "--image", "-i", help="Custom image to deploy."),
+    name: str = typer.Option(None, "--name", help="Name for the MCPServer (auto-inferred from pyproject.toml)."),
+    image: str = typer.Option(None, "--image", "-i", help="Custom image to deploy (auto-inferred from name)."),
     runtime: str = typer.Option(None, "--runtime", "-r", help="Registered runtime to deploy."),
     namespace: str = typer.Option(
         "default",
@@ -150,6 +148,7 @@ def deploy_mcpserver(
     ),
     params: str = typer.Option(None, "--params", "-p", help="Parameters for the runtime."),
     service_account: str = typer.Option(None, "--sa", help="ServiceAccount name for the pod."),
+    directory: str = typer.Option(".", "--dir", "-d", help="Directory to infer name/image from."),
 ) -> None:
     """Deploy an MCPServer from YAML, image, or runtime.
     
@@ -157,20 +156,21 @@ def deploy_mcpserver(
       kaos mcp deploy config.yaml                    # Deploy from YAML file
       kaos mcp deploy --name my-mcp --image img:v1   # Deploy custom image
       kaos mcp deploy --name my-mcp --runtime slack  # Deploy registered runtime
+      kaos mcp deploy                                # Auto-infer name/image from pyproject.toml
     """
     import sys
+    from kaos_cli.mcp.deploy import read_project_name, infer_image_name
     
     if file:
         deploy_from_yaml(file=file, namespace=namespace)
-    elif image and name:
-        deploy_custom_image(
-            name=name,
-            image=image,
-            namespace=namespace,
-            params=params,
-            service_account=service_account,
-        )
-    elif runtime and name:
+    elif runtime:
+        # Runtime deploy - infer name if needed
+        if not name:
+            name = read_project_name(directory)
+            if not name:
+                typer.echo("Error: --name required (or create pyproject.toml with project.name)", err=True)
+                sys.exit(1)
+            typer.echo(f"📦 Using name from pyproject.toml: {name}")
         deploy_runtime(
             name=name,
             runtime=runtime,
@@ -179,8 +179,25 @@ def deploy_mcpserver(
             service_account=service_account,
         )
     else:
-        typer.echo("Error: Provide either FILE, or --name with --image or --runtime", err=True)
-        sys.exit(1)
+        # Custom image deploy - auto-infer name and image if not provided
+        if not name:
+            name = read_project_name(directory)
+            if not name:
+                typer.echo("Error: --name required (or create pyproject.toml with project.name)", err=True)
+                sys.exit(1)
+            typer.echo(f"📦 Using name from pyproject.toml: {name}")
+        
+        if not image:
+            image = infer_image_name(name)
+            typer.echo(f"📦 Using inferred image: {image}")
+        
+        deploy_custom_image(
+            name=name,
+            image=image,
+            namespace=namespace,
+            params=params,
+            service_account=service_account,
+        )
 
 
 @app.command(name="invoke")

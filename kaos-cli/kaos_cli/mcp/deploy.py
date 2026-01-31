@@ -6,6 +6,11 @@ import tempfile
 from pathlib import Path
 import typer
 
+try:
+    import tomllib
+except ImportError:
+    import tomli as tomllib
+
 
 CUSTOM_RUNTIME_TEMPLATE = '''apiVersion: kaos.tools/v1alpha1
 kind: MCPServer
@@ -20,6 +25,24 @@ spec:
     - containerPort: 8000
       name: http
 '''
+
+
+def read_project_name(directory: str = ".") -> str | None:
+    """Read project name from pyproject.toml if available."""
+    pyproject_path = Path(directory) / "pyproject.toml"
+    if pyproject_path.exists():
+        try:
+            with open(pyproject_path, "rb") as f:
+                data = tomllib.load(f)
+            return data.get("project", {}).get("name")
+        except Exception:
+            pass
+    return None
+
+
+def infer_image_name(name: str, tag: str = "latest") -> str:
+    """Infer image name from project name."""
+    return f"{name}:{tag}"
 
 
 def deploy_from_yaml(file: str, namespace: str | None) -> None:
