@@ -2,7 +2,8 @@
 
 import typer
 
-from kaos_cli.modelapi.crud import list_command, get_command, logs_command, delete_command, deploy_command
+from kaos_cli.modelapi.crud import list_command, get_command, logs_command, delete_command
+from kaos_cli.modelapi.deploy import deploy_from_yaml, deploy_modelapi
 from kaos_cli.modelapi.invoke import invoke_command
 
 app = typer.Typer(
@@ -95,17 +96,38 @@ def delete_modelapi(
 
 
 @app.command(name="deploy")
-def deploy_modelapi(
-    file: str = typer.Argument(..., help="Path to ModelAPI YAML file."),
+def deploy_modelapi_cmd(
+    file: str = typer.Argument(None, help="Path to ModelAPI YAML file."),
+    name: str = typer.Option(None, "--name", help="Name for the ModelAPI."),
+    backend: str = typer.Option("litellm", "--backend", "-b", help="Backend type (litellm, ollama)."),
+    model: str = typer.Option(None, "--model", "-m", help="Model name."),
     namespace: str = typer.Option(
-        None,
+        "default",
         "--namespace",
         "-n",
-        help="Namespace to deploy to (overrides YAML metadata).",
+        help="Namespace to deploy to.",
     ),
 ) -> None:
-    """Deploy a ModelAPI from a YAML file."""
-    deploy_command(file=file, namespace=namespace)
+    """Deploy a ModelAPI from YAML file or flags.
+    
+    Examples:
+      kaos modelapi deploy config.yaml                      # Deploy from YAML file
+      kaos modelapi deploy --name my-api --model gpt-4      # Deploy with flags
+    """
+    import sys
+    
+    if file:
+        deploy_from_yaml(file=file, namespace=namespace)
+    elif name and model:
+        deploy_modelapi(
+            name=name,
+            backend=backend,
+            model=model,
+            namespace=namespace,
+        )
+    else:
+        typer.echo("Error: Provide FILE, or --name and --model", err=True)
+        sys.exit(1)
 
 
 @app.command(name="invoke")
