@@ -20,35 +20,5 @@ if tools_string:
             mcp.tool(name)(func)
 
 
-def create_app():
-    """Create ASGI app with health endpoint."""
-    from starlette.applications import Starlette
-    from starlette.responses import JSONResponse
-    from starlette.routing import Route, Mount
-
-    async def health(_):
-        return JSONResponse({"status": "healthy"})
-
-    async def ready(_):
-        # Return list of registered tools
-        tool_names = list(mcp._tool_manager._tools.keys()) if hasattr(mcp, '_tool_manager') else []
-        return JSONResponse({"status": "ready", "tools": tool_names})
-
-    # Get the FastMCP app
-    fastmcp_app = mcp.http_app()
-
-    # Create wrapper app with health route and mount FastMCP
-    # IMPORTANT: Must pass fastmcp_app.lifespan to initialize FastMCP's task group
-    app = Starlette(
-        routes=[
-            Route("/health", health),
-            Route("/ready", ready),
-            Mount("/", app=fastmcp_app),
-        ],
-        lifespan=fastmcp_app.lifespan,
-    )
-    return app
-
-
-# Export the app for uvicorn
-app = create_app()
+if __name__ == "__main__":
+    mcp.run(transport="streamable-http", host="0.0.0.0", port=8000)
