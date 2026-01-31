@@ -25,8 +25,8 @@ var _ = Describe("MCPServer Controller", func() {
 	ctx := context.Background()
 	const namespace = "default"
 
-	It("should create Deployment with MCP_TOOLS_STRING env var for fromString tools", func() {
-		name := uniqueMCPServerName("mcp-string")
+	It("should create Deployment with MCP_TOOLS_STRING env var for rawpython runtime with params", func() {
+		name := uniqueMCPServerName("mcp-rawpython")
 		toolsString := `
 def echo(message: str) -> str:
     """Echo the message back."""
@@ -38,12 +38,8 @@ def echo(message: str) -> str:
 				Namespace: namespace,
 			},
 			Spec: kaosv1alpha1.MCPServerSpec{
-				Type: kaosv1alpha1.MCPServerTypePython,
-				Config: kaosv1alpha1.MCPServerConfig{
-					Tools: &kaosv1alpha1.MCPToolsConfig{
-						FromString: toolsString,
-					},
-				},
+				Runtime: "rawpython",
+				Params:  toolsString,
 			},
 		}
 		Expect(k8sClient.Create(ctx, mcp)).To(Succeed())
@@ -89,18 +85,19 @@ def echo(message: str) -> str:
 		}, timeout, interval).Should(ContainSubstring(fmt.Sprintf("mcpserver-%s", name)))
 	})
 
-	It("should create Deployment with pip install for fromPackage tools", func() {
-		name := uniqueMCPServerName("mcp-package")
+	It("should create Deployment with custom runtime and custom image", func() {
+		name := uniqueMCPServerName("mcp-custom")
 		mcp := &kaosv1alpha1.MCPServer{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      name,
 				Namespace: namespace,
 			},
 			Spec: kaosv1alpha1.MCPServerSpec{
-				Type: kaosv1alpha1.MCPServerTypePython,
-				Config: kaosv1alpha1.MCPServerConfig{
-					Tools: &kaosv1alpha1.MCPToolsConfig{
-						FromPackage: "mcp-echo-server",
+				Runtime: "custom",
+				Container: &kaosv1alpha1.ContainerOverride{
+					Image: "python:3.12-slim",
+					Command: []string{
+						"python", "-c", "print('hello')",
 					},
 				},
 			},
@@ -119,13 +116,12 @@ def echo(message: str) -> str:
 			}, deployment)
 		}, timeout, interval).Should(Succeed())
 
-		// Verify command includes sh -c
+		// Verify custom image is used
 		container := deployment.Spec.Template.Spec.Containers[0]
-		Expect(container.Command).To(ContainElement("sh"))
-		Expect(container.Command).To(ContainElement("-c"))
+		Expect(container.Image).To(Equal("python:3.12-slim"))
 	})
 
-	It("should trigger rolling update when tools.fromString is changed", func() {
+	It("should trigger rolling update when params is changed", func() {
 		name := uniqueMCPServerName("mcp-update")
 		initialTools := `
 def echo(message: str) -> str:
@@ -138,12 +134,8 @@ def echo(message: str) -> str:
 				Namespace: namespace,
 			},
 			Spec: kaosv1alpha1.MCPServerSpec{
-				Type: kaosv1alpha1.MCPServerTypePython,
-				Config: kaosv1alpha1.MCPServerConfig{
-					Tools: &kaosv1alpha1.MCPToolsConfig{
-						FromString: initialTools,
-					},
-				},
+				Runtime: "rawpython",
+				Params:  initialTools,
 			},
 		}
 		Expect(k8sClient.Create(ctx, mcp)).To(Succeed())
@@ -164,7 +156,7 @@ def echo(message: str) -> str:
 		initialHash := deployment.Spec.Template.Annotations["kaos.tools/pod-spec-hash"]
 		Expect(initialHash).NotTo(BeEmpty())
 
-		// Update the tools
+		// Update the params
 		newTools := `
 def greet(name: str) -> str:
     """Greet the user."""
@@ -175,7 +167,7 @@ def greet(name: str) -> str:
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, current); err != nil {
 				return err
 			}
-			current.Spec.Config.Tools.FromString = newTools
+			current.Spec.Params = newTools
 			return k8sClient.Update(ctx, current)
 		}, timeout, interval).Should(Succeed())
 
@@ -190,7 +182,37 @@ def greet(name: str) -> str:
 			newHash := deployment.Spec.Template.Annotations["kaos.tools/pod-spec-hash"]
 			// Hash should change
 			return newHash != initialHash && newHash != ""
-		}, timeout, interval).Should(BeTrue(), "Deployment hash should change after tools update")
+		}, timeout, interval).Should(BeTrue(), "Deployment hash should change after params update")
+	})
+
+	It("should set serviceAccountName when specified", func() {
+		name := uniqueMCPServerName("mcp-sa")
+		mcp := &kaosv1alpha1.MCPServer{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: namespace,
+			},
+			Spec: kaosv1alpha1.MCPServerSpec{
+				Runtime:            "rawpython",
+				Params:             "def test(): pass",
+				ServiceAccountName: "my-service-account",
+			},
+		}
+		Expect(k8sClient.Create(ctx, mcp)).To(Succeed())
+		defer func() {
+			k8sClient.Delete(ctx, mcp)
+		}()
+
+		// Verify Deployment is created with serviceAccountName
+		deployment := &appsv1.Deployment{}
+		Eventually(func() error {
+			return k8sClient.Get(ctx, types.NamespacedName{
+				Name:      fmt.Sprintf("mcpserver-%s", name),
+				Namespace: namespace,
+			}, deployment)
+		}, timeout, interval).Should(Succeed())
+
+		Expect(deployment.Spec.Template.Spec.ServiceAccountName).To(Equal("my-service-account"))
 	})
 
 	It("should delete MCPServer without errors", func() {
@@ -206,12 +228,8 @@ def echo(message: str) -> str:
 				Namespace: namespace,
 			},
 			Spec: kaosv1alpha1.MCPServerSpec{
-				Type: kaosv1alpha1.MCPServerTypePython,
-				Config: kaosv1alpha1.MCPServerConfig{
-					Tools: &kaosv1alpha1.MCPToolsConfig{
-						FromString: toolsString,
-					},
-				},
+				Runtime: "rawpython",
+				Params:  toolsString,
 			},
 		}
 		Expect(k8sClient.Create(ctx, mcp)).To(Succeed())

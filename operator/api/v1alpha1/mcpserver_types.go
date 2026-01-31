@@ -5,67 +5,37 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// MCPServerType defines the type of MCP server runtime
-type MCPServerType string
-
-const (
-	// MCPServerTypePython means using Python-based MCP server
-	MCPServerTypePython MCPServerType = "python-runtime"
-	// MCPServerTypeNode means using Node.js-based MCP server (future)
-	MCPServerTypeNode MCPServerType = "node-runtime"
-)
-
 // +kubebuilder:object:generate=true
 
-// MCPToolsConfig defines the tools configuration for MCP server
-type MCPToolsConfig struct {
-	// FromPackage is the package name to run with uvx (e.g., "mcp-server-calculator")
-	// For python-runtime type: runs as "uvx <package-name>"
-	// The package must be available on PyPI
-	// +kubebuilder:validation:Optional
-	FromPackage string `json:"fromPackage,omitempty"`
+// MCPServerSpec defines the desired state of MCPServer
+type MCPServerSpec struct {
+	// Runtime identifier from ConfigMap registry or "custom"
+	// Examples: "rawpython", "kubernetes", "slack", "custom"
+	// +kubebuilder:validation:Required
+	Runtime string `json:"runtime"`
 
-	// FromString is a Python literal string defining tools dynamically
-	// When set, the MCP server uses MCP_TOOLS_STRING env var instead of uvx package
+	// Params is runtime-specific configuration (string, typically YAML)
+	// Passed to container via runtime's paramsEnvVar (e.g., MCP_TOOLS_STRING for rawpython)
 	// +kubebuilder:validation:Optional
-	FromString string `json:"fromString,omitempty"`
+	Params string `json:"params,omitempty"`
 
-	// FromSecretKeyRef is a reference to a Secret key containing tool definitions
+	// ServiceAccountName for RBAC (e.g., for kubernetes runtime)
+	// Created via `kaos system create-rbac`
 	// +kubebuilder:validation:Optional
-	FromSecretKeyRef *corev1.SecretKeySelector `json:"fromSecretKeyRef,omitempty"`
-}
-
-// +kubebuilder:object:generate=true
-
-// MCPServerConfig defines the configuration for MCP server
-type MCPServerConfig struct {
-	// Tools configures how MCP tools are loaded
-	// +kubebuilder:validation:Optional
-	Tools *MCPToolsConfig `json:"tools,omitempty"`
+	ServiceAccountName string `json:"serviceAccountName,omitempty"`
 
 	// Telemetry configures OpenTelemetry instrumentation
 	// +kubebuilder:validation:Optional
 	Telemetry *TelemetryConfig `json:"telemetry,omitempty"`
 
-	// Env variables to pass to the MCP server
-	// +kubebuilder:validation:Optional
-	Env []corev1.EnvVar `json:"env,omitempty"`
-}
-
-// +kubebuilder:object:generate=true
-
-// MCPServerSpec defines the desired state of MCPServer
-type MCPServerSpec struct {
-	// Type specifies the MCP server runtime type
-	// +kubebuilder:validation:Enum=python-runtime;node-runtime
-	Type MCPServerType `json:"type"`
-
-	// Config contains the MCP server configuration
-	Config MCPServerConfig `json:"config"`
-
 	// GatewayRoute configures Gateway API routing (timeout, etc.)
 	// +kubebuilder:validation:Optional
 	GatewayRoute *GatewayRoute `json:"gatewayRoute,omitempty"`
+
+	// Container provides shorthand container overrides (image, env, resources)
+	// For "custom" runtime, container.image is required
+	// +kubebuilder:validation:Optional
+	Container *ContainerOverride `json:"container,omitempty"`
 
 	// PodSpec allows overriding the generated pod spec using strategic merge patch
 	// +kubebuilder:validation:Optional
@@ -101,8 +71,7 @@ type MCPServerStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=mcp;mcps
-// +kubebuilder:printcolumn:name="Type",type=string,JSONPath=`.spec.type`
-// +kubebuilder:printcolumn:name="MCP",type=string,JSONPath=`.spec.config.mcp`
+// +kubebuilder:printcolumn:name="Runtime",type=string,JSONPath=`.spec.runtime`
 // +kubebuilder:printcolumn:name="Ready",type=boolean,JSONPath=`.status.ready`
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 
