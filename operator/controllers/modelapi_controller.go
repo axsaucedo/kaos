@@ -456,22 +456,13 @@ func (r *ModelAPIReconciler) constructContainer(modelapi *kaosv1alpha1.ModelAPI)
 					Name:  "PROXY_API_KEY",
 					Value: apiKey.Value,
 				})
-			} else if apiKey.ValueFrom != nil {
-				if apiKey.ValueFrom.SecretKeyRef != nil {
-					env = append(env, corev1.EnvVar{
-						Name: "PROXY_API_KEY",
-						ValueFrom: &corev1.EnvVarSource{
-							SecretKeyRef: apiKey.ValueFrom.SecretKeyRef,
-						},
-					})
-				} else if apiKey.ValueFrom.ConfigMapKeyRef != nil {
-					env = append(env, corev1.EnvVar{
-						Name: "PROXY_API_KEY",
-						ValueFrom: &corev1.EnvVarSource{
-							ConfigMapKeyRef: apiKey.ValueFrom.ConfigMapKeyRef,
-						},
-					})
-				}
+			} else if apiKey.ValueFrom != nil && apiKey.ValueFrom.SecretKeyRef != nil {
+				env = append(env, corev1.EnvVar{
+					Name: "PROXY_API_KEY",
+					ValueFrom: &corev1.EnvVarSource{
+						SecretKeyRef: apiKey.ValueFrom.SecretKeyRef,
+					},
+				})
 			}
 		}
 
