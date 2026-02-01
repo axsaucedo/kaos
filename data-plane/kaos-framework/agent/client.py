@@ -314,6 +314,7 @@ class Agent:
         message: Union[str, List[Dict[str, str]]],
         session_id: Optional[str] = None,
         stream: bool = False,
+        seed: Optional[int] = None,
     ) -> AsyncIterator[str]:
         """Process a message with agentic loop for tool calling and delegation.
 
@@ -321,6 +322,7 @@ class Agent:
             message: User message to process - can be a string or OpenAI-style message array
             session_id: Optional session ID (created if not provided)
             stream: Whether to stream the response
+            seed: Optional seed for reproducible generation
 
         Yields:
             Content chunks (streaming) or single complete response (non-streaming)
@@ -343,6 +345,8 @@ class Agent:
             "stream": stream,
             ATTR_SESSION_ID: session_id,
         }
+        if seed is not None:
+            span_attrs["seed"] = seed
         otel.span_begin(
             "agent.agentic_loop",
             attrs=span_attrs,
@@ -350,6 +354,8 @@ class Agent:
         )
         # Use failed flag pattern to ensure spans close on return/yield/early exit
         span_failed = False
+        # Store seed for use in agentic loop
+        self._current_seed = seed
         try:
             # Extract user-provided system prompt (if any) from message array
             user_system_prompt: Optional[str] = None
@@ -539,7 +545,11 @@ class Agent:
                 if msg.get("role") in ("user", "task-delegation"):
                     logger.debug(f"Model input (last user msg): {msg.get('content', '')[:200]}...")
                     break
-            content = cast(str, await self.model_api.process_message(messages, stream=False))
+            # Pass seed if set in current request
+            seed = getattr(self, "_current_seed", None)
+            content = cast(
+                str, await self.model_api.process_message(messages, stream=False, seed=seed)
+            )
             logger.debug(f"Model response ({len(content)} chars): {content[:200]}...")
             return content
         except Exception as e:
