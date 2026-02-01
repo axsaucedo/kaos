@@ -64,8 +64,8 @@ pip install kaos-cli
 kaos install
 
 # Create a few resources
-kaos modelapi deploy --name my-api --backend ollama --model "smollm2:135m"
-kaos agent deploy --name my-agent --modelapi mymodel
+kaos modelapi deploy my-api --mode Hosted --model "smollm2:135m"
+kaos agent deploy my-agent --modelapi my-api --model "smollm2:135m"
 
 # Send a request
 kaos agent invoke my-agent --message "Hello"

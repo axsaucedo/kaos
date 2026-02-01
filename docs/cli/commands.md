@@ -137,13 +137,12 @@ kaos mcp build --name my-mcp --tag v1 --kind-load
 Deploy an MCPServer.
 
 ```bash
-kaos mcp deploy [FILE] [OPTIONS]
+kaos mcp deploy [NAME] [OPTIONS]
 ```
 
 | Option | Short | Description |
 |--------|-------|-------------|
-| `FILE` | | YAML file path |
-| `--name` | | MCPServer name (for image/runtime) |
+| `NAME` | | MCPServer name (auto-inferred from pyproject.toml) |
 | `--image` | `-i` | Custom image |
 | `--runtime` | `-r` | Registered runtime |
 | `--namespace` | `-n` | Target namespace |
@@ -152,14 +151,14 @@ kaos mcp deploy [FILE] [OPTIONS]
 
 **Examples:**
 ```bash
-# From YAML file
-kaos mcp deploy mcpserver.yaml
-
 # From custom image
-kaos mcp deploy --name my-mcp --image my-image:v1
+kaos mcp deploy my-mcp --image my-image:v1
 
 # From registered runtime
-kaos mcp deploy --name slack-mcp --runtime slack
+kaos mcp deploy slack-mcp --runtime slack
+
+# Auto-infer from pyproject.toml
+kaos mcp deploy
 ```
 
 ### kaos mcp list
@@ -231,10 +230,29 @@ Agent lifecycle management.
 
 ### kaos agent deploy
 
-Deploy an Agent from YAML.
+Deploy an Agent.
 
 ```bash
-kaos agent deploy FILE [OPTIONS]
+kaos agent deploy NAME --modelapi MODELAPI --model MODEL [OPTIONS]
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `NAME` | | Agent name (required) |
+| `--modelapi` | `-a` | ModelAPI reference (required) |
+| `--model` | `-m` | Model name (required) |
+| `--namespace` | `-n` | Target namespace |
+| `--instructions` | `-i` | Agent instructions |
+| `--mcp` | | MCP server references (multiple) |
+| `--sub-agent` | | Sub-agent references (multiple) |
+
+**Examples:**
+```bash
+# Basic agent
+kaos agent deploy my-agent --modelapi my-api --model gpt-4o
+
+# With instructions and MCP tools
+kaos agent deploy my-agent -a my-api -m gpt-4o -i "You are a helpful assistant" --mcp calculator
 ```
 
 ### kaos agent list
@@ -296,10 +314,26 @@ ModelAPI lifecycle management.
 
 ### kaos modelapi deploy
 
-Deploy a ModelAPI from YAML.
+Deploy a ModelAPI.
 
 ```bash
-kaos modelapi deploy FILE [OPTIONS]
+kaos modelapi deploy NAME [OPTIONS]
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `NAME` | | ModelAPI name (required) |
+| `--mode` | `-m` | Mode: Proxy (LiteLLM) or Hosted (Ollama). Default: Proxy |
+| `--model` | | Model name (required for Hosted mode) |
+| `--namespace` | `-n` | Target namespace |
+
+**Examples:**
+```bash
+# Deploy Proxy mode (LiteLLM)
+kaos modelapi deploy my-api
+
+# Deploy Hosted mode (Ollama)
+kaos modelapi deploy my-api --mode Hosted --model smollm2:135m
 ```
 
 ### kaos modelapi list
@@ -400,7 +434,7 @@ cd my-tools
 kaos mcp build --name my-tools --tag v1 --kind-load
 
 # 4. Deploy
-kaos mcp deploy --name my-tools --image my-tools:v1
+kaos mcp deploy my-tools --image my-tools:v1
 ```
 
 ### Deploy Kubernetes MCP with RBAC
@@ -411,5 +445,5 @@ kaos system create-rbac --name k8s-sa --namespace default > rbac.yaml
 kubectl apply -f rbac.yaml
 
 # 2. Deploy
-kaos mcp deploy --name k8s-tools --runtime kubernetes --sa k8s-sa
+kaos mcp deploy k8s-tools --runtime kubernetes --sa k8s-sa
 ```

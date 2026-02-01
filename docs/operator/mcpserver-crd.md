@@ -302,14 +302,11 @@ spec:
 # List MCPServers
 kaos mcp list
 
-# Deploy from YAML
-kaos mcp deploy mcpserver.yaml
-
 # Deploy custom image directly
-kaos mcp deploy --name my-mcp --image my-image:v1
+kaos mcp deploy my-mcp --image my-image:v1
 
 # Deploy registered runtime
-kaos mcp deploy --name my-mcp --runtime slack
+kaos mcp deploy my-mcp --runtime slack
 
 # Get details
 kaos mcp get my-mcp
@@ -341,7 +338,7 @@ kaos mcp build --name my-server --tag v1
 kaos mcp build --name my-server --tag v1 --kind-load
 
 # Deploy
-kaos mcp deploy --name my-server --image my-server:v1
+kaos mcp deploy my-server --image my-server:v1
 ```
 
 ## Troubleshooting
