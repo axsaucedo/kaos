@@ -375,6 +375,10 @@ class AgentServer:
             The agent decides when to delegate or call tools based on model response.
             Server only routes requests to the agent for processing.
             Extracts trace context from incoming headers for distributed tracing.
+            
+            Session ID can be provided via:
+            - X-Session-ID header
+            - session_id field in request body
             """
             # Extract and attach trace context for distributed tracing
             ctx_token = KaosOtelManager.extract_and_attach_context(request.headers)
@@ -388,6 +392,9 @@ class AgentServer:
 
                 model_name = body.get("model", "agent")
                 stream_requested = body.get("stream", False)
+                
+                # Extract session_id from header (preferred) or body
+                session_id = request.headers.get("X-Session-ID") or body.get("session_id")
 
                 # Validate at least one user or task-delegation message exists
                 has_valid_message = any(
@@ -402,9 +409,9 @@ class AgentServer:
                 # Pass full messages array to agent for processing
                 # Agent handles tool calls and delegations based on model response
                 if stream_requested:
-                    return await self._stream_chat_completion(messages, model_name)
+                    return await self._stream_chat_completion(messages, model_name, session_id)
                 else:
-                    return await self._complete_chat_completion(messages, model_name)
+                    return await self._complete_chat_completion(messages, model_name, session_id)
 
             except HTTPException:
                 raise
@@ -414,16 +421,19 @@ class AgentServer:
             finally:
                 KaosOtelManager.detach_context(ctx_token)
 
-    async def _complete_chat_completion(self, messages: list, model_name: str) -> JSONResponse:
+    async def _complete_chat_completion(
+        self, messages: list, model_name: str, session_id: Optional[str] = None
+    ) -> JSONResponse:
         """Handle non-streaming chat completion.
 
         Args:
             messages: Full OpenAI-style messages array for context
             model_name: Model name for response
+            session_id: Optional session ID for conversation continuity
         """
         # Collect complete response
         response_content = ""
-        async for chunk in self.agent.process_message(messages, stream=False):
+        async for chunk in self.agent.process_message(messages, stream=False, session_id=session_id):
             response_content += chunk
 
         return JSONResponse(
@@ -447,12 +457,15 @@ class AgentServer:
             }
         )
 
-    async def _stream_chat_completion(self, messages: list, model_name: str) -> StreamingResponse:
+    async def _stream_chat_completion(
+        self, messages: list, model_name: str, session_id: Optional[str] = None
+    ) -> StreamingResponse:
         """Handle streaming chat completion with SSE.
 
         Args:
             messages: Full OpenAI-style messages array for context
             model_name: Model name for response
+            session_id: Optional session ID for conversation continuity
         """
 
         async def generate_stream():
@@ -462,7 +475,9 @@ class AgentServer:
                 created_at = int(time.time())
 
                 # Stream response chunks
-                async for chunk in self.agent.process_message(messages, stream=True):
+                async for chunk in self.agent.process_message(
+                    messages, stream=True, session_id=session_id
+                ):
                     if chunk:  # Only send non-empty chunks
                         sse_data = {
                             "id": chat_id,
