@@ -354,8 +354,6 @@ class Agent:
         )
         # Use failed flag pattern to ensure spans close on return/yield/early exit
         span_failed = False
-        # Store seed for use in agentic loop
-        self._current_seed = seed
         try:
             # Extract user-provided system prompt (if any) from message array
             user_system_prompt: Optional[str] = None
@@ -403,7 +401,7 @@ class Agent:
 
             # Agentic loop - iterate up to max_steps
             logger.debug(f"Starting agentic loop with {len(messages)} messages")
-            async for chunk in self._agentic_loop(messages, session_id, stream):
+            async for chunk in self._agentic_loop(messages, session_id, stream, seed=seed):
                 yield chunk
 
         except Exception as e:
@@ -423,6 +421,7 @@ class Agent:
         messages: List[Dict[str, str]],
         session_id: str,
         stream: bool,
+        seed: Optional[int] = None,
     ) -> AsyncIterator[str]:
         """Execute the agentic loop with tracing."""
         for step in range(self.max_steps):
@@ -436,7 +435,7 @@ class Agent:
             try:
                 # Get model response
                 model_name = self.model_api.model if self.model_api else "unknown"
-                content = await self._call_model(messages, model_name)
+                content = await self._call_model(messages, model_name, seed=seed)
 
                 # Check for tool call
                 tool_call = self._parse_block(content, "tool_call")
@@ -528,7 +527,9 @@ class Agent:
         logger.warning(max_steps_msg)
         yield max_steps_msg
 
-    async def _call_model(self, messages: List[Dict[str, str]], model_name: str) -> str:
+    async def _call_model(
+        self, messages: List[Dict[str, str]], model_name: str, seed: Optional[int] = None
+    ) -> str:
         """Call the model API with tracing."""
         otel.span_begin(
             "model.inference",
@@ -545,8 +546,6 @@ class Agent:
                 if msg.get("role") in ("user", "task-delegation"):
                     logger.debug(f"Model input (last user msg): {msg.get('content', '')[:200]}...")
                     break
-            # Pass seed if set in current request
-            seed = getattr(self, "_current_seed", None)
             content = cast(
                 str, await self.model_api.process_message(messages, stream=False, seed=seed)
             )
