@@ -74,6 +74,8 @@ func (r *ModelAPIReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			log.Error(err, "failed to add finalizer")
 			return ctrl.Result{}, err
 		}
+		// Requeue to continue with fresh object after finalizer is added
+		return ctrl.Result{Requeue: true}, nil
 	}
 
 	// Set initial status
@@ -84,6 +86,8 @@ func (r *ModelAPIReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			log.Error(err, "failed to update status")
 			return ctrl.Result{}, err
 		}
+		// Requeue to continue with fresh object after status is set
+		return ctrl.Result{Requeue: true}, nil
 	}
 
 	// Create ConfigMap for Proxy mode - always needed since we use config file mode
