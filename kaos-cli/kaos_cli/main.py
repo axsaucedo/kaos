@@ -53,9 +53,15 @@ def ui(
         "--no-browser",
         help="Don't automatically open the browser.",
     ),
+    version: str = typer.Option(
+        None,
+        "--version",
+        "-v",
+        help="UI version to use (e.g., 'dev', 'v0.1.3'). Defaults to CLI version.",
+    ),
 ) -> None:
     """Start a CORS-enabled proxy and open the KAOS UI."""
-    ui_command(k8s_url=k8s_url, expose_port=expose_port, namespace=namespace, no_browser=no_browser)
+    ui_command(k8s_url=k8s_url, expose_port=expose_port, namespace=namespace, no_browser=no_browser, version=version)
 
 
 @app.command(name="install")
