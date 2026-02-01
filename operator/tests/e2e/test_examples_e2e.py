@@ -72,6 +72,7 @@ class TestExamplesViaJupytext:
 class TestKAOSMonkeyExample:
     """Tests for the KAOS Monkey example - agent that deletes pods."""
 
+    @pytest.mark.skip(reason="kubernetes runtime requires external image, skip for now")
     def test_chaos_agent_deletes_pod(self, shared_namespace: str, shared_modelapi: str):
         """Test an agent that deletes a pod using kubernetes MCP runtime.
         
