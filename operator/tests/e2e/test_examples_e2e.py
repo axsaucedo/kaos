@@ -105,6 +105,7 @@ def convert_temperature(value: float, from_unit: str, to_unit: str) -> str:
 class TestKAOSMonkeyExample:
     """Tests for the KAOS Monkey example."""
 
+    @pytest.mark.skip(reason="kubernetes runtime not available in default installation")
     @pytest.mark.asyncio
     async def test_kubernetes_mcp_runtime(self, shared_namespace: str):
         """Test the kubernetes MCP runtime for kubectl access.
