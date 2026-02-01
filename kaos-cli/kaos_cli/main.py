@@ -59,9 +59,27 @@ def ui(
         "-v",
         help="UI version to use (e.g., 'dev', 'v0.1.3'). Defaults to CLI version.",
     ),
+    monitoring_enabled: bool = typer.Option(
+        False,
+        "--monitoring-enabled",
+        help="Enable SigNoz monitoring UI port-forward.",
+    ),
+    monitoring_namespace: str = typer.Option(
+        "monitoring",
+        "--monitoring-namespace",
+        help="Namespace where SigNoz is installed.",
+    ),
 ) -> None:
     """Start a CORS-enabled proxy and open the KAOS UI."""
-    ui_command(k8s_url=k8s_url, expose_port=expose_port, namespace=namespace, no_browser=no_browser, version=version)
+    ui_command(
+        k8s_url=k8s_url,
+        expose_port=expose_port,
+        namespace=namespace,
+        no_browser=no_browser,
+        version=version,
+        monitoring_enabled=monitoring_enabled,
+        monitoring_namespace=monitoring_namespace,
+    )
 
 
 @app.command(name="install")

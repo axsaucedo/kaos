@@ -13,7 +13,7 @@ from kaos_cli.install import (
 
 __all__ = [
     "install_command",
-    "uninstall_command", 
+    "uninstall_command",
     "check_helm_installed",
     "run_helm_command",
 ]

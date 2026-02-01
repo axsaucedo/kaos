@@ -35,10 +35,18 @@ def build_mcp(
     name: str = typer.Option(..., "--name", "-n", help="Name for the image."),
     tag: str = typer.Option("latest", "--tag", "-t", help="Tag for the image."),
     directory: str = typer.Option(".", "--dir", "-d", help="Source directory."),
-    entry_point: str = typer.Option("server.py", "--entry", "-e", help="Entry point file."),
-    kind_load: bool = typer.Option(False, "--kind-load", help="Load image to KIND cluster."),
-    create_dockerfile: bool = typer.Option(False, "--create-dockerfile", help="Create/overwrite Dockerfile."),
-    platform: str = typer.Option(None, "--platform", help="Docker platform (e.g., linux/amd64)."),
+    entry_point: str = typer.Option(
+        "server.py", "--entry", "-e", help="Entry point file."
+    ),
+    kind_load: bool = typer.Option(
+        False, "--kind-load", help="Load image to KIND cluster."
+    ),
+    create_dockerfile: bool = typer.Option(
+        False, "--create-dockerfile", help="Create/overwrite Dockerfile."
+    ),
+    platform: str = typer.Option(
+        None, "--platform", help="Docker platform (e.g., linux/amd64)."
+    ),
 ) -> None:
     """Build a Docker image from a FastMCP server."""
     build_command(
@@ -50,6 +58,7 @@ def build_mcp(
         create_dockerfile=create_dockerfile,
         platform=platform,
     )
+
 
 @app.command(name="list")
 def list_mcpservers(
@@ -137,21 +146,35 @@ def delete_mcpserver(
 @app.command(name="deploy")
 def deploy_mcpserver(
     file: str = typer.Argument(None, help="Path to MCPServer YAML file."),
-    name: str = typer.Option(None, "--name", help="Name for the MCPServer (auto-inferred from pyproject.toml)."),
-    image: str = typer.Option(None, "--image", "-i", help="Custom image to deploy (auto-inferred from name)."),
-    runtime: str = typer.Option(None, "--runtime", "-r", help="Registered runtime to deploy."),
+    name: str = typer.Option(
+        None,
+        "--name",
+        help="Name for the MCPServer (auto-inferred from pyproject.toml).",
+    ),
+    image: str = typer.Option(
+        None, "--image", "-i", help="Custom image to deploy (auto-inferred from name)."
+    ),
+    runtime: str = typer.Option(
+        None, "--runtime", "-r", help="Registered runtime to deploy."
+    ),
     namespace: str = typer.Option(
         "default",
         "--namespace",
         "-n",
         help="Namespace to deploy to.",
     ),
-    params: str = typer.Option(None, "--params", "-p", help="Parameters for the runtime."),
-    service_account: str = typer.Option(None, "--sa", help="ServiceAccount name for the pod."),
-    directory: str = typer.Option(".", "--dir", "-d", help="Directory to infer name/image from."),
+    params: str = typer.Option(
+        None, "--params", "-p", help="Parameters for the runtime."
+    ),
+    service_account: str = typer.Option(
+        None, "--sa", help="ServiceAccount name for the pod."
+    ),
+    directory: str = typer.Option(
+        ".", "--dir", "-d", help="Directory to infer name/image from."
+    ),
 ) -> None:
     """Deploy an MCPServer from YAML, image, or runtime.
-    
+
     Examples:
       kaos mcp deploy config.yaml                    # Deploy from YAML file
       kaos mcp deploy --name my-mcp --image img:v1   # Deploy custom image
@@ -160,7 +183,7 @@ def deploy_mcpserver(
     """
     import sys
     from kaos_cli.mcp.deploy import read_project_name, infer_image_name
-    
+
     if file:
         deploy_from_yaml(file=file, namespace=namespace)
     elif runtime:
@@ -168,7 +191,10 @@ def deploy_mcpserver(
         if not name:
             name = read_project_name(directory)
             if not name:
-                typer.echo("Error: --name required (or create pyproject.toml with project.name)", err=True)
+                typer.echo(
+                    "Error: --name required (or create pyproject.toml with project.name)",
+                    err=True,
+                )
                 sys.exit(1)
             typer.echo(f"📦 Using name from pyproject.toml: {name}")
         deploy_runtime(
@@ -183,14 +209,17 @@ def deploy_mcpserver(
         if not name:
             name = read_project_name(directory)
             if not name:
-                typer.echo("Error: --name required (or create pyproject.toml with project.name)", err=True)
+                typer.echo(
+                    "Error: --name required (or create pyproject.toml with project.name)",
+                    err=True,
+                )
                 sys.exit(1)
             typer.echo(f"📦 Using name from pyproject.toml: {name}")
-        
+
         if not image:
             image = infer_image_name(name)
             typer.echo(f"📦 Using inferred image: {image}")
-        
+
         deploy_custom_image(
             name=name,
             image=image,
@@ -203,7 +232,9 @@ def deploy_mcpserver(
 @app.command(name="invoke")
 def invoke_mcpserver(
     name: str = typer.Argument(..., help="Name of the MCPServer."),
-    tool: str = typer.Option(..., "--tool", "-t", help="Name of the MCP tool to invoke."),
+    tool: str = typer.Option(
+        ..., "--tool", "-t", help="Name of the MCP tool to invoke."
+    ),
     args: str = typer.Option(
         None,
         "--args",

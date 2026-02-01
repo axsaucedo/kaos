@@ -369,15 +369,32 @@ helm repo add signoz https://charts.signoz.io
 helm install signoz signoz/signoz -n monitoring --create-namespace
 ```
 
-2. Configure agents to send telemetry to SigNoz:
-```yaml
-config:
-  telemetry:
-    enabled: true
-    endpoint: "http://signoz-otel-collector.monitoring.svc.cluster.local:4317"
+2. Install KAOS with telemetry pointing to SigNoz:
+```bash
+kaos install --set telemetry.enabled=true \
+  --set telemetry.endpoint=http://signoz-otel-collector.monitoring:4317
 ```
 
-3. Access the SigNoz UI to view traces, metrics, and logs.
+3. Access the SigNoz UI via the KAOS CLI:
+```bash
+kaos ui --monitoring-enabled
+```
+
+This will:
+- Start the KAOS UI proxy on port 8010
+- Port-forward SigNoz frontend to http://localhost:8011
+
+### CLI Monitoring Options
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--monitoring-enabled` | `false` | Enable SigNoz UI port-forward |
+| `--monitoring-namespace` | `monitoring` | Namespace where SigNoz is installed |
+
+Example with custom namespace:
+```bash
+kaos ui --monitoring-enabled --monitoring-namespace observability
+```
 
 ## Using with Uptrace
 

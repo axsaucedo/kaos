@@ -7,7 +7,7 @@ from pathlib import Path
 import typer
 
 
-AGENT_TEMPLATE = '''apiVersion: kaos.tools/v1alpha1
+AGENT_TEMPLATE = """apiVersion: kaos.tools/v1alpha1
 kind: Agent
 metadata:
   name: {name}
@@ -16,16 +16,16 @@ spec:
   modelApiRef: {modelapi}
   systemPrompt: |
     {system_prompt}
-'''
+"""
 
 
 def deploy_from_yaml(file: str, namespace: str | None) -> None:
     """Deploy an Agent from YAML file."""
     args = ["kubectl", "apply", "-f", file]
-    
+
     if namespace:
         args.extend(["-n", namespace])
-    
+
     result = subprocess.run(args, capture_output=True, text=True)
     if result.returncode != 0:
         typer.echo(result.stderr or result.stdout, err=True)
@@ -49,23 +49,23 @@ def deploy_agent(
         modelapi=modelapi,
         system_prompt=prompt.replace("\n", "\n    "),
     )
-    
+
     # Add MCP servers if provided
     if mcp_servers:
         yaml_content = yaml_content.rstrip() + "\n  mcpServers:\n"
         for mcp in mcp_servers:
             yaml_content += f"  - {mcp}\n"
-    
+
     # Add sub-agents if provided
     if sub_agents:
         yaml_content = yaml_content.rstrip() + "\n  subAgents:\n"
         for agent in sub_agents:
             yaml_content += f"  - {agent}\n"
-    
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
         f.write(yaml_content)
         tmp_path = f.name
-    
+
     try:
         args = ["kubectl", "apply", "-f", tmp_path]
         result = subprocess.run(args, capture_output=True, text=True)

@@ -2,7 +2,12 @@
 
 import typer
 
-from kaos_cli.utils.crud import list_resources, get_resource, logs_resource, delete_resource
+from kaos_cli.utils.crud import (
+    list_resources,
+    get_resource,
+    logs_resource,
+    delete_resource,
+)
 from kaos_cli.agent.deploy import deploy_from_yaml, deploy_agent
 from kaos_cli.agent.invoke import invoke_command
 
@@ -108,16 +113,18 @@ def deploy_agent_cmd(
     ),
     system_prompt: str = typer.Option(None, "--prompt", "-p", help="System prompt."),
     mcp_servers: list[str] = typer.Option(None, "--mcp", help="MCP server references."),
-    sub_agents: list[str] = typer.Option(None, "--sub-agent", help="Sub-agent references."),
+    sub_agents: list[str] = typer.Option(
+        None, "--sub-agent", help="Sub-agent references."
+    ),
 ) -> None:
     """Deploy an Agent from YAML file or flags.
-    
+
     Examples:
       kaos agent deploy config.yaml                  # Deploy from YAML file
       kaos agent deploy --name my-agent --modelapi my-model  # Deploy with flags
     """
     import sys
-    
+
     if file:
         deploy_from_yaml(file=file, namespace=namespace)
     elif name and modelapi:
@@ -137,7 +144,9 @@ def deploy_agent_cmd(
 @app.command(name="invoke")
 def invoke_agent(
     name: str = typer.Argument(..., help="Name of the Agent."),
-    message: str = typer.Option(..., "--message", "-m", help="Message to send to the agent."),
+    message: str = typer.Option(
+        ..., "--message", "-m", help="Message to send to the agent."
+    ),
     namespace: str = typer.Option(
         "default",
         "--namespace",
@@ -158,4 +167,6 @@ def invoke_agent(
     ),
 ) -> None:
     """Send a message to an Agent via port-forward."""
-    invoke_command(name=name, namespace=namespace, message=message, port=port, stream=stream)
+    invoke_command(
+        name=name, namespace=namespace, message=message, port=port, stream=stream
+    )

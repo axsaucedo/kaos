@@ -19,7 +19,9 @@ def check_helm_installed() -> bool:
     return shutil.which("helm") is not None
 
 
-def run_helm_command(args: list[str], check: bool = True) -> subprocess.CompletedProcess:
+def run_helm_command(
+    args: list[str], check: bool = True
+) -> subprocess.CompletedProcess:
     """Run a helm command and return the result."""
     cmd = ["helm"] + args
     try:

@@ -7,7 +7,7 @@ from pathlib import Path
 import typer
 
 
-MODELAPI_LITELLM_TEMPLATE = '''apiVersion: kaos.tools/v1alpha1
+MODELAPI_LITELLM_TEMPLATE = """apiVersion: kaos.tools/v1alpha1
 kind: ModelAPI
 metadata:
   name: {name}
@@ -15,9 +15,9 @@ metadata:
 spec:
   backend: litellm
   model: {model}
-'''
+"""
 
-MODELAPI_OLLAMA_TEMPLATE = '''apiVersion: kaos.tools/v1alpha1
+MODELAPI_OLLAMA_TEMPLATE = """apiVersion: kaos.tools/v1alpha1
 kind: ModelAPI
 metadata:
   name: {name}
@@ -25,16 +25,16 @@ metadata:
 spec:
   backend: ollama
   model: {model}
-'''
+"""
 
 
 def deploy_from_yaml(file: str, namespace: str | None) -> None:
     """Deploy a ModelAPI from YAML file."""
     args = ["kubectl", "apply", "-f", file]
-    
+
     if namespace:
         args.extend(["-n", namespace])
-    
+
     result = subprocess.run(args, capture_output=True, text=True)
     if result.returncode != 0:
         typer.echo(result.stderr or result.stdout, err=True)
@@ -61,11 +61,11 @@ def deploy_modelapi(
             namespace=namespace,
             model=model,
         )
-    
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
         f.write(yaml_content)
         tmp_path = f.name
-    
+
     try:
         args = ["kubectl", "apply", "-f", tmp_path]
         result = subprocess.run(args, capture_output=True, text=True)

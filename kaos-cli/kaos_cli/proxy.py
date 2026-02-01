@@ -88,7 +88,11 @@ def create_proxy_app(k8s_url: str | None = None) -> Starlette:
             )
 
     routes = [
-        Route("/{path:path}", proxy_request, methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]),
+        Route(
+            "/{path:path}",
+            proxy_request,
+            methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+        ),
     ]
 
     app = Starlette(routes=routes)
