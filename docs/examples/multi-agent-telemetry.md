@@ -161,17 +161,22 @@ else:
 Create the coordinator that delegates to specialists. The coordinator uses multiple mock responses - one for each step of its reasoning:
 
 ```python
+# Mock responses for the coordinator
+# Note: The delegate block format triggers agent-to-agent communication
+mock_resp1 = 'Let me delegate the research portion first.\n\n```delegate\n{"agent": "researcher", "task": "Research AI adoption trends in enterprises"}\n```'
+mock_resp2 = 'Now let me get the analyst perspective.\n\n```delegate\n{"agent": "analyst", "task": "Analyze the growth patterns from the research"}\n```'
+mock_resp3 = "Based on input from my team: AI is growing with 40% YoY growth, especially in customer service automation."
+
 # Deploy coordinator agent with access to other agents
-# Each --mock-response is used in sequence
 result = subprocess.run([
     "kaos", "agent", "deploy", "coordinator",
     "-n", namespace,
     "--modelapi", "team-api",
     "--model", "mock-model",
-    "--instructions", "You are a coordinator. You delegate research to 'researcher' and analysis to 'analyst', then synthesize their responses.",
-    "--mock-response", 'Let me delegate the research portion first.\n\n```delegate\n{"agent": "researcher", "task": "Research AI adoption trends in enterprises"}\n```',
-    "--mock-response", 'Now let me get the analyst\'s perspective.\n\n```delegate\n{"agent": "analyst", "task": "Analyze the growth patterns from the research"}\n```',
-    "--mock-response", "Based on input from my team:\n\n**Research Summary:** AI is growing in enterprise use with focus on automation and customer service.\n\n**Analysis:** 40% YoY growth, with customer service automation leading at 60%.\n\nThe trend indicates continued expansion in AI-powered automation.",
+    "--instructions", "You are a coordinator that delegates to specialist agents.",
+    "--mock-response", mock_resp1,
+    "--mock-response", mock_resp2,
+    "--mock-response", mock_resp3,
     "--sub-agent", "researcher",
     "--sub-agent", "analyst",
     "--expose"
@@ -179,6 +184,9 @@ result = subprocess.run([
 print(result.stdout)
 if result.returncode != 0:
     print(f"stderr: {result.stderr}")
+    # Check what agents exist
+    check = subprocess.run(["kubectl", "get", "agents", "-n", namespace], capture_output=True, text=True)
+    print(f"Agents in namespace: {check.stdout}")
 ```
 
 Wait for coordinator agent:
