@@ -30,8 +30,8 @@ kubernetesClusterDomain: cluster.local
 
 # Default images for agent runtime and MCP servers
 defaultImages:
-  agentRuntime: axsauze/kaos-agent:v0.1.4-dev
-  mcpServer: axsauze/kaos-mcp-server:v0.1.4-dev
+  agentRuntime: axsauze/kaos-agent:v0.1.5-dev
+  mcpServer: axsauze/kaos-mcp-server:v0.1.5-dev
   mcpPythonString: axsauze/kaos-mcp-python-string:v0.1.4-dev
   mcpKubernetes: ghcr.io/manusa/kubernetes-mcp-server:latest
   mcpSlack: zencoderai/slack-mcp:latest
