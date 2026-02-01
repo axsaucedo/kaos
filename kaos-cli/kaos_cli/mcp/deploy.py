@@ -16,7 +16,6 @@ CUSTOM_RUNTIME_TEMPLATE = """apiVersion: kaos.tools/v1alpha1
 kind: MCPServer
 metadata:
   name: {name}
-  namespace: {namespace}
 spec:
   runtime: custom
   container:
@@ -45,33 +44,15 @@ def infer_image_name(name: str, tag: str = "latest") -> str:
     return f"{name}:{tag}"
 
 
-def deploy_from_yaml(file: str, namespace: str | None) -> None:
-    """Deploy an MCPServer from YAML file."""
-    args = ["kubectl", "apply", "-f", file]
-
-    if namespace:
-        args.extend(["-n", namespace])
-
-    result = subprocess.run(args, capture_output=True, text=True)
-    if result.returncode != 0:
-        typer.echo(result.stderr or result.stdout, err=True)
-        sys.exit(result.returncode)
-    typer.echo(result.stdout)
-
-
 def deploy_custom_image(
     name: str,
     image: str,
-    namespace: str,
+    namespace: str | None,
     params: str | None,
     service_account: str | None,
 ) -> None:
     """Deploy an MCPServer with a custom runtime image."""
-    yaml_content = CUSTOM_RUNTIME_TEMPLATE.format(
-        name=name,
-        namespace=namespace,
-        image=image,
-    )
+    yaml_content = CUSTOM_RUNTIME_TEMPLATE.format(name=name, image=image)
 
     # Add optional params via env var
     if params:
@@ -99,6 +80,8 @@ def deploy_custom_image(
 
     try:
         args = ["kubectl", "apply", "-f", tmp_path]
+        if namespace:
+            args.extend(["-n", namespace])
         result = subprocess.run(args, capture_output=True, text=True)
         if result.returncode != 0:
             typer.echo(result.stderr or result.stdout, err=True)
@@ -112,7 +95,7 @@ def deploy_custom_image(
 def deploy_runtime(
     name: str,
     runtime: str,
-    namespace: str,
+    namespace: str | None,
     params: str | None,
     service_account: str | None,
 ) -> None:
@@ -121,7 +104,6 @@ def deploy_runtime(
 kind: MCPServer
 metadata:
   name: {name}
-  namespace: {namespace}
 spec:
   runtime: {runtime}
 """
@@ -150,6 +132,8 @@ spec:
 
     try:
         args = ["kubectl", "apply", "-f", tmp_path]
+        if namespace:
+            args.extend(["-n", namespace])
         result = subprocess.run(args, capture_output=True, text=True)
         if result.returncode != 0:
             typer.echo(result.stderr or result.stdout, err=True)

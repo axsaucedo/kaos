@@ -54,6 +54,8 @@ KAOS is a Kubernetes-native framework for deploying and orchestrating AI agents 
 
 ### Option 1: KAOS CLI/UI
 
+For CLI/UI documentation, see the [CLI Guide](https://axsaucedo.github.io/kaos/cli/overview).
+
 ```bash
 # Install the CLI
 pip install kaos-cli
@@ -61,13 +63,33 @@ pip install kaos-cli
 # Install KAOS in your cluster
 kaos install
 
+# Create a few resources
+kaos modelapi deploy my-api --mode Hosted --model "smollm2:135m"
+kaos agent deploy my-agent --modelapi my-api --model "smollm2:135m"
+
+# Send a request
+kaos agent invoke my-agent --message "Hello"
+# 📤 Response:
+# Hello! How can I assist you today? If you have any questions, feel free to share them! 
+
 # Open the UI
 kaos ui
 ```
 
+This command opens [axsaucedo.github.io/kaos-ui](https://axsaucedo.github.io/kaos-ui) and runs a `kubectl proxy`. 
+
 <img src="docs/public/demo.gif">
 
-The UI opens at [axsaucedo.github.io/kaos-ui](https://axsaucedo.github.io/kaos-ui). For CLI/UI documentation, see the [CLI Guide](https://axsaucedo.github.io/kaos/cli/overview).
+You can also open the UI with telemetry enabled:
+
+```
+kaos ui --monitoring-enabled
+```
+
+Make sure you [enable observability](https://axsaucedo.github.io/kaos/v0.1.4/operator/telemetry.html#using-with-signoz).
+
+
+<img src="docs/public/demo-monitoring.gif">
 
 ### Option 2: Helm/kubectl
 

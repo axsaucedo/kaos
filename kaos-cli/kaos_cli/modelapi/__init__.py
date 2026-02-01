@@ -8,7 +8,7 @@ from kaos_cli.utils.crud import (
     logs_resource,
     delete_resource,
 )
-from kaos_cli.modelapi.deploy import deploy_from_yaml, deploy_modelapi
+from kaos_cli.modelapi.deploy import deploy_modelapi
 from kaos_cli.modelapi.invoke import invoke_command
 
 app = typer.Typer(
@@ -40,7 +40,7 @@ def list_modelapis(
 def get_modelapi(
     name: str = typer.Argument(..., help="Name of the ModelAPI."),
     namespace: str = typer.Option(
-        "default",
+        None,
         "--namespace",
         "-n",
         help="Namespace of the ModelAPI.",
@@ -60,7 +60,7 @@ def get_modelapi(
 def logs_modelapi(
     name: str = typer.Argument(..., help="Name of the ModelAPI."),
     namespace: str = typer.Option(
-        "default",
+        None,
         "--namespace",
         "-n",
         help="Namespace of the ModelAPI.",
@@ -85,7 +85,7 @@ def logs_modelapi(
 def delete_modelapi(
     name: str = typer.Argument(..., help="Name of the ModelAPI."),
     namespace: str = typer.Option(
-        "default",
+        None,
         "--namespace",
         "-n",
         help="Namespace of the ModelAPI.",
@@ -102,39 +102,27 @@ def delete_modelapi(
 
 @app.command(name="deploy")
 def deploy_modelapi_cmd(
-    file: str = typer.Argument(None, help="Path to ModelAPI YAML file."),
-    name: str = typer.Option(None, "--name", help="Name for the ModelAPI."),
-    backend: str = typer.Option(
-        "litellm", "--backend", "-b", help="Backend type (litellm, ollama)."
+    name: str = typer.Argument(..., help="Name for the ModelAPI."),
+    mode: str = typer.Option(
+        "Proxy", "--mode", "-m", help="Mode: Proxy (LiteLLM) or Hosted (Ollama)."
     ),
-    model: str = typer.Option(None, "--model", "-m", help="Model name."),
+    model: str = typer.Option(
+        None, "--model", help="Model name (required for Hosted mode)."
+    ),
     namespace: str = typer.Option(
-        "default",
+        None,
         "--namespace",
         "-n",
         help="Namespace to deploy to.",
     ),
 ) -> None:
-    """Deploy a ModelAPI from YAML file or flags.
+    """Deploy a ModelAPI.
 
     Examples:
-      kaos modelapi deploy config.yaml                      # Deploy from YAML file
-      kaos modelapi deploy --name my-api --model gpt-4      # Deploy with flags
+      kaos modelapi deploy my-api                           # Deploy Proxy mode
+      kaos modelapi deploy my-api --mode Hosted --model smollm2:135m  # Deploy Hosted
     """
-    import sys
-
-    if file:
-        deploy_from_yaml(file=file, namespace=namespace)
-    elif name and model:
-        deploy_modelapi(
-            name=name,
-            backend=backend,
-            model=model,
-            namespace=namespace,
-        )
-    else:
-        typer.echo("Error: Provide FILE, or --name and --model", err=True)
-        sys.exit(1)
+    deploy_modelapi(name=name, mode=mode, model=model, namespace=namespace)
 
 
 @app.command(name="invoke")
@@ -143,7 +131,7 @@ def invoke_modelapi(
     message: str = typer.Option(..., "--message", "-m", help="Message to send."),
     model: str = typer.Option(..., "--model", help="Model name to use."),
     namespace: str = typer.Option(
-        "default",
+        None,
         "--namespace",
         "-n",
         help="Namespace of the ModelAPI.",

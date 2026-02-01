@@ -54,10 +54,12 @@ def list_resources(
 
 
 def get_resource(
-    resource_type: ResourceType, name: str, namespace: str, output: str
+    resource_type: ResourceType, name: str, namespace: str | None, output: str
 ) -> None:
     """Get a specific resource."""
-    args = ["get", resource_type, name, "-n", namespace, "-o", output]
+    args = ["get", resource_type, name, "-o", output]
+    if namespace:
+        args.extend(["-n", namespace])
     result = run_kubectl(args)
     typer.echo(result.stdout)
 
@@ -65,13 +67,16 @@ def get_resource(
 def logs_resource(
     resource_type: ResourceType,
     name: str,
-    namespace: str,
+    namespace: str | None,
     follow: bool,
     tail: int | None,
 ) -> None:
     """View logs from a resource pod."""
     label = RESOURCE_LABELS[resource_type]
-    args = ["logs", "-l", f"{label}={name}", "-n", namespace]
+    args = ["logs", "-l", f"{label}={name}"]
+
+    if namespace:
+        args.extend(["-n", namespace])
 
     if follow:
         args.append("-f")
@@ -87,19 +92,20 @@ def logs_resource(
 
 
 def delete_resource(
-    resource_type: ResourceType, name: str, namespace: str, force: bool
+    resource_type: ResourceType, name: str, namespace: str | None, force: bool
 ) -> None:
     """Delete a resource."""
     display_name = resource_type.capitalize()
+    ns_display = namespace or "current namespace"
     if not force:
-        confirm = typer.confirm(
-            f"Delete {display_name} '{name}' in namespace '{namespace}'?"
-        )
+        confirm = typer.confirm(f"Delete {display_name} '{name}' in {ns_display}?")
         if not confirm:
             typer.echo("Cancelled.")
             return
 
-    args = ["delete", resource_type, name, "-n", namespace]
+    args = ["delete", resource_type, name]
+    if namespace:
+        args.extend(["-n", namespace])
     result = run_kubectl(args)
     typer.echo(result.stdout)
 

@@ -15,16 +15,18 @@ def list_command(namespace: str | None, output: str) -> None:
     list_resources(RESOURCE_TYPE, namespace, output)
 
 
-def get_command(name: str, namespace: str, output: str) -> None:
+def get_command(name: str, namespace: str | None, output: str) -> None:
     """Get a specific MCPServer."""
     get_resource(RESOURCE_TYPE, name, namespace, output)
 
 
-def logs_command(name: str, namespace: str, follow: bool, tail: int | None) -> None:
+def logs_command(
+    name: str, namespace: str | None, follow: bool, tail: int | None
+) -> None:
     """View logs from an MCPServer pod."""
     logs_resource(RESOURCE_TYPE, name, namespace, follow, tail)
 
 
-def delete_command(name: str, namespace: str, force: bool) -> None:
+def delete_command(name: str, namespace: str | None, force: bool) -> None:
     """Delete an MCPServer."""
     delete_resource(RESOURCE_TYPE, name, namespace, force)
