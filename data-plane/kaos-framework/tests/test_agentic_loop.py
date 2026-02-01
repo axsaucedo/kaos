@@ -37,7 +37,7 @@ class MockModelAPI(ModelAPI):
         self.client = None  # Not used
         self._mock_responses: Optional[List[str]] = None  # Not used in mock
 
-    async def process_message(self, messages, stream=False):
+    async def process_message(self, messages, stream=False, seed: Optional[int] = None):
         """Return next response from the list.
 
         Returns str if stream=False, AsyncIterator[str] if stream=True.

@@ -314,6 +314,7 @@ class Agent:
         message: Union[str, List[Dict[str, str]]],
         session_id: Optional[str] = None,
         stream: bool = False,
+        seed: Optional[int] = None,
     ) -> AsyncIterator[str]:
         """Process a message with agentic loop for tool calling and delegation.
 
@@ -321,6 +322,7 @@ class Agent:
             message: User message to process - can be a string or OpenAI-style message array
             session_id: Optional session ID (created if not provided)
             stream: Whether to stream the response
+            seed: Optional seed for reproducible generation
 
         Yields:
             Content chunks (streaming) or single complete response (non-streaming)
@@ -343,6 +345,8 @@ class Agent:
             "stream": stream,
             ATTR_SESSION_ID: session_id,
         }
+        if seed is not None:
+            span_attrs["seed"] = seed
         otel.span_begin(
             "agent.agentic_loop",
             attrs=span_attrs,
@@ -397,7 +401,7 @@ class Agent:
 
             # Agentic loop - iterate up to max_steps
             logger.debug(f"Starting agentic loop with {len(messages)} messages")
-            async for chunk in self._agentic_loop(messages, session_id, stream):
+            async for chunk in self._agentic_loop(messages, session_id, stream, seed=seed):
                 yield chunk
 
         except Exception as e:
@@ -417,6 +421,7 @@ class Agent:
         messages: List[Dict[str, str]],
         session_id: str,
         stream: bool,
+        seed: Optional[int] = None,
     ) -> AsyncIterator[str]:
         """Execute the agentic loop with tracing."""
         for step in range(self.max_steps):
@@ -430,7 +435,7 @@ class Agent:
             try:
                 # Get model response
                 model_name = self.model_api.model if self.model_api else "unknown"
-                content = await self._call_model(messages, model_name)
+                content = await self._call_model(messages, model_name, seed=seed)
 
                 # Check for tool call
                 tool_call = self._parse_block(content, "tool_call")
@@ -522,7 +527,9 @@ class Agent:
         logger.warning(max_steps_msg)
         yield max_steps_msg
 
-    async def _call_model(self, messages: List[Dict[str, str]], model_name: str) -> str:
+    async def _call_model(
+        self, messages: List[Dict[str, str]], model_name: str, seed: Optional[int] = None
+    ) -> str:
         """Call the model API with tracing."""
         otel.span_begin(
             "model.inference",
@@ -539,7 +546,9 @@ class Agent:
                 if msg.get("role") in ("user", "task-delegation"):
                     logger.debug(f"Model input (last user msg): {msg.get('content', '')[:200]}...")
                     break
-            content = cast(str, await self.model_api.process_message(messages, stream=False))
+            content = cast(
+                str, await self.model_api.process_message(messages, stream=False, seed=seed)
+            )
             logger.debug(f"Model response ({len(content)} chars): {content[:200]}...")
             return content
         except Exception as e:

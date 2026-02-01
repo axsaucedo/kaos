@@ -28,7 +28,9 @@ class MockModelAPI(ModelAPI):
         self.api_base = "mock://localhost"
         self._mock_responses: Optional[List[str]] = None  # Not used in this mock
 
-    async def process_message(self, messages: List[Dict], stream: bool = False):
+    async def process_message(
+        self, messages: List[Dict], stream: bool = False, seed: Optional[int] = None
+    ):
         """Return a mock response based on the name.
 
         Returns str if stream=False, AsyncIterator[str] if stream=True.

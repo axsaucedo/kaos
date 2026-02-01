@@ -89,6 +89,8 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			log.Error(err, "failed to add finalizer")
 			return ctrl.Result{}, err
 		}
+		// Requeue to continue with fresh object after finalizer is added
+		return ctrl.Result{Requeue: true}, nil
 	}
 
 	// Set initial status
@@ -99,6 +101,8 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 			log.Error(err, "failed to update status")
 			return ctrl.Result{}, err
 		}
+		// Requeue to continue with fresh object after status is set
+		return ctrl.Result{Requeue: true}, nil
 	}
 
 	// Validate telemetry config
@@ -422,7 +426,7 @@ func (r *MCPServerReconciler) constructContainerFromRuntime(ctx context.Context,
 					Port: intstr.FromInt(8000),
 				},
 			},
-			InitialDelaySeconds: 20,
+			InitialDelaySeconds: 5,
 			PeriodSeconds:       10,
 			TimeoutSeconds:      3,
 			FailureThreshold:    3,
@@ -433,7 +437,7 @@ func (r *MCPServerReconciler) constructContainerFromRuntime(ctx context.Context,
 					Port: intstr.FromInt(8000),
 				},
 			},
-			InitialDelaySeconds: 15,
+			InitialDelaySeconds: 3,
 			PeriodSeconds:       5,
 			TimeoutSeconds:      3,
 			FailureThreshold:    2,

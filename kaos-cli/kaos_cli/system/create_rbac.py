@@ -15,21 +15,21 @@ def create_rbac_command(
     cluster_wide: bool,
 ) -> None:
     """Create RBAC resources for MCPServer Kubernetes runtime.
-    
+
     Generates and applies ServiceAccount, Role/ClusterRole, and RoleBinding/ClusterRoleBinding.
     """
     if read_only:
         verbs = ["get", "list", "watch"]
-    
+
     if not verbs:
         verbs = ["get", "list", "watch", "create", "update", "patch", "delete"]
-    
+
     if not resources:
         resources = ["pods", "deployments", "services", "configmaps", "secrets"]
-    
+
     # Generate YAML
     yaml_docs = []
-    
+
     # ServiceAccount
     sa_yaml = f"""apiVersion: v1
 kind: ServiceAccount
@@ -38,7 +38,7 @@ metadata:
   namespace: {namespace}
 """
     yaml_docs.append(sa_yaml)
-    
+
     # Role or ClusterRole
     if cluster_wide:
         role_yaml = f"""apiVersion: rbac.authorization.k8s.io/v1
@@ -62,7 +62,7 @@ rules:
   verbs: [{', '.join(f'"{v}"' for v in verbs)}]
 """
     yaml_docs.append(role_yaml)
-    
+
     # RoleBinding or ClusterRoleBinding
     if cluster_wide:
         binding_yaml = f"""apiVersion: rbac.authorization.k8s.io/v1
@@ -112,18 +112,18 @@ roleRef:
   name: {name}
   apiGroup: rbac.authorization.k8s.io
 """
-    
+
     if not namespaces or cluster_wide:
         yaml_docs.append(binding_yaml)
-    
+
     combined_yaml = "---\n".join(yaml_docs)
-    
+
     # Output the YAML
     typer.echo("Generated RBAC resources:")
     typer.echo("-" * 40)
     typer.echo(combined_yaml)
     typer.echo("-" * 40)
-    
+
     # Apply via kubectl
     typer.echo("\nApplying RBAC resources...")
     try:

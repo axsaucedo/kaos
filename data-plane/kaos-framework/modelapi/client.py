@@ -68,12 +68,14 @@ class ModelAPI:
         self,
         messages: List[Dict[str, str]],
         stream: bool = False,
+        seed: Optional[int] = None,
     ) -> Union[str, AsyncIterator[str]]:
         """Process messages and return response.
 
         Args:
             messages: OpenAI-format messages
             stream: If True, returns AsyncIterator[str]; if False, returns str
+            seed: Optional seed for reproducible generation
 
         Returns:
             str if stream=False, AsyncIterator[str] if stream=True
@@ -93,12 +95,16 @@ class ModelAPI:
 
         # Call real API
         if stream:
-            return self._stream_response(messages)
-        return await self._complete_response(messages)
+            return self._stream_response(messages, seed=seed)
+        return await self._complete_response(messages, seed=seed)
 
-    async def _complete_response(self, messages: List[Dict[str, str]]) -> str:
+    async def _complete_response(
+        self, messages: List[Dict[str, str]], seed: Optional[int] = None
+    ) -> str:
         """Non-streaming completion - returns content string."""
         payload = {"model": self.model, "messages": messages, "stream": False}
+        if seed is not None:
+            payload["seed"] = seed
 
         try:
             response = await self.client.post("/v1/chat/completions", json=payload)
@@ -117,9 +123,13 @@ class ModelAPI:
             logger.error(f"JSON decode error in completion: {e}")
             raise ValueError(f"Invalid JSON response: {e}")
 
-    async def _stream_response(self, messages: List[Dict[str, str]]) -> AsyncIterator[str]:
+    async def _stream_response(
+        self, messages: List[Dict[str, str]], seed: Optional[int] = None
+    ) -> AsyncIterator[str]:
         """Streaming completion - yields content chunks."""
         payload = {"model": self.model, "messages": messages, "stream": True}
+        if seed is not None:
+            payload["seed"] = seed
 
         try:
             async with self.client.stream(

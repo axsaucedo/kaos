@@ -8719,32 +8719,8 @@ spec:
                           for production)
                         type: string
                       valueFrom:
-                        description: ValueFrom is a reference to a secret or configmap
+                        description: ValueFrom is a reference to a secret
                         properties:
-                          configMapKeyRef:
-                            description: ConfigMapKeyRef is a reference to a configmap
-                              key
-                            properties:
-                              key:
-                                description: The key to select.
-                                type: string
-                              name:
-                                default: ""
-                                description: |-
-                                  Name of the referent.
-                                  This field is effectively required, but due to backwards compatibility is
-                                  allowed to be empty. Instances of this type with an empty value here are
-                                  almost certainly wrong.
-                                  More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                                type: string
-                              optional:
-                                description: Specify whether the ConfigMap or its
-                                  key must be defined
-                                type: boolean
-                            required:
-                            - key
-                            type: object
-                            x-kubernetes-map-type: atomic
                           secretKeyRef:
                             description: SecretKeyRef is a reference to a secret key
                             properties:

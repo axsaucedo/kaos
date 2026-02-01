@@ -17,45 +17,63 @@ def invoke_command(
 ) -> None:
     """Send a message to an Agent via port-forward."""
     import httpx
-    
+
     # Find the service for this Agent
     result = subprocess.run(
-        ["kubectl", "get", "svc", f"agent-{name}", "-n", namespace, "-o", "jsonpath={.spec.ports[0].port}"],
+        [
+            "kubectl",
+            "get",
+            "svc",
+            f"agent-{name}",
+            "-n",
+            namespace,
+            "-o",
+            "jsonpath={.spec.ports[0].port}",
+        ],
         capture_output=True,
         text=True,
     )
-    
+
     if result.returncode != 0:
-        typer.echo(f"Error: Agent '{name}' not found in namespace '{namespace}'", err=True)
+        typer.echo(
+            f"Error: Agent '{name}' not found in namespace '{namespace}'", err=True
+        )
         sys.exit(1)
-    
+
     svc_port = result.stdout.strip() or "8000"
-    
+
     typer.echo(f"Port-forwarding to agent-{name}:{svc_port}...")
-    
+
     # Start port-forward in background
     pf_process = subprocess.Popen(
-        ["kubectl", "port-forward", f"svc/agent-{name}", f"{port}:{svc_port}", "-n", namespace],
+        [
+            "kubectl",
+            "port-forward",
+            f"svc/agent-{name}",
+            f"{port}:{svc_port}",
+            "-n",
+            namespace,
+        ],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
-    
+
     def cleanup():
         pf_process.terminate()
         pf_process.wait()
-    
+
     signal.signal(signal.SIGINT, lambda s, f: (cleanup(), sys.exit(0)))
-    
+
     time.sleep(2)
-    
+
     if pf_process.poll() is not None:
         stderr = pf_process.stderr.read().decode() if pf_process.stderr else ""
         typer.echo(f"Error: Port-forward failed: {stderr}", err=True)
         sys.exit(1)
-    
+
     try:
         typer.echo(f"Sending message: {message}")
-        
+
         try:
             if stream:
                 # Streaming response
@@ -92,17 +110,21 @@ def invoke_command(
                     },
                     timeout=120.0,
                 )
-                
+
                 if response.status_code == 200:
                     result = response.json()
                     if "choices" in result and result["choices"]:
-                        content = result["choices"][0].get("message", {}).get("content", "")
+                        content = (
+                            result["choices"][0].get("message", {}).get("content", "")
+                        )
                         typer.echo("\n📤 Response:")
                         typer.echo(content)
                     else:
                         typer.echo(json.dumps(result, indent=2))
                 else:
-                    typer.echo(f"Error: HTTP {response.status_code}: {response.text}", err=True)
+                    typer.echo(
+                        f"Error: HTTP {response.status_code}: {response.text}", err=True
+                    )
         except httpx.ConnectError:
             typer.echo("Error: Could not connect to Agent", err=True)
         except Exception as e:

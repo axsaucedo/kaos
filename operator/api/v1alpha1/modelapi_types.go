@@ -35,10 +35,6 @@ type ApiKeyValueFrom struct {
 	// SecretKeyRef is a reference to a secret key
 	// +kubebuilder:validation:Optional
 	SecretKeyRef *corev1.SecretKeySelector `json:"secretKeyRef,omitempty"`
-
-	// ConfigMapKeyRef is a reference to a configmap key
-	// +kubebuilder:validation:Optional
-	ConfigMapKeyRef *corev1.ConfigMapKeySelector `json:"configMapKeyRef,omitempty"`
 }
 
 // +kubebuilder:object:generate=true
@@ -49,7 +45,7 @@ type ApiKeySource struct {
 	// +kubebuilder:validation:Optional
 	Value string `json:"value,omitempty"`
 
-	// ValueFrom is a reference to a secret or configmap
+	// ValueFrom is a reference to a secret
 	// +kubebuilder:validation:Optional
 	ValueFrom *ApiKeyValueFrom `json:"valueFrom,omitempty"`
 }

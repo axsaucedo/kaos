@@ -27,7 +27,7 @@ if __name__ == "__main__":
     mcp.run(transport="streamable-http", host="0.0.0.0", port=8000)
 '''
 
-TEMPLATE_PYPROJECT_TOML = '''[project]
+TEMPLATE_PYPROJECT_TOML = """[project]
 name = "my-mcp-server"
 version = "0.1.0"
 description = "A FastMCP server created with kaos mcp init"
@@ -42,9 +42,9 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["."]
-'''
+"""
 
-TEMPLATE_README_MD = '''# My MCP Server
+TEMPLATE_README_MD = """# My MCP Server
 
 A FastMCP server created with `kaos mcp init`.
 
@@ -75,7 +75,7 @@ Deploy to Kubernetes:
 ```bash
 kaos mcp deploy --name my-mcp-server --image my-mcp-server:latest
 ```
-'''
+"""
 
 
 def init_command(
@@ -84,25 +84,27 @@ def init_command(
 ) -> None:
     """Initialize a new FastMCP server project."""
     target_dir = Path(directory) if directory else Path.cwd()
-    
+
     if not target_dir.exists():
         target_dir.mkdir(parents=True)
-    
+
     files = {
         "server.py": TEMPLATE_SERVER_PY,
         "pyproject.toml": TEMPLATE_PYPROJECT_TOML,
         "README.md": TEMPLATE_README_MD,
     }
-    
+
     for filename, content in files.items():
         filepath = target_dir / filename
         if filepath.exists() and not force:
-            typer.echo(f"⚠️  Skipping {filename} (already exists, use --force to overwrite)")
+            typer.echo(
+                f"⚠️  Skipping {filename} (already exists, use --force to overwrite)"
+            )
             continue
-        
+
         filepath.write_text(content)
         typer.echo(f"✅ Created {filepath}")
-    
+
     typer.echo(f"\n🎉 FastMCP project initialized in {target_dir}")
     typer.echo("\nNext steps:")
     typer.echo("  1. Edit server.py to add your tools")

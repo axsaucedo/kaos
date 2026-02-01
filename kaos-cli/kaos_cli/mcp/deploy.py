@@ -12,7 +12,7 @@ except ImportError:
     import tomli as tomllib
 
 
-CUSTOM_RUNTIME_TEMPLATE = '''apiVersion: kaos.tools/v1alpha1
+CUSTOM_RUNTIME_TEMPLATE = """apiVersion: kaos.tools/v1alpha1
 kind: MCPServer
 metadata:
   name: {name}
@@ -24,7 +24,7 @@ spec:
     ports:
     - containerPort: 8000
       name: http
-'''
+"""
 
 
 def read_project_name(directory: str = ".") -> str | None:
@@ -48,10 +48,10 @@ def infer_image_name(name: str, tag: str = "latest") -> str:
 def deploy_from_yaml(file: str, namespace: str | None) -> None:
     """Deploy an MCPServer from YAML file."""
     args = ["kubectl", "apply", "-f", file]
-    
+
     if namespace:
         args.extend(["-n", namespace])
-    
+
     result = subprocess.run(args, capture_output=True, text=True)
     if result.returncode != 0:
         typer.echo(result.stderr or result.stdout, err=True)
@@ -72,25 +72,31 @@ def deploy_custom_image(
         namespace=namespace,
         image=image,
     )
-    
+
     # Add optional params via env var
     if params:
-        yaml_content = yaml_content.rstrip() + f'''
+        yaml_content = (
+            yaml_content.rstrip()
+            + f"""
     env:
     - name: MCP_PARAMS
       value: "{params}"
-'''
-    
+"""
+        )
+
     # Add optional service account
     if service_account:
-        yaml_content = yaml_content.rstrip() + f'''
+        yaml_content = (
+            yaml_content.rstrip()
+            + f"""
   serviceAccountName: {service_account}
-'''
-    
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+"""
+        )
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
         f.write(yaml_content)
         tmp_path = f.name
-    
+
     try:
         args = ["kubectl", "apply", "-f", tmp_path]
         result = subprocess.run(args, capture_output=True, text=True)
@@ -111,31 +117,37 @@ def deploy_runtime(
     service_account: str | None,
 ) -> None:
     """Deploy an MCPServer with a registered runtime."""
-    yaml_content = f'''apiVersion: kaos.tools/v1alpha1
+    yaml_content = f"""apiVersion: kaos.tools/v1alpha1
 kind: MCPServer
 metadata:
   name: {name}
   namespace: {namespace}
 spec:
   runtime: {runtime}
-'''
-    
+"""
+
     # Add params via runtime-specific config
     if params:
-        yaml_content = yaml_content.rstrip() + f'''
+        yaml_content = (
+            yaml_content.rstrip()
+            + f"""
   params: |
     {params}
-'''
-    
+"""
+        )
+
     if service_account:
-        yaml_content = yaml_content.rstrip() + f'''
+        yaml_content = (
+            yaml_content.rstrip()
+            + f"""
   serviceAccountName: {service_account}
-'''
-    
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+"""
+        )
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
         f.write(yaml_content)
         tmp_path = f.name
-    
+
     try:
         args = ["kubectl", "apply", "-f", tmp_path]
         result = subprocess.run(args, capture_output=True, text=True)

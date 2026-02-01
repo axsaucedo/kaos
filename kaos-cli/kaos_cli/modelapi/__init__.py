@@ -2,7 +2,12 @@
 
 import typer
 
-from kaos_cli.utils.crud import list_resources, get_resource, logs_resource, delete_resource
+from kaos_cli.utils.crud import (
+    list_resources,
+    get_resource,
+    logs_resource,
+    delete_resource,
+)
 from kaos_cli.modelapi.deploy import deploy_from_yaml, deploy_modelapi
 from kaos_cli.modelapi.invoke import invoke_command
 
@@ -99,7 +104,9 @@ def delete_modelapi(
 def deploy_modelapi_cmd(
     file: str = typer.Argument(None, help="Path to ModelAPI YAML file."),
     name: str = typer.Option(None, "--name", help="Name for the ModelAPI."),
-    backend: str = typer.Option("litellm", "--backend", "-b", help="Backend type (litellm, ollama)."),
+    backend: str = typer.Option(
+        "litellm", "--backend", "-b", help="Backend type (litellm, ollama)."
+    ),
     model: str = typer.Option(None, "--model", "-m", help="Model name."),
     namespace: str = typer.Option(
         "default",
@@ -109,13 +116,13 @@ def deploy_modelapi_cmd(
     ),
 ) -> None:
     """Deploy a ModelAPI from YAML file or flags.
-    
+
     Examples:
       kaos modelapi deploy config.yaml                      # Deploy from YAML file
       kaos modelapi deploy --name my-api --model gpt-4      # Deploy with flags
     """
     import sys
-    
+
     if file:
         deploy_from_yaml(file=file, namespace=namespace)
     elif name and model:
@@ -149,4 +156,6 @@ def invoke_modelapi(
     ),
 ) -> None:
     """Send a chat completion request to a ModelAPI via port-forward."""
-    invoke_command(name=name, namespace=namespace, message=message, model=model, port=port)
+    invoke_command(
+        name=name, namespace=namespace, message=message, model=model, port=port
+    )
