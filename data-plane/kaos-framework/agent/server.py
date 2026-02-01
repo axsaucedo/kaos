@@ -376,7 +376,7 @@ class AgentServer:
             The agent decides when to delegate or call tools based on model response.
             Server only routes requests to the agent for processing.
             Extracts trace context from incoming headers for distributed tracing.
-            
+
             Session ID can be provided via:
             - X-Session-ID header
             - session_id field in request body
@@ -394,7 +394,7 @@ class AgentServer:
                 model_name = body.get("model", "agent")
                 stream_requested = body.get("stream", False)
                 seed = body.get("seed")  # Optional seed for reproducible generation
-                
+
                 # Extract session_id from header (preferred) or body
                 session_id = request.headers.get("X-Session-ID") or body.get("session_id")
 
