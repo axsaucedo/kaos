@@ -1,326 +1,311 @@
+---
+jupyter:
+  jupytext:
+    cell_metadata_filter: -all
+    text_representation:
+      extension: .md
+      format_name: markdown
+      format_version: '1.3'
+      jupytext_version: 1.19.1
+  kernelspec:
+    display_name: Python 3 (ipykernel)
+    language: python
+    name: python3
+---
+
 # Multi-Agent System with Telemetry
 
-This example demonstrates building a multi-agent system with OpenTelemetry observability. You'll see how to track agent interactions, tool calls, and delegation events across your agent network.
+This example demonstrates building a multi-agent system with delegation between agents. You'll see how a coordinator agent delegates to specialist agents.
 
 ## Prerequisites
 
-- KAOS operator installed with telemetry enabled ([Installation Guide](/getting-started/installation))
+- KAOS operator installed ([Installation Guide](/getting-started/installation))
 - `kaos-cli` installed
-- Helm (for deploying OTEL collector)
+- Access to a Kubernetes cluster
 
 ## Overview
 
 We'll create:
-1. An OTEL collector to receive telemetry
-2. A coordinator agent that delegates to specialists
-3. Specialist agents for different tasks
-4. Dashboard to view traces and metrics
+1. A coordinator agent that delegates to specialists
+2. Specialist agents (researcher, analyst) that handle specific tasks
+3. Demonstrate agent-to-agent communication via delegation
 
-## Step 1: Deploy the OTEL Collector
+## Setup
 
-First, deploy an OpenTelemetry collector to receive agent telemetry:
+First, let's set up the environment and create a unique namespace:
 
-```console
-# Create monitoring namespace
-$ kubectl create namespace monitoring
+```python
+import os
+import subprocess
+import time
+import json
 
-# Deploy a simple OTEL collector
-$ kubectl apply -f - <<EOF
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: otel-collector-config
-  namespace: monitoring
-data:
-  config.yaml: |
-    receivers:
-      otlp:
-        protocols:
-          grpc:
-            endpoint: 0.0.0.0:4317
-          http:
-            endpoint: 0.0.0.0:4318
-    
-    processors:
-      batch:
-        timeout: 1s
-    
-    exporters:
-      logging:
-        verbosity: detailed
-    
-    service:
-      pipelines:
-        traces:
-          receivers: [otlp]
-          processors: [batch]
-          exporters: [logging]
-        metrics:
-          receivers: [otlp]
-          processors: [batch]
-          exporters: [logging]
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: otel-collector
-  namespace: monitoring
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: otel-collector
-  template:
-    metadata:
-      labels:
-        app: otel-collector
-    spec:
-      containers:
-        - name: collector
-          image: otel/opentelemetry-collector:0.96.0
-          args: ["--config=/etc/otel/config.yaml"]
-          ports:
-            - containerPort: 4317
-            - containerPort: 4318
-          volumeMounts:
-            - name: config
-              mountPath: /etc/otel
-      volumes:
-        - name: config
-          configMap:
-            name: otel-collector-config
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: otel-collector
-  namespace: monitoring
-spec:
-  ports:
-    - name: grpc
-      port: 4317
-    - name: http
-      port: 4318
-  selector:
-    app: otel-collector
-EOF
+# Get namespace from environment or create a unique one
+namespace = os.environ.get("TEST_NAMESPACE", f"multi-agent-{int(time.time()) % 10000}")
+print(f"Using namespace: {namespace}")
+
+# Create namespace
+subprocess.run(["kubectl", "create", "namespace", namespace], check=False)
 ```
 
-Wait for the collector to be ready:
-
-```console
-$ kubectl get pods -n monitoring -w
-```
-
-## Step 2: Create the ModelAPI
+## Step 1: Create the ModelAPI
 
 Create a shared ModelAPI for all agents (using mock responses for testing):
 
-```console
-$ kaos modelapi deploy telemetry-api --mode Proxy
+```python
+# Deploy ModelAPI using kaos CLI
+result = subprocess.run(
+    ["kaos", "modelapi", "deploy", "team-api", "-n", namespace, "--mode", "Proxy"],
+    capture_output=True, text=True
+)
+print(result.stdout)
+if result.returncode != 0:
+    print(f"stderr: {result.stderr}")
 ```
 
-## Step 3: Create Specialist Agents
+Wait for ModelAPI to be ready:
 
-Create worker agents with telemetry enabled:
+```python
+# Wait for ModelAPI deployment to be ready
+for i in range(60):
+    result = subprocess.run(
+        ["kubectl", "get", "deployment", "modelapi-team-api", "-n", namespace, 
+         "-o", "jsonpath={.status.readyReplicas}"],
+        capture_output=True, text=True
+    )
+    if result.stdout.strip() == "1":
+        print("ModelAPI is ready!")
+        break
+    time.sleep(2)
+else:
+    raise TimeoutError("ModelAPI did not become ready")
+```
+
+## Step 2: Create the Researcher Agent
+
+Create a specialist agent that handles research tasks:
+
+```python
+# Mock response for the researcher
+researcher_mock = json.dumps([
+    "Here is my research on the topic: AI systems are increasingly being used in enterprise environments. Key trends include automation, decision support, and customer service. Growth is estimated at 40% year-over-year."
+])
+
+# Deploy researcher agent
+result = subprocess.run([
+    "kaos", "agent", "deploy", "researcher",
+    "-n", namespace,
+    "--modelapi", "team-api",
+    "--model", "mock-model",
+    "--instructions", "You are a research specialist. You gather and synthesize information on any topic.",
+    "--mock-response", researcher_mock,
+    "--expose"
+], capture_output=True, text=True)
+print(result.stdout)
+if result.returncode != 0:
+    print(f"stderr: {result.stderr}")
+```
+
+Wait for researcher agent:
+
+```python
+# Wait for researcher deployment
+for i in range(60):
+    result = subprocess.run(
+        ["kubectl", "get", "deployment", "agent-researcher", "-n", namespace,
+         "-o", "jsonpath={.status.readyReplicas}"],
+        capture_output=True, text=True
+    )
+    if result.stdout.strip() == "1":
+        print("Researcher agent is ready!")
+        break
+    time.sleep(2)
+else:
+    raise TimeoutError("Researcher agent did not become ready")
+```
+
+## Step 3: Create the Analyst Agent
+
+Create another specialist for data analysis:
+
+```python
+# Mock response for the analyst
+analyst_mock = json.dumps([
+    "Based on my analysis: The data shows 40% year-over-year growth in AI adoption. The highest impact areas are customer service automation (60%), decision support systems (25%), and predictive analytics (15%)."
+])
+
+# Deploy analyst agent
+result = subprocess.run([
+    "kaos", "agent", "deploy", "analyst",
+    "-n", namespace,
+    "--modelapi", "team-api",
+    "--model", "mock-model",
+    "--instructions", "You are a data analyst. You analyze information and provide insights with statistics.",
+    "--mock-response", analyst_mock,
+    "--expose"
+], capture_output=True, text=True)
+print(result.stdout)
+if result.returncode != 0:
+    print(f"stderr: {result.stderr}")
+```
+
+Wait for analyst agent:
+
+```python
+# Wait for analyst deployment
+for i in range(60):
+    result = subprocess.run(
+        ["kubectl", "get", "deployment", "agent-analyst", "-n", namespace,
+         "-o", "jsonpath={.status.readyReplicas}"],
+        capture_output=True, text=True
+    )
+    if result.stdout.strip() == "1":
+        print("Analyst agent is ready!")
+        break
+    time.sleep(2)
+else:
+    raise TimeoutError("Analyst agent did not become ready")
+```
+
+## Step 4: Create the Coordinator Agent
+
+Create the coordinator that delegates to specialists:
+
+```python
+# Mock responses for the coordinator - it will delegate to both specialists
+coordinator_mock = json.dumps([
+    'Let me delegate the research portion first.\n\n```delegate\n{"agent": "researcher", "task": "Research AI adoption trends in enterprises"}\n```',
+    'Now let me get the analyst\'s perspective.\n\n```delegate\n{"agent": "analyst", "task": "Analyze the growth patterns from the research"}\n```',
+    'Based on input from my team:\n\n**Research Summary:** AI is growing in enterprise use with focus on automation and customer service.\n\n**Analysis:** 40% YoY growth, with customer service automation leading at 60%.\n\nThe trend indicates continued expansion in AI-powered automation.'
+])
+
+# Deploy coordinator agent with access to other agents
+result = subprocess.run([
+    "kaos", "agent", "deploy", "coordinator",
+    "-n", namespace,
+    "--modelapi", "team-api",
+    "--model", "mock-model",
+    "--instructions", "You are a coordinator. You delegate research to 'researcher' and analysis to 'analyst', then synthesize their responses.",
+    "--mock-response", coordinator_mock,
+    "--sub-agent", "researcher",
+    "--sub-agent", "analyst",
+    "--expose"
+], capture_output=True, text=True)
+print(result.stdout)
+if result.returncode != 0:
+    print(f"stderr: {result.stderr}")
+```
+
+Wait for coordinator agent:
+
+```python
+# Wait for coordinator deployment
+for i in range(60):
+    result = subprocess.run(
+        ["kubectl", "get", "deployment", "agent-coordinator", "-n", namespace,
+         "-o", "jsonpath={.status.readyReplicas}"],
+        capture_output=True, text=True
+    )
+    if result.stdout.strip() == "1":
+        print("Coordinator agent is ready!")
+        break
+    time.sleep(2)
+else:
+    raise TimeoutError("Coordinator agent did not become ready")
+```
+
+## Step 5: Test the Multi-Agent System
+
+Send a request to the coordinator and watch it delegate:
+
+```python
+# Invoke the coordinator
+result = subprocess.run([
+    "kaos", "agent", "invoke", "coordinator",
+    "-n", namespace,
+    "--message", "What are the current trends in enterprise AI adoption?"
+], capture_output=True, text=True)
+print("Coordinator response:")
+print(result.stdout)
+if result.returncode != 0:
+    print(f"stderr: {result.stderr}")
+```
+
+## Step 6: Verify the Result
+
+The coordinator should have delegated to both specialists and synthesized their responses:
+
+```python
+# Verify the response contains synthesized information
+output = result.stdout.lower()
+if "40%" in output or "growth" in output or "yoy" in output:
+    print("\nSUCCESS: Multi-agent delegation worked correctly!")
+    print("The coordinator synthesized responses from researcher and analyst.")
+else:
+    print("\nResponse may not contain expected synthesis.")
+    print("Check the full output above for details.")
+```
+
+## How Delegation Works
+
+The coordinator's mock responses include `delegate` blocks:
+
+```
+```delegate
+{"agent": "researcher", "task": "Research AI trends"}
+```
+```
+
+When the agent framework sees this, it:
+1. Looks up the `researcher` agent in the sub-agents list
+2. Sends the task as a message to that agent
+3. Waits for the response
+4. Includes the response in the conversation context
+5. Continues to the next mock response
+
+## Architecture
+
+```mermaid
+graph TB
+    User[User Request] --> C[Coordinator]
+    C --> R[Researcher Agent]
+    C --> A[Analyst Agent]
+    R --> C
+    A --> C
+    C --> Response[Synthesized Response]
+```
+
+## Enabling Telemetry (Production)
+
+For production use, enable OpenTelemetry on your agents:
 
 ```yaml
-# agents.yaml
-apiVersion: kaos.tools/v1alpha1
-kind: Agent
-metadata:
-  name: researcher
-spec:
-  modelAPI: telemetry-api
-  model: gpt-4o
-  config:
-    description: "Research specialist agent"
-    instructions: "You gather and synthesize information on any topic."
-    telemetry:
-      enabled: true
-      endpoint: "http://otel-collector.monitoring.svc:4317"
-  container:
-    env:
-      - name: DEBUG_MOCK_RESPONSES
-        value: '["Here is my research on the topic: AI systems are increasingly being used in enterprise environments for automation, decision support, and customer service."]'
-  agentNetwork:
-    expose: true
----
-apiVersion: kaos.tools/v1alpha1
-kind: Agent
-metadata:
-  name: analyst
-spec:
-  modelAPI: telemetry-api
-  model: gpt-4o
-  config:
-    description: "Data analyst agent"
-    instructions: "You analyze information and provide insights."
-    telemetry:
-      enabled: true
-      endpoint: "http://otel-collector.monitoring.svc:4317"
-  container:
-    env:
-      - name: DEBUG_MOCK_RESPONSES
-        value: '["Based on my analysis: The trend shows 40% year-over-year growth in AI adoption, with the highest impact in customer service automation."]'
-  agentNetwork:
-    expose: true
----
 apiVersion: kaos.tools/v1alpha1
 kind: Agent
 metadata:
   name: coordinator
 spec:
-  modelAPI: telemetry-api
+  modelAPI: team-api
   model: gpt-4o
   config:
-    description: "Coordinator that delegates to specialists"
-    instructions: |
-      You coordinate between specialist agents:
-      - researcher: For gathering information
-      - analyst: For analyzing data
-      
-      Break down complex requests and delegate appropriately.
     telemetry:
       enabled: true
       endpoint: "http://otel-collector.monitoring.svc:4317"
-  container:
-    env:
-      - name: DEBUG_MOCK_RESPONSES
-        value: |
-          [
-            "I'll delegate the research portion first.\n\n```delegate\n{\"agent\": \"researcher\", \"task\": \"Research AI adoption trends in enterprises\"}\n```",
-            "Now let me get the analyst's perspective.\n\n```delegate\n{\"agent\": \"analyst\", \"task\": \"Analyze the growth patterns from the research\"}\n```",
-            "Based on input from my team:\n\n**Research Summary:** AI is growing in enterprise use.\n\n**Analysis:** 40% YoY growth, especially in customer service.\n\nThe trend indicates continued expansion in AI-powered automation."
-          ]
-  agentNetwork:
-    expose: true
-    access:
-      - researcher
-      - analyst
 ```
 
-Apply the agents:
-
-```console
-$ kubectl apply -f agents.yaml
-
-# Wait for all agents to be ready
-$ kubectl get agents -w
-```
-
-## Step 4: Test the Multi-Agent System
-
-Send a request to the coordinator:
-
-```console
-$ kaos agent invoke coordinator \
-  --message "Analyze the current trends in enterprise AI adoption"
-```
-
-The coordinator will:
-1. Delegate to the researcher
-2. Delegate to the analyst  
-3. Synthesize the responses
-
-## Step 5: View Telemetry Data
-
-Check the OTEL collector logs to see traces:
-
-```console
-$ kubectl logs -n monitoring -l app=otel-collector --tail=100
-```
-
-You should see spans like:
-- `agent.process_message` - Main request handling
-- `agent.delegation.request` - Outbound delegation
-- `agent.delegation.response` - Delegation result
-- `agent.model.completion` - LLM calls
-
-## Telemetry Architecture
-
-```mermaid
-graph TB
-    subgraph Agents
-        C[Coordinator] --> R[Researcher]
-        C --> A[Analyst]
-    end
-    
-    subgraph Telemetry
-        C -.->|traces| OC[OTEL Collector]
-        R -.->|traces| OC
-        A -.->|traces| OC
-    end
-    
-    OC --> L[Logs/Export]
-```
-
-## Available Metrics
-
-When telemetry is enabled, agents emit:
-
-| Metric | Type | Description |
-|--------|------|-------------|
-| `kaos.requests` | Counter | Total requests processed |
-| `kaos.tool_calls` | Counter | Tool invocations |
-| `kaos.delegations` | Counter | Agent-to-agent delegations |
-| `kaos.tokens` | Counter | LLM tokens used |
-| `kaos.latency` | Histogram | Request latency |
-
-## Production Setup with SigNoz
-
-For production, use SigNoz for visualization:
-
-```console
-# Install SigNoz in monitoring namespace
-$ helm repo add signoz https://charts.signoz.io
-$ helm install signoz signoz/signoz -n monitoring
-
-# Update agents to point to SigNoz
-$ kubectl patch agent coordinator --type=merge -p '
-{
-  "spec": {
-    "config": {
-      "telemetry": {
-        "endpoint": "http://signoz-otel-collector.monitoring.svc:4317"
-      }
-    }
-  }
-}'
-```
-
-Then open the UI with telemetry:
-
-```console
-$ kaos ui --monitoring-enabled
-```
-
-## Trace Propagation
-
-Traces propagate across agent boundaries. A single user request generates a trace tree:
-
-```
-coordinator (root span)
-├── model.completion
-├── delegation.request [researcher]
-│   └── researcher (child trace)
-│       └── model.completion
-├── delegation.request [analyst]
-│   └── analyst (child trace)
-│       └── model.completion
-└── model.completion (final)
-```
+This sends traces and metrics to your OTEL collector for observability.
 
 ## Cleanup
 
-```console
-$ kaos agent delete coordinator researcher analyst
-$ kaos modelapi delete telemetry-api
-$ kubectl delete namespace monitoring
+```python
+# Clean up all resources
+subprocess.run(["kubectl", "delete", "namespace", namespace, "--ignore-not-found"], 
+               capture_output=True)
+print(f"Cleaned up namespace: {namespace}")
 ```
 
 ## Next Steps
 
-- [OpenTelemetry Reference](/operator/telemetry) - Full telemetry configuration
 - [Custom MCP Server](/examples/custom-mcp-server) - Build custom tools
-- [Agent CRD Reference](/operator/agent-crd) - Agent configuration options
+- [KAOS Monkey](/examples/kaos-monkey) - Kubernetes management agent
+- [Agent CRD Reference](/operator/agent-crd) - Full configuration options
