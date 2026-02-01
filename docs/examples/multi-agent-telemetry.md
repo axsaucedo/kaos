@@ -20,12 +20,12 @@ We'll create:
 
 First, deploy an OpenTelemetry collector to receive agent telemetry:
 
-```bash
+```console
 # Create monitoring namespace
-kubectl create namespace monitoring
+$ kubectl create namespace monitoring
 
 # Deploy a simple OTEL collector
-kubectl apply -f - <<EOF
+$ kubectl apply -f - <<EOF
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -108,16 +108,16 @@ EOF
 
 Wait for the collector to be ready:
 
-```bash
-kubectl get pods -n monitoring -w
+```console
+$ kubectl get pods -n monitoring -w
 ```
 
 ## Step 2: Create the ModelAPI
 
 Create a shared ModelAPI for all agents (using mock responses for testing):
 
-```bash
-kaos modelapi deploy telemetry-api --mode Proxy
+```console
+$ kaos modelapi deploy telemetry-api --mode Proxy
 ```
 
 ## Step 3: Create Specialist Agents
@@ -202,19 +202,19 @@ spec:
 
 Apply the agents:
 
-```bash
-kubectl apply -f agents.yaml
+```console
+$ kubectl apply -f agents.yaml
 
 # Wait for all agents to be ready
-kubectl get agents -w
+$ kubectl get agents -w
 ```
 
 ## Step 4: Test the Multi-Agent System
 
 Send a request to the coordinator:
 
-```bash
-kaos agent invoke coordinator \
+```console
+$ kaos agent invoke coordinator \
   --message "Analyze the current trends in enterprise AI adoption"
 ```
 
@@ -227,8 +227,8 @@ The coordinator will:
 
 Check the OTEL collector logs to see traces:
 
-```bash
-kubectl logs -n monitoring -l app=otel-collector --tail=100
+```console
+$ kubectl logs -n monitoring -l app=otel-collector --tail=100
 ```
 
 You should see spans like:
@@ -271,13 +271,13 @@ When telemetry is enabled, agents emit:
 
 For production, use SigNoz for visualization:
 
-```bash
+```console
 # Install SigNoz in monitoring namespace
-helm repo add signoz https://charts.signoz.io
-helm install signoz signoz/signoz -n monitoring
+$ helm repo add signoz https://charts.signoz.io
+$ helm install signoz signoz/signoz -n monitoring
 
 # Update agents to point to SigNoz
-kubectl patch agent coordinator --type=merge -p '
+$ kubectl patch agent coordinator --type=merge -p '
 {
   "spec": {
     "config": {
@@ -291,8 +291,8 @@ kubectl patch agent coordinator --type=merge -p '
 
 Then open the UI with telemetry:
 
-```bash
-kaos ui --monitoring-enabled
+```console
+$ kaos ui --monitoring-enabled
 ```
 
 ## Trace Propagation
@@ -313,10 +313,10 @@ coordinator (root span)
 
 ## Cleanup
 
-```bash
-kaos agent delete coordinator researcher analyst
-kaos modelapi delete telemetry-api
-kubectl delete namespace monitoring
+```console
+$ kaos agent delete coordinator researcher analyst
+$ kaos modelapi delete telemetry-api
+$ kubectl delete namespace monitoring
 ```
 
 ## Next Steps

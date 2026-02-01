@@ -131,6 +131,32 @@ def wait_for_resource_ready(
     raise TimeoutError(f"Resource not ready at {url} after {max_wait}s{detail}")
 
 
+async def wait_for_mcp_server_ready(mcp_url: str, max_wait: int = 60):
+    """Wait for MCPServer to be reachable via Gateway.
+    
+    MCPServer uses vanilla FastMCP which returns 400/406 for GET requests
+    to /mcp endpoint (requires proper MCP protocol headers). This is expected
+    and indicates the server is running.
+    
+    Args:
+        mcp_url: Base URL of the MCP server
+        max_wait: Maximum seconds to wait
+        
+    Raises:
+        TimeoutError: If server not reachable within max_wait seconds
+    """
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        for _ in range(max_wait):
+            try:
+                response = await client.get(f"{mcp_url}/mcp")
+                if response.status_code in [400, 406]:
+                    return  # Server is running
+            except Exception:
+                pass
+            await asyncio.sleep(1)
+    raise TimeoutError(f"MCPServer not reachable at {mcp_url}/mcp after {max_wait}s")
+
+
 def _install_operator():
     """Install operator with Gateway API enabled via Helm.
 

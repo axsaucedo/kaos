@@ -1,5 +1,6 @@
 """KAOS Agent deploy command - deploy Agent resources."""
 
+import json
 import subprocess
 import sys
 import tempfile
@@ -25,6 +26,7 @@ def deploy_agent(
     instructions: str | None,
     mcp_servers: list[str] | None,
     sub_agents: list[str] | None,
+    mock_responses: list[str] | None,
 ) -> None:
     """Deploy an Agent with specified configuration."""
     yaml_content = AGENT_TEMPLATE.format(
@@ -51,6 +53,16 @@ def deploy_agent(
         yaml_content += "  agentNetwork:\n    access:\n"
         for agent in sub_agents:
             yaml_content += f"    - {agent}\n"
+
+    # Add mock responses as container env if provided
+    if mock_responses:
+        # Convert list to JSON array string
+        mock_json = json.dumps(mock_responses)
+        yaml_content += f"""  container:
+    env:
+    - name: DEBUG_MOCK_RESPONSES
+      value: '{mock_json}'
+"""
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
         f.write(yaml_content)

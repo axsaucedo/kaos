@@ -25,15 +25,15 @@ The agent will use **mock responses** for deterministic behavior - this means we
 
 First, generate the ServiceAccount and RBAC permissions:
 
-```bash
+```console
 # Generate RBAC manifest for the test namespace
-kaos system create-rbac --name kaos-monkey-sa --namespace default > rbac.yaml
+$ kaos system create-rbac --name kaos-monkey-sa --namespace default > rbac.yaml
 
 # Review the generated RBAC
-cat rbac.yaml
+$ cat rbac.yaml
 
 # Apply it
-kubectl apply -f rbac.yaml
+$ kubectl apply -f rbac.yaml
 ```
 
 The RBAC gives the ServiceAccount permissions to manage pods in the specified namespace.
@@ -42,22 +42,22 @@ The RBAC gives the ServiceAccount permissions to manage pods in the specified na
 
 Create a ModelAPI in Proxy mode (we'll use mock responses so no real LLM needed):
 
-```bash
-kaos modelapi deploy chaos-api --mode Proxy
+```console
+$ kaos modelapi deploy chaos-api --mode Proxy
 ```
 
 Wait for it to be ready:
 
-```bash
-kaos modelapi get chaos-api
+```console
+$ kaos modelapi get chaos-api
 ```
 
 ## Step 3: Deploy the Kubernetes MCP Runtime
 
 Deploy an MCP server using the built-in `kubernetes` runtime:
 
-```bash
-kaos mcp deploy k8s-tools --runtime kubernetes --sa kaos-monkey-sa
+```console
+$ kaos mcp deploy k8s-tools --runtime kubernetes --sa kaos-monkey-sa
 ```
 
 This creates an MCP server with kubectl access, using the ServiceAccount we created.
@@ -104,25 +104,25 @@ spec:
 
 Apply this configuration:
 
-```bash
-kubectl apply -f kaos-monkey.yaml
+```console
+$ kubectl apply -f kaos-monkey.yaml
 ```
 
 ## Step 5: Create a Test Pod
 
 Create a simple test pod that our chaos agent can target:
 
-```bash
-kubectl run test-pod --image=nginx --restart=Never
-kubectl get pods
+```console
+$ kubectl run test-pod --image=nginx --restart=Never
+$ kubectl get pods
 ```
 
 ## Step 6: Unleash the Chaos
 
 Now invoke the chaos agent:
 
-```bash
-kaos agent invoke kaos-monkey --message "Please cause some chaos in the default namespace"
+```console
+$ kaos agent invoke kaos-monkey --message "Please cause some chaos in the default namespace"
 ```
 
 Because we're using mock responses, the agent will:
@@ -134,8 +134,8 @@ Because we're using mock responses, the agent will:
 
 Check that the pod was deleted:
 
-```bash
-kubectl get pods
+```console
+$ kubectl get pods
 ```
 
 The `test-pod` should be gone (or in Terminating state).
@@ -168,15 +168,15 @@ graph LR
 
 To use a real LLM instead of mocks, remove the `DEBUG_MOCK_RESPONSES` env var and configure your ModelAPI with actual credentials:
 
-```bash
+```console
 # Create a ModelAPI pointing to OpenAI
-kaos modelapi deploy openai-api --mode Proxy
+$ kaos modelapi deploy openai-api --mode Proxy
 
 # Add your API key as a secret
-kubectl create secret generic openai-secret --from-literal=api-key=sk-...
+$ kubectl create secret generic openai-secret --from-literal=api-key=sk-...
 
 # Update the ModelAPI to use the secret
-kubectl patch modelapi openai-api --type=merge -p '
+$ kubectl patch modelapi openai-api --type=merge -p '
 {
   "spec": {
     "proxyConfig": {
@@ -202,12 +202,12 @@ For production chaos engineering:
 
 ## Cleanup
 
-```bash
-kaos agent delete kaos-monkey
-kaos mcp delete k8s-tools
-kaos modelapi delete chaos-api
-kubectl delete -f rbac.yaml
-kubectl delete pod test-pod --ignore-not-found
+```console
+$ kaos agent delete kaos-monkey
+$ kaos mcp delete k8s-tools
+$ kaos modelapi delete chaos-api
+$ kubectl delete -f rbac.yaml
+$ kubectl delete pod test-pod --ignore-not-found
 ```
 
 ## Next Steps

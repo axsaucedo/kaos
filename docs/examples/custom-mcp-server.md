@@ -1,6 +1,21 @@
+---
+jupyter:
+  jupytext:
+    cell_metadata_filter: -all
+    text_representation:
+      extension: .md
+      format_name: markdown
+      format_version: '1.3'
+      jupytext_version: 1.19.1
+  kernelspec:
+    display_name: Python 3 (ipykernel)
+    language: python
+    name: python3
+---
+
 # Building a Custom MCP Server
 
-This example walks through creating, building, and deploying a custom MCP server using the KAOS CLI. By the end, you'll have a working MCP server with custom tools running in your Kubernetes cluster.
+This example walks through creating, building, and deploying a custom MCP server using the KAOS CLI. By the end, you'll have a working MCP server with custom tools.
 
 ## Prerequisites
 
@@ -13,22 +28,37 @@ This example walks through creating, building, and deploying a custom MCP server
 
 First, let's scaffold a new MCP server project using the CLI:
 
-```bash
-# Create a new directory and initialize
-mkdir my-weather-mcp && cd my-weather-mcp
-kaos mcp init .
+```python
+import os
+import tempfile
+
+# Create a temporary directory for our project
+work_dir = tempfile.mkdtemp(prefix="weather-mcp-")
+os.chdir(work_dir)
+print(f"Working in: {work_dir}")
+```
+
+```python
+# Initialize the MCP project
+!kaos mcp init .
+```
+
+```python
+# Verify the files were created
+!ls -la
 ```
 
 This creates three files:
 - `server.py` - The FastMCP server with example tools
-- `pyproject.toml` - Python project configuration
+- `pyproject.toml` - Python project configuration  
 - `README.md` - Project documentation
 
 ## Step 2: Customize the Server
 
-Let's replace the default server with a weather information server. Edit `server.py`:
+Let's replace the default server with a weather information server:
 
 ```python
+%%writefile server.py
 """Weather MCP Server - provides weather information tools."""
 
 from fastmcp import FastMCP
@@ -47,7 +77,6 @@ def get_weather(city: str) -> str:
     Returns:
         A string describing the current weather conditions.
     """
-    # In a real implementation, this would call a weather API
     conditions = ["sunny", "cloudy", "rainy", "partly cloudy", "windy"]
     temp = random.randint(15, 30)
     condition = random.choice(conditions)
@@ -78,113 +107,73 @@ def get_forecast(city: str, days: int = 3) -> str:
     return f"Forecast for {city}:\n" + "\n".join(forecasts)
 
 
-@mcp.tool()
-def convert_temperature(value: float, from_unit: str, to_unit: str) -> str:
-    """Convert temperature between Celsius and Fahrenheit.
-    
-    Args:
-        value: The temperature value to convert.
-        from_unit: Source unit ('C' or 'F').
-        to_unit: Target unit ('C' or 'F').
-    
-    Returns:
-        The converted temperature as a string.
-    """
-    if from_unit.upper() == to_unit.upper():
-        return f"{value}°{to_unit.upper()}"
-    
-    if from_unit.upper() == "C" and to_unit.upper() == "F":
-        result = (value * 9/5) + 32
-    elif from_unit.upper() == "F" and to_unit.upper() == "C":
-        result = (value - 32) * 5/9
-    else:
-        return "Error: units must be 'C' or 'F'"
-    
-    return f"{value}°{from_unit.upper()} = {result:.1f}°{to_unit.upper()}"
-
-
 if __name__ == "__main__":
     mcp.run(transport="streamable-http", host="0.0.0.0", port=8000)
 ```
 
-## Step 3: Test Locally
+## Step 3: Build the Docker Image
 
-Before deploying, test the server locally:
+Build the container image using the CLI. The `--create-dockerfile` flag generates a Dockerfile for you:
 
-```bash
-# Install dependencies
-pip install -e .
-
-# Run the server
-python server.py
+```python
+# Generate a Dockerfile and build
+!kaos mcp build --name weather-mcp --tag v1 --create-dockerfile
 ```
 
-In another terminal, test the tools:
-
-```bash
-# The server exposes MCP protocol on port 8000
-curl http://localhost:8000/health
+```python
+# View the generated Dockerfile
+!cat Dockerfile
 ```
 
-## Step 4: Build the Docker Image
+For KIND clusters, use `--kind-load` to load the image directly:
 
-Build the container image using the CLI:
-
-```bash
-# Build with a tag
-kaos mcp build --name weather-mcp --tag v1
-
-# For KIND clusters, load directly
-kaos mcp build --name weather-mcp --tag v1 --kind-load
+```console
+$ kaos mcp build --name weather-mcp --tag v1 --kind-load
 ```
 
-## Step 5: Deploy to Kubernetes
+## Step 4: Deploy to Kubernetes
+
+> **Note**: The following steps require a running Kubernetes cluster with KAOS installed.
 
 Deploy the MCP server to your cluster:
 
-```bash
+```console
 # Deploy using the built image
-kaos mcp deploy weather-mcp --image weather-mcp:v1
+$ kaos mcp deploy weather-mcp --image weather-mcp:v1
 
 # Check the status
-kaos mcp get weather-mcp
-```
-
-Wait for it to be ready:
-
-```bash
-# Watch until Ready=true
-kubectl get mcpserver weather-mcp -w
-```
-
-## Step 6: Create an Agent with Your Tools
-
-Now create an agent that uses your weather MCP server:
-
-```bash
-# First, create a ModelAPI (using Hosted mode with Ollama)
-kaos modelapi deploy weather-api --mode Hosted --model smollm2:135m
+$ kaos mcp get weather-mcp
 
 # Wait for it to be ready
-kaos modelapi get weather-api
+$ kubectl get mcpserver weather-mcp -w
+```
+
+## Step 5: Create an Agent with Your Tools
+
+Create an agent that uses your weather MCP server:
+
+```console
+# First, create a ModelAPI (using Hosted mode with Ollama)
+$ kaos modelapi deploy weather-api --mode Hosted --model smollm2:135m
+
+# Wait for it to be ready
+$ kaos modelapi get weather-api
 
 # Create an agent with access to the weather tools
-kaos agent deploy weather-agent \
+$ kaos agent deploy weather-agent \
   --modelapi weather-api \
   --model smollm2:135m \
   --mcp weather-mcp \
-  --instructions "You are a helpful weather assistant. Use the weather tools to answer questions about weather conditions."
+  --instructions "You are a helpful weather assistant."
 ```
 
-## Step 7: Test the Agent
+## Step 6: Test the Agent
 
 Send a message to your agent:
 
-```bash
-kaos agent invoke weather-agent --message "What's the weather like in London?"
+```console
+$ kaos agent invoke weather-agent --message "What's the weather like in London?"
 ```
-
-The agent will use the `get_weather` tool to provide an answer.
 
 ## Understanding the Flow
 
@@ -209,10 +198,10 @@ sequenceDiagram
 
 Remove the resources when done:
 
-```bash
-kaos agent delete weather-agent
-kaos mcp delete weather-mcp
-kaos modelapi delete weather-api
+```console
+$ kaos agent delete weather-agent
+$ kaos mcp delete weather-mcp  
+$ kaos modelapi delete weather-api
 ```
 
 ## Next Steps
