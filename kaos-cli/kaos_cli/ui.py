@@ -15,8 +15,8 @@ from kaos_cli import __version__
 
 # Default monitoring configuration
 DEFAULT_MONITORING_NAMESPACE = "monitoring"
-SIGNOZ_SERVICE_NAME = "signoz-frontend"
-SIGNOZ_SERVICE_PORT = 3301
+SIGNOZ_SERVICE_NAME = "signoz"
+SIGNOZ_SERVICE_PORT = 8080
 SIGNOZ_LOCAL_PORT = 8011
 
 # KAOS UI hosted on GitHub Pages

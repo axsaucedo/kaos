@@ -382,7 +382,7 @@ kaos ui --monitoring-enabled
 
 This will:
 - Start the KAOS UI proxy on port 8010
-- Port-forward SigNoz frontend to http://localhost:8011
+- Port-forward SigNoz UI (signoz:8080) to http://localhost:8011
 
 ### CLI Monitoring Options
 
