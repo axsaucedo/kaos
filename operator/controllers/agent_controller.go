@@ -6,6 +6,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
@@ -102,6 +103,15 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	modelapi := &kaosv1alpha1.ModelAPI{}
 	err := r.Get(ctx, types.NamespacedName{Name: agent.Spec.ModelAPI, Namespace: agent.Namespace}, modelapi)
 	if err != nil {
+		if apierrors.IsNotFound(err) {
+			// ModelAPI doesn't exist (may have been deleted) - wait for it
+			log.Info("ModelAPI not found, waiting", "modelAPI", agent.Spec.ModelAPI)
+			agent.Status.Phase = "Waiting"
+			agent.Status.Message = fmt.Sprintf("ModelAPI %s not found", agent.Spec.ModelAPI)
+			r.Status().Update(ctx, agent)
+			return ctrl.Result{RequeueAfter: time.Second * 5}, nil
+		}
+		// Other errors - log and retry
 		log.Error(err, "unable to fetch ModelAPI", "modelAPI", agent.Spec.ModelAPI)
 		agent.Status.Phase = "Failed"
 		agent.Status.Message = fmt.Sprintf("Failed to resolve ModelAPI: %v", err)
@@ -135,6 +145,15 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		mcp := &kaosv1alpha1.MCPServer{}
 		err := r.Get(ctx, types.NamespacedName{Name: mcpName, Namespace: agent.Namespace}, mcp)
 		if err != nil {
+			if apierrors.IsNotFound(err) {
+				// MCPServer doesn't exist (may have been deleted) - wait for it
+				log.Info("MCPServer not found, waiting", "mcpserver", mcpName)
+				agent.Status.Phase = "Waiting"
+				agent.Status.Message = fmt.Sprintf("MCPServer %s not found", mcpName)
+				r.Status().Update(ctx, agent)
+				return ctrl.Result{RequeueAfter: time.Second * 5}, nil
+			}
+			// Other errors - log and retry
 			log.Error(err, "unable to fetch MCPServer", "mcpserver", mcpName)
 			agent.Status.Phase = "Failed"
 			agent.Status.Message = fmt.Sprintf("Failed to resolve MCPServer %s: %v", mcpName, err)
@@ -342,8 +361,10 @@ func (r *AgentReconciler) constructDeployment(agent *kaosv1alpha1.Agent, modelap
 					Scheme: corev1.URISchemeHTTP,
 				},
 			},
-			InitialDelaySeconds: 30,
+			InitialDelaySeconds: 5,
 			PeriodSeconds:       10,
+			TimeoutSeconds:      3,
+			FailureThreshold:    3,
 		},
 		ReadinessProbe: &corev1.Probe{
 			ProbeHandler: corev1.ProbeHandler{
@@ -353,8 +374,10 @@ func (r *AgentReconciler) constructDeployment(agent *kaosv1alpha1.Agent, modelap
 					Scheme: corev1.URISchemeHTTP,
 				},
 			},
-			InitialDelaySeconds: 10,
+			InitialDelaySeconds: 3,
 			PeriodSeconds:       5,
+			TimeoutSeconds:      3,
+			FailureThreshold:    2,
 		},
 	}
 
