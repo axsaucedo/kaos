@@ -27,6 +27,7 @@ def deploy_agent(
     mcp_servers: list[str] | None,
     sub_agents: list[str] | None,
     mock_responses: list[str] | None,
+    expose: bool,
 ) -> None:
     """Deploy an Agent with specified configuration."""
     yaml_content = AGENT_TEMPLATE.format(
@@ -48,15 +49,19 @@ def deploy_agent(
         for mcp in mcp_servers:
             yaml_content += f"  - {mcp}\n"
 
-    # Add sub-agents via agentNetwork.access if provided
-    if sub_agents:
-        yaml_content += "  agentNetwork:\n    access:\n"
-        for agent in sub_agents:
-            yaml_content += f"    - {agent}\n"
+    # Build agentNetwork section
+    has_agent_network = expose or sub_agents
+    if has_agent_network:
+        yaml_content += "  agentNetwork:\n"
+        if expose:
+            yaml_content += "    expose: true\n"
+        if sub_agents:
+            yaml_content += "    access:\n"
+            for agent in sub_agents:
+                yaml_content += f"    - {agent}\n"
 
     # Add mock responses as container env if provided
     if mock_responses:
-        # Convert list to JSON array string
         mock_json = json.dumps(mock_responses)
         yaml_content += f"""  container:
     env:

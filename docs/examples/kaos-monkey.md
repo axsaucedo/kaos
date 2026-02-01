@@ -23,20 +23,13 @@ The agent will use **mock responses** for deterministic behavior - this means we
 
 ## Step 1: Create RBAC for Kubernetes Access
 
-First, generate the ServiceAccount and RBAC permissions:
+Create a ServiceAccount with permissions to manage pods:
 
 ```console
-# Generate RBAC manifest for the test namespace
-$ kaos system create-rbac --name kaos-monkey-sa --namespace default > rbac.yaml
-
-# Review the generated RBAC
-$ cat rbac.yaml
-
-# Apply it
-$ kubectl apply -f rbac.yaml
+$ kaos system create-rbac kaos-monkey-sa
 ```
 
-The RBAC gives the ServiceAccount permissions to manage pods in the specified namespace.
+This creates a ServiceAccount, Role, and RoleBinding in your current namespace.
 
 ## Step 2: Create a ModelAPI
 
@@ -44,12 +37,6 @@ Create a ModelAPI in Proxy mode (we'll use mock responses so no real LLM needed)
 
 ```console
 $ kaos modelapi deploy chaos-api --mode Proxy
-```
-
-Wait for it to be ready:
-
-```console
-$ kaos modelapi get chaos-api
 ```
 
 ## Step 3: Deploy the Kubernetes MCP Runtime
@@ -62,67 +49,38 @@ $ kaos mcp deploy k8s-tools --runtime kubernetes --sa kaos-monkey-sa
 
 This creates an MCP server with kubectl access, using the ServiceAccount we created.
 
-## Step 4: Create the Chaos Agent
-
-Now create the agent with mock responses for deterministic testing:
-
-```yaml
-apiVersion: kaos.tools/v1alpha1
-kind: Agent
-metadata:
-  name: kaos-monkey
-spec:
-  modelAPI: chaos-api
-  model: gpt-4o  # Model name for mock
-  mcpServers:
-    - k8s-tools
-  config:
-    instructions: |
-      You are KAOS Monkey, a chaos engineering agent.
-      You have access to Kubernetes tools to manage pods.
-      
-      Available tools:
-      - kubectl_get: List resources (pods, deployments, etc.)
-      - kubectl_delete: Delete a resource
-      - kubectl_describe: Get detailed info about a resource
-      
-      When asked to cause chaos, pick a random pod and delete it.
-      Always confirm what you're about to do before doing it.
-  container:
-    env:
-      # Mock responses for deterministic testing
-      - name: DEBUG_MOCK_RESPONSES
-        value: |
-          [
-            "I'll list the pods first to see what's running.\n\n```tool_call\n{\"tool\": \"kubectl_get\", \"arguments\": {\"resource\": \"pods\", \"namespace\": \"default\"}}\n```",
-            "I found some pods. Let me delete the test pod to cause some chaos.\n\n```tool_call\n{\"tool\": \"kubectl_delete\", \"arguments\": {\"resource\": \"pod\", \"name\": \"test-pod\", \"namespace\": \"default\"}}\n```",
-            "Done! I've deleted the test-pod. The deployment controller should recreate it shortly. This simulates a pod failure scenario."
-          ]
-  agentNetwork:
-    expose: true
-```
-
-Apply this configuration:
-
-```console
-$ kubectl apply -f kaos-monkey.yaml
-```
-
-## Step 5: Create a Test Pod
+## Step 4: Create a Test Pod
 
 Create a simple test pod that our chaos agent can target:
 
 ```console
 $ kubectl run test-pod --image=nginx --restart=Never
-$ kubectl get pods
 ```
+
+## Step 5: Create the Chaos Agent
+
+Create the agent with mock responses that will delete the test pod:
+
+```console
+$ kaos agent deploy kaos-monkey \
+    --modelapi chaos-api \
+    --model gpt-4o \
+    --mcp k8s-tools \
+    --instructions "You are KAOS Monkey, a chaos engineering agent." \
+    --mock-response 'I will list the pods first.\n\n```tool_call\n{"tool": "kubectl_get", "arguments": {"resource": "pods"}}\n```' \
+    --mock-response 'Found the test pod. Deleting it now.\n\n```tool_call\n{"tool": "kubectl_delete", "arguments": {"resource": "pod", "name": "test-pod"}}\n```' \
+    --mock-response 'Done! I deleted test-pod to simulate a pod failure.' \
+    --expose
+```
+
+Note: The `--instructions` are minimal because MCP tool descriptions are automatically provided to the agent.
 
 ## Step 6: Unleash the Chaos
 
-Now invoke the chaos agent:
+Invoke the chaos agent:
 
 ```console
-$ kaos agent invoke kaos-monkey --message "Please cause some chaos in the default namespace"
+$ kaos agent invoke kaos-monkey --message "Cause some chaos"
 ```
 
 Because we're using mock responses, the agent will:
@@ -142,14 +100,14 @@ The `test-pod` should be gone (or in Terminating state).
 
 ## Understanding Mock Responses
 
-The `DEBUG_MOCK_RESPONSES` environment variable contains a JSON array of responses. Each time the agent needs to generate a response, it uses the next item in the array instead of calling the LLM.
+The `--mock-response` flags provide deterministic LLM responses. Each invocation consumes the next response in sequence.
+
+The mock responses include `tool_call` blocks that trigger **real** MCP tool execution - only the LLM reasoning is mocked.
 
 This is essential for:
 - **Testing**: Deterministic behavior in CI/CD
 - **Cost savings**: No LLM API calls during development
 - **Reproducibility**: Same inputs always produce same outputs
-
-The mock responses include `tool_call` blocks that trigger the actual MCP tool execution, so the Kubernetes commands are real - only the LLM reasoning is mocked.
 
 ## Architecture
 
@@ -166,39 +124,24 @@ graph LR
 
 ## Real LLM Usage
 
-To use a real LLM instead of mocks, remove the `DEBUG_MOCK_RESPONSES` env var and configure your ModelAPI with actual credentials:
+To use a real LLM instead of mocks, deploy without `--mock-response`:
 
 ```console
-# Create a ModelAPI pointing to OpenAI
-$ kaos modelapi deploy openai-api --mode Proxy
-
-# Add your API key as a secret
-$ kubectl create secret generic openai-secret --from-literal=api-key=sk-...
-
-# Update the ModelAPI to use the secret
-$ kubectl patch modelapi openai-api --type=merge -p '
-{
-  "spec": {
-    "proxyConfig": {
-      "apiKeyFrom": {
-        "secretKeyRef": {
-          "name": "openai-secret",
-          "key": "api-key"
-        }
-      }
-    }
-  }
-}'
+$ kaos agent deploy kaos-monkey \
+    --modelapi my-openai-api \
+    --model gpt-4o \
+    --mcp k8s-tools \
+    --instructions "You are KAOS Monkey, a chaos engineering agent." \
+    --expose
 ```
 
 ## Safety Considerations
 
 For production chaos engineering:
 
-1. **Limit RBAC scope**: Only give permissions to specific namespaces
-2. **Use approval workflows**: Require human approval before deletions
-3. **Log all actions**: Enable telemetry to track what the agent does
-4. **Set guardrails**: Configure which resources can/cannot be touched
+1. **Limit RBAC scope**: Use `--read-only` or specific `--resources` and `--verbs`
+2. **Log all actions**: Enable telemetry to track what the agent does
+3. **Set guardrails**: Configure which resources can/cannot be touched
 
 ## Cleanup
 
@@ -206,7 +149,6 @@ For production chaos engineering:
 $ kaos agent delete kaos-monkey
 $ kaos mcp delete k8s-tools
 $ kaos modelapi delete chaos-api
-$ kubectl delete -f rbac.yaml
 $ kubectl delete pod test-pod --ignore-not-found
 ```
 

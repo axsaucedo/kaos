@@ -7,17 +7,30 @@ import typer
 
 def create_rbac_command(
     name: str,
-    namespace: str,
+    namespace: str | None,
     namespaces: list[str],
     resources: list[str],
     verbs: list[str],
     read_only: bool,
     cluster_wide: bool,
+    dry_run: bool,
 ) -> None:
     """Create RBAC resources for MCPServer Kubernetes runtime.
 
     Generates and applies ServiceAccount, Role/ClusterRole, and RoleBinding/ClusterRoleBinding.
     """
+    # Get namespace from current context if not specified
+    if namespace is None:
+        try:
+            result = subprocess.run(
+                ["kubectl", "config", "view", "--minify", "-o", "jsonpath={..namespace}"],
+                capture_output=True,
+                text=True,
+            )
+            namespace = result.stdout.strip() or "default"
+        except Exception:
+            namespace = "default"
+
     if read_only:
         verbs = ["get", "list", "watch"]
 
@@ -118,14 +131,13 @@ roleRef:
 
     combined_yaml = "---\n".join(yaml_docs)
 
-    # Output the YAML
-    typer.echo("Generated RBAC resources:")
-    typer.echo("-" * 40)
-    typer.echo(combined_yaml)
-    typer.echo("-" * 40)
+    if dry_run:
+        # Just print YAML without applying
+        typer.echo(combined_yaml)
+        return
 
     # Apply via kubectl
-    typer.echo("\nApplying RBAC resources...")
+    typer.echo("Applying RBAC resources...")
     try:
         result = subprocess.run(
             ["kubectl", "apply", "-f", "-"],
@@ -134,10 +146,9 @@ roleRef:
             text=True,
         )
         if result.returncode == 0:
-            typer.echo("✅ RBAC resources created successfully!")
-            typer.echo(f"\nUse in your MCPServer with:")
-            typer.echo(f"  spec:")
-            typer.echo(f"    serviceAccountName: {name}")
+            typer.echo(result.stdout)
+            typer.echo(f"✅ RBAC resources created: ServiceAccount/{name}")
+            typer.echo(f"\nUse in MCPServer with: --sa {name}")
         else:
             typer.echo(f"Error: {result.stderr}", err=True)
             sys.exit(1)

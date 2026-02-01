@@ -121,13 +121,16 @@ def deploy_agent_cmd(
     mock_responses: list[str] = typer.Option(
         None, "--mock-response", help="Mock responses for testing (DEBUG_MOCK_RESPONSES)."
     ),
+    expose: bool = typer.Option(
+        False, "--expose", help="Expose agent via Gateway (agentNetwork.expose)."
+    ),
 ) -> None:
     """Deploy an Agent.
 
     Examples:
       kaos agent deploy my-agent --modelapi my-api --model smollm2:135m
       kaos agent deploy my-agent -a my-api -m gpt-4o --mcp calculator --sub-agent helper
-      kaos agent deploy my-agent -a my-api -m test --mock-response "Hello!" --mock-response "Done"
+      kaos agent deploy my-agent -a my-api -m test --mock-response "Hello!" --expose
     """
     deploy_agent(
         name=name,
@@ -138,6 +141,7 @@ def deploy_agent_cmd(
         mcp_servers=mcp_servers,
         sub_agents=sub_agents,
         mock_responses=mock_responses,
+        expose=expose,
     )
 
 
