@@ -5,13 +5,12 @@ import subprocess
 import sys
 import time
 import typer
-import threading
 import signal
 
 
 def invoke_command(
     name: str,
-    namespace: str,
+    namespace: str | None,
     tool: str,
     args: str | None,
     port: int,
@@ -20,25 +19,20 @@ def invoke_command(
     import httpx
 
     # Find the service for this MCPServer
-    result = subprocess.run(
-        [
-            "kubectl",
-            "get",
-            "svc",
-            f"mcpserver-{name}",
-            "-n",
-            namespace,
-            "-o",
-            "jsonpath={.spec.ports[0].port}",
-        ],
-        capture_output=True,
-        text=True,
-    )
+    cmd = [
+        "kubectl",
+        "get",
+        "svc",
+        f"mcpserver-{name}",
+        "-o",
+        "jsonpath={.spec.ports[0].port}",
+    ]
+    if namespace:
+        cmd.extend(["-n", namespace])
+    result = subprocess.run(cmd, capture_output=True, text=True)
 
     if result.returncode != 0:
-        typer.echo(
-            f"Error: MCPServer '{name}' not found in namespace '{namespace}'", err=True
-        )
+        typer.echo(f"Error: MCPServer '{name}' not found", err=True)
         sys.exit(1)
 
     svc_port = result.stdout.strip() or "8000"
@@ -46,17 +40,11 @@ def invoke_command(
     typer.echo(f"Port-forwarding to mcpserver-{name}:{svc_port}...")
 
     # Start port-forward in background
+    pf_cmd = ["kubectl", "port-forward", f"svc/mcpserver-{name}", f"{port}:{svc_port}"]
+    if namespace:
+        pf_cmd.extend(["-n", namespace])
     pf_process = subprocess.Popen(
-        [
-            "kubectl",
-            "port-forward",
-            f"svc/mcpserver-{name}",
-            f"{port}:{svc_port}",
-            "-n",
-            namespace,
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        pf_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
     )
 
     # Handle cleanup
@@ -94,10 +82,7 @@ def invoke_command(
                 json={
                     "jsonrpc": "2.0",
                     "method": "tools/call",
-                    "params": {
-                        "name": tool,
-                        "arguments": tool_args,
-                    },
+                    "params": {"name": tool, "arguments": tool_args},
                     "id": 1,
                 },
                 timeout=30.0,

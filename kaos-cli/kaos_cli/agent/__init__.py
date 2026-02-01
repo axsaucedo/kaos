@@ -8,7 +8,7 @@ from kaos_cli.utils.crud import (
     logs_resource,
     delete_resource,
 )
-from kaos_cli.agent.deploy import deploy_from_yaml, deploy_agent
+from kaos_cli.agent.deploy import deploy_agent
 from kaos_cli.agent.invoke import invoke_command
 
 app = typer.Typer(
@@ -40,7 +40,7 @@ def list_agents(
 def get_agent(
     name: str = typer.Argument(..., help="Name of the Agent."),
     namespace: str = typer.Option(
-        "default",
+        None,
         "--namespace",
         "-n",
         help="Namespace of the Agent.",
@@ -60,7 +60,7 @@ def get_agent(
 def logs_agent(
     name: str = typer.Argument(..., help="Name of the Agent."),
     namespace: str = typer.Option(
-        "default",
+        None,
         "--namespace",
         "-n",
         help="Namespace of the Agent.",
@@ -85,7 +85,7 @@ def logs_agent(
 def delete_agent(
     name: str = typer.Argument(..., help="Name of the Agent."),
     namespace: str = typer.Option(
-        "default",
+        None,
         "--namespace",
         "-n",
         help="Namespace of the Agent.",
@@ -102,43 +102,38 @@ def delete_agent(
 
 @app.command(name="deploy")
 def deploy_agent_cmd(
-    file: str = typer.Argument(None, help="Path to Agent YAML file."),
-    name: str = typer.Option(None, "--name", help="Name for the Agent."),
-    modelapi: str = typer.Option(None, "--modelapi", "-m", help="ModelAPI reference."),
+    name: str = typer.Argument(..., help="Name for the Agent."),
+    modelapi: str = typer.Option(..., "--modelapi", "-a", help="ModelAPI reference."),
+    model: str = typer.Option(..., "--model", "-m", help="Model name to use."),
     namespace: str = typer.Option(
-        "default",
+        None,
         "--namespace",
         "-n",
         help="Namespace to deploy to.",
     ),
-    system_prompt: str = typer.Option(None, "--prompt", "-p", help="System prompt."),
+    instructions: str = typer.Option(
+        None, "--instructions", "-i", help="Agent instructions."
+    ),
     mcp_servers: list[str] = typer.Option(None, "--mcp", help="MCP server references."),
     sub_agents: list[str] = typer.Option(
-        None, "--sub-agent", help="Sub-agent references."
+        None, "--sub-agent", help="Sub-agent references (agentNetwork.access)."
     ),
 ) -> None:
-    """Deploy an Agent from YAML file or flags.
+    """Deploy an Agent.
 
     Examples:
-      kaos agent deploy config.yaml                  # Deploy from YAML file
-      kaos agent deploy --name my-agent --modelapi my-model  # Deploy with flags
+      kaos agent deploy my-agent --modelapi my-api --model smollm2:135m
+      kaos agent deploy my-agent -a my-api -m gpt-4o --mcp calculator --sub-agent helper
     """
-    import sys
-
-    if file:
-        deploy_from_yaml(file=file, namespace=namespace)
-    elif name and modelapi:
-        deploy_agent(
-            name=name,
-            modelapi=modelapi,
-            namespace=namespace,
-            system_prompt=system_prompt,
-            mcp_servers=mcp_servers,
-            sub_agents=sub_agents,
-        )
-    else:
-        typer.echo("Error: Provide FILE, or --name and --modelapi", err=True)
-        sys.exit(1)
+    deploy_agent(
+        name=name,
+        modelapi=modelapi,
+        model=model,
+        namespace=namespace,
+        instructions=instructions,
+        mcp_servers=mcp_servers,
+        sub_agents=sub_agents,
+    )
 
 
 @app.command(name="invoke")
@@ -148,7 +143,7 @@ def invoke_agent(
         ..., "--message", "-m", help="Message to send to the agent."
     ),
     namespace: str = typer.Option(
-        "default",
+        None,
         "--namespace",
         "-n",
         help="Namespace of the Agent.",

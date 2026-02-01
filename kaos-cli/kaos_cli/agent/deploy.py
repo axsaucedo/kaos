@@ -11,56 +11,46 @@ AGENT_TEMPLATE = """apiVersion: kaos.tools/v1alpha1
 kind: Agent
 metadata:
   name: {name}
-  namespace: {namespace}
 spec:
-  modelApiRef: {modelapi}
-  systemPrompt: |
-    {system_prompt}
+  modelAPI: {modelapi}
+  model: {model}
 """
-
-
-def deploy_from_yaml(file: str, namespace: str | None) -> None:
-    """Deploy an Agent from YAML file."""
-    args = ["kubectl", "apply", "-f", file]
-
-    if namespace:
-        args.extend(["-n", namespace])
-
-    result = subprocess.run(args, capture_output=True, text=True)
-    if result.returncode != 0:
-        typer.echo(result.stderr or result.stdout, err=True)
-        sys.exit(result.returncode)
-    typer.echo(result.stdout)
 
 
 def deploy_agent(
     name: str,
     modelapi: str,
-    namespace: str,
-    system_prompt: str | None,
+    model: str,
+    namespace: str | None,
+    instructions: str | None,
     mcp_servers: list[str] | None,
     sub_agents: list[str] | None,
 ) -> None:
     """Deploy an Agent with specified configuration."""
-    prompt = system_prompt or "You are a helpful AI assistant."
     yaml_content = AGENT_TEMPLATE.format(
         name=name,
-        namespace=namespace,
         modelapi=modelapi,
-        system_prompt=prompt.replace("\n", "\n    "),
+        model=model,
     )
+
+    # Add config section if instructions provided
+    if instructions:
+        yaml_content += f"""  config:
+    instructions: |
+      {instructions.replace(chr(10), chr(10) + '      ')}
+"""
 
     # Add MCP servers if provided
     if mcp_servers:
-        yaml_content = yaml_content.rstrip() + "\n  mcpServers:\n"
+        yaml_content += "  mcpServers:\n"
         for mcp in mcp_servers:
             yaml_content += f"  - {mcp}\n"
 
-    # Add sub-agents if provided
+    # Add sub-agents via agentNetwork.access if provided
     if sub_agents:
-        yaml_content = yaml_content.rstrip() + "\n  subAgents:\n"
+        yaml_content += "  agentNetwork:\n    access:\n"
         for agent in sub_agents:
-            yaml_content += f"  - {agent}\n"
+            yaml_content += f"    - {agent}\n"
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
         f.write(yaml_content)
@@ -68,6 +58,8 @@ def deploy_agent(
 
     try:
         args = ["kubectl", "apply", "-f", tmp_path]
+        if namespace:
+            args.extend(["-n", namespace])
         result = subprocess.run(args, capture_output=True, text=True)
         if result.returncode != 0:
             typer.echo(result.stderr or result.stdout, err=True)

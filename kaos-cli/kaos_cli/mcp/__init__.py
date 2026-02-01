@@ -3,7 +3,7 @@
 import typer
 
 from kaos_cli.mcp.crud import list_command, get_command, logs_command, delete_command
-from kaos_cli.mcp.deploy import deploy_from_yaml, deploy_custom_image, deploy_runtime
+from kaos_cli.mcp.deploy import deploy_custom_image, deploy_runtime
 from kaos_cli.mcp.invoke import invoke_command
 from kaos_cli.mcp.init import init_command
 from kaos_cli.mcp.build import build_command
@@ -83,7 +83,7 @@ def list_mcpservers(
 def get_mcpserver(
     name: str = typer.Argument(..., help="Name of the MCPServer."),
     namespace: str = typer.Option(
-        "default",
+        None,
         "--namespace",
         "-n",
         help="Namespace of the MCPServer.",
@@ -103,7 +103,7 @@ def get_mcpserver(
 def logs_mcpserver(
     name: str = typer.Argument(..., help="Name of the MCPServer."),
     namespace: str = typer.Option(
-        "default",
+        None,
         "--namespace",
         "-n",
         help="Namespace of the MCPServer.",
@@ -128,7 +128,7 @@ def logs_mcpserver(
 def delete_mcpserver(
     name: str = typer.Argument(..., help="Name of the MCPServer."),
     namespace: str = typer.Option(
-        "default",
+        None,
         "--namespace",
         "-n",
         help="Namespace of the MCPServer.",
@@ -145,11 +145,8 @@ def delete_mcpserver(
 
 @app.command(name="deploy")
 def deploy_mcpserver(
-    file: str = typer.Argument(None, help="Path to MCPServer YAML file."),
-    name: str = typer.Option(
-        None,
-        "--name",
-        help="Name for the MCPServer (auto-inferred from pyproject.toml).",
+    name: str = typer.Argument(
+        None, help="Name for the MCPServer (auto-inferred from pyproject.toml)."
     ),
     image: str = typer.Option(
         None, "--image", "-i", help="Custom image to deploy (auto-inferred from name)."
@@ -158,7 +155,7 @@ def deploy_mcpserver(
         None, "--runtime", "-r", help="Registered runtime to deploy."
     ),
     namespace: str = typer.Option(
-        "default",
+        None,
         "--namespace",
         "-n",
         help="Namespace to deploy to.",
@@ -173,26 +170,23 @@ def deploy_mcpserver(
         ".", "--dir", "-d", help="Directory to infer name/image from."
     ),
 ) -> None:
-    """Deploy an MCPServer from YAML, image, or runtime.
+    """Deploy an MCPServer from image or runtime.
 
     Examples:
-      kaos mcp deploy config.yaml                    # Deploy from YAML file
-      kaos mcp deploy --name my-mcp --image img:v1   # Deploy custom image
-      kaos mcp deploy --name my-mcp --runtime slack  # Deploy registered runtime
-      kaos mcp deploy                                # Auto-infer name/image from pyproject.toml
+      kaos mcp deploy my-mcp --image img:v1     # Deploy custom image
+      kaos mcp deploy my-mcp --runtime slack    # Deploy registered runtime
+      kaos mcp deploy                           # Auto-infer from pyproject.toml
     """
     import sys
     from kaos_cli.mcp.deploy import read_project_name, infer_image_name
 
-    if file:
-        deploy_from_yaml(file=file, namespace=namespace)
-    elif runtime:
+    if runtime:
         # Runtime deploy - infer name if needed
         if not name:
             name = read_project_name(directory)
             if not name:
                 typer.echo(
-                    "Error: --name required (or create pyproject.toml with project.name)",
+                    "Error: NAME required (or create pyproject.toml with project.name)",
                     err=True,
                 )
                 sys.exit(1)
@@ -210,7 +204,7 @@ def deploy_mcpserver(
             name = read_project_name(directory)
             if not name:
                 typer.echo(
-                    "Error: --name required (or create pyproject.toml with project.name)",
+                    "Error: NAME required (or create pyproject.toml with project.name)",
                     err=True,
                 )
                 sys.exit(1)
@@ -242,7 +236,7 @@ def invoke_mcpserver(
         help="JSON arguments for the tool.",
     ),
     namespace: str = typer.Option(
-        "default",
+        None,
         "--namespace",
         "-n",
         help="Namespace of the MCPServer.",
