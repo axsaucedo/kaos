@@ -44,7 +44,6 @@ First, let's set up the environment and create a unique namespace for this examp
 import os
 import subprocess
 import time
-import json
 
 # Get namespace from environment or create a unique one
 namespace = os.environ.get("TEST_NAMESPACE", f"kaos-monkey-{int(time.time()) % 10000}")
@@ -195,17 +194,10 @@ else:
 
 ## Step 4: Create the Chaos Agent
 
-Create the agent with mock responses that will delete the test pod:
+Create the agent with mock responses that will delete the test pod. Each `--mock-response` is consumed in sequence:
 
 ```python
-# Mock responses that simulate the agent's decision-making
-mock_responses = json.dumps([
-    f'I will list the pods first.\n\n```tool_call\n{{"tool": "list_pods", "arguments": {{"namespace": "{namespace}"}}}}\n```',
-    f'Found chaos-victim pod. Deleting it now.\n\n```tool_call\n{{"tool": "delete_pod", "arguments": {{"namespace": "{namespace}", "name": "chaos-victim"}}}}\n```',
-    'Done! I have deleted the chaos-victim pod to simulate a failure scenario.'
-])
-
-# Deploy the chaos agent
+# Deploy the chaos agent with mock responses for each step
 result = subprocess.run([
     "kaos", "agent", "deploy", "kaos-monkey",
     "-n", namespace,
@@ -213,7 +205,9 @@ result = subprocess.run([
     "--model", "mock-model",
     "--mcp", "chaos-tools",
     "--instructions", "You are KAOS Monkey, a chaos engineering agent.",
-    "--mock-response", mock_responses,
+    "--mock-response", f'I will list the pods first.\n\n```tool_call\n{{"tool": "list_pods", "arguments": {{"namespace": "{namespace}"}}}}\n```',
+    "--mock-response", f'Found chaos-victim pod. Deleting it now.\n\n```tool_call\n{{"tool": "delete_pod", "arguments": {{"namespace": "{namespace}", "name": "chaos-victim"}}}}\n```',
+    "--mock-response", "Done! I have deleted the chaos-victim pod to simulate a failure scenario.",
     "--expose"
 ], capture_output=True, text=True)
 print(result.stdout)

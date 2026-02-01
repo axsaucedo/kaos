@@ -38,7 +38,6 @@ First, let's set up the environment and create a unique namespace:
 import os
 import subprocess
 import time
-import json
 
 # Get namespace from environment or create a unique one
 namespace = os.environ.get("TEST_NAMESPACE", f"multi-agent-{int(time.time()) % 10000}")
@@ -86,19 +85,14 @@ else:
 Create a specialist agent that handles research tasks:
 
 ```python
-# Mock response for the researcher
-researcher_mock = json.dumps([
-    "Here is my research on the topic: AI systems are increasingly being used in enterprise environments. Key trends include automation, decision support, and customer service. Growth is estimated at 40% year-over-year."
-])
-
-# Deploy researcher agent
+# Deploy researcher agent with a single mock response
 result = subprocess.run([
     "kaos", "agent", "deploy", "researcher",
     "-n", namespace,
     "--modelapi", "team-api",
     "--model", "mock-model",
     "--instructions", "You are a research specialist. You gather and synthesize information on any topic.",
-    "--mock-response", researcher_mock,
+    "--mock-response", "Here is my research on the topic: AI systems are increasingly being used in enterprise environments. Key trends include automation, decision support, and customer service. Growth is estimated at 40% year-over-year.",
     "--expose"
 ], capture_output=True, text=True)
 print(result.stdout)
@@ -129,19 +123,14 @@ else:
 Create another specialist for data analysis:
 
 ```python
-# Mock response for the analyst
-analyst_mock = json.dumps([
-    "Based on my analysis: The data shows 40% year-over-year growth in AI adoption. The highest impact areas are customer service automation (60%), decision support systems (25%), and predictive analytics (15%)."
-])
-
-# Deploy analyst agent
+# Deploy analyst agent with a single mock response
 result = subprocess.run([
     "kaos", "agent", "deploy", "analyst",
     "-n", namespace,
     "--modelapi", "team-api",
     "--model", "mock-model",
     "--instructions", "You are a data analyst. You analyze information and provide insights with statistics.",
-    "--mock-response", analyst_mock,
+    "--mock-response", "Based on my analysis: The data shows 40% year-over-year growth in AI adoption. The highest impact areas are customer service automation (60%), decision support systems (25%), and predictive analytics (15%).",
     "--expose"
 ], capture_output=True, text=True)
 print(result.stdout)
@@ -169,24 +158,20 @@ else:
 
 ## Step 4: Create the Coordinator Agent
 
-Create the coordinator that delegates to specialists:
+Create the coordinator that delegates to specialists. The coordinator uses multiple mock responses - one for each step of its reasoning:
 
 ```python
-# Mock responses for the coordinator - it will delegate to both specialists
-coordinator_mock = json.dumps([
-    'Let me delegate the research portion first.\n\n```delegate\n{"agent": "researcher", "task": "Research AI adoption trends in enterprises"}\n```',
-    'Now let me get the analyst\'s perspective.\n\n```delegate\n{"agent": "analyst", "task": "Analyze the growth patterns from the research"}\n```',
-    'Based on input from my team:\n\n**Research Summary:** AI is growing in enterprise use with focus on automation and customer service.\n\n**Analysis:** 40% YoY growth, with customer service automation leading at 60%.\n\nThe trend indicates continued expansion in AI-powered automation.'
-])
-
 # Deploy coordinator agent with access to other agents
+# Each --mock-response is used in sequence
 result = subprocess.run([
     "kaos", "agent", "deploy", "coordinator",
     "-n", namespace,
     "--modelapi", "team-api",
     "--model", "mock-model",
     "--instructions", "You are a coordinator. You delegate research to 'researcher' and analysis to 'analyst', then synthesize their responses.",
-    "--mock-response", coordinator_mock,
+    "--mock-response", 'Let me delegate the research portion first.\n\n```delegate\n{"agent": "researcher", "task": "Research AI adoption trends in enterprises"}\n```',
+    "--mock-response", 'Now let me get the analyst\'s perspective.\n\n```delegate\n{"agent": "analyst", "task": "Analyze the growth patterns from the research"}\n```',
+    "--mock-response", "Based on input from my team:\n\n**Research Summary:** AI is growing in enterprise use with focus on automation and customer service.\n\n**Analysis:** 40% YoY growth, with customer service automation leading at 60%.\n\nThe trend indicates continued expansion in AI-powered automation.",
     "--sub-agent", "researcher",
     "--sub-agent", "analyst",
     "--expose"
