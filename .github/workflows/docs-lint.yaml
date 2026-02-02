@@ -34,38 +34,32 @@ jobs:
 
       - name: Check notebooks are in sync with markdown
         run: |
-          # Regenerate notebooks from markdown sources
+          # Check each markdown/notebook pair using jupytext --diff
+          has_diff=0
           for md in docs/examples/*.md; do
             basename=$(basename "$md" .md)
-            echo "Checking $basename..."
-            jupytext --to ipynb "$md" -o "/tmp/${basename}.ipynb"
+            notebook="examples/${basename}.ipynb"
             
-            # Compare with existing notebook (ignore metadata differences)
-            if [ -f "examples/${basename}.ipynb" ]; then
-              # Extract cells from both and compare
-              python3 -c "
-          import json
-          import sys
-
-          def extract_cells(path):
-              with open(path) as f:
-                  nb = json.load(f)
-              # Return cell sources only (ignore metadata, outputs, etc)
-              return [c.get('source', []) for c in nb.get('cells', [])]
-
-          generated = extract_cells('/tmp/${basename}.ipynb')
-          existing = extract_cells('examples/${basename}.ipynb')
-
-          if generated != existing:
-              print(f'ERROR: examples/${basename}.ipynb is out of sync with docs/examples/${basename}.md')
-              print('Run: jupytext --to ipynb docs/examples/${basename}.md -o examples/${basename}.ipynb')
-              sys.exit(1)
-          print(f'OK: ${basename}.ipynb is in sync')
-          "
+            if [ ! -f "$notebook" ]; then
+              echo "ERROR: $notebook does not exist"
+              echo "Run: jupytext --to ipynb $md -o $notebook"
+              has_diff=1
+              continue
+            fi
+            
+            # jupytext --diff compares source cells only (ignores metadata/outputs)
+            diff_output=$(jupytext "$md" "$notebook" --diff 2>&1)
+            if [ -n "$diff_output" ]; then
+              echo "ERROR: $notebook is out of sync with $md"
+              echo "$diff_output" | head -20
+              echo "Run: jupytext --to ipynb $md -o $notebook"
+              has_diff=1
             else
-              echo "ERROR: examples/${basename}.ipynb does not exist"
-              echo "Run: jupytext --to ipynb $md -o examples/${basename}.ipynb"
-              exit 1
+              echo "OK: $basename.ipynb is in sync"
             fi
           done
+          
+          if [ $has_diff -ne 0 ]; then
+            exit 1
+          fi
           echo "All notebooks are in sync!"

@@ -19,6 +19,18 @@ jupyter:
 
 This example demonstrates building a multi-agent system with delegation between agents. You'll see how a coordinator agent delegates to specialist agents.
 
+## Architecture
+
+```mermaid
+graph TB
+    User[User Request] --> C[Coordinator]
+    C --> R[Researcher Agent]
+    C --> A[Analyst Agent]
+    R --> C
+    A --> C
+    C --> Response[Synthesized Response]
+```
+
 ## Prerequisites
 
 - KAOS operator installed ([Installation Guide](/getting-started/installation))
@@ -109,6 +121,7 @@ Create the coordinator that delegates to specialists. The coordinator uses multi
 mock1 = 'Let me delegate the research portion first.\n\n```delegate\n{"agent": "researcher", "task": "Research AI adoption trends in enterprises"}\n```'
 mock2 = 'Now let me get the analyst perspective.\n\n```delegate\n{"agent": "analyst", "task": "Analyze the growth patterns from the research"}\n```'
 mock3 = "Based on input from my team: AI is growing with 40% YoY growth, especially in customer service automation."
+os.environ["MOCK1"], os.environ["MOCK2"], os.environ["MOCK3"] = mock1, mock2, mock3
 ```
 
 ```python
@@ -116,9 +129,9 @@ mock3 = "Based on input from my team: AI is growing with 40% YoY growth, especia
     --modelapi team-api \
     --model mock-model \
     --instructions "You are a coordinator that delegates to specialist agents." \
-    --mock-response "$mock1" \
-    --mock-response "$mock2" \
-    --mock-response "$mock3" \
+    --mock-response "$MOCK1" \
+    --mock-response "$MOCK2" \
+    --mock-response "$MOCK3" \
     --sub-agent researcher \
     --sub-agent analyst \
     --expose
@@ -148,38 +161,16 @@ print("\nSUCCESS: Multi-agent delegation worked correctly!")
 print("The coordinator synthesized responses from researcher and analyst.")
 ```
 
-## How Delegation Works
-
-The coordinator's mock responses include `delegate` blocks:
-
-```
-```delegate
-{"agent": "researcher", "task": "Research AI trends"}
-```
-```
-
-When the agent framework sees this, it:
-1. Looks up the `researcher` agent in the sub-agents list
-2. Sends the task as a message to that agent
-3. Waits for the response
-4. Includes the response in the conversation context
-5. Continues to the next mock response
-
-## Architecture
-
-```mermaid
-graph TB
-    User[User Request] --> C[Coordinator]
-    C --> R[Researcher Agent]
-    C --> A[Analyst Agent]
-    R --> C
-    A --> C
-    C --> Response[Synthesized Response]
-```
-
 ## Enabling Telemetry (Production)
 
-For production use, enable OpenTelemetry on your agents:
+For production use, enable OpenTelemetry on your agents using the `--otel-endpoint` flag:
+
+```bash
+kaos agent deploy coordinator --modelapi team-api --model gpt-4o \
+    --otel-endpoint "http://otel-collector.monitoring.svc:4317"
+```
+
+Or via YAML:
 
 ```yaml
 apiVersion: kaos.tools/v1alpha1
@@ -196,6 +187,23 @@ spec:
 ```
 
 This sends traces and metrics to your OTEL collector for observability.
+
+## How Delegation Works
+
+The coordinator's mock responses include `delegate` blocks:
+
+```
+```delegate
+{"agent": "researcher", "task": "Research AI trends"}
+```
+```
+
+When the agent framework sees this, it:
+1. Looks up the `researcher` agent in the sub-agents list
+2. Sends the task as a message to that agent
+3. Waits for the response
+4. Includes the response in the conversation context
+5. Continues to the next mock response
 
 ## Cleanup
 

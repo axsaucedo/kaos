@@ -19,6 +19,18 @@ jupyter:
 
 This example demonstrates building a "chaos monkey" style agent that can interact with your Kubernetes cluster using the [Kubernetes MCP Server](https://github.com/manusa/kubernetes-mcp-server). The agent uses MCP tools to execute operations, controlled by deterministic mock responses.
 
+## Architecture
+
+```mermaid
+graph LR
+    A[User Request] --> B[KAOS Monkey Agent]
+    B --> C[Mock LLM Response]
+    C --> D{Tool Call?}
+    D -->|Yes| E[Kubernetes MCP Server]
+    E --> F[Kubernetes API]
+    D -->|No| G[Final Response]
+```
+
 ::: warning
 This example demonstrates powerful capabilities. Use with caution in production environments.
 :::
@@ -70,7 +82,7 @@ Wait for ModelAPI to be ready:
 
 ## Step 2: Set Up RBAC for Kubernetes MCP Server
 
-The Kubernetes MCP server needs permissions to interact with the Kubernetes API. We use `kaos system create-rbac` to create the necessary ServiceAccount, Role, and RoleBinding:
+The Kubernetes MCP server needs permissions to interact with the Kubernetes API:
 
 ```python
 !kaos system create-rbac k8s-mcp -n $NS --resources pods --verbs list,get,delete
@@ -78,21 +90,10 @@ The Kubernetes MCP server needs permissions to interact with the Kubernetes API.
 
 ## Step 3: Create the Kubernetes MCP Server
 
-Deploy the Kubernetes MCP server using the built-in `kubernetes` runtime. This uses the [kubernetes-mcp-server](https://github.com/manusa/kubernetes-mcp-server) image which provides 22+ Kubernetes tools:
+Deploy the Kubernetes MCP server using the built-in `kubernetes` runtime with the service account we just created:
 
 ```python
-%%writefile /tmp/k8s-mcp.yaml
-apiVersion: kaos.tools/v1alpha1
-kind: MCPServer
-metadata:
-  name: k8s-tools
-spec:
-  runtime: kubernetes
-  serviceAccountName: k8s-mcp
-```
-
-```python
-!kubectl apply -f /tmp/k8s-mcp.yaml -n $NS
+!kaos mcp deploy k8s-tools -n $NS --runtime kubernetes --sa k8s-mcp
 ```
 
 Wait for MCP server to be ready:
@@ -117,48 +118,26 @@ Wait for pod to be running:
 
 ## Step 5: Create the Chaos Agent
 
-Create the agent with mock responses that will delete the test pod. The Kubernetes MCP server provides tools like `pods_list` and `pods_delete`:
+Create the agent with mock responses. The `--mock-response` flag can be used multiple times - each response is consumed in sequence:
 
 ```python
-%%writefile /tmp/chaos-agent.yaml
-apiVersion: kaos.tools/v1alpha1
-kind: Agent
-metadata:
-  name: kaos-monkey
-spec:
-  modelAPI: chaos-api
-  model: mock-model
-  mcpServers:
-  - k8s-tools
-  config:
-    instructions: "You are KAOS Monkey, a chaos engineering agent."
-  agentNetwork:
-    expose: true
+# Mock responses with namespace interpolation  
+mock1 = f'I will list the pods first.\n\n```tool_call\n{{"tool": "pods_list", "arguments": {{"namespace": "{ns}"}}}}\n```'
+mock2 = f'Found chaos-victim pod. Deleting it now.\n\n```tool_call\n{{"tool": "pods_delete", "arguments": {{"namespace": "{ns}", "name": "chaos-victim"}}}}\n```'
+mock3 = "Done! I have deleted the chaos-victim pod to simulate a failure scenario."
+os.environ["MOCK1"], os.environ["MOCK2"], os.environ["MOCK3"] = mock1, mock2, mock3
 ```
 
 ```python
-# Add mock responses via env var - note the tool names from kubernetes-mcp-server
-import json
-ns = os.environ["NS"]
-mock_responses = [
-    f'I will list the pods first.\n\n```tool_call\n{{"tool": "pods_list", "arguments": {{"namespace": "{ns}"}}}}\n```',
-    f'Found chaos-victim pod. Deleting it now.\n\n```tool_call\n{{"tool": "pods_delete", "arguments": {{"namespace": "{ns}", "name": "chaos-victim"}}}}\n```',
-    "Done! I have deleted the chaos-victim pod to simulate a failure scenario."
-]
-
-# Write the agent YAML with mock responses
-import yaml
-with open("/tmp/chaos-agent.yaml") as f:
-    agent = yaml.safe_load(f)
-agent["spec"]["container"] = {
-    "env": [{"name": "DEBUG_MOCK_RESPONSES", "value": json.dumps(mock_responses)}]
-}
-with open("/tmp/chaos-agent.yaml", "w") as f:
-    yaml.dump(agent, f)
-```
-
-```python
-!kubectl apply -f /tmp/chaos-agent.yaml -n $NS
+!kaos agent deploy kaos-monkey -n $NS \
+    --modelapi chaos-api \
+    --model mock-model \
+    --mcp k8s-tools \
+    --instructions "You are KAOS Monkey, a chaos engineering agent." \
+    --mock-response "$MOCK1" \
+    --mock-response "$MOCK2" \
+    --mock-response "$MOCK3" \
+    --expose
 ```
 
 Wait for agent to be ready:
@@ -200,18 +179,6 @@ The `kubernetes` runtime provides many useful tools:
 - `namespaces_list`, `resources_list`, `resources_create_or_update`
 - `helm_install`, `helm_list`, `helm_uninstall`
 - And more! See the [kubernetes-mcp-server documentation](https://github.com/manusa/kubernetes-mcp-server).
-
-## Architecture
-
-```mermaid
-graph LR
-    A[User Request] --> B[KAOS Monkey Agent]
-    B --> C[Mock LLM Response]
-    C --> D{Tool Call?}
-    D -->|Yes| E[Kubernetes MCP Server]
-    E --> F[Kubernetes API]
-    D -->|No| G[Final Response]
-```
 
 ## Cleanup
 

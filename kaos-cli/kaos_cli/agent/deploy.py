@@ -28,6 +28,7 @@ def deploy_agent(
     sub_agents: list[str] | None,
     mock_responses: list[str] | None,
     expose: bool,
+    otel_endpoint: str | None,
 ) -> None:
     """Deploy an Agent with specified configuration."""
     yaml_content = AGENT_TEMPLATE.format(
@@ -36,11 +37,15 @@ def deploy_agent(
         model=model,
     )
 
-    # Add config section if instructions provided
-    if instructions:
-        yaml_content += f"""  config:
-    instructions: |
-      {instructions.replace(chr(10), chr(10) + '      ')}
+    # Add config section if instructions or telemetry provided
+    if instructions or otel_endpoint:
+        yaml_content += "  config:\n"
+        if instructions:
+            yaml_content += f"    instructions: |\n      {instructions.replace(chr(10), chr(10) + '      ')}\n"
+        if otel_endpoint:
+            yaml_content += f"""    telemetry:
+      enabled: true
+      endpoint: "{otel_endpoint}"
 """
 
     # Add MCP servers if provided
