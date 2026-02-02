@@ -74,6 +74,8 @@ jobs:
             files: "e2e/test_mcp_tools_e2e.py"
           - name: multi-agent
             files: "e2e/test_agentic_loop_e2e.py e2e/test_multi_agent_e2e.py"
+          - name: examples
+            files: "e2e/test_examples_e2e.py"
     name: E2E (${{ matrix.shard.name }})
     steps:
       - name: Checkout
@@ -178,6 +180,9 @@ jobs:
         run: |
           cd operator/tests
           source .venv/bin/activate 2>/dev/null || (uv venv && source .venv/bin/activate && uv pip install -e .)
+          
+          # Install kaos-cli for examples tests
+          uv pip install -e ../../kaos-cli
           
           # Set up port-forward to Gateway
           GATEWAY_SVC=$(kubectl get svc -n envoy-gateway-system -l "gateway.envoyproxy.io/owning-gateway-name=kaos-gateway" -o jsonpath='{.items[0].metadata.name}')

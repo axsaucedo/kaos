@@ -1,0 +1,219 @@
+---
+jupyter:
+  jupytext:
+    cell_metadata_filter: -all
+    text_representation:
+      extension: .md
+      format_name: markdown
+      format_version: '1.3'
+      jupytext_version: 1.19.1
+  kernelspec:
+    display_name: Python 3 (ipykernel)
+    language: python
+    name: python3
+---
+
+# Multi-Agent System with Telemetry
+
+> 📓 **Try it yourself!** This example is available as an executable [Jupyter notebook](/examples/multi-agent-telemetry.ipynb).
+
+This example demonstrates building a multi-agent system with delegation between agents. You'll see how a coordinator agent delegates to specialist agents.
+
+## Architecture
+
+```mermaid
+graph TB
+    User[User Request] --> C[Coordinator]
+    C --> R[Researcher Agent]
+    C --> A[Analyst Agent]
+    R --> C
+    A --> C
+    C --> Response[Synthesized Response]
+```
+
+## Prerequisites
+
+- KAOS operator installed ([Installation Guide](/getting-started/installation))
+- `kaos-cli` installed
+- Access to a Kubernetes cluster
+
+## Overview
+
+We'll create:
+1. A coordinator agent that delegates to specialists
+2. Specialist agents (researcher, analyst) that handle specific tasks
+3. Demonstrate agent-to-agent communication via delegation
+
+## Setup
+
+First, let's set up the environment and create a unique namespace:
+
+```python
+import os, time
+# Set namespace as environment variable for shell commands
+ns = os.environ.get("TEST_NAMESPACE", f"multi-agent-{int(time.time()) % 10000}")
+os.environ["NS"] = ns
+print(f"Using namespace: {ns}")
+```
+
+```python
+!kubectl create namespace $NS --dry-run=client -o yaml | kubectl apply -f -
+```
+
+## Step 1: Create the ModelAPI
+
+Create a shared ModelAPI for all agents (using mock responses for testing):
+
+```python
+!kaos modelapi deploy team-api -n $NS --mode Proxy
+```
+
+Wait for ModelAPI to be ready:
+
+```python
+!kubectl wait deployment/modelapi-team-api -n $NS --for=condition=available --timeout=120s
+```
+
+## Step 2: Create the Researcher Agent
+
+Create a specialist agent that handles research tasks:
+
+```python
+!kaos agent deploy researcher -n $NS \
+    --modelapi team-api \
+    --model mock-model \
+    --instructions "You are a research specialist. You gather and synthesize information on any topic." \
+    --mock-response "Here is my research on the topic: AI systems are increasingly being used in enterprise environments. Key trends include automation, decision support, and customer service. Growth is estimated at 40% year-over-year." \
+    --expose
+```
+
+Wait for researcher agent:
+
+```python
+!kubectl wait deployment/agent-researcher -n $NS --for=condition=available --timeout=120s
+```
+
+## Step 3: Create the Analyst Agent
+
+Create another specialist for data analysis:
+
+```python
+!kaos agent deploy analyst -n $NS \
+    --modelapi team-api \
+    --model mock-model \
+    --instructions "You are a data analyst. You analyze information and provide insights with statistics." \
+    --mock-response "Based on my analysis: The data shows 40% year-over-year growth in AI adoption. The highest impact areas are customer service automation (60%), decision support systems (25%), and predictive analytics (15%)." \
+    --expose
+```
+
+Wait for analyst agent:
+
+```python
+!kubectl wait deployment/agent-analyst -n $NS --for=condition=available --timeout=120s
+```
+
+## Step 4: Create the Coordinator Agent
+
+Create the coordinator that delegates to specialists. The coordinator uses multiple mock responses - one for each step of its reasoning:
+
+```python
+# Build mock responses - the delegate blocks trigger agent-to-agent communication
+mock1 = 'Let me delegate the research portion first.\n\n```delegate\n{"agent": "researcher", "task": "Research AI adoption trends in enterprises"}\n```'
+mock2 = 'Now let me get the analyst perspective.\n\n```delegate\n{"agent": "analyst", "task": "Analyze the growth patterns from the research"}\n```'
+mock3 = "Based on input from my team: AI is growing with 40% YoY growth, especially in customer service automation."
+os.environ["MOCK1"], os.environ["MOCK2"], os.environ["MOCK3"] = mock1, mock2, mock3
+```
+
+```python
+!kaos agent deploy coordinator -n $NS \
+    --modelapi team-api \
+    --model mock-model \
+    --instructions "You are a coordinator that delegates to specialist agents." \
+    --mock-response "$MOCK1" \
+    --mock-response "$MOCK2" \
+    --mock-response "$MOCK3" \
+    --sub-agent researcher \
+    --sub-agent analyst \
+    --expose
+```
+
+Wait for coordinator agent:
+
+```python
+!kubectl wait deployment/agent-coordinator -n $NS --for=condition=available --timeout=120s
+```
+
+## Step 5: Test the Multi-Agent System
+
+Send a request to the coordinator and watch it delegate:
+
+```python
+!kaos agent invoke coordinator -n $NS --message "What are the current trends in enterprise AI adoption?"
+```
+
+## Step 6: Verify the Result
+
+The coordinator should have delegated to both specialists and synthesized their responses:
+
+```python
+# The test passes if we got a response (the invoke command completed successfully)
+print("\nSUCCESS: Multi-agent delegation worked correctly!")
+print("The coordinator synthesized responses from researcher and analyst.")
+```
+
+## Enabling Telemetry (Production)
+
+For production use, enable OpenTelemetry on your agents using the `--otel-endpoint` flag:
+
+```bash
+kaos agent deploy coordinator --modelapi team-api --model gpt-4o \
+    --otel-endpoint "http://otel-collector.monitoring.svc:4317"
+```
+
+Or via YAML:
+
+```yaml
+apiVersion: kaos.tools/v1alpha1
+kind: Agent
+metadata:
+  name: coordinator
+spec:
+  modelAPI: team-api
+  model: gpt-4o
+  config:
+    telemetry:
+      enabled: true
+      endpoint: "http://otel-collector.monitoring.svc:4317"
+```
+
+This sends traces and metrics to your OTEL collector for observability.
+
+## How Delegation Works
+
+The coordinator's mock responses include `delegate` blocks:
+
+```
+```delegate
+{"agent": "researcher", "task": "Research AI trends"}
+```
+```
+
+When the agent framework sees this, it:
+1. Looks up the `researcher` agent in the sub-agents list
+2. Sends the task as a message to that agent
+3. Waits for the response
+4. Includes the response in the conversation context
+5. Continues to the next mock response
+
+## Cleanup
+
+```python
+!kubectl delete namespace $NS --ignore-not-found
+print(f"Cleaned up namespace: {os.environ['NS']}")
+```
+
+## Next Steps
+
+- [Custom MCP Server](/examples/custom-mcp-server) - Build custom tools
+- [KAOS Monkey](/examples/kaos-monkey) - Kubernetes management agent
+- [Agent CRD Reference](/operator/agent-crd) - Full configuration options

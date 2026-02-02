@@ -74,10 +74,10 @@ def uninstall(
 def create_rbac(
     name: str = typer.Argument(..., help="Name for the ServiceAccount and Role."),
     namespace: str = typer.Option(
-        "default",
+        None,
         "--namespace",
         "-n",
-        help="Namespace for the ServiceAccount.",
+        help="Namespace for the ServiceAccount. Uses current context if not specified.",
     ),
     namespaces: list[str] = typer.Option(
         [],
@@ -92,7 +92,7 @@ def create_rbac(
     verbs: list[str] = typer.Option(
         [],
         "--verbs",
-        help="Kubernetes verbs to grant.",
+        help="Kubernetes verbs to grant (comma-separated or repeated).",
     ),
     read_only: bool = typer.Option(
         False,
@@ -104,16 +104,31 @@ def create_rbac(
         "--cluster-wide",
         help="Create ClusterRole and ClusterRoleBinding instead of Role.",
     ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Only print YAML without applying to cluster.",
+    ),
 ) -> None:
     """Create RBAC resources for MCPServer Kubernetes runtime."""
+    # Split comma-separated values for resources and verbs
+    expanded_resources = []
+    for r in resources:
+        expanded_resources.extend(r.split(","))
+    
+    expanded_verbs = []
+    for v in verbs:
+        expanded_verbs.extend(v.split(","))
+    
     create_rbac_command(
         name=name,
         namespace=namespace,
         namespaces=list(namespaces),
-        resources=list(resources),
-        verbs=list(verbs),
+        resources=expanded_resources,
+        verbs=expanded_verbs,
         read_only=read_only,
         cluster_wide=cluster_wide,
+        dry_run=dry_run,
     )
 
 

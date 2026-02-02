@@ -1,0 +1,65 @@
+name: Docs Lint
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'docs/examples/**'
+      - 'examples/**'
+      - '.github/workflows/docs-lint.yaml'
+  push:
+    branches: [main]
+    paths:
+      - 'docs/examples/**'
+      - 'examples/**'
+      - '.github/workflows/docs-lint.yaml'
+  workflow_dispatch:
+
+jobs:
+  notebook-sync:
+    name: Check Notebook Sync
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install jupytext
+        run: pip install jupytext
+
+      - name: Check notebooks are in sync with markdown
+        run: |
+          # Check each markdown/notebook pair using jupytext --diff
+          has_diff=0
+          for md in docs/examples/*.md; do
+            basename=$(basename "$md" .md)
+            notebook="examples/${basename}.ipynb"
+            
+            if [ ! -f "$notebook" ]; then
+              echo "ERROR: $notebook does not exist"
+              echo "Run: jupytext --to ipynb $md -o $notebook"
+              has_diff=1
+              continue
+            fi
+            
+            # jupytext --diff compares source cells only (ignores metadata/outputs)
+            diff_output=$(jupytext "$md" "$notebook" --diff 2>&1)
+            if [ -n "$diff_output" ]; then
+              echo "ERROR: $notebook is out of sync with $md"
+              echo "$diff_output" | head -20
+              echo "Run: jupytext --to ipynb $md -o $notebook"
+              has_diff=1
+            else
+              echo "OK: $basename.ipynb is in sync"
+            fi
+          done
+          
+          if [ $has_diff -ne 0 ]; then
+            exit 1
+          fi
+          echo "All notebooks are in sync!"

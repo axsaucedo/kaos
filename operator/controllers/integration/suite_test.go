@@ -84,7 +84,7 @@ runtimes:
     transport: http
   kubernetes:
     type: go
-    image: ghcr.io/manusa/kubernetes-mcp-server:latest
+    image: quay.io/containers/kubernetes_mcp_server:latest
     args: ["--port", "8000"]
     transport: http
   slack:

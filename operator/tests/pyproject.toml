@@ -11,6 +11,9 @@ dependencies = [
     "pyyaml>=6.0.3",
     "sh>=2.2.2",
     "mcp>=1.0.0",
+    "jupytext>=1.16.0",
+    "nbconvert>=7.0.0",
+    "ipykernel>=6.0.0",
 ]
 
 [build-system]

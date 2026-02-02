@@ -118,11 +118,11 @@ export default withMermaid(defineConfig({
         ]
       },
       {
-        text: 'Tutorials',
+        text: 'Examples',
         items: [
-          { text: 'Simple Agent', link: '/tutorials/simple-agent-tools' },
-          { text: 'Multi-Agent', link: '/tutorials/multi-agent' },
-          { text: 'Custom Tools', link: '/tutorials/custom-mcp-tools' }
+          { text: 'Custom MCP Server', link: '/examples/custom-mcp-server' },
+          { text: 'KAOS Monkey', link: '/examples/kaos-monkey' },
+          { text: 'Multi-Agent Telemetry', link: '/examples/multi-agent-telemetry' }
         ]
       },
       {
