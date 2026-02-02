@@ -51,7 +51,7 @@ var _ = Describe("MCPServer Runtime Registry", func() {
 
 		// Verify image from registry
 		container := deployment.Spec.Template.Spec.Containers[0]
-		Expect(container.Image).To(Equal("ghcr.io/manusa/kubernetes-mcp-server:latest"))
+		Expect(container.Image).To(Equal("quay.io/containers/kubernetes_mcp_server:latest"))
 		Expect(container.Args).To(ContainElements("--port", "8000"))
 	})
 

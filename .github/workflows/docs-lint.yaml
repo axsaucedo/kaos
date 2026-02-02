@@ -1,0 +1,71 @@
+name: Docs Lint
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'docs/examples/**'
+      - 'examples/**'
+      - '.github/workflows/docs-lint.yaml'
+  push:
+    branches: [main]
+    paths:
+      - 'docs/examples/**'
+      - 'examples/**'
+      - '.github/workflows/docs-lint.yaml'
+  workflow_dispatch:
+
+jobs:
+  notebook-sync:
+    name: Check Notebook Sync
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install jupytext
+        run: pip install jupytext
+
+      - name: Check notebooks are in sync with markdown
+        run: |
+          # Regenerate notebooks from markdown sources
+          for md in docs/examples/*.md; do
+            basename=$(basename "$md" .md)
+            echo "Checking $basename..."
+            jupytext --to ipynb "$md" -o "/tmp/${basename}.ipynb"
+            
+            # Compare with existing notebook (ignore metadata differences)
+            if [ -f "examples/${basename}.ipynb" ]; then
+              # Extract cells from both and compare
+              python3 -c "
+          import json
+          import sys
+
+          def extract_cells(path):
+              with open(path) as f:
+                  nb = json.load(f)
+              # Return cell sources only (ignore metadata, outputs, etc)
+              return [c.get('source', []) for c in nb.get('cells', [])]
+
+          generated = extract_cells('/tmp/${basename}.ipynb')
+          existing = extract_cells('examples/${basename}.ipynb')
+
+          if generated != existing:
+              print(f'ERROR: examples/${basename}.ipynb is out of sync with docs/examples/${basename}.md')
+              print('Run: jupytext --to ipynb docs/examples/${basename}.md -o examples/${basename}.ipynb')
+              sys.exit(1)
+          print(f'OK: ${basename}.ipynb is in sync')
+          "
+            else
+              echo "ERROR: examples/${basename}.ipynb does not exist"
+              echo "Run: jupytext --to ipynb $md -o examples/${basename}.ipynb"
+              exit 1
+            fi
+          done
+          echo "All notebooks are in sync!"
