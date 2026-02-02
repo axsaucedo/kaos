@@ -15,6 +15,8 @@ jupyter:
 
 # KAOS Monkey: Kubernetes Chaos Agent
 
+> 📓 **Try it yourself!** This example is available as an executable [Jupyter notebook](/examples/kaos-monkey.ipynb).
+
 This example demonstrates building a "chaos monkey" style agent that can interact with your Kubernetes cluster. The agent uses MCP tools to execute operations, controlled by deterministic mock responses.
 
 ::: warning
@@ -41,16 +43,15 @@ The agent uses **mock responses** for deterministic behavior - this means we con
 First, let's set up the environment and create a unique namespace for this example:
 
 ```python
-import os
-import subprocess
-import time
+import os, time
+# Set namespace as environment variable for shell commands
+ns = os.environ.get("TEST_NAMESPACE", f"kaos-monkey-{int(time.time()) % 10000}")
+os.environ["NS"] = ns
+print(f"Using namespace: {ns}")
+```
 
-# Get namespace from environment or create a unique one
-namespace = os.environ.get("TEST_NAMESPACE", f"kaos-monkey-{int(time.time()) % 10000}")
-print(f"Using namespace: {namespace}")
-
-# Create namespace
-subprocess.run(["kubectl", "create", "namespace", namespace], check=False)
+```python
+!kubectl create namespace $NS --dry-run=client -o yaml | kubectl apply -f -
 ```
 
 ## Step 1: Create a ModelAPI
@@ -58,32 +59,13 @@ subprocess.run(["kubectl", "create", "namespace", namespace], check=False)
 Create a ModelAPI in Proxy mode (we'll use mock responses so no real LLM needed):
 
 ```python
-# Deploy ModelAPI using kaos CLI
-result = subprocess.run(
-    ["kaos", "modelapi", "deploy", "chaos-api", "-n", namespace, "--mode", "Proxy"],
-    capture_output=True, text=True
-)
-print(result.stdout)
-if result.returncode != 0:
-    print(f"stderr: {result.stderr}")
+!kaos modelapi deploy chaos-api -n $NS --mode Proxy
 ```
 
 Wait for ModelAPI to be ready:
 
 ```python
-# Wait for ModelAPI deployment to be ready
-for i in range(60):
-    result = subprocess.run(
-        ["kubectl", "get", "deployment", "modelapi-chaos-api", "-n", namespace, 
-         "-o", "jsonpath={.status.readyReplicas}"],
-        capture_output=True, text=True
-    )
-    if result.stdout.strip() == "1":
-        print("ModelAPI is ready!")
-        break
-    time.sleep(2)
-else:
-    raise TimeoutError("ModelAPI did not become ready")
+!kubectl wait deployment/modelapi-chaos-api -n $NS --for=condition=available --timeout=120s
 ```
 
 ## Step 2: Create a Custom MCP Server with Python Tools
@@ -91,61 +73,41 @@ else:
 We'll create an MCP server with python-string runtime that simulates pod management:
 
 ```python
-# Create MCPServer with python-string runtime
-mcp_yaml = f"""
+%%writefile /tmp/chaos-mcp.yaml
 apiVersion: kaos.tools/v1alpha1
 kind: MCPServer
 metadata:
   name: chaos-tools
-  namespace: {namespace}
 spec:
   runtime: python-string
   params: |
     def list_pods(namespace: str) -> str:
-        \"\"\"List pods in a namespace.\"\"\"
+        """List pods in a namespace."""
         import subprocess
         result = subprocess.run(
             ["kubectl", "get", "pods", "-n", namespace, "-o", "name"],
             capture_output=True, text=True
         )
-        return result.stdout if result.returncode == 0 else f"Error: {{result.stderr}}"
+        return result.stdout if result.returncode == 0 else f"Error: {result.stderr}"
     
     def delete_pod(namespace: str, name: str) -> str:
-        \"\"\"Delete a specific pod.\"\"\"
+        """Delete a specific pod."""
         import subprocess
         result = subprocess.run(
             ["kubectl", "delete", "pod", name, "-n", namespace, "--ignore-not-found"],
             capture_output=True, text=True
         )
-        return f"Deleted pod {{name}}" if result.returncode == 0 else f"Error: {{result.stderr}}"
-"""
+        return f"Deleted pod {name}" if result.returncode == 0 else f"Error: {result.stderr}"
+```
 
-# Apply the MCPServer
-result = subprocess.run(
-    ["kubectl", "apply", "-f", "-"],
-    input=mcp_yaml, capture_output=True, text=True
-)
-print(result.stdout)
-if result.returncode != 0:
-    print(f"stderr: {result.stderr}")
+```python
+!kubectl apply -f /tmp/chaos-mcp.yaml -n $NS
 ```
 
 Wait for MCP server to be ready:
 
 ```python
-# Wait for MCPServer deployment
-for i in range(60):
-    result = subprocess.run(
-        ["kubectl", "get", "deployment", "mcpserver-chaos-tools", "-n", namespace,
-         "-o", "jsonpath={.status.readyReplicas}"],
-        capture_output=True, text=True
-    )
-    if result.stdout.strip() == "1":
-        print("MCPServer is ready!")
-        break
-    time.sleep(2)
-else:
-    raise TimeoutError("MCPServer did not become ready")
+!kubectl wait deployment/mcpserver-chaos-tools -n $NS --for=condition=available --timeout=120s
 ```
 
 ## Step 3: Create a Test Pod
@@ -153,43 +115,13 @@ else:
 Create a simple test pod that our chaos agent can target:
 
 ```python
-# Create a test pod
-pod_yaml = f"""
-apiVersion: v1
-kind: Pod
-metadata:
-  name: chaos-victim
-  namespace: {namespace}
-spec:
-  containers:
-  - name: nginx
-    image: nginx:alpine
-  restartPolicy: Never
-"""
-
-result = subprocess.run(
-    ["kubectl", "apply", "-f", "-"],
-    input=pod_yaml, capture_output=True, text=True
-)
-print(result.stdout)
+!kubectl run chaos-victim -n $NS --image=nginx:alpine --restart=Never
 ```
 
 Wait for pod to be running:
 
 ```python
-# Wait for test pod to be running
-for i in range(30):
-    result = subprocess.run(
-        ["kubectl", "get", "pod", "chaos-victim", "-n", namespace,
-         "-o", "jsonpath={.status.phase}"],
-        capture_output=True, text=True
-    )
-    if result.stdout.strip() == "Running":
-        print("Test pod is running!")
-        break
-    time.sleep(2)
-else:
-    print(f"Pod status: {result.stdout}")
+!kubectl wait pod/chaos-victim -n $NS --for=condition=ready --timeout=60s
 ```
 
 ## Step 4: Create the Chaos Agent
@@ -197,40 +129,29 @@ else:
 Create the agent with mock responses that will delete the test pod. Each `--mock-response` is consumed in sequence:
 
 ```python
-# Deploy the chaos agent with mock responses for each step
-result = subprocess.run([
-    "kaos", "agent", "deploy", "kaos-monkey",
-    "-n", namespace,
-    "--modelapi", "chaos-api",
-    "--model", "mock-model",
-    "--mcp", "chaos-tools",
-    "--instructions", "You are KAOS Monkey, a chaos engineering agent.",
-    "--mock-response", f'I will list the pods first.\n\n```tool_call\n{{"tool": "list_pods", "arguments": {{"namespace": "{namespace}"}}}}\n```',
-    "--mock-response", f'Found chaos-victim pod. Deleting it now.\n\n```tool_call\n{{"tool": "delete_pod", "arguments": {{"namespace": "{namespace}", "name": "chaos-victim"}}}}\n```',
-    "--mock-response", "Done! I have deleted the chaos-victim pod to simulate a failure scenario.",
-    "--expose"
-], capture_output=True, text=True)
-print(result.stdout)
-if result.returncode != 0:
-    print(f"stderr: {result.stderr}")
+# Build mock responses with namespace interpolation
+ns = os.environ["NS"]
+mock1 = f'I will list the pods first.\n\n```tool_call\n{{"tool": "list_pods", "arguments": {{"namespace": "{ns}"}}}}\n```'
+mock2 = f'Found chaos-victim pod. Deleting it now.\n\n```tool_call\n{{"tool": "delete_pod", "arguments": {{"namespace": "{ns}", "name": "chaos-victim"}}}}\n```'
+mock3 = "Done! I have deleted the chaos-victim pod to simulate a failure scenario."
+```
+
+```python
+!kaos agent deploy kaos-monkey -n $NS \
+    --modelapi chaos-api \
+    --model mock-model \
+    --mcp chaos-tools \
+    --instructions "You are KAOS Monkey, a chaos engineering agent." \
+    --mock-response "$mock1" \
+    --mock-response "$mock2" \
+    --mock-response "$mock3" \
+    --expose
 ```
 
 Wait for agent to be ready:
 
 ```python
-# Wait for agent deployment
-for i in range(60):
-    result = subprocess.run(
-        ["kubectl", "get", "deployment", "agent-kaos-monkey", "-n", namespace,
-         "-o", "jsonpath={.status.readyReplicas}"],
-        capture_output=True, text=True
-    )
-    if result.stdout.strip() == "1":
-        print("Agent is ready!")
-        break
-    time.sleep(2)
-else:
-    raise TimeoutError("Agent did not become ready")
+!kubectl wait deployment/agent-kaos-monkey -n $NS --for=condition=available --timeout=120s
 ```
 
 ## Step 5: Unleash the Chaos
@@ -238,16 +159,7 @@ else:
 Now invoke the chaos agent to delete the pod:
 
 ```python
-# Invoke the agent
-result = subprocess.run([
-    "kaos", "agent", "invoke", "kaos-monkey",
-    "-n", namespace,
-    "--message", "Cause some chaos by deleting a pod"
-], capture_output=True, text=True)
-print("Agent response:")
-print(result.stdout)
-if result.returncode != 0:
-    print(f"stderr: {result.stderr}")
+!kaos agent invoke kaos-monkey -n $NS --message "Cause some chaos by deleting a pod"
 ```
 
 ## Step 6: Verify the Chaos
@@ -255,16 +167,8 @@ if result.returncode != 0:
 Check that the pod was deleted:
 
 ```python
-# Verify the pod was deleted
-time.sleep(2)
-result = subprocess.run(
-    ["kubectl", "get", "pod", "chaos-victim", "-n", namespace],
-    capture_output=True, text=True
-)
-if "NotFound" in result.stderr or "chaos-victim" not in result.stdout:
-    print("SUCCESS: Pod was deleted by the chaos agent!")
-else:
-    print(f"Pod still exists: {result.stdout}")
+import time; time.sleep(2)
+!kubectl get pod chaos-victim -n $NS 2>&1 || echo "SUCCESS: Pod was deleted by the chaos agent!"
 ```
 
 ## Understanding Mock Responses
@@ -292,10 +196,8 @@ graph LR
 ## Cleanup
 
 ```python
-# Clean up all resources
-subprocess.run(["kubectl", "delete", "namespace", namespace, "--ignore-not-found"], 
-               capture_output=True)
-print(f"Cleaned up namespace: {namespace}")
+!kubectl delete namespace $NS --ignore-not-found
+print(f"Cleaned up namespace: {os.environ['NS']}")
 ```
 
 ## Next Steps

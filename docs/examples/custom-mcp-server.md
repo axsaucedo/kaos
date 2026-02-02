@@ -15,6 +15,8 @@ jupyter:
 
 # Building a Custom MCP Server
 
+> 📓 **Try it yourself!** This example is available as an executable [Jupyter notebook](/examples/custom-mcp-server.ipynb).
+
 This example walks through creating, building, and deploying a custom MCP server using the KAOS CLI. By the end, you'll have a working MCP server with custom tools.
 
 ## Prerequisites
