@@ -42,6 +42,15 @@ list-tags:
 	@echo "Available version tags (excluding v0.0.x test tags):"
 	@git tag --list "v*" --sort=-v:refname | grep -v '^v0\.0\.' | head -20
 
+# Build the examples into jupyter notebooks
+build-examples:
+	@for f in examples/*.md; do \
+		echo "$$f"; \
+		jupytext --to ipynb "$$f" \
+			--output "../examples/$$(basename "$${f%.md}.ipynb")"; \
+	done
+
+
 # Rebuild docs for a specific tag by triggering workflow dispatch
 # Usage: make rebuild-tag TAG=v1.0.0
 rebuild-tag:
