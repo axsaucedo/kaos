@@ -117,23 +117,14 @@ Wait for pod to be running:
 Create the agent with mock responses. The `--mock-response` flag can be used multiple times - each response is consumed in sequence:
 
 ```python
-# Mock responses with namespace interpolation  
-mock1 = f'I will list the pods first.\n\n```tool_call\n{{"tool": "pods_list", "arguments": {{"namespace": "{ns}"}}}}\n```'
-mock2 = f'Found chaos-victim pod. Deleting it now.\n\n```tool_call\n{{"tool": "pods_delete", "arguments": {{"namespace": "{ns}", "name": "chaos-victim"}}}}\n```'
-mock3 = "Done! I have deleted the chaos-victim pod to simulate a failure scenario."
-
-os.environ["MOCK1"], os.environ["MOCK2"], os.environ["MOCK3"] = mock1, mock2, mock3
-```
-
-```python
 !kaos agent deploy kaos-monkey -n $NS \
     --modelapi chaos-api \
     --model mock-model \
     --mcp k8s-tools \
     --instructions "You are KAOS Monkey, a chaos engineering agent." \
-    --mock-response "$MOCK1" \
-    --mock-response "$MOCK2" \
-    --mock-response "$MOCK3" \
+    --mock-response 'I will list the pods first.\n\n\`\`\`tool_call\n{{"tool": "pods_list", "arguments": {{"namespace": "$NS"}}}}\n\`\`\`' \
+    --mock-response 'Found chaos-victim pod. Deleting it now.\n\n\`\`\`tool_call\n{{"tool": "pods_delete", "arguments": {{"namespace": "$NS", "name": "chaos-victim"}}}}\n\`\`\`' \
+    --mock-response "Done! I have deleted the chaos-victim pod to simulate a failure scenario." \
     --expose
 ```
 

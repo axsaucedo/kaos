@@ -112,22 +112,15 @@ Wait for analyst agent:
 
 Create the coordinator that delegates to specialists. The coordinator uses multiple mock responses - one for each step of its reasoning:
 
-```python
-# Build mock responses - the delegate blocks trigger agent-to-agent communication
-mock1 = 'Let me delegate the research portion first.\n\n```delegate\n{"agent": "researcher", "task": "Research AI adoption trends in enterprises"}\n```'
-mock2 = 'Now let me get the analyst perspective.\n\n```delegate\n{"agent": "analyst", "task": "Analyze the growth patterns from the research"}\n```'
-mock3 = "Based on input from my team: AI is growing with 40% YoY growth, especially in customer service automation."
-os.environ["MOCK1"], os.environ["MOCK2"], os.environ["MOCK3"] = mock1, mock2, mock3
-```
 
 ```python
 !kaos agent deploy coordinator -n $NS \
     --modelapi team-api \
     --model mock-model \
     --instructions "You are a coordinator that delegates to specialist agents." \
-    --mock-response "$MOCK1" \
-    --mock-response "$MOCK2" \
-    --mock-response "$MOCK3" \
+    --mock-response "Let me delegate the research portion first.\n\n\`\`\`delegate\n{"agent": "researcher", "task": "Research AI adoption trends in enterprises"}\n\`\`\`" \
+    --mock-response "'Now let me get the analyst perspective.\n\n\`\`\`delegate\n{"agent": "analyst", "task": "Analyze the growth patterns from the research"}\n\`\`\`" \
+    --mock-response "Based on input from my team: AI is growing with 40% YoY growth, especially in customer service automation." \
     --sub-agent researcher \
     --sub-agent analyst \
     --expose
