@@ -174,6 +174,9 @@ jobs:
         uses: actions/upload-pages-artifact@v3
         with:
           path: deploy
+          name: github-pages-${{ inputs.deploy-path }}
 
       - name: Deploy to GitHub Pages
         uses: actions/deploy-pages@v4
+        with:
+          artifact_name: github-pages-${{ inputs.deploy-path }}
