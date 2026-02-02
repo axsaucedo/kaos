@@ -19,7 +19,7 @@ jupyter:
 
 This example demonstrates building a "chaos monkey" style agent that can interact with your Kubernetes cluster using the [Kubernetes MCP Server](https://github.com/manusa/kubernetes-mcp-server). The agent uses MCP tools to execute operations, controlled by deterministic mock responses.
 
-## Architecture
+## Understanding the Flow
 
 ```mermaid
 graph LR
@@ -55,15 +55,11 @@ The agent uses **mock responses** for deterministic behavior - this means we con
 First, let's set up the environment and create a unique namespace for this example:
 
 ```python
-import os, time
-# Set namespace as environment variable for shell commands
-ns = os.environ.get("TEST_NAMESPACE", f"kaos-monkey-{int(time.time()) % 10000}")
-os.environ["NS"] = ns
-print(f"Using namespace: {ns}")
+!export NS="${TEST_NAMESPACE:-kaos-monkey-$(($(date +%s)%10000))}"
 ```
 
 ```python
-!kubectl create namespace $NS --dry-run=client -o yaml | kubectl apply -f -
+!kubectl create namespace $NS
 ```
 
 ## Step 1: Create a ModelAPI
@@ -125,6 +121,7 @@ Create the agent with mock responses. The `--mock-response` flag can be used mul
 mock1 = f'I will list the pods first.\n\n```tool_call\n{{"tool": "pods_list", "arguments": {{"namespace": "{ns}"}}}}\n```'
 mock2 = f'Found chaos-victim pod. Deleting it now.\n\n```tool_call\n{{"tool": "pods_delete", "arguments": {{"namespace": "{ns}", "name": "chaos-victim"}}}}\n```'
 mock3 = "Done! I have deleted the chaos-victim pod to simulate a failure scenario."
+
 os.environ["MOCK1"], os.environ["MOCK2"], os.environ["MOCK3"] = mock1, mock2, mock3
 ```
 
@@ -159,7 +156,8 @@ Now invoke the chaos agent to delete the pod:
 Check that the pod was deleted:
 
 ```python
-import time; time.sleep(2)
+!sleep 2
+
 !kubectl get pod chaos-victim -n $NS 2>&1 || echo "SUCCESS: Pod was deleted by the chaos agent!"
 ```
 

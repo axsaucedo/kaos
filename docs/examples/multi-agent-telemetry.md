@@ -19,7 +19,7 @@ jupyter:
 
 This example demonstrates building a multi-agent system with delegation between agents. You'll see how a coordinator agent delegates to specialist agents.
 
-## Architecture
+## Understanding the Flow
 
 ```mermaid
 graph TB
@@ -49,15 +49,11 @@ We'll create:
 First, let's set up the environment and create a unique namespace:
 
 ```python
-import os, time
-# Set namespace as environment variable for shell commands
-ns = os.environ.get("TEST_NAMESPACE", f"multi-agent-{int(time.time()) % 10000}")
-os.environ["NS"] = ns
-print(f"Using namespace: {ns}")
+!export NS="${TEST_NAMESPACE:-kaos-monkey-$(($(date +%s)%10000))}"
 ```
 
 ```python
-!kubectl create namespace $NS --dry-run=client -o yaml | kubectl apply -f -
+!kubectl create namespace $NS
 ```
 
 ## Step 1: Create the ModelAPI
