@@ -173,7 +173,8 @@ The `kubernetes` runtime provides many useful tools:
 
 ```python
 !kubectl delete namespace $NS --ignore-not-found
-print(f"Cleaned up namespace: {os.environ['NS']}")
+
+!echo "Cleaned up namespace: $NS"
 ```
 
 ## Next Steps
