@@ -92,7 +92,7 @@ def create_rbac(
     verbs: list[str] = typer.Option(
         [],
         "--verbs",
-        help="Kubernetes verbs to grant.",
+        help="Kubernetes verbs to grant (comma-separated or repeated).",
     ),
     read_only: bool = typer.Option(
         False,
@@ -111,12 +111,21 @@ def create_rbac(
     ),
 ) -> None:
     """Create RBAC resources for MCPServer Kubernetes runtime."""
+    # Split comma-separated values for resources and verbs
+    expanded_resources = []
+    for r in resources:
+        expanded_resources.extend(r.split(","))
+    
+    expanded_verbs = []
+    for v in verbs:
+        expanded_verbs.extend(v.split(","))
+    
     create_rbac_command(
         name=name,
         namespace=namespace,
         namespaces=list(namespaces),
-        resources=list(resources),
-        verbs=list(verbs),
+        resources=expanded_resources,
+        verbs=expanded_verbs,
         read_only=read_only,
         cluster_wide=cluster_wide,
         dry_run=dry_run,
