@@ -19,6 +19,23 @@ jupyter:
 
 This example walks through creating, building, and deploying a custom MCP server using the KAOS CLI. By the end, you'll have a working MCP server with custom tools.
 
+```mermaid
+sequenceDiagram
+    participant User
+    participant Agent
+    participant ModelAPI
+    participant MCPServer
+    
+    User->>Agent: "What's the weather in Paris?"
+    Agent->>ModelAPI: Generate response
+    ModelAPI-->>Agent: Use get_weather tool
+    Agent->>MCPServer: Call get_weather("Paris")
+    MCPServer-->>Agent: "Weather in Paris: 22°C, sunny"
+    Agent->>ModelAPI: Continue with tool result
+    ModelAPI-->>Agent: Final response
+    Agent-->>User: "The weather in Paris is 22°C and sunny."
+```
+
 ## Prerequisites
 
 - KAOS operator installed ([Installation Guide](/getting-started/installation))
@@ -31,13 +48,10 @@ This example walks through creating, building, and deploying a custom MCP server
 First, let's scaffold a new MCP server project using the CLI:
 
 ```python
-import os
-import tempfile
-
 # Create a temporary directory for our project
-work_dir = tempfile.mkdtemp(prefix="weather-mcp-")
-os.chdir(work_dir)
-print(f"Working in: {work_dir}")
+!mkdir -p weather-mcp
+
+!cd weather-mcp
 ```
 
 ```python
@@ -177,24 +191,6 @@ Send a message to your agent:
 $ kaos agent invoke weather-agent --message "What's the weather like in London?"
 ```
 
-## Understanding the Flow
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant Agent
-    participant ModelAPI
-    participant MCPServer
-    
-    User->>Agent: "What's the weather in Paris?"
-    Agent->>ModelAPI: Generate response
-    ModelAPI-->>Agent: Use get_weather tool
-    Agent->>MCPServer: Call get_weather("Paris")
-    MCPServer-->>Agent: "Weather in Paris: 22°C, sunny"
-    Agent->>ModelAPI: Continue with tool result
-    ModelAPI-->>Agent: Final response
-    Agent-->>User: "The weather in Paris is 22°C and sunny."
-```
 
 ## Cleanup
 

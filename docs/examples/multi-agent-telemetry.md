@@ -15,11 +15,11 @@ jupyter:
 
 # Multi-Agent System with Telemetry
 
-> 📓 **Try it yourself!** This example is available as an executable [Jupyter notebook](/examples/multi-agent-telemetry.ipynb).
+> **Try it yourself!** This example is available as an executable [Jupyter notebook](/examples/multi-agent-telemetry.ipynb).
 
 This example demonstrates building a multi-agent system with delegation between agents. You'll see how a coordinator agent delegates to specialist agents.
 
-## Architecture
+## Understanding the Flow
 
 ```mermaid
 graph TB
@@ -46,40 +46,38 @@ We'll create:
 
 ## Setup
 
-First, let's set up the environment and create a unique namespace:
+First, let's set up the environment and create a namespace:
 
 ```python
-import os, time
-# Set namespace as environment variable for shell commands
-ns = os.environ.get("TEST_NAMESPACE", f"multi-agent-{int(time.time()) % 10000}")
-os.environ["NS"] = ns
-print(f"Using namespace: {ns}")
+import os
+os.environ['NAMESPACE'] = 'kaos-agent-telemetry-example'
 ```
 
-```python
-!kubectl create namespace $NS --dry-run=client -o yaml | kubectl apply -f -
+```bash
+kubectl create namespace $NAMESPACE 2>/dev/null || true
+kubectl config set-context --current --namespace=$NAMESPACE
 ```
 
 ## Step 1: Create the ModelAPI
 
 Create a shared ModelAPI for all agents (using mock responses for testing):
 
-```python
-!kaos modelapi deploy team-api -n $NS --mode Proxy
+```bash
+kaos modelapi deploy team-api --mode proxy
 ```
 
 Wait for ModelAPI to be ready:
 
-```python
-!kubectl wait deployment/modelapi-team-api -n $NS --for=condition=available --timeout=120s
+```bash
+kubectl wait deployment/modelapi-team-api --for=condition=available --timeout=120s
 ```
 
 ## Step 2: Create the Researcher Agent
 
 Create a specialist agent that handles research tasks:
 
-```python
-!kaos agent deploy researcher -n $NS \
+```bash
+kaos agent deploy researcher \
     --modelapi team-api \
     --model mock-model \
     --instructions "You are a research specialist. You gather and synthesize information on any topic." \
@@ -89,16 +87,16 @@ Create a specialist agent that handles research tasks:
 
 Wait for researcher agent:
 
-```python
-!kubectl wait deployment/agent-researcher -n $NS --for=condition=available --timeout=120s
+```bash
+kubectl wait deployment/agent-researcher --for=condition=available --timeout=120s
 ```
 
 ## Step 3: Create the Analyst Agent
 
 Create another specialist for data analysis:
 
-```python
-!kaos agent deploy analyst -n $NS \
+```bash
+kaos agent deploy analyst \
     --modelapi team-api \
     --model mock-model \
     --instructions "You are a data analyst. You analyze information and provide insights with statistics." \
@@ -108,30 +106,23 @@ Create another specialist for data analysis:
 
 Wait for analyst agent:
 
-```python
-!kubectl wait deployment/agent-analyst -n $NS --for=condition=available --timeout=120s
+```bash
+kubectl wait deployment/agent-analyst --for=condition=available --timeout=120s
 ```
 
 ## Step 4: Create the Coordinator Agent
 
 Create the coordinator that delegates to specialists. The coordinator uses multiple mock responses - one for each step of its reasoning:
 
-```python
-# Build mock responses - the delegate blocks trigger agent-to-agent communication
-mock1 = 'Let me delegate the research portion first.\n\n```delegate\n{"agent": "researcher", "task": "Research AI adoption trends in enterprises"}\n```'
-mock2 = 'Now let me get the analyst perspective.\n\n```delegate\n{"agent": "analyst", "task": "Analyze the growth patterns from the research"}\n```'
-mock3 = "Based on input from my team: AI is growing with 40% YoY growth, especially in customer service automation."
-os.environ["MOCK1"], os.environ["MOCK2"], os.environ["MOCK3"] = mock1, mock2, mock3
-```
 
-```python
-!kaos agent deploy coordinator -n $NS \
+```bash
+kaos agent deploy coordinator \
     --modelapi team-api \
     --model mock-model \
     --instructions "You are a coordinator that delegates to specialist agents." \
-    --mock-response "$MOCK1" \
-    --mock-response "$MOCK2" \
-    --mock-response "$MOCK3" \
+    --mock-response $'Let me delegate the research portion first.\n\n```delegate\n{"agent": "researcher", "task": "Research AI adoption trends in enterprises"}\n```' \
+    --mock-response $'Now let me get the analyst perspective.\n\n```delegate\n{"agent": "analyst", "task": "Analyze the growth patterns from the research"}\n```' \
+    --mock-response "Based on input from my team: AI is growing with 40% YoY growth, especially in customer service automation." \
     --sub-agent researcher \
     --sub-agent analyst \
     --expose
@@ -139,8 +130,8 @@ os.environ["MOCK1"], os.environ["MOCK2"], os.environ["MOCK3"] = mock1, mock2, mo
 
 Wait for coordinator agent:
 
-```python
-!kubectl wait deployment/agent-coordinator -n $NS --for=condition=available --timeout=120s
+```bash
+kubectl wait deployment/agent-coordinator --for=condition=available --timeout=120s
 ```
 
 ## Step 5: Test the Multi-Agent System
@@ -148,7 +139,15 @@ Wait for coordinator agent:
 Send a request to the coordinator and watch it delegate:
 
 ```python
-!kaos agent invoke coordinator -n $NS --message "What are the current trends in enterprise AI adoption?"
+import subprocess
+result = subprocess.run(
+    ["kaos", "agent", "invoke", "coordinator", "--message", "What are the current trends in enterprise AI adoption?"],
+    capture_output=True, text=True
+)
+print(result.stdout)
+if result.returncode != 0:
+    print(result.stderr)
+    raise AssertionError(f"Agent invoke failed with code {result.returncode}")
 ```
 
 ## Step 6: Verify the Result
@@ -156,9 +155,12 @@ Send a request to the coordinator and watch it delegate:
 The coordinator should have delegated to both specialists and synthesized their responses:
 
 ```python
-# The test passes if we got a response (the invoke command completed successfully)
-print("\nSUCCESS: Multi-agent delegation worked correctly!")
-print("The coordinator synthesized responses from researcher and analyst.")
+# Verify we got a meaningful response containing expected content
+if "40%" in result.stdout or "growth" in result.stdout.lower():
+    print("\nSUCCESS: Multi-agent delegation worked correctly!")
+    print("The coordinator synthesized responses from researcher and analyst.")
+else:
+    raise AssertionError(f"Unexpected response - delegation may have failed: {result.stdout}")
 ```
 
 ## Enabling Telemetry (Production)
@@ -207,9 +209,8 @@ When the agent framework sees this, it:
 
 ## Cleanup
 
-```python
-!kubectl delete namespace $NS --ignore-not-found
-print(f"Cleaned up namespace: {os.environ['NS']}")
+```bash
+kubectl delete namespace $NAMESPACE
 ```
 
 ## Next Steps
