@@ -15,7 +15,7 @@ jupyter:
 
 # KAOS Monkey: Kubernetes Chaos Agent
 
-> 📓 **Try it yourself!** This example is available as an executable [Jupyter notebook](/examples/kaos-monkey.ipynb).
+> **Try it yourself!** This example is available as an executable [Jupyter notebook](/examples/kaos-monkey.ipynb).
 
 This example demonstrates building a "chaos monkey" style agent that can interact with your Kubernetes cluster using the [Kubernetes MCP Server](https://github.com/manusa/kubernetes-mcp-server). The agent uses MCP tools to execute operations, controlled by deterministic mock responses.
 
@@ -48,109 +48,99 @@ We'll create an agent that can:
 2. Delete specific pods using the `pods_delete` tool
 3. Return results of operations
 
-The agent uses **mock responses** for deterministic behavior - this means we control exactly what the LLM "decides" to do, making the example reproducible and testable.
+The agent uses **mock responses** for deterministic behavior which allows us to control exactly what the LLM "decides" to do, making the example reproducible and testable (and doesn't require setting up external ModelAPI).
 
 ## Setup
 
 First, let's set up the environment and create a namespace for this example:
 
 ```python
-import os
-ns = os.environ.get("TEST_NAMESPACE", "kaos-monkey-example")
-os.environ["NS"] = ns
-print(f"Using namespace: {ns}")
+%env KUBECTL_NAMESPACE=kaos-monkey-example
 ```
 
-```python
-!kubectl create namespace $NS --dry-run=client -o yaml | kubectl apply -f -
+```bash
+kubectl create namespace kaos-monkey-example | echo "exists"
 ```
 
 ## Step 1: Create a ModelAPI
 
 Create a ModelAPI in Proxy mode (we'll use mock responses so no real LLM needed):
 
-```python
-!kaos modelapi deploy chaos-api -n $NS --mode Proxy
+```bash
+kaos modelapi deploy chaos-api --mode Proxy
 ```
 
 Wait for ModelAPI to be ready:
 
-```python
-!kubectl wait deployment/modelapi-chaos-api -n $NS --for=condition=available --timeout=120s
+```bash
+kubectl wait deployment/modelapi-chaos-api --for=condition=available --timeout=120s
 ```
 
 ## Step 2: Set Up RBAC for Kubernetes MCP Server
 
 The Kubernetes MCP server needs permissions to interact with the Kubernetes API:
 
-```python
-!kaos system create-rbac k8s-mcp -n $NS --resources pods --verbs list,get,delete
+```bash
+kaos system create-rbac k8s-mcp --resources pods --verbs list,get,delete
 ```
 
 ## Step 3: Create the Kubernetes MCP Server
 
 Deploy the Kubernetes MCP server using the built-in `kubernetes` runtime with the service account we just created:
 
-```python
-!kaos mcp deploy k8s-tools -n $NS --runtime kubernetes --sa k8s-mcp
+```bash
+kaos mcp deploy k8s-tools --runtime kubernetes --sa k8s-mcp
 ```
 
 Wait for MCP server to be ready:
 
-```python
-!kubectl wait deployment/mcpserver-k8s-tools -n $NS --for=condition=available --timeout=120s
+```bash
+kubectl wait deployment/mcpserver-k8s-tools --for=condition=available --timeout=120s
 ```
 
 ## Step 4: Create a Test Pod
 
 Create a simple test pod that our chaos agent can target:
 
-```python
-!kubectl run chaos-victim -n $NS --image=nginx:alpine --restart=Never
+```bash
+kubectl run chaos-victim --image=nginx:alpine --restart=Never | echo "exists"
 ```
 
 Wait for pod to be running:
 
-```python
-!kubectl wait pod/chaos-victim -n $NS --for=condition=ready --timeout=60s
+```bash
+kubectl wait pod/chaos-victim --for=condition=ready --timeout=60s
 ```
 
 ## Step 5: Create the Chaos Agent
 
 Create the agent with mock responses. The `--mock-response` flag can be used multiple times - each response is consumed in sequence:
 
-```python
-# Build mock responses with namespace interpolation
-mock1 = f'I will list the pods first.\n\n```tool_call\n{{"tool": "pods_list", "arguments": {{"namespace": "{ns}"}}}}\n```'
-mock2 = f'Found chaos-victim pod. Deleting it now.\n\n```tool_call\n{{"tool": "pods_delete", "arguments": {{"namespace": "{ns}", "name": "chaos-victim"}}}}\n```'
-mock3 = "Done! I have deleted the chaos-victim pod to simulate a failure scenario."
-os.environ["MOCK1"], os.environ["MOCK2"], os.environ["MOCK3"] = mock1, mock2, mock3
-```
-
-```python
-!kaos agent deploy kaos-monkey -n $NS \
+```bash
+# Use '$' sign to treat newlines directly
+kaos agent deploy kaos-monkey \
     --modelapi chaos-api \
     --model mock-model \
     --mcp k8s-tools \
     --instructions "You are KAOS Monkey, a chaos engineering agent." \
-    --mock-response "$MOCK1" \
-    --mock-response "$MOCK2" \
-    --mock-response "$MOCK3" \
+    --mock-response $'I will list the pods first.\n\n```tool_call\n{"tool": "pods_list", "arguments": {"namespace": "kaos-monkey-example"}}\n```' \
+    --mock-response $'Found chaos-victim pod. Deleting it now.\n\n```tool_call\n{"tool": "pods_delete", "arguments": {"namespace": "kaos-monkey-example", "name": "chaos-victim"}}\n```' \
+    --mock-response "Done! I have deleted the chaos-victim pod to simulate a failure scenario." \
     --expose
 ```
 
 Wait for agent to be ready:
 
-```python
-!kubectl wait deployment/agent-kaos-monkey -n $NS --for=condition=available --timeout=120s
+```bash
+kubectl wait deployment/agent-kaos-monkey --for=condition=available --timeout=120s
 ```
 
 ## Step 6: Unleash the Chaos
 
 Now invoke the chaos agent to delete the pod:
 
-```python
-!kaos agent invoke kaos-monkey -n $NS --message "Cause some chaos by deleting a pod"
+```bash
+kaos agent invoke kaos-monkey --message "Cause some chaos by deleting a pod"
 ```
 
 ## Step 7: Verify the Chaos
@@ -163,7 +153,7 @@ import time
 time.sleep(3)  # Wait for deletion to propagate
 
 # Verify pod was deleted - this should fail (pod not found)
-result = subprocess.run(["kubectl", "get", "pod", "chaos-victim", "-n", ns], capture_output=True)
+result = subprocess.run(["kubectl", "get", "pod", "chaos-victim"], capture_output=True)
 if result.returncode != 0:
     print("SUCCESS: Pod was deleted by the chaos agent!")
 else:
@@ -189,9 +179,8 @@ The `kubernetes` runtime provides many useful tools:
 
 ## Cleanup
 
-```python
-!kubectl delete namespace $NS --ignore-not-found
-print(f"Cleaned up namespace: {ns}")
+```bash
+kubectl delete namespace kaos-monkey-example
 ```
 
 ## Next Steps
