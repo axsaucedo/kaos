@@ -152,7 +152,7 @@ import subprocess
 
 # Verify pod was deleted - this should fail (pod not found)
 result = subprocess.run(["kubectl", "get", "event"], capture_output=True)
-r_str = result(str)
+r_str = str(result.stdout)
 
 if "Killing" in r_str and "pod/chaos-victim" in r_str:
     print("SUCCESS: Pod was deleted by the chaos agent!")
