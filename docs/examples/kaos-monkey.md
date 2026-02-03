@@ -155,7 +155,6 @@ result = subprocess.run(["kubectl", "get", "event"], capture_output=True)
 r_str = result(str)
 
 if "Killing" in r_str and "pod/chaos-victim" in r_str:
-:
     print("SUCCESS: Pod was deleted by the chaos agent!")
 else:
     raise AssertionError("FAILED: Pod still exists - chaos agent did not delete it")
