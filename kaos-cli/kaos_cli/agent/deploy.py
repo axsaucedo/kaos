@@ -68,6 +68,7 @@ def deploy_agent(
     # Add mock responses as container env if provided
     if mock_responses:
         mock_json = json.dumps(mock_responses)
+        mock_json = mock_json.replace("'", "''")
         yaml_content += f"""  container:
     env:
     - name: DEBUG_MOCK_RESPONSES
