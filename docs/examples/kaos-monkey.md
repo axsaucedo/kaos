@@ -55,11 +55,13 @@ The agent uses **mock responses** for deterministic behavior which allows us to 
 First, let's set up the environment and create a namespace for this example:
 
 ```python
-%env KUBECTL_NAMESPACE=kaos-monkey-example
+import os
+os.environ['NAMESPACE'] = 'kaos-monkey-example'
 ```
 
 ```bash
-kubectl create namespace kaos-monkey-example | echo "exists"
+kubectl create namespace $NAMESPACE 2>/dev/null || true
+kubectl config set-context --current --namespace=$NAMESPACE
 ```
 
 ## Step 1: Create a ModelAPI
@@ -117,15 +119,29 @@ kubectl wait pod/chaos-victim --for=condition=ready --timeout=60s
 Create the agent with mock responses. The `--mock-response` flag can be used multiple times - each response is consumed in sequence:
 
 ```bash
-# Use '$' sign to treat newlines directly
+# Build mock responses with proper newline handling
+MOCK1="I will list the pods first.
+
+\`\`\`tool_call
+{\"tool\": \"pods_list\", \"arguments\": {\"namespace\": \"$NAMESPACE\"}}
+\`\`\`"
+
+MOCK2="Found chaos-victim pod. Deleting it now.
+
+\`\`\`tool_call
+{\"tool\": \"pods_delete\", \"arguments\": {\"namespace\": \"$NAMESPACE\", \"name\": \"chaos-victim\"}}
+\`\`\`"
+
+MOCK3="Done! I have deleted the chaos-victim pod to simulate a failure scenario."
+
 kaos agent deploy kaos-monkey \
     --modelapi chaos-api \
     --model mock-model \
     --mcp k8s-tools \
     --instructions "You are KAOS Monkey, a chaos engineering agent." \
-    --mock-response $'I will list the pods first.\n\n```tool_call\n{"tool": "pods_list", "arguments": {"namespace": "kaos-monkey-example"}}\n```' \
-    --mock-response $'Found chaos-victim pod. Deleting it now.\n\n```tool_call\n{"tool": "pods_delete", "arguments": {"namespace": "kaos-monkey-example", "name": "chaos-victim"}}\n```' \
-    --mock-response "Done! I have deleted the chaos-victim pod to simulate a failure scenario." \
+    --mock-response "$MOCK1" \
+    --mock-response "$MOCK2" \
+    --mock-response "$MOCK3" \
     --expose
 ```
 
@@ -180,7 +196,7 @@ The `kubernetes` runtime provides many useful tools:
 ## Cleanup
 
 ```bash
-kubectl delete namespace kaos-monkey-example
+kubectl delete namespace $NAMESPACE
 ```
 
 ## Next Steps

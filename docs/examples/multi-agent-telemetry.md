@@ -49,11 +49,13 @@ We'll create:
 First, let's set up the environment and create a namespace:
 
 ```python
-%env KUBECTL_NAMESPACE=kaos-agent-telemetry-example
+import os
+os.environ['NAMESPACE'] = 'kaos-agent-telemetry-example'
 ```
 
 ```bash
-kubectl create namespace $KUBECTL_NAMESPACE | echo "exists"
+kubectl create namespace $NAMESPACE 2>/dev/null || true
+kubectl config set-context --current --namespace=$NAMESPACE
 ```
 
 ## Step 1: Create the ModelAPI
@@ -207,9 +209,8 @@ When the agent framework sees this, it:
 
 ## Cleanup
 
-```python
-!kubectl delete namespace $NS --ignore-not-found
-print(f"Cleaned up namespace: {os.environ['NS']}")
+```bash
+kubectl delete namespace $NAMESPACE
 ```
 
 ## Next Steps
