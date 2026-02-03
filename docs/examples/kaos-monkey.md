@@ -52,14 +52,17 @@ The agent uses **mock responses** for deterministic behavior - this means we con
 
 ## Setup
 
-First, let's set up the environment and create a unique namespace for this example:
+First, let's set up the environment and create a namespace for this example:
 
 ```python
-!export NS="${TEST_NAMESPACE:-kaos-monkey-$(($(date +%s)%10000))}"
+import os
+ns = os.environ.get("TEST_NAMESPACE", "kaos-monkey-example")
+os.environ["NS"] = ns
+print(f"Using namespace: {ns}")
 ```
 
 ```python
-!kubectl create namespace $NS
+!kubectl create namespace $NS --dry-run=client -o yaml | kubectl apply -f -
 ```
 
 ## Step 1: Create a ModelAPI
@@ -117,14 +120,22 @@ Wait for pod to be running:
 Create the agent with mock responses. The `--mock-response` flag can be used multiple times - each response is consumed in sequence:
 
 ```python
+# Build mock responses with namespace interpolation
+mock1 = f'I will list the pods first.\n\n```tool_call\n{{"tool": "pods_list", "arguments": {{"namespace": "{ns}"}}}}\n```'
+mock2 = f'Found chaos-victim pod. Deleting it now.\n\n```tool_call\n{{"tool": "pods_delete", "arguments": {{"namespace": "{ns}", "name": "chaos-victim"}}}}\n```'
+mock3 = "Done! I have deleted the chaos-victim pod to simulate a failure scenario."
+os.environ["MOCK1"], os.environ["MOCK2"], os.environ["MOCK3"] = mock1, mock2, mock3
+```
+
+```python
 !kaos agent deploy kaos-monkey -n $NS \
     --modelapi chaos-api \
     --model mock-model \
     --mcp k8s-tools \
     --instructions "You are KAOS Monkey, a chaos engineering agent." \
-    --mock-response 'I will list the pods first.\n\n\`\`\`tool_call\n{{"tool": "pods_list", "arguments": {{"namespace": "$NS"}}}}\n\`\`\`' \
-    --mock-response 'Found chaos-victim pod. Deleting it now.\n\n\`\`\`tool_call\n{{"tool": "pods_delete", "arguments": {{"namespace": "$NS", "name": "chaos-victim"}}}}\n\`\`\`' \
-    --mock-response "Done! I have deleted the chaos-victim pod to simulate a failure scenario." \
+    --mock-response "$MOCK1" \
+    --mock-response "$MOCK2" \
+    --mock-response "$MOCK3" \
     --expose
 ```
 
@@ -147,9 +158,16 @@ Now invoke the chaos agent to delete the pod:
 Check that the pod was deleted:
 
 ```python
-!sleep 2
+import subprocess
+import time
+time.sleep(3)  # Wait for deletion to propagate
 
-!kubectl get pod chaos-victim -n $NS 2>&1 || echo "SUCCESS: Pod was deleted by the chaos agent!"
+# Verify pod was deleted - this should fail (pod not found)
+result = subprocess.run(["kubectl", "get", "pod", "chaos-victim", "-n", ns], capture_output=True)
+if result.returncode != 0:
+    print("SUCCESS: Pod was deleted by the chaos agent!")
+else:
+    raise AssertionError("FAILED: Pod still exists - chaos agent did not delete it")
 ```
 
 ## Understanding Mock Responses
@@ -173,8 +191,7 @@ The `kubernetes` runtime provides many useful tools:
 
 ```python
 !kubectl delete namespace $NS --ignore-not-found
-
-!echo "Cleaned up namespace: $NS"
+print(f"Cleaned up namespace: {ns}")
 ```
 
 ## Next Steps
