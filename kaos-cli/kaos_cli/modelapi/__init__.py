@@ -99,16 +99,28 @@ def delete_modelapi(
 def deploy_modelapi_cmd(
     name: str = typer.Argument(..., help="Name for the ModelAPI."),
     mode: str = typer.Option(
-        "Proxy", "--mode", "-m", help="Mode: Proxy (LiteLLM) or Hosted (Ollama)."
+        "Proxy", "--mode", help="Mode: Proxy (LiteLLM) or Hosted (Ollama)."
     ),
-    model: str = typer.Option(
-        None, "--model", help="Model name (required for Hosted mode)."
+    models: list[str] = typer.Option(
+        None,
+        "--model",
+        "-m",
+        help="Model name(s). For Proxy: list of models. For Hosted: single model.",
     ),
     namespace: str = typer.Option(
         None,
         "--namespace",
         "-n",
         help="Namespace to deploy to.",
+    ),
+    provider: str = typer.Option(
+        None, "--provider", help="LiteLLM provider prefix (e.g., openai, anthropic)."
+    ),
+    base_url: str = typer.Option(None, "--base-url", help="Backend LLM API base URL."),
+    api_secret: str = typer.Option(
+        None,
+        "--api-secret",
+        help="API key secret (secretname:key format, or prompts for key).",
     ),
     env_vars: list[str] = typer.Option(
         None, "--env", "-e", help="Environment variables (NAME=value format)."
@@ -126,16 +138,21 @@ def deploy_modelapi_cmd(
     """Deploy a ModelAPI.
 
     Examples:
-      kaos modelapi deploy my-api                           # Deploy Proxy mode
-      kaos modelapi deploy my-api --mode Hosted --model smollm2:135m  # Deploy Hosted
-      kaos modelapi deploy my-api --wait                    # Wait for ready
-      kaos modelapi deploy my-api --env LOG_LEVEL=DEBUG     # With env vars
+      kaos modelapi deploy my-api                           # Deploy Proxy mode with wildcard
+      kaos modelapi deploy my-api -m gpt-4o -m gpt-3.5      # Proxy with specific models
+      kaos modelapi deploy my-api --mode Hosted -m smollm2:135m  # Hosted mode
+      kaos modelapi deploy my-api --provider openai --api-secret mysecret:key
+      kaos modelapi deploy my-api --provider nebius --base-url https://api.nebius.ai/v1
+      kaos modelapi deploy my-api --api-secret prompt       # Prompts for API key
     """
     deploy_modelapi(
         name=name,
         mode=mode,
-        model=model,
+        models=models,
         namespace=namespace,
+        provider=provider,
+        base_url=base_url,
+        api_secret=api_secret,
         env_vars=env_vars,
         wait=wait,
         wait_timeout=wait_timeout,
