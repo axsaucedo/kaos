@@ -41,6 +41,7 @@ def deploy_agent(
     modelapi: str,
     model: str,
     namespace: str | None,
+    description: str | None,
     instructions: str | None,
     mcp_servers: list[str] | None,
     sub_agents: list[str] | None,
@@ -59,9 +60,11 @@ def deploy_agent(
         model=model,
     )
 
-    # Add config section if instructions or telemetry provided
-    if instructions or otel_endpoint:
+    # Add config section if description, instructions or telemetry provided
+    if description or instructions or otel_endpoint:
         yaml_content += "  config:\n"
+        if description:
+            yaml_content += f'    description: "{description}"\n'
         if instructions:
             yaml_content += f"    instructions: |\n      {instructions.replace(chr(10), chr(10) + '      ')}\n"
         if otel_endpoint:

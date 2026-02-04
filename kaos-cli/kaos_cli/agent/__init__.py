@@ -106,6 +106,9 @@ def deploy_agent_cmd(
         "-n",
         help="Namespace to deploy to.",
     ),
+    description: str = typer.Option(
+        None, "--description", "-d", help="Agent description."
+    ),
     instructions: str = typer.Option(
         None, "--instructions", "-i", help="Agent instructions."
     ),
@@ -144,14 +147,14 @@ def deploy_agent_cmd(
       kaos agent deploy my-agent -a my-api -m gpt-4o --mcp calculator --sub-agent helper
       kaos agent deploy my-agent -a my-api -m test --mock-response "Hello!" --expose
       kaos agent deploy my-agent -a my-api -m gpt-4o --otel-endpoint http://otel:4317
-      kaos agent deploy my-agent -a my-api -m gpt-4o --wait
-      kaos agent deploy my-agent -a my-api -m gpt-4o --env LOG_LEVEL=DEBUG
+      kaos agent deploy my-agent -a my-api -m gpt-4o --description "My helpful agent"
     """
     deploy_agent(
         name=name,
         modelapi=modelapi,
         model=model,
         namespace=namespace,
+        description=description,
         instructions=instructions,
         mcp_servers=mcp_servers,
         sub_agents=sub_agents,
