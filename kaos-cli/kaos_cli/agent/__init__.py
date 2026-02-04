@@ -129,6 +129,15 @@ def deploy_agent_cmd(
     otel_endpoint: str = typer.Option(
         None, "--otel-endpoint", help="OpenTelemetry endpoint (enables telemetry)."
     ),
+    wait: bool = typer.Option(
+        False, "--wait", help="Wait for deployment to be available."
+    ),
+    wait_timeout: int = typer.Option(
+        120, "--wait-timeout", help="Timeout in seconds for --wait."
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Print YAML instead of deploying."
+    ),
 ) -> None:
     """Deploy an Agent.
 
@@ -137,6 +146,7 @@ def deploy_agent_cmd(
       kaos agent deploy my-agent -a my-api -m gpt-4o --mcp calculator --sub-agent helper
       kaos agent deploy my-agent -a my-api -m test --mock-response "Hello!" --expose
       kaos agent deploy my-agent -a my-api -m gpt-4o --otel-endpoint http://otel:4317
+      kaos agent deploy my-agent -a my-api -m gpt-4o --wait
     """
     deploy_agent(
         name=name,
@@ -149,6 +159,9 @@ def deploy_agent_cmd(
         mock_responses=mock_responses,
         expose=expose,
         otel_endpoint=otel_endpoint,
+        wait=wait,
+        wait_timeout=wait_timeout,
+        dry_run=dry_run,
     )
 
 

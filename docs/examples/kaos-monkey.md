@@ -69,13 +69,7 @@ kubectl config set-context --current --namespace=$NAMESPACE
 Create a ModelAPI in Proxy mode (we'll use mock responses so no real LLM needed):
 
 ```bash
-kaos modelapi deploy chaos-api --mode Proxy
-```
-
-Wait for ModelAPI to be ready:
-
-```bash
-kubectl wait deployment/modelapi-chaos-api --for=condition=available --timeout=120s
+kaos modelapi deploy chaos-api --mode Proxy --wait
 ```
 
 ## Step 2: Set Up RBAC for Kubernetes MCP Server
@@ -91,13 +85,7 @@ kaos system create-rbac k8s-mcp --resources pods --verbs list,get,delete
 Deploy the Kubernetes MCP server using the built-in `kubernetes` runtime with the service account we just created:
 
 ```bash
-kaos mcp deploy k8s-tools --runtime kubernetes --sa k8s-mcp
-```
-
-Wait for MCP server to be ready:
-
-```bash
-kubectl wait deployment/mcpserver-k8s-tools --for=condition=available --timeout=120s
+kaos mcp deploy k8s-tools --runtime kubernetes --sa k8s-mcp --wait
 ```
 
 ## Step 4: Create a Test Pod
@@ -142,13 +130,8 @@ kaos agent deploy kaos-monkey \
     --mock-response "$MOCK1" \
     --mock-response "$MOCK2" \
     --mock-response "$MOCK3" \
-    --expose
-```
-
-Wait for agent to be ready:
-
-```bash
-kubectl wait deployment/agent-kaos-monkey --for=condition=available --timeout=120s
+    --expose \
+    --wait
 ```
 
 ## Step 6: Unleash the Chaos

@@ -115,14 +115,32 @@ def deploy_modelapi_cmd(
         "-n",
         help="Namespace to deploy to.",
     ),
+    wait: bool = typer.Option(
+        False, "--wait", help="Wait for deployment to be available."
+    ),
+    wait_timeout: int = typer.Option(
+        120, "--wait-timeout", help="Timeout in seconds for --wait."
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Print YAML instead of deploying."
+    ),
 ) -> None:
     """Deploy a ModelAPI.
 
     Examples:
       kaos modelapi deploy my-api                           # Deploy Proxy mode
       kaos modelapi deploy my-api --mode Hosted --model smollm2:135m  # Deploy Hosted
+      kaos modelapi deploy my-api --wait                    # Wait for ready
     """
-    deploy_modelapi(name=name, mode=mode, model=model, namespace=namespace)
+    deploy_modelapi(
+        name=name,
+        mode=mode,
+        model=model,
+        namespace=namespace,
+        wait=wait,
+        wait_timeout=wait_timeout,
+        dry_run=dry_run,
+    )
 
 
 @app.command(name="invoke")

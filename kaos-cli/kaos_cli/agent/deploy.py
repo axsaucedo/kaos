@@ -17,6 +17,8 @@ spec:
   model: {model}
 """
 
+DEFAULT_WAIT_TIMEOUT = 120
+
 
 def deploy_agent(
     name: str,
@@ -29,6 +31,9 @@ def deploy_agent(
     mock_responses: list[str] | None,
     expose: bool,
     otel_endpoint: str | None,
+    wait: bool = False,
+    wait_timeout: int = DEFAULT_WAIT_TIMEOUT,
+    dry_run: bool = False,
 ) -> None:
     """Deploy an Agent with specified configuration."""
     yaml_content = AGENT_TEMPLATE.format(
@@ -75,6 +80,11 @@ def deploy_agent(
       value: '{mock_json}'
 """
 
+    # Dry run: print YAML and exit
+    if dry_run:
+        typer.echo(yaml_content)
+        return
+
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
         f.write(yaml_content)
         tmp_path = f.name
@@ -89,5 +99,23 @@ def deploy_agent(
             sys.exit(result.returncode)
         typer.echo(result.stdout)
         typer.echo(f"\n✅ Deployed Agent '{name}' with ModelAPI '{modelapi}'")
+
+        # Wait for deployment if requested
+        if wait:
+            typer.echo(f"⏳ Waiting for deployment to be available...")
+            wait_args = [
+                "kubectl",
+                "wait",
+                f"deployment/agent-{name}",
+                "--for=condition=available",
+                f"--timeout={wait_timeout}s",
+            ]
+            if namespace:
+                wait_args.extend(["-n", namespace])
+            wait_result = subprocess.run(wait_args, capture_output=True, text=True)
+            if wait_result.returncode != 0:
+                typer.echo(wait_result.stderr or wait_result.stdout, err=True)
+                sys.exit(wait_result.returncode)
+            typer.echo("✅ Deployment is available")
     finally:
         Path(tmp_path).unlink()
