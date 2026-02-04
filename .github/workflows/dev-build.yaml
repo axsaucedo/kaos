@@ -6,8 +6,10 @@ on:
     paths:
       - 'operator/**'
       - 'data-plane/kaos-framework/**'
+      - 'data-plane/mcp-servers/**'
       - 'VERSION'
       - '.github/workflows/dev-build.yaml'
+      - '.github/workflows/reusable-build-images.yaml'
   workflow_dispatch:
     inputs:
       tag:
