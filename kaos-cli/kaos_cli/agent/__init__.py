@@ -90,14 +90,9 @@ def delete_agent(
         "-n",
         help="Namespace of the Agent.",
     ),
-    force: bool = typer.Option(
-        False,
-        "--force",
-        help="Skip confirmation prompt.",
-    ),
 ) -> None:
     """Delete an Agent resource."""
-    delete_resource("agent", name, namespace, force)
+    delete_resource("agent", name, namespace)
 
 
 @app.command(name="deploy")
@@ -111,6 +106,9 @@ def deploy_agent_cmd(
         "-n",
         help="Namespace to deploy to.",
     ),
+    description: str = typer.Option(
+        None, "--description", "-d", help="Agent description."
+    ),
     instructions: str = typer.Option(
         None, "--instructions", "-i", help="Agent instructions."
     ),
@@ -119,13 +117,27 @@ def deploy_agent_cmd(
         None, "--sub-agent", help="Sub-agent references (agentNetwork.access)."
     ),
     mock_responses: list[str] = typer.Option(
-        None, "--mock-response", help="Mock responses for testing (DEBUG_MOCK_RESPONSES)."
+        None,
+        "--mock-response",
+        help="Mock responses for testing (DEBUG_MOCK_RESPONSES).",
     ),
     expose: bool = typer.Option(
         False, "--expose", help="Expose agent via Gateway (agentNetwork.expose)."
     ),
     otel_endpoint: str = typer.Option(
         None, "--otel-endpoint", help="OpenTelemetry endpoint (enables telemetry)."
+    ),
+    env_vars: list[str] = typer.Option(
+        None, "--env", "-e", help="Environment variables (NAME=value format)."
+    ),
+    wait: bool = typer.Option(
+        False, "--wait", help="Wait for deployment to be available."
+    ),
+    wait_timeout: int = typer.Option(
+        120, "--wait-timeout", help="Timeout in seconds for --wait."
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Print YAML instead of deploying."
     ),
 ) -> None:
     """Deploy an Agent.
@@ -135,18 +147,24 @@ def deploy_agent_cmd(
       kaos agent deploy my-agent -a my-api -m gpt-4o --mcp calculator --sub-agent helper
       kaos agent deploy my-agent -a my-api -m test --mock-response "Hello!" --expose
       kaos agent deploy my-agent -a my-api -m gpt-4o --otel-endpoint http://otel:4317
+      kaos agent deploy my-agent -a my-api -m gpt-4o --description "My helpful agent"
     """
     deploy_agent(
         name=name,
         modelapi=modelapi,
         model=model,
         namespace=namespace,
+        description=description,
         instructions=instructions,
         mcp_servers=mcp_servers,
         sub_agents=sub_agents,
         mock_responses=mock_responses,
         expose=expose,
         otel_endpoint=otel_endpoint,
+        env_vars=env_vars,
+        wait=wait,
+        wait_timeout=wait_timeout,
+        dry_run=dry_run,
     )
 
 

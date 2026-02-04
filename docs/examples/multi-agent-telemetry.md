@@ -63,13 +63,7 @@ kubectl config set-context --current --namespace=$NAMESPACE
 Create a shared ModelAPI for all agents (using mock responses for testing):
 
 ```bash
-kaos modelapi deploy team-api --mode proxy
-```
-
-Wait for ModelAPI to be ready:
-
-```bash
-kubectl wait deployment/modelapi-team-api --for=condition=available --timeout=120s
+kaos modelapi deploy team-api --mode proxy --wait
 ```
 
 ## Step 2: Create the Researcher Agent
@@ -82,13 +76,8 @@ kaos agent deploy researcher \
     --model mock-model \
     --instructions "You are a research specialist. You gather and synthesize information on any topic." \
     --mock-response "Here is my research on the topic: AI systems are increasingly being used in enterprise environments. Key trends include automation, decision support, and customer service. Growth is estimated at 40% year-over-year." \
-    --expose
-```
-
-Wait for researcher agent:
-
-```bash
-kubectl wait deployment/agent-researcher --for=condition=available --timeout=120s
+    --expose \
+    --wait
 ```
 
 ## Step 3: Create the Analyst Agent
@@ -101,13 +90,8 @@ kaos agent deploy analyst \
     --model mock-model \
     --instructions "You are a data analyst. You analyze information and provide insights with statistics." \
     --mock-response "Based on my analysis: The data shows 40% year-over-year growth in AI adoption. The highest impact areas are customer service automation (60%), decision support systems (25%), and predictive analytics (15%)." \
-    --expose
-```
-
-Wait for analyst agent:
-
-```bash
-kubectl wait deployment/agent-analyst --for=condition=available --timeout=120s
+    --expose \
+    --wait
 ```
 
 ## Step 4: Create the Coordinator Agent
@@ -125,13 +109,8 @@ kaos agent deploy coordinator \
     --mock-response "Based on input from my team: AI is growing with 40% YoY growth, especially in customer service automation." \
     --sub-agent researcher \
     --sub-agent analyst \
-    --expose
-```
-
-Wait for coordinator agent:
-
-```bash
-kubectl wait deployment/agent-coordinator --for=condition=available --timeout=120s
+    --expose \
+    --wait
 ```
 
 ## Step 5: Test the Multi-Agent System

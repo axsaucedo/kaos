@@ -92,17 +92,9 @@ def logs_resource(
 
 
 def delete_resource(
-    resource_type: ResourceType, name: str, namespace: str | None, force: bool
+    resource_type: ResourceType, name: str, namespace: str | None
 ) -> None:
     """Delete a resource."""
-    display_name = resource_type.capitalize()
-    ns_display = namespace or "current namespace"
-    if not force:
-        confirm = typer.confirm(f"Delete {display_name} '{name}' in {ns_display}?")
-        if not confirm:
-            typer.echo("Cancelled.")
-            return
-
     args = ["delete", resource_type, name]
     if namespace:
         args.extend(["-n", namespace])

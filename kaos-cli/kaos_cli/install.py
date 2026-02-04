@@ -37,18 +37,60 @@ def run_helm_command(
         raise
 
 
+def _install_monitoring() -> bool:
+    """Install SigNoz monitoring stack."""
+    typer.echo("Installing SigNoz monitoring stack...")
+
+    # Add SigNoz helm repo
+    result = run_helm_command(
+        ["repo", "add", "signoz", "https://charts.signoz.io", "--force-update"],
+        check=False,
+    )
+    if result.returncode != 0 and "already exists" not in result.stderr:
+        typer.echo(f"Warning adding SigNoz repo: {result.stderr}", err=True)
+
+    run_helm_command(["repo", "update"], check=False)
+
+    # Install SigNoz
+    result = run_helm_command(
+        [
+            "upgrade",
+            "--install",
+            "signoz",
+            "signoz/signoz",
+            "--namespace",
+            "observability",
+            "--create-namespace",
+            "--wait",
+        ],
+        check=False,
+    )
+    if result.returncode != 0:
+        typer.echo(f"Error installing SigNoz: {result.stderr}", err=True)
+        return False
+
+    typer.echo("✅ SigNoz monitoring installed in 'observability' namespace")
+    return True
+
+
 def install_command(
     namespace: str,
     release_name: str,
     version: str | None,
     set_values: list[str],
     wait: bool,
+    monitoring_enabled: bool = False,
 ) -> None:
     """Install the KAOS operator using Helm."""
     if not check_helm_installed():
         typer.echo("Error: helm is not installed. Please install helm first.", err=True)
         typer.echo("See: https://helm.sh/docs/intro/install/", err=True)
         sys.exit(1)
+
+    # Install monitoring first if requested
+    if monitoring_enabled:
+        if not _install_monitoring():
+            typer.echo("Warning: Monitoring installation failed, continuing...", err=True)
 
     typer.echo(f"Installing KAOS operator to namespace '{namespace}'...")
 
@@ -84,6 +126,16 @@ def install_command(
 
     for value in set_values:
         helm_args.extend(["--set", value])
+
+    # Add telemetry settings if monitoring is enabled
+    if monitoring_enabled:
+        helm_args.extend(["--set", "telemetry.enabled=true"])
+        helm_args.extend(
+            [
+                "--set",
+                "telemetry.endpoint=http://signoz-otel-collector.observability:4317",
+            ]
+        )
 
     typer.echo(f"Installing chart {HELM_CHART_NAME}...")
     result = run_helm_command(helm_args)

@@ -133,14 +133,9 @@ def delete_mcpserver(
         "-n",
         help="Namespace of the MCPServer.",
     ),
-    force: bool = typer.Option(
-        False,
-        "--force",
-        help="Skip confirmation prompt.",
-    ),
 ) -> None:
     """Delete an MCPServer resource."""
-    delete_command(name=name, namespace=namespace, force=force)
+    delete_command(name=name, namespace=namespace)
 
 
 @app.command(name="deploy")
@@ -169,6 +164,18 @@ def deploy_mcpserver(
     directory: str = typer.Option(
         ".", "--dir", "-d", help="Directory to infer name/image from."
     ),
+    env_vars: list[str] = typer.Option(
+        None, "--env", "-e", help="Environment variables (NAME=value format)."
+    ),
+    wait: bool = typer.Option(
+        False, "--wait", help="Wait for deployment to be available."
+    ),
+    wait_timeout: int = typer.Option(
+        120, "--wait-timeout", help="Timeout in seconds for --wait."
+    ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Print YAML instead of deploying."
+    ),
 ) -> None:
     """Deploy an MCPServer from image or runtime.
 
@@ -176,6 +183,8 @@ def deploy_mcpserver(
       kaos mcp deploy my-mcp --image img:v1     # Deploy custom image
       kaos mcp deploy my-mcp --runtime slack    # Deploy registered runtime
       kaos mcp deploy                           # Auto-infer from pyproject.toml
+      kaos mcp deploy my-mcp --runtime kubernetes --wait  # Wait for ready
+      kaos mcp deploy my-mcp --image img:v1 --env LOG_LEVEL=DEBUG
     """
     import sys
     from kaos_cli.mcp.deploy import read_project_name, infer_image_name
@@ -197,6 +206,10 @@ def deploy_mcpserver(
             namespace=namespace,
             params=params,
             service_account=service_account,
+            env_vars=env_vars,
+            wait=wait,
+            wait_timeout=wait_timeout,
+            dry_run=dry_run,
         )
     else:
         # Custom image deploy - auto-infer name and image if not provided
@@ -220,6 +233,10 @@ def deploy_mcpserver(
             namespace=namespace,
             params=params,
             service_account=service_account,
+            env_vars=env_vars,
+            wait=wait,
+            wait_timeout=wait_timeout,
+            dry_run=dry_run,
         )
 
 

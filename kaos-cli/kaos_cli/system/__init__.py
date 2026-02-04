@@ -1,5 +1,8 @@
 """KAOS system commands."""
 
+import subprocess
+import sys
+
 import typer
 
 from kaos_cli.system.install import install_command, uninstall_command
@@ -16,7 +19,7 @@ app = typer.Typer(
 @app.command(name="install")
 def install(
     namespace: str = typer.Option(
-        "kaos",
+        "kaos-system",
         "--namespace",
         "-n",
         help="Kubernetes namespace to install into.",
@@ -41,6 +44,11 @@ def install(
         "--wait",
         help="Wait for pods to be ready before returning.",
     ),
+    monitoring_enabled: bool = typer.Option(
+        False,
+        "--monitoring-enabled",
+        help="Install SigNoz monitoring stack and enable telemetry.",
+    ),
 ) -> None:
     """Install the KAOS operator using Helm."""
     install_command(
@@ -49,13 +57,14 @@ def install(
         version=version,
         set_values=list(set_values),
         wait=wait,
+        monitoring_enabled=monitoring_enabled,
     )
 
 
 @app.command(name="uninstall")
 def uninstall(
     namespace: str = typer.Option(
-        "kaos",
+        "kaos-system",
         "--namespace",
         "-n",
         help="Kubernetes namespace to uninstall from.",
@@ -115,11 +124,11 @@ def create_rbac(
     expanded_resources = []
     for r in resources:
         expanded_resources.extend(r.split(","))
-    
+
     expanded_verbs = []
     for v in verbs:
         expanded_verbs.extend(v.split(","))
-    
+
     create_rbac_command(
         name=name,
         namespace=namespace,
@@ -135,7 +144,7 @@ def create_rbac(
 @app.command(name="status")
 def status(
     namespace: str = typer.Option(
-        "kaos",
+        "kaos-system",
         "--namespace",
         "-n",
         help="Namespace where KAOS operator is installed.",
@@ -148,7 +157,7 @@ def status(
 @app.command(name="runtimes")
 def runtimes(
     namespace: str = typer.Option(
-        "kaos",
+        "kaos-system",
         "--namespace",
         "-n",
         help="Namespace where KAOS operator is installed.",
@@ -156,3 +165,56 @@ def runtimes(
 ) -> None:
     """List available MCP runtimes."""
     runtimes_command(namespace=namespace)
+
+
+@app.command(name="working-namespace")
+def working_namespace(
+    namespace: str = typer.Argument(..., help="Namespace to switch to."),
+) -> None:
+    """Set the working namespace for kubectl.
+
+    Creates the namespace if it doesn't exist and switches kubectl context.
+    """
+    # Create namespace if it doesn't exist
+    result = subprocess.run(
+        ["kubectl", "create", "namespace", namespace],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        typer.echo(f"✅ Created namespace '{namespace}'")
+    elif "already exists" in result.stderr:
+        typer.echo(f"📦 Namespace '{namespace}' already exists")
+    else:
+        typer.echo(f"Error: {result.stderr}", err=True)
+        sys.exit(result.returncode)
+
+    # Get current context
+    result = subprocess.run(
+        ["kubectl", "config", "current-context"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        typer.echo(f"Error getting current context: {result.stderr}", err=True)
+        sys.exit(result.returncode)
+    current_context = result.stdout.strip()
+
+    # Set namespace in current context
+    result = subprocess.run(
+        [
+            "kubectl",
+            "config",
+            "set-context",
+            current_context,
+            "--namespace",
+            namespace,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        typer.echo(f"Error setting namespace: {result.stderr}", err=True)
+        sys.exit(result.returncode)
+
+    typer.echo(f"✅ Switched to namespace '{namespace}'")
