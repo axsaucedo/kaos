@@ -3,6 +3,7 @@
 import subprocess
 import sys
 import tempfile
+import textwrap
 from pathlib import Path
 import typer
 
@@ -114,7 +115,7 @@ spec:
             yaml_content.rstrip()
             + f"""
   params: |
-    {params}
+    {textwrap.indent(params, 4 * ' ')}
 """
         )
 

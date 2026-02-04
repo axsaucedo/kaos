@@ -23,7 +23,14 @@ def create_rbac_command(
     if namespace is None:
         try:
             result = subprocess.run(
-                ["kubectl", "config", "view", "--minify", "-o", "jsonpath={..namespace}"],
+                [
+                    "kubectl",
+                    "config",
+                    "view",
+                    "--minify",
+                    "-o",
+                    "jsonpath={..namespace}",
+                ],
                 capture_output=True,
                 text=True,
             )

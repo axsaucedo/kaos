@@ -119,7 +119,9 @@ def deploy_agent_cmd(
         None, "--sub-agent", help="Sub-agent references (agentNetwork.access)."
     ),
     mock_responses: list[str] = typer.Option(
-        None, "--mock-response", help="Mock responses for testing (DEBUG_MOCK_RESPONSES)."
+        None,
+        "--mock-response",
+        help="Mock responses for testing (DEBUG_MOCK_RESPONSES).",
     ),
     expose: bool = typer.Option(
         False, "--expose", help="Expose agent via Gateway (agentNetwork.expose)."
