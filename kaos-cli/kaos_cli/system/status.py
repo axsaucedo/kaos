@@ -7,7 +7,7 @@ import typer
 
 def status_command(namespace: str) -> None:
     """Show KAOS operator status."""
-    typer.echo(f"KAOS System Status (namespace: {namespace})")
+    typer.echo(f"KAOS System Status (operator namespace: {namespace})")
     typer.echo("=" * 50)
 
     # Check operator deployment
@@ -50,8 +50,8 @@ def status_command(namespace: str) -> None:
         else:
             typer.echo(f"  ❌ {crd} (not installed)")
 
-    # Count resources
-    typer.echo("\n📊 Resources:")
+    # Count resources (across all namespaces)
+    typer.echo("\n📊 Resources (all namespaces):")
     for kind, name in [
         ("Agent", "agents"),
         ("MCPServer", "mcpservers"),
