@@ -90,14 +90,9 @@ def delete_modelapi(
         "-n",
         help="Namespace of the ModelAPI.",
     ),
-    force: bool = typer.Option(
-        False,
-        "--force",
-        help="Skip confirmation prompt.",
-    ),
 ) -> None:
     """Delete a ModelAPI resource."""
-    delete_resource("modelapi", name, namespace, force)
+    delete_resource("modelapi", name, namespace)
 
 
 @app.command(name="deploy")

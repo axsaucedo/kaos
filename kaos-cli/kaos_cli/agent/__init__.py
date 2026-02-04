@@ -90,14 +90,9 @@ def delete_agent(
         "-n",
         help="Namespace of the Agent.",
     ),
-    force: bool = typer.Option(
-        False,
-        "--force",
-        help="Skip confirmation prompt.",
-    ),
 ) -> None:
     """Delete an Agent resource."""
-    delete_resource("agent", name, namespace, force)
+    delete_resource("agent", name, namespace)
 
 
 @app.command(name="deploy")

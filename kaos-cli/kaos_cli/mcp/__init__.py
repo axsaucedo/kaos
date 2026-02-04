@@ -133,14 +133,9 @@ def delete_mcpserver(
         "-n",
         help="Namespace of the MCPServer.",
     ),
-    force: bool = typer.Option(
-        False,
-        "--force",
-        help="Skip confirmation prompt.",
-    ),
 ) -> None:
     """Delete an MCPServer resource."""
-    delete_command(name=name, namespace=namespace, force=force)
+    delete_command(name=name, namespace=namespace)
 
 
 @app.command(name="deploy")

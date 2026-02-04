@@ -27,6 +27,6 @@ def logs_command(
     logs_resource(RESOURCE_TYPE, name, namespace, follow, tail)
 
 
-def delete_command(name: str, namespace: str | None, force: bool) -> None:
+def delete_command(name: str, namespace: str | None) -> None:
     """Delete an MCPServer."""
-    delete_resource(RESOURCE_TYPE, name, namespace, force)
+    delete_resource(RESOURCE_TYPE, name, namespace)
