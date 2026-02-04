@@ -66,12 +66,29 @@ def _wait_for_deployment(name: str, namespace: str | None, timeout: int) -> None
     typer.echo("✅ Deployment is available")
 
 
+def _parse_env_vars(env_list: list[str] | None) -> list[tuple[str, str]]:
+    """Parse NAME=value format env vars into list of (name, value) tuples."""
+    if not env_list:
+        return []
+    result = []
+    for env in env_list:
+        if "=" in env:
+            name, value = env.split("=", 1)
+            result.append((name.strip(), value))
+        else:
+            typer.echo(
+                f"Warning: Invalid env format '{env}', expected NAME=value", err=True
+            )
+    return result
+
+
 def deploy_custom_image(
     name: str,
     image: str,
     namespace: str | None,
     params: str | None,
     service_account: str | None,
+    env_vars: list[str] | None = None,
     wait: bool = False,
     wait_timeout: int = DEFAULT_WAIT_TIMEOUT,
     dry_run: bool = False,
@@ -79,16 +96,19 @@ def deploy_custom_image(
     """Deploy an MCPServer with a custom runtime image."""
     yaml_content = CUSTOM_RUNTIME_TEMPLATE.format(name=name, image=image)
 
-    # Add optional params via env var
+    # Build env section with params and custom env vars
+    env_entries = []
     if params:
-        yaml_content = (
-            yaml_content.rstrip()
-            + f"""
-    env:
-    - name: MCP_PARAMS
-      value: "{params}"
-"""
-        )
+        env_entries.append(("MCP_PARAMS", f'"{params}"'))
+    parsed_env = _parse_env_vars(env_vars)
+    for env_name, env_value in parsed_env:
+        env_entries.append((env_name, f'"{env_value}"'))
+
+    if env_entries:
+        yaml_content = yaml_content.rstrip() + "\n    env:\n"
+        for env_name, env_value in env_entries:
+            yaml_content += f"    - name: {env_name}\n"
+            yaml_content += f"      value: {env_value}\n"
 
     # Add optional service account
     if service_account:
@@ -131,6 +151,7 @@ def deploy_runtime(
     namespace: str | None,
     params: str | None,
     service_account: str | None,
+    env_vars: list[str] | None = None,
     wait: bool = False,
     wait_timeout: int = DEFAULT_WAIT_TIMEOUT,
     dry_run: bool = False,
@@ -163,6 +184,14 @@ spec:
   serviceAccountName: {service_account}
 """
         )
+
+    # Add container.env for custom env vars
+    parsed_env = _parse_env_vars(env_vars)
+    if parsed_env:
+        yaml_content = yaml_content.rstrip() + "\n  container:\n    env:\n"
+        for env_name, env_value in parsed_env:
+            yaml_content += f"    - name: {env_name}\n"
+            yaml_content += f'      value: "{env_value}"\n'
 
     # Dry run: print YAML and exit
     if dry_run:

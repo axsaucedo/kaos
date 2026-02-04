@@ -110,6 +110,9 @@ def deploy_modelapi_cmd(
         "-n",
         help="Namespace to deploy to.",
     ),
+    env_vars: list[str] = typer.Option(
+        None, "--env", "-e", help="Environment variables (NAME=value format)."
+    ),
     wait: bool = typer.Option(
         False, "--wait", help="Wait for deployment to be available."
     ),
@@ -126,12 +129,14 @@ def deploy_modelapi_cmd(
       kaos modelapi deploy my-api                           # Deploy Proxy mode
       kaos modelapi deploy my-api --mode Hosted --model smollm2:135m  # Deploy Hosted
       kaos modelapi deploy my-api --wait                    # Wait for ready
+      kaos modelapi deploy my-api --env LOG_LEVEL=DEBUG     # With env vars
     """
     deploy_modelapi(
         name=name,
         mode=mode,
         model=model,
         namespace=namespace,
+        env_vars=env_vars,
         wait=wait,
         wait_timeout=wait_timeout,
         dry_run=dry_run,

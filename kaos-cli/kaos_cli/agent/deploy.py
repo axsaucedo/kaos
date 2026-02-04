@@ -20,6 +20,22 @@ spec:
 DEFAULT_WAIT_TIMEOUT = 120
 
 
+def _parse_env_vars(env_list: list[str] | None) -> list[tuple[str, str]]:
+    """Parse NAME=value format env vars into list of (name, value) tuples."""
+    if not env_list:
+        return []
+    result = []
+    for env in env_list:
+        if "=" in env:
+            name, value = env.split("=", 1)
+            result.append((name.strip(), value))
+        else:
+            typer.echo(
+                f"Warning: Invalid env format '{env}', expected NAME=value", err=True
+            )
+    return result
+
+
 def deploy_agent(
     name: str,
     modelapi: str,
@@ -31,6 +47,7 @@ def deploy_agent(
     mock_responses: list[str] | None,
     expose: bool,
     otel_endpoint: str | None,
+    env_vars: list[str] | None = None,
     wait: bool = False,
     wait_timeout: int = DEFAULT_WAIT_TIMEOUT,
     dry_run: bool = False,
@@ -70,15 +87,23 @@ def deploy_agent(
             for agent in sub_agents:
                 yaml_content += f"    - {agent}\n"
 
-    # Add mock responses as container env if provided
+    # Build container.env section with mock responses and custom env vars
+    env_entries = []
+    parsed_env = _parse_env_vars(env_vars)
+    for env_name, env_value in parsed_env:
+        env_entries.append((env_name, env_value))
+
     if mock_responses:
         mock_json = json.dumps(mock_responses)
         mock_json = mock_json.replace("'", "''")
-        yaml_content += f"""  container:
-    env:
-    - name: DEBUG_MOCK_RESPONSES
-      value: '{mock_json}'
-"""
+        env_entries.append(("DEBUG_MOCK_RESPONSES", f"'{mock_json}'"))
+
+    if env_entries:
+        yaml_content += "  container:\n"
+        yaml_content += "    env:\n"
+        for env_name, env_value in env_entries:
+            yaml_content += f"    - name: {env_name}\n"
+            yaml_content += f"      value: {env_value}\n"
 
     # Dry run: print YAML and exit
     if dry_run:
@@ -102,7 +127,7 @@ def deploy_agent(
 
         # Wait for deployment if requested
         if wait:
-            typer.echo(f"⏳ Waiting for deployment to be available...")
+            typer.echo("⏳ Waiting for deployment to be available...")
             wait_args = [
                 "kubectl",
                 "wait",

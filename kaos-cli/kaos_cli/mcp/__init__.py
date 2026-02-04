@@ -164,6 +164,9 @@ def deploy_mcpserver(
     directory: str = typer.Option(
         ".", "--dir", "-d", help="Directory to infer name/image from."
     ),
+    env_vars: list[str] = typer.Option(
+        None, "--env", "-e", help="Environment variables (NAME=value format)."
+    ),
     wait: bool = typer.Option(
         False, "--wait", help="Wait for deployment to be available."
     ),
@@ -181,6 +184,7 @@ def deploy_mcpserver(
       kaos mcp deploy my-mcp --runtime slack    # Deploy registered runtime
       kaos mcp deploy                           # Auto-infer from pyproject.toml
       kaos mcp deploy my-mcp --runtime kubernetes --wait  # Wait for ready
+      kaos mcp deploy my-mcp --image img:v1 --env LOG_LEVEL=DEBUG
     """
     import sys
     from kaos_cli.mcp.deploy import read_project_name, infer_image_name
@@ -202,6 +206,7 @@ def deploy_mcpserver(
             namespace=namespace,
             params=params,
             service_account=service_account,
+            env_vars=env_vars,
             wait=wait,
             wait_timeout=wait_timeout,
             dry_run=dry_run,
@@ -228,6 +233,7 @@ def deploy_mcpserver(
             namespace=namespace,
             params=params,
             service_account=service_account,
+            env_vars=env_vars,
             wait=wait,
             wait_timeout=wait_timeout,
             dry_run=dry_run,

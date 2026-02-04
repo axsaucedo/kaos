@@ -30,11 +30,28 @@ spec:
 DEFAULT_WAIT_TIMEOUT = 120
 
 
+def _parse_env_vars(env_list: list[str] | None) -> list[tuple[str, str]]:
+    """Parse NAME=value format env vars into list of (name, value) tuples."""
+    if not env_list:
+        return []
+    result = []
+    for env in env_list:
+        if "=" in env:
+            name, value = env.split("=", 1)
+            result.append((name.strip(), value))
+        else:
+            typer.echo(
+                f"Warning: Invalid env format '{env}', expected NAME=value", err=True
+            )
+    return result
+
+
 def deploy_modelapi(
     name: str,
     mode: str,
     model: str | None,
     namespace: str | None,
+    env_vars: list[str] | None = None,
     wait: bool = False,
     wait_timeout: int = DEFAULT_WAIT_TIMEOUT,
     dry_run: bool = False,
@@ -47,6 +64,15 @@ def deploy_modelapi(
         yaml_content = MODELAPI_HOSTED_TEMPLATE.format(name=name, model=model)
     else:
         yaml_content = MODELAPI_PROXY_TEMPLATE.format(name=name)
+
+    # Add container.env if env vars provided
+    parsed_env = _parse_env_vars(env_vars)
+    if parsed_env:
+        yaml_content += "  container:\n"
+        yaml_content += "    env:\n"
+        for env_name, env_value in parsed_env:
+            yaml_content += f"    - name: {env_name}\n"
+            yaml_content += f'      value: "{env_value}"\n'
 
     # Dry run: print YAML and exit
     if dry_run:
