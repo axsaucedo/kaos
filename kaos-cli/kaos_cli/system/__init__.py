@@ -44,6 +44,11 @@ def install(
         "--wait",
         help="Wait for pods to be ready before returning.",
     ),
+    monitoring_enabled: bool = typer.Option(
+        False,
+        "--monitoring-enabled",
+        help="Install SigNoz monitoring stack and enable telemetry.",
+    ),
 ) -> None:
     """Install the KAOS operator using Helm."""
     install_command(
@@ -52,6 +57,7 @@ def install(
         version=version,
         set_values=list(set_values),
         wait=wait,
+        monitoring_enabled=monitoring_enabled,
     )
 
 
