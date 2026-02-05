@@ -113,14 +113,15 @@ class TestAgenticLoopToolCalling:
     @pytest.mark.asyncio
     async def test_tool_call_detected_and_executed(self):
         """Test that a tool call in model response triggers tool execution."""
-        # Mock response that includes a tool call
-        tool_call_response = """I'll calculate that for you.
-```tool_call
-{"tool": "calculator", "arguments": {"a": 5, "b": 3}}
-```"""
+        # Mock response with JSON action format
+        # Two-phase loop: action -> (tool exec) -> no-action -> final response
+        tool_call_response = '{"tool": "calculator", "arguments": {"a": 5, "b": 3}}'
+        no_action_response = "{}"  # Signal to proceed to final response
         final_response = "The result is 8."
 
-        mock_model = MockModelAPI(responses=[tool_call_response, final_response])
+        mock_model = MockModelAPI(
+            responses=[tool_call_response, no_action_response, final_response]
+        )
         mock_mcp = MockMCPClient(tools={"calculator": ("Add two numbers", {"sum": 8})})
         memory = LocalMemory()
 
@@ -129,7 +130,7 @@ class TestAgenticLoopToolCalling:
             model_api=mock_model,
             mcp_clients=[mock_mcp],
             memory=memory,
-            max_steps=3,
+            max_steps=5,
         )
 
         # Process message
@@ -143,8 +144,8 @@ class TestAgenticLoopToolCalling:
         assert len(mock_mcp.call_log) == 1
         assert mock_mcp.call_log[0]["tool"] == "calculator"
 
-        # Verify model was called twice (tool call + final response)
-        assert mock_model.call_count == 2
+        # Verify model was called: action(tool) -> action(none) -> final response
+        assert mock_model.call_count == 3
 
         # Verify memory has tool events
         sessions = await memory.list_sessions()
@@ -165,13 +166,14 @@ class TestAgenticLoopDelegation:
     @pytest.mark.asyncio
     async def test_delegation_detected_and_executed(self):
         """Test that a delegation in model response triggers sub-agent invocation."""
-        delegation_response = """I'll delegate this to the worker.
-```delegate
-{"agent": "worker", "task": "Process this data"}
-```"""
+        # JSON action format - two phase: action(delegate) -> action(none) -> final
+        delegation_response = '{"agent": "worker", "task": "Process this data"}'
+        no_action_response = "{}"
         final_response = "The worker processed the data successfully."
 
-        mock_model = MockModelAPI(responses=[delegation_response, final_response])
+        mock_model = MockModelAPI(
+            responses=[delegation_response, no_action_response, final_response]
+        )
         memory = LocalMemory()
 
         # Create mock remote agent
@@ -195,7 +197,7 @@ class TestAgenticLoopDelegation:
             model_api=mock_model,
             sub_agents=[mock_remote],
             memory=memory,
-            max_steps=3,
+            max_steps=5,
         )
 
         # Process message
@@ -211,8 +213,8 @@ class TestAgenticLoopDelegation:
         assert call_args[-1]["role"] == "task-delegation"
         assert "Process this data" in call_args[-1]["content"]
 
-        # Verify model was called twice
-        assert mock_model.call_count == 2
+        # Verify model calls: action(delegate) -> action(none) -> final response
+        assert mock_model.call_count == 3
 
         # Verify memory has delegation events
         sessions = await memory.list_sessions()
@@ -231,10 +233,8 @@ class TestAgenticLoopMaxSteps:
     @pytest.mark.asyncio
     async def test_max_steps_prevents_infinite_loop(self):
         """Test that max_steps prevents infinite tool call loops."""
-        # Model always returns a tool call
-        infinite_tool_call = """```tool_call
-{"tool": "loop_tool", "arguments": {}}
-```"""
+        # JSON action format - model always returns a tool call
+        infinite_tool_call = '{"tool": "loop_tool", "arguments": {}}'
 
         mock_model = MockModelAPI(responses=[infinite_tool_call] * 10)
         mock_mcp = MockMCPClient(tools={"loop_tool": ("Loops forever", {"result": "ok"})})
@@ -283,11 +283,8 @@ class TestMemoryContextLimit:
     @pytest.mark.asyncio
     async def test_delegation_respects_memory_context_limit(self):
         """Test that delegation uses memory_context_limit to limit context messages."""
-        # Create mock model that returns delegation then final response
-        delegation_response = """I'll delegate this.
-```delegate
-{"agent": "worker", "task": "Do the work"}
-```"""
+        # JSON action format
+        delegation_response = '{"agent": "worker", "task": "Do the work"}'
         final_response = "Done."
 
         mock_model = MockModelAPI(responses=[delegation_response, final_response])
@@ -357,7 +354,8 @@ class TestSystemPromptBuilding:
         assert "You are a helpful agent." in prompt
         assert "search" in prompt.lower()
         assert "calculate" in prompt.lower()
-        assert "tool_call" in prompt
+        # Check for JSON tool call format instruction
+        assert '"tool":' in prompt
 
         logger.info("✓ System prompt includes tools")
 
@@ -423,7 +421,8 @@ class TestSystemPromptBuilding:
     @pytest.mark.asyncio
     async def test_process_message_merges_user_system_prompt(self):
         """Test that process_message correctly merges user system prompts."""
-        mock_model = MockModelAPI(responses=["Response considering user context."])
+        # Two-phase: no-action (empty response) -> final response
+        mock_model = MockModelAPI(responses=["{}", "Response considering user context."])
 
         agent = Agent(
             name="test-agent",
@@ -441,10 +440,9 @@ class TestSystemPromptBuilding:
         ):
             result.append(chunk)
 
-        # Verify the model was called (we can't easily check the exact prompt
-        # without more intrusive mocking, but we verify the flow completes)
+        # Verify the model was called: action check + final response
         assert len(result) > 0
-        assert mock_model.call_count == 1
+        assert mock_model.call_count == 2
 
         logger.info("✓ Process message merges user system prompt")
 
@@ -461,7 +459,8 @@ class TestMockResponseEnvVar:
         memory = LocalMemory()
 
         # Set mock responses via env var BEFORE creating ModelAPI
-        os.environ["DEBUG_MOCK_RESPONSES"] = json.dumps(["Mocked response from env"])
+        # Two-phase loop: action(none) -> final response
+        os.environ["DEBUG_MOCK_RESPONSES"] = json.dumps(["{}", "Mocked response from env"])
 
         try:
             # Use real ModelAPI - it reads env var in __init__
@@ -494,10 +493,10 @@ class TestMockResponseEnvVar:
         memory = LocalMemory()
 
         # Set mock responses for tool call then final response BEFORE creating ModelAPI
+        # JSON action format: action(tool) -> action(none) -> final response
         mock_responses = [
-            """```tool_call
-{"tool": "calculator", "arguments": {"a": 5, "b": 3}}
-```""",
+            '{"tool": "calculator", "arguments": {"a": 5, "b": 3}}',
+            "{}",
             "The result is 8.",
         ]
         os.environ["DEBUG_MOCK_RESPONSES"] = json.dumps(mock_responses)
@@ -520,7 +519,7 @@ class TestMockResponseEnvVar:
 
             response = "".join(result)
 
-            # Should get final response after tool call
+            # Should get final response after tool call (may include progress blocks)
             assert "8" in response
 
             # Tool should have been called
@@ -539,14 +538,11 @@ class TestMemoryEventTracking:
     @pytest.mark.asyncio
     async def test_complete_workflow_memory_tracking(self):
         """Test that all events are properly tracked in memory."""
-        # Workflow: tool call -> delegation -> final response
+        # Workflow: tool call -> delegation -> no-action -> final response (JSON action format)
         responses = [
-            """```tool_call
-{"tool": "fetch", "arguments": {"url": "http://example.com"}}
-```""",
-            """```delegate
-{"agent": "analyzer", "task": "Analyze the data"}
-```""",
+            '{"tool": "fetch", "arguments": {"url": "http://example.com"}}',
+            '{"agent": "analyzer", "task": "Analyze the data"}',
+            "{}",  # No action - proceed to final response
             "Based on my analysis, the result is complete.",
         ]
 

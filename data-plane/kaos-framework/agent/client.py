@@ -13,7 +13,6 @@ Key design principles:
 """
 
 import json
-import re
 import logging
 from typing import List, Dict, Any, Optional, AsyncIterator, Union, cast
 import httpx
@@ -39,19 +38,24 @@ Memory = LocalMemory | NullMemory
 
 # System prompt templates for agentic loop
 TOOLS_INSTRUCTIONS = """
-To use a tool, respond with a JSON block in this exact format:
-```tool_call
+To use a tool, respond with ONLY this JSON (no other text):
 {"tool": "tool_name", "arguments": {"arg1": "value1"}}
-```
+
 Wait for the tool result before providing your final answer.
 """
 
 AGENT_INSTRUCTIONS = """
-To delegate a task to another agent, respond with:
-```delegate
+To delegate a task to another agent, respond with ONLY this JSON (no other text):
 {"agent": "agent_name", "task": "task description"}
-```
+
 Wait for the agent's response before providing your final answer.
+"""
+
+NO_ACTION_INSTRUCTIONS = """
+When you have all the information needed to provide a final answer, respond with ONLY:
+{}
+
+Then the system will ask you to provide your final response.
 """
 
 
@@ -288,6 +292,10 @@ class Agent:
         if agents_prompt:
             parts.append(agents_prompt)
 
+        # Add no-action instruction if we have tools or agents
+        if tools_prompt or agents_prompt:
+            parts.append(NO_ACTION_INSTRUCTIONS)
+
         # User-provided system prompt (if any)
         if user_system_prompt:
             parts.append("\n## User-Provided System Prompt")
@@ -298,16 +306,39 @@ class Agent:
 
         return "\n".join(parts)
 
-    def _parse_block(self, content: str, block_type: str) -> Optional[Dict[str, Any]]:
-        """Extract JSON from a fenced code block (tool_call or delegate)."""
-        pattern = rf"```{block_type}\s*\n({{.*?}})\s*\n```"
-        match = re.search(pattern, content, re.DOTALL)
-        if match:
-            try:
-                return json.loads(match.group(1))
-            except json.JSONDecodeError as e:
-                logger.warning(f"Failed to parse {block_type} JSON: {e}")
-        return None
+    def _parse_action(self, content: str) -> Dict[str, Any]:
+        """Parse action JSON from model response.
+
+        Looks for a JSON object on its own line that represents an action.
+        Returns the parsed action dict, or empty dict if no valid action found.
+
+        Action formats:
+        - Tool call: {"tool": "name", "arguments": {...}}
+        - Delegation: {"agent": "name", "task": "..."}
+        - No action: {}
+        """
+        content = content.strip()
+
+        # Try to parse the entire content as JSON first (most common case)
+        try:
+            parsed = json.loads(content)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+
+        # Look for JSON object on a line by itself
+        for line in content.split("\n"):
+            line = line.strip()
+            if line.startswith("{") and line.endswith("}"):
+                try:
+                    parsed = json.loads(line)
+                    if isinstance(parsed, dict):
+                        return parsed
+                except json.JSONDecodeError:
+                    continue
+
+        return {}
 
     async def process_message(
         self,
@@ -423,33 +454,48 @@ class Agent:
         stream: bool,
         seed: Optional[int] = None,
     ) -> AsyncIterator[str]:
-        """Execute the agentic loop with tracing."""
+        """Execute the two-phase agentic loop with tracing.
+
+        Phase 1: Action collection - non-streaming model calls to collect tool/delegation results
+        Phase 2: Final response - streaming model call to produce the user-visible response
+        """
+        model_name = self.model_api.model if self.model_api else "unknown"
+
+        # Phase 1: Action Collection Loop
         for step in range(self.max_steps):
             logger.debug(f"Agentic loop step {step + 1}/{self.max_steps}")
 
             # Start step span
-            step_attrs = {"step": step + 1, "max_steps": self.max_steps}
+            step_attrs = {"step": step + 1, "max_steps": self.max_steps, "phase": "action"}
             otel.span_begin(f"agent.step.{step + 1}", attrs=step_attrs)
-            # Use failed flag pattern to ensure spans close on continue/return/yield
             step_failed = False
             try:
-                # Get model response
-                model_name = self.model_api.model if self.model_api else "unknown"
+                # Get model response (non-streaming for action collection)
                 content = await self._call_model(messages, model_name, seed=seed)
 
+                # Parse action from response
+                action = self._parse_action(content)
+
                 # Check for tool call
-                tool_call = self._parse_block(content, "tool_call")
-                if tool_call:
-                    tool_event = self.memory.create_event("tool_call", tool_call)
+                if action.get("tool"):
+                    tool_name = action["tool"]
+                    tool_args = action.get("arguments", {})
+
+                    tool_event = self.memory.create_event("tool_call", action)
                     await self.memory.add_event(session_id, tool_event)
 
-                    try:
-                        tool_name = tool_call.get("tool", "")
-                        tool_args = tool_call.get("arguments", {})
-                        if not tool_name:
-                            raise ValueError("Tool name not specified")
+                    # Emit progress block
+                    progress = json.dumps(
+                        {
+                            "type": "progress",
+                            "step": step + 1,
+                            "action": "tool_call",
+                            "target": tool_name,
+                        }
+                    )
+                    yield progress
 
-                        # Execute tool
+                    try:
                         tool_result = await self._execute_tool(tool_name, tool_args)
 
                         result_event = self.memory.create_event(
@@ -469,25 +515,31 @@ class Agent:
                         continue
 
                 # Check for delegation
-                delegation = self._parse_block(content, "delegate")
-                if delegation:
-                    agent_name = delegation.get("agent", "")
-                    task = delegation.get("task", "")
+                if action.get("agent"):
+                    agent_name = action["agent"]
+                    task = action.get("task", "")
 
-                    if not agent_name or not task:
+                    if not task:
                         messages.append({"role": "assistant", "content": content})
                         messages.append(
-                            {
-                                "role": "user",
-                                "content": "Invalid delegation: missing 'agent' or 'task'",
-                            }
+                            {"role": "user", "content": "Invalid delegation: missing 'task'"}
                         )
                         continue
+
+                    # Emit progress block
+                    progress = json.dumps(
+                        {
+                            "type": "progress",
+                            "step": step + 1,
+                            "action": "delegate",
+                            "target": agent_name,
+                        }
+                    )
+                    yield progress
 
                     try:
                         context_messages = [m for m in messages if m.get("role") != "system"]
 
-                        # Delegate to sub-agent
                         delegation_result = await self._execute_delegation(
                             agent_name, task, context_messages, session_id
                         )
@@ -503,16 +555,8 @@ class Agent:
                         messages.append({"role": "user", "content": f"Delegation failed: {e}"})
                         continue
 
-                # No tool call or delegation - this is the final response
-                response_event = self.memory.create_event("agent_response", content)
-                await self.memory.add_event(session_id, response_event)
-
-                if stream:
-                    for word in content.split():
-                        yield word + " "
-                else:
-                    yield content
-                return
+                # No action (empty dict or no recognized action) - proceed to Phase 2
+                break
 
             except Exception as e:
                 step_failed = True
@@ -521,11 +565,75 @@ class Agent:
             finally:
                 if not step_failed:
                     otel.span_success()
+        else:
+            # Max steps reached without completing - yield warning and return
+            max_steps_msg = f"Reached maximum reasoning steps ({self.max_steps})"
+            logger.warning(max_steps_msg)
+            yield max_steps_msg
+            return
 
-        # Max steps reached
-        max_steps_msg = f"Reached maximum reasoning steps ({self.max_steps})"
-        logger.warning(max_steps_msg)
-        yield max_steps_msg
+        # Phase 2: Final Response (streaming)
+        otel.span_begin("agent.final_response", attrs={"phase": "final", "stream": stream})
+        final_failed = False
+        try:
+            # Add instruction to provide final response
+            messages.append(
+                {"role": "user", "content": "Now provide your final response to the user."}
+            )
+
+            if stream:
+                # True streaming from model
+                full_response = ""
+                async for chunk in self._call_model_streaming(messages, model_name, seed=seed):
+                    full_response += chunk
+                    yield chunk
+
+                # Record the complete response in memory
+                response_event = self.memory.create_event("agent_response", full_response)
+                await self.memory.add_event(session_id, response_event)
+            else:
+                # Non-streaming final response
+                content = await self._call_model(messages, model_name, seed=seed)
+                response_event = self.memory.create_event("agent_response", content)
+                await self.memory.add_event(session_id, response_event)
+                yield content
+
+        except Exception as e:
+            final_failed = True
+            otel.span_failure(e)
+            raise
+        finally:
+            if not final_failed:
+                otel.span_success()
+
+    async def _call_model_streaming(
+        self, messages: List[Dict[str, str]], model_name: str, seed: Optional[int] = None
+    ) -> AsyncIterator[str]:
+        """Call the model API with streaming and tracing."""
+        otel.span_begin(
+            "model.inference.stream",
+            kind=SpanKind.CLIENT,
+            attrs={ATTR_MODEL_NAME: model_name, "stream": True},
+            metric_kind="model",
+            metric_attrs={"model": model_name},
+        )
+        failed = False
+        try:
+            logger.debug(f"Model streaming call: {model_name}, messages count: {len(messages)}")
+            response = await self.model_api.process_message(messages, stream=True, seed=seed)
+
+            # response is an AsyncIterator when stream=True
+            async for chunk in cast(AsyncIterator[str], response):
+                yield chunk
+
+        except Exception as e:
+            failed = True
+            logger.error(f"Model streaming call failed: {type(e).__name__}: {e}")
+            otel.span_failure(e)
+            raise
+        finally:
+            if not failed:
+                otel.span_success()
 
     async def _call_model(
         self, messages: List[Dict[str, str]], model_name: str, seed: Optional[int] = None
