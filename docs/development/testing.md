@@ -147,16 +147,16 @@ For simpler tests, use the `mock_response` parameter:
 async def test_tool_call():
     agent = Agent(name="test", model_api=model_api)
     
-    # Mock response that triggers tool call
-    mock = '''I'll use the calculator.
-
-```tool_call
-{"tool": "add", "arguments": {"a": 1, "b": 2}}
-```'''
+    # Mock responses for two-phase loop: action -> no-action -> final
+    mocks = [
+        '{"tool": "add", "arguments": {"a": 1, "b": 2}}',
+        '{}',  # Signal end of action phase
+        'The result is 3.'
+    ]
     
     async for response in agent.process_message(
         "Add 1+2",
-        mock_response=mock
+        mock_response=mocks
     ):
         print(response)
 ```
@@ -182,9 +182,7 @@ def agent():
 
 async def test_max_steps_reached(agent):
     # Mock that always returns tool call (infinite loop)
-    mock = '''```tool_call
-{"tool": "echo", "arguments": {"text": "test"}}
-```'''
+    mock = '{"tool": "echo", "arguments": {"text": "test"}}'
     
     responses = []
     async for chunk in agent.process_message("test", mock_response=mock):

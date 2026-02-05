@@ -104,8 +104,9 @@ kaos agent deploy coordinator \
     --modelapi team-api \
     --model mock-model \
     --instructions "You are a coordinator that delegates to specialist agents." \
-    --mock-response $'Let me delegate the research portion first.\n\n```delegate\n{"agent": "researcher", "task": "Research AI adoption trends in enterprises"}\n```' \
-    --mock-response $'Now let me get the analyst perspective.\n\n```delegate\n{"agent": "analyst", "task": "Analyze the growth patterns from the research"}\n```' \
+    --mock-response '{"agent": "researcher", "task": "Research AI adoption trends in enterprises"}' \
+    --mock-response '{"agent": "analyst", "task": "Analyze the growth patterns from the research"}' \
+    --mock-response '{}' \
     --mock-response "Based on input from my team: AI is growing with 40% YoY growth, especially in customer service automation." \
     --sub-agent researcher \
     --sub-agent analyst \
@@ -171,12 +172,10 @@ This sends traces and metrics to your OTEL collector for observability.
 
 ## How Delegation Works
 
-The coordinator's mock responses include `delegate` blocks:
+The coordinator's mock responses include JSON delegation actions:
 
-```
-```delegate
+```json
 {"agent": "researcher", "task": "Research AI trends"}
-```
 ```
 
 When the agent framework sees this, it:

@@ -14,7 +14,7 @@ make format                     # Auto-format code
 ```
 
 ## Project Structure
-- `agent/client.py`: Agent, RemoteAgent, AgentCard classes
+- `agent/client.py`: Agent, RemoteAgent, AgentCard classes with two-phase agentic loop
 - `agent/server.py`: AgentServer with A2A endpoints
 - `agent/memory.py`: LocalMemory for session/event management
 - `agent/telemetry/`: OpenTelemetry instrumentation (tracing, metrics)
@@ -28,14 +28,32 @@ make format                     # Auto-format code
 | `MODEL_API_URL` | LLM API base URL (required) |
 | `MODEL_NAME` | Model name (required) |
 | `AGENT_SUB_AGENTS` | Direct format: `"name:url,name:url"` |
-| `DEBUG_MOCK_RESPONSES` | JSON array of mock responses for testing |
+| `DEBUG_MOCK_RESPONSES` | JSON array of mock responses for two-phase loop |
 | `OTEL_ENABLED` | Enable OpenTelemetry instrumentation |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP exporter endpoint |
+
+## Two-Phase Agentic Loop
+
+The agent uses a two-phase agentic loop:
+1. **Phase 1 (Action Collection)**: Non-streaming model calls to collect tool/delegation actions
+2. **Phase 2 (Final Response)**: Streaming model call for final user-visible response
+
+### Action Format (JSON)
+- Tool call: `{"tool": "name", "arguments": {...}}`
+- Delegation: `{"agent": "name", "task": "..."}`
+- No action: `{}` (signals end of action phase)
+
+### Mock Response Pattern
+For testing, include action responses then `{}` then final response:
+```bash
+export DEBUG_MOCK_RESPONSES='["{\"tool\": \"echo\", \"arguments\": {}}", "{}", "Done."]'
+```
 
 ## Testing Patterns
 - Use `DEBUG_MOCK_RESPONSES` for deterministic tests
 - Tests use `pytest-asyncio` for async test functions
 - Use `@pytest.mark.parametrize` for testing multiple cases
+- Mock responses must follow two-phase pattern (action -> `{}` -> final)
 
 ## Code Style
 - Use `black` for formatting

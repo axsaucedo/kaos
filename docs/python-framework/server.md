@@ -173,12 +173,10 @@ data: [DONE]
 
 ### Agent Delegation
 
-Delegation happens automatically via the agentic loop when the model's response contains a `delegate` block:
+Delegation happens automatically via the agentic loop when the model's response contains a JSON delegation action:
 
-```
-```delegate
+```json
 {"agent": "worker-1", "task": "Process this data"}
-```
 ```
 
 The agent parses this and invokes the sub-agent via `/v1/chat/completions`. For deterministic testing, use `DEBUG_MOCK_RESPONSES` environment variable to control model responses.
