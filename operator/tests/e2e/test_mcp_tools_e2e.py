@@ -227,11 +227,10 @@ async def test_agent_tool_calling_with_memory(
     await wait_for_mcp_server_ready(mcp_url)
 
     # Deploy Agent with mock response that triggers tool call
+    # Two-phase: action(tool) -> action(none) -> final
     mock_responses = [
-        f"""I'll use the echo tool to help you.
-```tool_call
-{{"tool": "echo", "arguments": {{"message": "Task {task_id} processed"}}}}
-```""",
+        f'{{"tool": "echo", "arguments": {{"message": "Task {task_id} processed"}}}}',
+        "{}",
         f"The echo tool returned the result for task {task_id}.",
     ]
 

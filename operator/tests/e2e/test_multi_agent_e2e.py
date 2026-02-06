@@ -171,21 +171,20 @@ async def test_multi_agent_delegation_with_memory(
     task_id = f"K8S_DELEGATE_{int(time.time())}"
 
     # Create resources with mock responses configured
-    # Coordinator: first response triggers delegation, second is final response
-    # Worker: just responds with acknowledgment
+    # Two-phase pattern:
+    # Coordinator: action(delegate) -> action(none) -> final response
+    # Worker: action(none) -> final response
     resources = create_multi_agent_resources(
         test_namespace,
         shared_modelapi,
         "-mem",
         mock_responses={
             f"multi-coord-mem": [
-                f"""I'll delegate this task to the worker.
-```delegate
-{{"agent": "multi-w1-mem", "task": "Process task {task_id}"}}
-```""",
+                f'{{"agent": "multi-w1-mem", "task": "Process task {task_id}"}}',
+                "{}",
                 f"The worker has completed task {task_id}.",
             ],
-            "multi-w1-mem": [f"Task {task_id} processed by worker-1."],
+            "multi-w1-mem": ["{}", f"Task {task_id} processed by worker-1."],
         },
     )
 

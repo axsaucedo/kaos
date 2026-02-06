@@ -347,7 +347,7 @@ class TestMultiAgentCluster:
         """Test delegation happens when model decides to delegate.
 
         With the new design, delegation occurs when the model's response
-        contains a ```delegate block, not via special roles.
+        contains a JSON delegation action like {"agent": "name", "task": "..."}.
         This test verifies basic invocation works - delegation testing
         is better done via DEBUG_MOCK_RESPONSES in E2E tests.
         """

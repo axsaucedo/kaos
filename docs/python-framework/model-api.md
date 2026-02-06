@@ -156,8 +156,8 @@ For Agent-level testing, use `DEBUG_MOCK_RESPONSES` environment variable:
 # Single response
 export DEBUG_MOCK_RESPONSES='["Hello from mock"]'
 
-# Multi-step agentic loop
-export DEBUG_MOCK_RESPONSES='["```tool_call\n{\"tool\": \"echo\", \"arguments\": {}}\n```", "Done."]'
+# Multi-step agentic loop (action -> no-action -> final)
+export DEBUG_MOCK_RESPONSES='["{\"tool\": \"echo\", \"arguments\": {}}", "{}", "Done."]'
 ```
 
 This bypasses the ModelAPI entirely and is the recommended approach for E2E testing.

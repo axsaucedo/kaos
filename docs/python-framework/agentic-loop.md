@@ -1,26 +1,32 @@
 # Agentic Loop
 
-The agentic loop is the reasoning mechanism that enables agents to use tools and delegate tasks iteratively until producing a final response.
+The agentic loop is the two-phase reasoning mechanism that enables agents to collect tool results and delegation responses, then produce a final streamed response.
 
 ## How It Works
 
 ```mermaid
 flowchart TB
-    start["1. Build System Prompt<br/>• Base instructions<br/>• Available tools<br/>• Available agents"]
+    subgraph phase1["Phase 1: Action Collection"]
+        start["1. Build System Prompt<br/>• Base instructions<br/>• Available tools<br/>• Available agents"]
+        
+        llm["2. Send to LLM (non-streaming)"]
+        
+        parse["3. Parse JSON Action"]
+        
+        tool{"Tool Action?<br/>{\"tool\": ...}"}
+        delegate{"Delegate Action?<br/>{\"agent\": ...}"}
+        
+        exec_tool["Execute tool"]
+        exec_delegate["Invoke agent"]
+        
+        add["4. Add Result to Conversation"]
+        
+        noaction{"Empty JSON {}?"}
+    end
     
-    llm["2. Send to LLM<br/>System prompt + conversation history"]
-    
-    parse["3. Parse Response<br/>• Check for tool_call block<br/>• Check for delegate block"]
-    
-    tool{"Tool Call?"}
-    delegate{"Delegation?"}
-    
-    exec_tool["Execute tool"]
-    exec_delegate["Invoke agent"]
-    
-    add["4. Add Result to Conversation"]
-    
-    final["5. No Action → Return Final Response"]
+    subgraph phase2["Phase 2: Final Response"]
+        final["5. Send to LLM (streaming)<br/>Produce final user response"]
+    end
     
     start --> llm
     llm --> parse
@@ -28,10 +34,12 @@ flowchart TB
     tool -->|Yes| exec_tool
     tool -->|No| delegate
     delegate -->|Yes| exec_delegate
-    delegate -->|No| final
+    delegate -->|No| noaction
     exec_tool --> add
     exec_delegate --> add
     add --> llm
+    noaction -->|Yes| final
+    noaction -->|No| llm
 ```
 
 ## Configuration
@@ -42,13 +50,13 @@ The agentic loop is controlled by the `max_steps` parameter passed to the Agent:
 agent = Agent(
     name="my-agent",
     model_api=model_api,
-    max_steps=5  # Maximum loop iterations
+    max_steps=5  # Maximum action collection iterations
 )
 ```
 
 ### max_steps
 
-Prevents infinite loops. When reached, returns message:
+Prevents infinite loops in Phase 1. When reached, returns message:
 ```
 "Reached maximum reasoning steps (5)"
 ```
@@ -58,9 +66,31 @@ Prevents infinite loops. When reached, returns message:
 - Tool-using tasks: 5 steps (default)
 - Complex multi-step tasks: 10+ steps
 
+## Action Format (JSON)
+
+Actions are simple JSON objects. The agent recognizes three action types:
+
+### Tool Call
+
+```json
+{"tool": "calculator", "arguments": {"expression": "2 + 2"}}
+```
+
+### Delegation
+
+```json
+{"agent": "researcher", "task": "Find information about quantum computing"}
+```
+
+### No Action (Proceed to Final Response)
+
+```json
+{}
+```
+
 ## System Prompt Construction
 
-The agent builds an enhanced system prompt:
+The agent builds an enhanced system prompt with action instructions:
 
 ```python
 async def _build_system_prompt(self) -> str:
@@ -76,88 +106,104 @@ async def _build_system_prompt(self) -> str:
         parts.append("\n## Available Agents for Delegation\n" + agents_info)
         parts.append(AGENT_INSTRUCTIONS)
     
+    if self.mcp_clients or self.sub_agents:
+        parts.append(NO_ACTION_INSTRUCTIONS)
+    
     return "\n".join(parts)
 ```
 
 ### Tool Instructions Template
 
 ```
-To use a tool, respond with a JSON block in this exact format:
-```tool_call
+To use a tool, respond with ONLY this JSON (no other text):
 {"tool": "tool_name", "arguments": {"arg1": "value1"}}
-```
+
 Wait for the tool result before providing your final answer.
 ```
 
 ### Delegation Instructions Template
 
 ```
-To delegate a task to another agent, respond with:
-```delegate
+To delegate a task to another agent, respond with ONLY this JSON (no other text):
 {"agent": "agent_name", "task": "task description"}
-```
+
 Wait for the agent's response before providing your final answer.
+```
+
+### No Action Instructions Template
+
+```
+When you have all the information needed to provide a final answer, respond with ONLY:
+{}
+
+Then the system will ask you to provide your final response.
 ```
 
 ## Response Parsing
 
-### Tool Call Detection
-
 ```python
-def _parse_tool_call(self, content: str) -> Optional[Dict[str, Any]]:
-    match = re.search(r'```tool_call\s*\n({.*?})\s*\n```', content, re.DOTALL)
-    if match:
-        return json.loads(match.group(1))
-    return None
+def _parse_action(self, content: str) -> Dict[str, Any]:
+    """Parse JSON action from model response."""
+    content = content.strip()
+    
+    # Try parsing entire content as JSON
+    try:
+        parsed = json.loads(content)
+        if isinstance(parsed, dict):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+    
+    # Look for JSON on a line by itself
+    for line in content.split("\n"):
+        line = line.strip()
+        if line.startswith("{") and line.endswith("}"):
+            try:
+                return json.loads(line)
+            except json.JSONDecodeError:
+                continue
+    
+    return {}  # No action found
 ```
 
-**Example LLM Response:**
-```
-I'll use the calculator tool to compute this.
+## Progress Blocks
 
-```tool_call
-{"tool": "calculate", "arguments": {"expression": "2 + 2"}}
-```
-```
+During Phase 1, the agent emits progress blocks when starting tool/delegation execution:
 
-### Delegation Detection
-
-```python
-def _parse_delegation(self, content: str) -> Optional[Dict[str, Any]]:
-    match = re.search(r'```delegate\s*\n({.*?})\s*\n```', content, re.DOTALL)
-    if match:
-        return json.loads(match.group(1))
-    return None
-```
-
-**Example LLM Response:**
-```
-This is a research task, I'll delegate to the researcher agent.
-
-```delegate
-{"agent": "researcher", "task": "Find information about quantum computing"}
-```
+```json
+{"type": "progress", "step": 1, "action": "tool_call", "target": "calculator"}
+{"type": "progress", "step": 2, "action": "delegate", "target": "researcher"}
 ```
 
 ## Execution Flow
 
 ### Tool Execution
 
-1. Parse tool name and arguments from `tool_call` block
-2. Log `tool_call` event to memory
-3. Execute tool via MCP client
-4. Log `tool_result` event to memory
-5. Add result to conversation
-6. Continue loop
+1. Parse `tool` and `arguments` from JSON action
+2. Emit progress block
+3. Log `tool_call` event to memory
+4. Execute tool via MCP client
+5. Log `tool_result` event to memory
+6. Add result to conversation
+7. Continue to next action loop iteration
 
 ### Delegation Execution
 
-1. Parse agent name and task from `delegate` block
-2. Log `delegation_request` event to memory
-3. Invoke remote agent via A2A protocol
-4. Log `delegation_response` event to memory
-5. Add response to conversation
-6. Continue loop
+1. Parse `agent` and `task` from JSON action
+2. Emit progress block
+3. Log `delegation_request` event to memory
+4. Invoke remote agent via A2A protocol
+5. Log `delegation_response` event to memory
+6. Add response to conversation
+7. Continue to next action loop iteration
+
+### Final Response (Phase 2)
+
+1. When `{}` or no action detected, exit action loop
+2. Add "provide your final response" prompt
+3. Call model with streaming enabled
+4. Stream tokens directly to client
+5. Log `agent_response` event to memory
 
 ## Memory Events
 
@@ -175,29 +221,36 @@ events = await agent.memory.get_session_events(session_id)
 
 ## Testing with Mock Responses
 
-Set `DEBUG_MOCK_RESPONSES` environment variable to test loop behavior deterministically:
+Set `DEBUG_MOCK_RESPONSES` environment variable to test loop behavior deterministically.
+
+The two-phase pattern requires:
+1. Action responses (tool/delegate JSON or `{}` for no action)
+2. Final response text
 
 ```bash
-# Test tool calling
-export DEBUG_MOCK_RESPONSES='["I will use the echo tool.\n\n```tool_call\n{\"tool\": \"echo\", \"arguments\": {\"text\": \"hello\"}}\n```", "The echo returned: hello"]'
+# Test tool calling (action -> no-action -> final)
+export DEBUG_MOCK_RESPONSES='["{\"tool\": \"echo\", \"arguments\": {\"text\": \"hello\"}}", "{}", "The echo returned: hello"]'
 
-# Test delegation
-export DEBUG_MOCK_RESPONSES='["I will delegate to the researcher.\n\n```delegate\n{\"agent\": \"researcher\", \"task\": \"Find quantum computing info\"}\n```", "Based on the research, quantum computing uses qubits."]'
+# Test delegation (action -> no-action -> final)
+export DEBUG_MOCK_RESPONSES='["{\"agent\": \"researcher\", \"task\": \"Find quantum info\"}", "{}", "Based on the research, quantum computing uses qubits."]'
+
+# Simple response (no-action -> final)
+export DEBUG_MOCK_RESPONSES='["{}", "Hello! How can I help you?"]'
 ```
 
 For Kubernetes E2E tests, configure via the Agent CRD:
 ```yaml
 spec:
-  config:
+  container:
     env:
     - name: DEBUG_MOCK_RESPONSES
-      value: '["```delegate\n{\"agent\": \"worker\", \"task\": \"process data\"}\n```", "Done."]'
+      value: '["{\"agent\": \"worker\", \"task\": \"process data\"}", "{}", "Done."]'
 ```
 
 ## Best Practices
 
 1. **Set appropriate max_steps** - Too low may truncate reasoning, too high wastes resources
 2. **Clear instructions** - Tell the LLM when to use tools vs. respond directly
-3. **Test with mocks** - Verify loop behavior without LLM variability
+3. **Test with mocks** - Include `{}` to signal end of action phase
 4. **Monitor events** - Use memory endpoints to debug complex flows
 5. **Handle errors gracefully** - Tool failures are fed back to the loop for recovery
