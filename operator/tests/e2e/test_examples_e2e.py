@@ -94,11 +94,12 @@ class TestExamplesViaJupytext:
         """Execute the Unified MCP Gateway (pctx) example.
         
         Tests: pctx aggregation, Code Mode, multi-server routing
+        Note: Uses longer timeout (420s) due to multiple MCP servers + pctx gateway
         """
         example_file = DOCS_EXAMPLES_PATH / "unified-mcp-gateway.md"
         assert example_file.exists(), f"Example file not found: {example_file}"
         
-        result = run_jupytext(example_file, timeout=300)
+        result = run_jupytext(example_file, timeout=420)
         
         if result.returncode != 0:
             print(f"STDOUT:\n{result.stdout}")
