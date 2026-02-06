@@ -72,8 +72,6 @@ jobs:
             files: "e2e/test_base_func_e2e.py e2e/test_modelapi_e2e.py"
           - name: mcp
             files: "e2e/test_mcp_tools_e2e.py"
-          - name: pctx
-            files: "e2e/test_pctx_e2e.py"
           - name: multi-agent
             files: "e2e/test_agentic_loop_e2e.py e2e/test_multi_agent_e2e.py"
           - name: examples

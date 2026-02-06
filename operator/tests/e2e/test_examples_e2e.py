@@ -89,3 +89,19 @@ class TestExamplesViaJupytext:
             print(f"STDERR:\n{result.stderr}")
         
         assert result.returncode == 0, f"Example execution failed: {result.stderr}"
+
+    def test_unified_mcp_gateway_example(self):
+        """Execute the Unified MCP Gateway (pctx) example.
+        
+        Tests: pctx aggregation, Code Mode, multi-server routing
+        """
+        example_file = DOCS_EXAMPLES_PATH / "unified-mcp-gateway.md"
+        assert example_file.exists(), f"Example file not found: {example_file}"
+        
+        result = run_jupytext(example_file, timeout=300)
+        
+        if result.returncode != 0:
+            print(f"STDOUT:\n{result.stdout}")
+            print(f"STDERR:\n{result.stderr}")
+        
+        assert result.returncode == 0, f"Example execution failed: {result.stderr}"
