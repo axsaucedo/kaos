@@ -133,8 +133,8 @@ EOF
 Wait for both servers to be ready:
 
 ```bash
-kubectl wait mcpserver/calculator --for=condition=Ready --timeout=120s
-kubectl wait mcpserver/textutils --for=condition=Ready --timeout=120s
+kubectl wait mcpserver/calculator --for=condition=Ready --timeout=180s
+kubectl wait mcpserver/textutils --for=condition=Ready --timeout=180s
 ```
 
 ## Step 3: Create the pctx Gateway
@@ -170,7 +170,7 @@ EOF
 Wait for the gateway to be ready:
 
 ```bash
-kubectl wait mcpserver/unified-gateway --for=condition=Ready --timeout=120s
+kubectl wait mcpserver/unified-gateway --for=condition=Ready --timeout=180s
 ```
 
 ## Step 4: Create the Agent
