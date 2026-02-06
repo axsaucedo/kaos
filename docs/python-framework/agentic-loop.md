@@ -68,7 +68,7 @@ Prevents infinite loops in Phase 1. When reached, returns message:
 
 ## Action Format (JSON)
 
-Actions are simple JSON objects. The agent recognizes three action types. The model can include reasoning context before or after the JSON action.
+Actions are simple JSON objects. The agent recognizes three action types:
 
 ### Tool Call
 
@@ -87,18 +87,6 @@ Actions are simple JSON objects. The agent recognizes three action types. The mo
 ```json
 {}
 ```
-
-### Context with Actions
-
-The model can include reasoning alongside actions:
-
-```
-I need to calculate this sum first.
-{"tool": "calculator", "arguments": {"a": 5, "b": 3}}
-I'll wait for the result.
-```
-
-The agent extracts the JSON action from the response regardless of surrounding text.
 
 ## System Prompt Construction
 
@@ -127,20 +115,18 @@ async def _build_system_prompt(self) -> str:
 ### Tool Instructions Template
 
 ```
-To use a tool, include this JSON in your response:
+To use a tool, respond with ONLY this JSON (no other text):
 {"tool": "tool_name", "arguments": {"arg1": "value1"}}
 
-You may include reasoning or context before/after the JSON.
 Wait for the tool result before providing your final answer.
 ```
 
 ### Delegation Instructions Template
 
 ```
-To delegate a task to another agent, include this JSON in your response:
+To delegate a task to another agent, respond with ONLY this JSON (no other text):
 {"agent": "agent_name", "task": "task description"}
 
-You may include reasoning or context before/after the JSON.
 Wait for the agent's response before providing your final answer.
 ```
 
