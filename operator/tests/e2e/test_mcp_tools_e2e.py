@@ -25,7 +25,7 @@ from e2e.conftest import (
 async def wait_for_mcp_server_ready(mcp_url: str, max_wait: int = 30):
     """Wait for MCPServer to be reachable via Gateway.
     
-    MCPServer uses vanilla FastMCP which returns 400/406 for GET requests
+    MCPServer uses vanilla FastMCP which returns 400/405/406 for GET requests
     to /mcp endpoint (requires proper MCP protocol headers). This is expected
     and indicates the server is running.
     """
@@ -33,7 +33,8 @@ async def wait_for_mcp_server_ready(mcp_url: str, max_wait: int = 30):
         for _ in range(max_wait):
             try:
                 response = await client.get(f"{mcp_url}/mcp")
-                if response.status_code in [400, 406]:
+                # 400, 405, 406 all indicate server is running
+                if response.status_code in [400, 405, 406]:
                     return  # Server is running
             except Exception:
                 pass
@@ -113,17 +114,17 @@ async def test_mcpserver_deployment_ready(test_namespace: str):
 
     # MCPServer uses vanilla FastMCP - no custom /health endpoint
     # Readiness is verified via K8s deployment rollout (TCP probe)
-    # Verify the MCP endpoint responds (will return 406 without proper headers, but that's OK)
+    # Verify the MCP endpoint responds (will return 405/406 without proper headers, but that's OK)
     mcp_url = gateway_url(test_namespace, "mcp", mcp_name)
     
     async with httpx.AsyncClient(timeout=30.0) as client:
-        # The /mcp endpoint exists - FastMCP returns 400/406 for GET without proper headers
+        # The /mcp endpoint exists - servers return 400/405/406 for GET without proper headers
         # but this confirms the server is running and reachable via Gateway
         for _ in range(30):
             try:
                 response = await client.get(f"{mcp_url}/mcp")
-                # 400 or 406 means server is running but request format is wrong (expected)
-                if response.status_code in [400, 406]:
+                # 400, 405, 406 all mean server is running but request format is wrong (expected)
+                if response.status_code in [400, 405, 406]:
                     return  # Success - server is running
             except Exception:
                 pass
