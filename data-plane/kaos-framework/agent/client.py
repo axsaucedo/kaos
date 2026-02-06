@@ -38,21 +38,23 @@ Memory = LocalMemory | NullMemory
 
 # System prompt templates for agentic loop
 TOOLS_INSTRUCTIONS = """
-To use a tool, respond with ONLY this JSON (no other text):
+To use a tool, include this JSON in your response:
 {"tool": "tool_name", "arguments": {"arg1": "value1"}}
 
+You may include reasoning or context before/after the JSON.
 Wait for the tool result before providing your final answer.
 """
 
 AGENT_INSTRUCTIONS = """
-To delegate a task to another agent, respond with ONLY this JSON (no other text):
+To delegate a task to another agent, include this JSON in your response:
 {"agent": "agent_name", "task": "task description"}
 
+You may include reasoning or context before/after the JSON.
 Wait for the agent's response before providing your final answer.
 """
 
 NO_ACTION_INSTRUCTIONS = """
-When you have all the information needed to provide a final answer, respond with ONLY:
+When you have all the information needed to provide a final answer, include:
 {}
 
 Then the system will ask you to provide your final response.
@@ -309,7 +311,8 @@ class Agent:
     def _parse_action(self, content: str) -> Dict[str, Any]:
         """Parse action JSON from model response.
 
-        Looks for a JSON object on its own line that represents an action.
+        Looks for a JSON object anywhere in the response that represents an action.
+        The model can include reasoning/context before or after the JSON.
         Returns the parsed action dict, or empty dict if no valid action found.
 
         Action formats:
@@ -319,7 +322,7 @@ class Agent:
         """
         content = content.strip()
 
-        # Try to parse the entire content as JSON first (most common case)
+        # Try to parse the entire content as JSON first (pure JSON response)
         try:
             parsed = json.loads(content)
             if isinstance(parsed, dict):
@@ -327,16 +330,31 @@ class Agent:
         except json.JSONDecodeError:
             pass
 
-        # Look for JSON object on a line by itself
-        for line in content.split("\n"):
-            line = line.strip()
-            if line.startswith("{") and line.endswith("}"):
-                try:
-                    parsed = json.loads(line)
-                    if isinstance(parsed, dict):
-                        return parsed
-                except json.JSONDecodeError:
-                    continue
+        # Look for JSON objects in the content (may have surrounding text)
+        # Find all potential JSON objects using brace matching
+        i = 0
+        while i < len(content):
+            if content[i] == "{":
+                # Find matching closing brace
+                depth = 0
+                start = i
+                for j in range(i, len(content)):
+                    if content[j] == "{":
+                        depth += 1
+                    elif content[j] == "}":
+                        depth -= 1
+                        if depth == 0:
+                            candidate = content[start : j + 1]
+                            try:
+                                parsed = json.loads(candidate)
+                                if isinstance(parsed, dict):
+                                    # Check if it's a valid action (tool, agent, or empty)
+                                    if "tool" in parsed or "agent" in parsed or parsed == {}:
+                                        return parsed
+                            except json.JSONDecodeError:
+                                pass
+                            break
+            i += 1
 
         return {}
 
@@ -461,6 +479,10 @@ class Agent:
         """
         model_name = self.model_api.model if self.model_api else "unknown"
 
+        def _step_context(step: int) -> str:
+            """Generate step context metadata for the model."""
+            return f"[Step {step + 1}/{self.max_steps}]"
+
         # Phase 1: Action Collection Loop
         for step in range(self.max_steps):
             logger.debug(f"Agentic loop step {step + 1}/{self.max_steps}")
@@ -489,6 +511,7 @@ class Agent:
                         {
                             "type": "progress",
                             "step": step + 1,
+                            "max_steps": self.max_steps,
                             "action": "tool_call",
                             "target": tool_name,
                         }
@@ -505,13 +528,21 @@ class Agent:
 
                         messages.append({"role": "assistant", "content": content})
                         messages.append(
-                            {"role": "user", "content": f"Tool result: {json.dumps(tool_result)}"}
+                            {
+                                "role": "user",
+                                "content": f"{_step_context(step)} Tool result: {json.dumps(tool_result)}",
+                            }
                         )
                         continue
 
                     except Exception as e:
                         messages.append({"role": "assistant", "content": content})
-                        messages.append({"role": "user", "content": f"Tool execution failed: {e}"})
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": f"{_step_context(step)} Tool execution failed: {e}",
+                            }
+                        )
                         continue
 
                 # Check for delegation
@@ -522,7 +553,10 @@ class Agent:
                     if not task:
                         messages.append({"role": "assistant", "content": content})
                         messages.append(
-                            {"role": "user", "content": "Invalid delegation: missing 'task'"}
+                            {
+                                "role": "user",
+                                "content": f"{_step_context(step)} Invalid delegation: missing 'task'",
+                            }
                         )
                         continue
 
@@ -531,6 +565,7 @@ class Agent:
                         {
                             "type": "progress",
                             "step": step + 1,
+                            "max_steps": self.max_steps,
                             "action": "delegate",
                             "target": agent_name,
                         }
@@ -546,13 +581,21 @@ class Agent:
 
                         messages.append({"role": "assistant", "content": content})
                         messages.append(
-                            {"role": "user", "content": f"Agent response: {delegation_result}"}
+                            {
+                                "role": "user",
+                                "content": f"{_step_context(step)} Agent response: {delegation_result}",
+                            }
                         )
                         continue
 
                     except ValueError as e:
                         messages.append({"role": "assistant", "content": content})
-                        messages.append({"role": "user", "content": f"Delegation failed: {e}"})
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": f"{_step_context(step)} Delegation failed: {e}",
+                            }
+                        )
                         continue
 
                 # No action (empty dict or no recognized action) - proceed to Phase 2
@@ -573,7 +616,7 @@ class Agent:
             return
 
         # Phase 2: Final Response (streaming)
-        otel.span_begin("agent.final_response", attrs={"phase": "final", "stream": stream})
+        otel.span_begin("agent.response", attrs={"phase": "final", "stream": stream})
         final_failed = False
         try:
             # Add instruction to provide final response

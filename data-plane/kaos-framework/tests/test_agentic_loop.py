@@ -159,6 +159,43 @@ class TestAgenticLoopToolCalling:
 
         logger.info("✓ Tool call detection and execution works")
 
+    @pytest.mark.asyncio
+    async def test_tool_call_with_context(self):
+        """Test that tool calls work when model includes reasoning context."""
+        # Model response with reasoning before JSON action
+        tool_call_with_context = """I'll use the calculator to compute this sum.
+
+{"tool": "calculator", "arguments": {"a": 5, "b": 3}}
+
+Let me wait for the result."""
+        no_action_response = "{}"
+        final_response = "The result is 8."
+
+        mock_model = MockModelAPI(
+            responses=[tool_call_with_context, no_action_response, final_response]
+        )
+        mock_mcp = MockMCPClient(tools={"calculator": ("Add two numbers", {"sum": 8})})
+        memory = LocalMemory()
+
+        agent = Agent(
+            name="tool-agent",
+            model_api=mock_model,
+            mcp_clients=[mock_mcp],
+            memory=memory,
+            max_steps=5,
+        )
+
+        result = []
+        async for chunk in agent.process_message("What is 5 + 3?"):
+            result.append(chunk)
+
+        # Verify tool was called even with context around JSON
+        assert len(mock_mcp.call_log) == 1
+        assert mock_mcp.call_log[0]["tool"] == "calculator"
+        assert mock_model.call_count == 3
+
+        logger.info("✓ Tool call with context works")
+
 
 class TestAgenticLoopDelegation:
     """Tests for agent delegation in the agentic loop."""
