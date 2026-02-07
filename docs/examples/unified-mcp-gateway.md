@@ -183,12 +183,13 @@ kaos mcp deploy unified-gateway --runtime pctx --params "$PCTX_CONFIG" --wait
 
 ## Step 4: Create the Agent
 
-Create an agent connected to the pctx gateway. The mock responses demonstrate Code Mode - the agent writes TypeScript that calls multiple tools in sequence:
+Create an agent connected to the pctx gateway. The mock responses demonstrate Code Mode - the agent writes TypeScript that calls multiple tools in sequence using pctx's `execute` tool:
 
 ```bash
 # Define the mock code response with formatted TypeScript
+# pctx exposes the "execute" tool for running TypeScript code
 MOCK_CODE="{\
-  \"tool\": \"code_mode\",\
+  \"tool\": \"execute\",\
   \"arguments\": {\
     \"code\": \"\
     const sum = await calc.add({a: 42, b: 8});\
@@ -239,16 +240,21 @@ kaos agent status gateway-agent --json | grep -q "tool_execution" || exit 1
 
 ## Step 7: Verify Memory Events
 
-Check that tool calls were recorded in memory:
+Check that tool calls were recorded in memory and no errors occurred:
 
 ```bash
 kaos agent memory gateway-agent
 ```
 
-Verify a tool_call event exists:
+Verify a tool_call event exists and no errors were recorded:
 
 ```bash
+# Check tool_call event exists
 kaos agent memory gateway-agent --json | grep -q "tool_call" || exit 1
+# Check no tool errors occurred
+kaos agent memory gateway-agent --json | grep -q "tool_error" && exit 1 || true
+# Check no delegation errors occurred
+kaos agent memory gateway-agent --json | grep -q "delegation_error" && exit 1 || true
 ```
 
 ## Cleanup

@@ -101,14 +101,15 @@ def memory_command(
                 for etype, count in sorted(event_types.items()):
                     typer.echo(f"  - {etype}: {count}")
             
-            # Show last few events
+            # Show all events (no truncation)
             if events:
-                typer.echo("\nRecent Events:")
-                for event in events[-5:]:
+                typer.echo("\nAll Events:")
+                for event in events:
                     etype = event.get("event_type", "unknown")
                     content = event.get("content", "")
-                    if isinstance(content, str) and len(content) > 60:
-                        content = content[:60] + "..."
+                    # Convert dicts to JSON string for display
+                    if isinstance(content, dict):
+                        content = json.dumps(content)
                     typer.echo(f"  [{etype}] {content}")
 
     except Exception as e:
