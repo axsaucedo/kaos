@@ -9,6 +9,7 @@ Includes OpenTelemetry instrumentation for tracing, metrics, and log correlation
 import os
 import time
 import uuid
+import json
 import logging
 import sys
 from typing import Dict, Any, List, Optional
@@ -511,8 +512,8 @@ class AgentServer:
                             ],
                         }
 
-                        # Format as SSE
-                        yield f"data: {str(sse_data).replace('None', 'null').replace(chr(39), chr(34))}\n\n"
+                        # Format as SSE with proper JSON serialization
+                        yield f"data: {json.dumps(sse_data)}\n\n"
 
                 # Send final chunk to indicate completion
                 final_data = {
@@ -522,13 +523,13 @@ class AgentServer:
                     "model": model_name,
                     "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
                 }
-                yield f"data: {str(final_data).replace('None', 'null').replace(chr(39), chr(34))}\n\n"
+                yield f"data: {json.dumps(final_data)}\n\n"
                 yield "data: [DONE]\n\n"
 
             except Exception as e:
                 logger.error(f"Streaming error: {e}")
                 error_data = {"error": {"type": "server_error", "message": str(e)}}
-                yield f"data: {str(error_data).replace(chr(39), chr(34))}\n\n"
+                yield f"data: {json.dumps(error_data)}\n\n"
                 yield "data: [DONE]\n\n"
 
         return StreamingResponse(
