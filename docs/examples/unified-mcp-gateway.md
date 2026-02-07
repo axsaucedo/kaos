@@ -13,13 +13,35 @@ jupyter:
     name: python3
 ---
 
-# Unified MCP Gateway with pctx
+# Optimized MCPs with Unified Code Mode
 
 > **Try it yourself!** This example is available as an executable [Jupyter notebook](/examples/unified-mcp-gateway.ipynb).
 
-This example demonstrates building a **unified MCP gateway** using [pctx (Port of Context)](https://github.com/portofcontext/pctx). The pctx runtime aggregates multiple MCP servers into a single endpoint, exposing them through a powerful "Code Mode" interface that reduces token usage by up to 98%.
+This example demonstrates building an **optimized MCP gateway** using [pctx (Port of Context)](https://github.com/portofcontext/pctx). The pctx runtime aggregates multiple MCP servers into a single endpoint, exposing them through a powerful "Code Mode" interface that reduces token usage by up to 98%.
 
-## Understanding the Flow
+## Understanding Code Mode
+
+With traditional MCP, each tool call requires an LLM round-trip:
+
+```
+LLM: "I'll call add(42, 8)"       → Tool executes → Result
+LLM: "Now I'll call multiply"    → Tool executes → Result
+LLM: "Now I'll call uppercase"   → Tool executes → Result
+LLM: "Here's the final answer"
+```
+
+With Code Mode, the agent writes TypeScript that executes all tools in one callWith Code Mode, the agent / All tools execute in a single LLM round-trip
+With Csum = await calc.add({a: 42, b: 8});
+const product = await calc.multiply({x: const product = await calc.multiply({xc.pconst product = await calc.multiply({x: const product = await calc.multiply({xc.pconst product = await calc.multiply({x: sult = await text.uppercase({text: "result: " + squared + " (words: " + wordCount + ")"});
+return result;
+```
+
+This reduces:
+- **LLM round-trips**: From N+1 to 2 (code generation + final response)
+- **Token usage**: Up to 98% reduction for complex workflows
+- **Latency**: Dramatically faster for multi-step operations
+
+## Architecture
 
 ```mermaid
 graph LR
@@ -27,14 +49,14 @@ graph LR
     B --> C[pctx Gateway]
     C --> D[Calculator MCP]
     C --> E[Text Utils MCP]
-    D --> F[Tool Result]
+    D --> F[Tool Results]
     E --> F
     F --> B
     B --> G[Final Response]
 ```
 
-::: tip Why Code Mode?
-Traditional MCP requires multiple LLM round-trips for tool calls. Code Mode lets the agent write TypeScript code that executes multiple tools in a single call, dramatically reducing latency and token usage.
+::: tip Why pctx?
+pctx aggregates multiple MCP servers and exposes them through TypeScript namespaces. Each server becomes a namespace (e.g., `calc.add()`, `text.uppercase()`), enabling complex multi-tool orchestration in a single code block.
 :::
 
 ## Prerequisites
@@ -42,13 +64,6 @@ Traditional MCP requires multiple LLM round-trips for tool calls. Code Mode lets
 - KAOS operator installed ([Installation Guide](/getting-started/installation))
 - `kaos-cli` installed
 - Access to a Kubernetes cluster
-
-## Overview
-
-We'll build a system where:
-1. Two upstream MCP servers provide different capabilities (math + text operations)
-2. A pctx gateway aggregates them into a unified endpoint
-3. An agent uses Code Mode to orchestrate multi-tool workflows
 
 ## Setup
 
@@ -74,42 +89,34 @@ kaos modelapi deploy gateway-api --mode Proxy --wait
 
 ## Step 2: Create Upstream MCP Servers
 
-Create two MCP servers with different capabilities using the `python-string` runtime.
+We'll create two MCP servers showing both deployment methods.
 
-### Calculator MCP Server
+### Calculator MCP Server (CLI method)
 
-This server provides mathematical operations:
+Deploy using the `kaos mcp deploy` command with `--wait` flag:
 
 ```bash
-cat <<'EOF' | kubectl apply -f -
-apiVersion: kaos.tools/v1alpha1
-kind: MCPServer
-metadata:
-  name: calculator
-spec:
-  runtime: python-string
-  params: |
-    def add(a: int, b: int) -> int:
-        """Add two numbers together."""
-        return a + b
-    
-    def multiply(x: int, y: int) -> int:
-        """Multiply two numbers."""
-        return x * y
-    
-    def power(base: int, exponent: int) -> int:
-        """Raise base to the power of exponent."""
-        return base ** exponent
-EOF
+export CALC_FUNCS='def add(a: int, b: int) -> int:
+    """Add two numbers together."""
+    return a + b
+
+def multiply(x: int, y: int) -> int:
+    """Multiply two numbers."""
+    return x * y
+
+def power(base: int, exponent: int) -> int:
+    """Raise base to the power of exponent."""
+    return base ** exponent'
+
+kaos mcp deploy calculator --runtime python-string --params "$CALC_FUNCS" --wait
 ```
 
-### Text Utils MCP Server
+### Text Utils MCP Server (CRD method)
 
-This server provides text manipulation tools:
+Alternatively, deploy using a Kubernetes manifest directly:
 
 ```bash
-cat <<'EOF' | kubectl apply -f -
-apiVersion: kaos.tools/v1alpha1
+cat <<'cat <<'cat <<'cat <<'cat <<'cat <<'cat <<'cat <<'cat <ha1
 kind: MCPServer
 metadata:
   name: textutils
@@ -128,226 +135,58 @@ spec:
         """Count the number of words in text."""
         return len(text.split())
 EOF
-```
 
-Wait for both servers to be ready:
-
-```bash
-kubectl wait mcpserver/calculator --for=jsonpath='{.status.ready}'=true --timeout=180s
-kubectl wait mcpserver/textutils --for=jsonpath='{.status.ready}'=true --timeout=180s
+# Wait for the textutils server using kaos CLI
+kaos mcp deploy textutils --runtime python-string --wait 2>/dev/null || \
+    kubectl wait mcpserver/textutils --for=jsonpath='{.status.ready}'=true --timeout=180s
 ```
 
 ## Step 3: Create the pctx Gateway
 
-Now create the pctx gateway that aggregates both upstream servers. The `params` field contains a JSON configuration specifying the upstream servers:
+Create the pctx gateway that aggregates both upstream servers:
 
 ```bash
-cat <<EOF | kubectl apply -f -
-apiVersion: kaos.tools/v1alpha1
-kind: MCPServer
-metadata:
-  name: unified-gateway
-spec:
-  runtime: pctx
-  params: |
+export PCTX_CONFIG='{
+  "name": "unified-gateway",
+  "version": "1.0.0",
+  "servers": [
     {
-      "name": "unified-gateway",
-      "version": "1.0.0",
-      "servers": [
-        {
-          "name": "calc",
-          "url": "http://mcpserver-calculator.$NAMESPACE.svc.cluster.local:8000/mcp"
-        },
-        {
-          "name": "text",
-          "url": "http://mcpserver-textutils.$NAMESPACE.svc.cluster.local:8000/mcp"
-        }
-      ]
+      "name": "calc",
+      "url": "h      "url": "h      "url": "h      "url": "h      "url": 800      
+                                                                r-              ME        vc.cluster.local:8000/mcp"
     }
-EOF
-```
+  ]
+}'
 
-Wait for the gateway to be ready:
-
-```bash
-kubectl wait mcpserver/unified-gateway --for=jsonpath='{.status.ready}'=true --timeout=180s
+kaos mcp deploy unifiekaos mcp deploy unifiekaos mcp depl$PCTX_CONFIG" --wait
 ```
 
 ## Step 4: Create the Agent
 
-Create an agent connected to the pctx gateway. The mock responses demonstrate Code Mode - the agent writes TypeScript that calls multiple tools in sequence:
-
-```bash
-# Mock response: Agent uses Code Mode to call calc.add and text.uppercase
-# pctx exposes tools via TypeScript namespaces matching server names
-MOCK_CODE='{"tool": "code_mode", "arguments": {"code": "const sum = await calc.add({a: 42, b: 8}); const result = await text.uppercase({text: \"answer is \" + sum}); return result;"}}'
+Create an agent connected to the pctx gateway. The mock Create an agent connected to the pctx gatewawrCreate an agent connectels multCreate an agent connected to the pctock response: Agent uses Code Mode to execute a complex multi-tool workflow
+# This d# ons# This d# ons# This d# ons# This d# ons# Thisou# This d# ons# This d# ons# This d# ons# This d# ons# Thisou# This d# on"const sum = await calc.add({a: 42, b: 8}); const product = await calc.multiply({x: sum, y: # ); # This d# ons# This d# ons# This {ba# This d# ons# This d# ons# This d# ons# This d# ons# Thisou#{te# ThisThe answer is \" + squar# This d# ons# This d# ons#te# This d# ons# This \"RESULT: \" + squared # This d# ons# This ords)\"}); return result;"}}'
 MOCK_END='{}'
-MOCK_FINAL='The calculation is complete! I added 42 + 8 = 50 and formatted the result as "ANSWER IS 50".'
-
-kaos agent deploy gateway-agent \
-    --modelapi gateway-api \
-    --model mock-model \
-    --mcp unified-gateway \
-    --instructions "You use Code Mode to orchestrate multiple tools efficiently." \
-    --mock-response "$MOCK_CODE" \
-    --mock-response "$MOCK_END" \
-    --mock-response "$MOCK_FINAL" \
-    --expose \
-    --wait
-```
-
-## Step 5: Invoke the Agent
-
-Send a request that triggers multi-tool orchestration:
+MOCK_FINAL='I executed a complex calculatMOCK_FINAL='I executed a complex calculatMOCK_FINAL='I executed a complex calculatMOCK_FINAL='I executed a complex 
+kkkkkagkkt keplkkkkkagkkt keplkkkkkagkkt keplkkkkkagkkt keplkkkkkagkkt keplkkkkkagkkt keplk --mcp kkkkkagkkt keplkkkkkagkkt strkkkkkagkkt keplkkkkkagkkt keplkkkkkagkkt keplkkkkkagkkt keplkkkkkagkkt keplkkkkkagkkt keplk --mcp kkkkkagkkt keplkkkkkagkkt strkkkkkagkkt keplkkkkkagkkt keplkkkkkagkkt keplkkkkkagkkt keplkkkkkagkkt keplkkkkkagkkt keplk --mcp kkkkkagkkt keplkkka request that triggers multi-tool orchestration:
 
 ```bash
-kaos agent invoke gateway-agent --message "Add 42 and 8, then format the result in uppercase"
+kaos agent invoke gateway-agent --message "Calculate (42+8)*2, square it, count the words in the result description, and format everything in uppercase"
 ```
 
-## Step 6: Verify Tool Discovery
+## Step 6: Verify Agent Status
 
-Check that the agent card shows tools from the pctx gateway:
+Check that the agent has discovered tools from the pctx gateway:
 
-```python
-import subprocess
-import json
-import time
-
-# Start port-forward in background
-pf_proc = subprocess.Popen(
-    ["kubectl", "port-forward", "svc/agent-gateway-agent", "18765:8000"],
-    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-)
-time.sleep(5)
-
-try:
-    import urllib.request
-    import urllib.error
-    
-    # Retry logic for port-forward to be ready
-    card = None
-    for attempt in range(10):
-        try:
-            req = urllib.request.Request("http://localhost:18765/.well-known/agent")
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                card = json.loads(resp.read().decode())
-            break
-        except (urllib.error.URLError, ConnectionRefusedError):
-            time.sleep(2)
-    
-    assert card is not None, "Failed to connect to agent after 10 attempts"
-    
-    # Verify agent has tool_execution capability
-    assert "tool_execution" in card.get("capabilities", []), \
-        f"Missing tool_execution capability: {card}"
-    
-    # Verify skills are discovered (pctx exposes code_mode tool)
-    skills = card.get("skills", [])
-    assert len(skills) > 0, f"No skills discovered: {card}"
-    
-    print(f"SUCCESS: Agent discovered {len(skills)} tool(s) via pctx gateway")
-    print(f"Capabilities: {card.get('capabilities', [])}")
-finally:
-    pf_proc.terminate()
-    pf_proc.wait()
+```bash
+kaos agent status gateway-agent
 ```
 
-## Step 7: Verify Memory Events
+Verify the output shows `tool_execution` capability:
 
-Check that tool calls were recorded in memory:
-
-```python
-import subprocess
-import json
-import time
-
-# Start port-forward in background
-pf_proc = subprocess.Popen(
-    ["kubectl", "port-forward", "svc/agent-gateway-agent", "18766:8000"],
-    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-)
-time.sleep(5)
-
-try:
-    import urllib.request
-    import urllib.error
-    
-    # Retry logic for port-forward to be ready
-    memory = None
-    for attempt in range(10):
-        try:
-            req = urllib.request.Request("http://localhost:18766/memory/events")
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                memory = json.loads(resp.read().decode())
-            break
-        except (urllib.error.URLError, ConnectionRefusedError):
-            time.sleep(2)
-    
-    assert memory is not None, "Failed to connect to agent after 10 attempts"
-    
-    events = memory.get("events", [])
-    event_types = [e.get("event_type") for e in events]
-    
-    # Verify tool_call event exists (from code_mode execution)
-    assert "tool_call" in event_types, \
-        f"No tool_call in memory events: {event_types}"
-    
-    print(f"SUCCESS: Found {len(events)} memory events")
-    print(f"Event types: {set(event_types)}")
-finally:
-    pf_proc.terminate()
-    pf_proc.wait()
-```
-
-## Understanding Code Mode
-
-With traditional MCP, each tool call requires an LLM round-trip:
-
-```
-LLM: "I'll call add(42, 8)"     → Tool executes → Result
-LLM: "Now I'll call uppercase"  → Tool executes → Result
-LLM: "Here's the final answer"
-```
-
-With Code Mode, the agent writes TypeScript that executes all tools in one call:
-
-```text
-const sum = await calc.add({a: 42, b: 8});
-const result = await text.uppercase({text: "answer is " + sum});
-return result;
-```
-
-This reduces:
-- **LLM round-trips**: From N+1 to 2 (code generation + final response)
-- **Token usage**: Up to 98% reduction for complex workflows
-- **Latency**: Dramatically faster for multi-step operations
-
-## pctx Configuration
-
-The pctx config supports:
-- **Multiple servers**: Aggregate any number of MCP servers
-- **Custom namespaces**: Server names become TypeScript namespaces
-- **Authentication**: Add bearer tokens or custom headers
-- **External servers**: Reference any HTTP MCP endpoint
-
-Example with authentication:
-
-```yaml
-spec:
-  runtime: pctx
-  params: |
-    {
-      "servers": [
-        {
-          "name": "private_api",
-          "url": "https://api.example.com/mcp",
-          "bearer": "your-token"
-        }
-      ]
-    }
-```
-
-## Cleanup
+```bash
+kaos agent status gateway-agent --json | grep -q "tool_execution" && echo "kaos agent status gateway-agent --json | grep -q "tool_execution" && echo "kaos agent status gateway-agent --json | grep -q "tool_execution" && echo "kaos rykaos agent status gateway-agent --json | grep -q "tool_execution" && echo "kaos agent status gateway-agent --json | grep -q "tool_execution" && echo "kaos agent status gateway-agent --json | grep -q "tool_execution" && echo "kaos rykaos agent status gateway-agent --json | grep -q "tool_execution" && echo "kaos agent status gateway-agent --json | grep -q "tool_execution" && echo "kaos agent status gateway-agent --js**Authentickaos agent status gateway-agent --json | grep -q "tool_execution" && echo "kaos agent status gateway-agent --json | grep -q "tool_execution" && echo "kc:ka rukaos agent status gateway-age
+                                                                          rl                              p"                                                         }
+      # Cleanup
 
 ```bash
 kubectl delete namespace $NAMESPACE

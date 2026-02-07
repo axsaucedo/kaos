@@ -9,7 +9,7 @@ Executable Jupyter notebooks demonstrating KAOS features.
 | [custom-mcp-server.ipynb](custom-mcp-server.ipynb) | Build and deploy a custom MCP server with FastMCP |
 | [kaos-monkey.ipynb](kaos-monkey.ipynb) | Chaos engineering agent with Kubernetes tools |
 | [multi-agent-telemetry.ipynb](multi-agent-telemetry.ipynb) | Multi-agent delegation with coordinator pattern |
-| [unified-mcp-gateway.ipynb](unified-mcp-gateway.ipynb) | Aggregate multiple MCP servers with pctx Code Mode |
+| [unified-mcp-gateway.ipynb](unified-mcp-gateway.ipynb) | Optimized MCPs with pctx Unified Code Mode |
 
 ## Prerequisites
 
