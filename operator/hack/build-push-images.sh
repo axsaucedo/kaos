@@ -56,6 +56,14 @@ docker build -t "${REGISTRY}/kaos-agent:${AGENT_TAG}" "${PROJECT_ROOT}/data-plan
 # Tag same image for MCP server (they use the same base)
 docker tag "${REGISTRY}/kaos-agent:${AGENT_TAG}" "${REGISTRY}/kaos-mcp-server:${AGENT_TAG}"
 
+# Build MCP python-string image
+echo "Building MCP python-string image..."
+docker build -t "${REGISTRY}/kaos-mcp-python-string:${AGENT_TAG}" "${PROJECT_ROOT}/data-plane/mcp-servers/python-string/"
+
+# Build MCP pctx image
+echo "Building MCP pctx image..."
+docker build -t "${REGISTRY}/kaos-mcp-pctx:${AGENT_TAG}" "${PROJECT_ROOT}/data-plane/mcp-servers/pctx/"
+
 # Build minimal LiteLLM image (~200MB vs 1.5GB upstream)
 # Tag it as the upstream image to override for local development
 echo "Building minimal LiteLLM image..."
@@ -71,6 +79,8 @@ echo "Loading images into KIND cluster '${KIND_CLUSTER_NAME}'..."
 kind load docker-image "${REGISTRY}/kaos-operator:${OPERATOR_TAG}" --name "${KIND_CLUSTER_NAME}"
 kind load docker-image "${REGISTRY}/kaos-agent:${AGENT_TAG}" --name "${KIND_CLUSTER_NAME}"
 kind load docker-image "${REGISTRY}/kaos-mcp-server:${AGENT_TAG}" --name "${KIND_CLUSTER_NAME}"
+kind load docker-image "${REGISTRY}/kaos-mcp-python-string:${AGENT_TAG}" --name "${KIND_CLUSTER_NAME}"
+kind load docker-image "${REGISTRY}/kaos-mcp-pctx:${AGENT_TAG}" --name "${KIND_CLUSTER_NAME}"
 kind load docker-image "${LITELLM_IMAGE}" --name "${KIND_CLUSTER_NAME}"
 kind load docker-image "${OLLAMA_IMAGE}" --name "${KIND_CLUSTER_NAME}"
 

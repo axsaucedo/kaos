@@ -421,9 +421,7 @@ class Agent:
             # Handle both string and array input formats
             if isinstance(message, str):
                 logger.debug(f"User message: {message[:200]}...")
-                user_event = self.memory.create_event("user_message", message)
-                await self.memory.add_event(session_id, user_event)
-                logger.debug(f"Memory event created: user_message")
+                await self.memory.add_event(session_id, "user_message", message)
                 messages.append({"role": "user", "content": message})
             else:
                 for msg in message:
@@ -434,19 +432,13 @@ class Agent:
 
                     if role == "task-delegation":
                         logger.debug(f"Received delegation task: {content[:200]}...")
-                        delegation_event = self.memory.create_event(
-                            "task_delegation_received", content
-                        )
-                        await self.memory.add_event(session_id, delegation_event)
-                        logger.debug(f"Memory event created: task_delegation_received")
+                        await self.memory.add_event(session_id, "task_delegation_received", content)
                         messages.append({"role": "user", "content": content})
                     else:
                         messages.append({"role": role, "content": content})
                         if role == "user":
                             logger.debug(f"User message: {content[:200]}...")
-                            user_event = self.memory.create_event("user_message", content)
-                            await self.memory.add_event(session_id, user_event)
-                            logger.debug(f"Memory event created: user_message")
+                            await self.memory.add_event(session_id, "user_message", content)
 
             # Agentic loop - iterate up to max_steps
             logger.debug(f"Starting agentic loop with {len(messages)} messages")
@@ -458,8 +450,7 @@ class Agent:
             error_msg = f"Error processing message: {str(e)}"
             logger.error(error_msg)
             otel.span_failure(e)
-            error_event = self.memory.create_event("error", error_msg)
-            await self.memory.add_event(session_id, error_event)
+            await self.memory.add_event(session_id, "error", error_msg)
             yield f"Sorry, I encountered an error: {str(e)}"
         finally:
             if not span_failed:
@@ -503,8 +494,7 @@ class Agent:
                     tool_name = action["tool"]
                     tool_args = action.get("arguments", {})
 
-                    tool_event = self.memory.create_event("tool_call", action)
-                    await self.memory.add_event(session_id, tool_event)
+                    await self.memory.add_event(session_id, "tool_call", action)
 
                     # Emit progress block
                     progress = json.dumps(
@@ -521,10 +511,9 @@ class Agent:
                     try:
                         tool_result = await self._execute_tool(tool_name, tool_args)
 
-                        result_event = self.memory.create_event(
-                            "tool_result", {"tool": tool_name, "result": tool_result}
+                        await self.memory.add_event(
+                            session_id, "tool_result", {"tool": tool_name, "result": tool_result}
                         )
-                        await self.memory.add_event(session_id, result_event)
 
                         messages.append({"role": "assistant", "content": content})
                         messages.append(
@@ -536,11 +525,15 @@ class Agent:
                         continue
 
                     except Exception as e:
+                        error_msg = str(e)
+                        await self.memory.add_event(
+                            session_id, "tool_error", {"tool": tool_name, "error": error_msg}
+                        )
                         messages.append({"role": "assistant", "content": content})
                         messages.append(
                             {
                                 "role": "user",
-                                "content": f"{_step_context(step)} Tool execution failed: {e}",
+                                "content": f"{_step_context(step)} Tool execution failed: {error_msg}",
                             }
                         )
                         continue
@@ -632,13 +625,11 @@ class Agent:
                     yield chunk
 
                 # Record the complete response in memory
-                response_event = self.memory.create_event("agent_response", full_response)
-                await self.memory.add_event(session_id, response_event)
+                await self.memory.add_event(session_id, "agent_response", full_response)
             else:
                 # Non-streaming final response
                 content = await self._call_model(messages, model_name, seed=seed)
-                response_event = self.memory.create_event("agent_response", content)
-                await self.memory.add_event(session_id, response_event)
+                await self.memory.add_event(session_id, "agent_response", content)
                 yield content
 
         except Exception as e:
@@ -791,8 +782,7 @@ class Agent:
 
         if session_id:
             await self.memory.add_event(
-                session_id,
-                self.memory.create_event("delegation_request", {"agent": agent_name, "task": task}),
+                session_id, "delegation_request", {"agent": agent_name, "task": task}
             )
 
         # Build messages for sub-agent with context
@@ -806,10 +796,7 @@ class Agent:
 
             if session_id:
                 await self.memory.add_event(
-                    session_id,
-                    self.memory.create_event(
-                        "delegation_response", {"agent": agent_name, "response": response}
-                    ),
+                    session_id, "delegation_response", {"agent": agent_name, "response": response}
                 )
             return response
 
@@ -819,10 +806,7 @@ class Agent:
 
             if session_id:
                 await self.memory.add_event(
-                    session_id,
-                    self.memory.create_event(
-                        "delegation_error", {"agent": agent_name, "error": error_msg}
-                    ),
+                    session_id, "delegation_error", {"agent": agent_name, "error": error_msg}
                 )
             return f"[Delegation failed: {error_msg}]"
 

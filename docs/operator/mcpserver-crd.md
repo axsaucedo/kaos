@@ -59,6 +59,7 @@ Runtime identifier for the MCP server. Can be:
 | Value | Description |
 |-------|-------------|
 | `python-string` | Python code execution via MCP_TOOLS_STRING |
+| `pctx` | Unified MCP aggregator with Code Mode |
 | `kubernetes` | Kubernetes CRUD operations |
 | `slack` | Slack integration |
 | `custom` | User-provided container image |
@@ -72,6 +73,7 @@ Runtime-specific configuration passed to the container. The delivery method depe
 | Runtime | Params Environment Variable |
 |---------|---------------------------|
 | `python-string` | `MCP_TOOLS_STRING` |
+| `pctx` | `PCTX_CONFIG` |
 | `kubernetes` | `MCP_PARAMS` |
 | `slack` | `MCP_PARAMS` |
 
@@ -161,6 +163,51 @@ spec:
         return f"Echo: {message}"
 ```
 
+### pctx
+
+Unified MCP aggregator with Code Mode. Aggregates multiple upstream MCP servers into a single interface with efficient code execution.
+
+Based on [pctx (Port of Context)](https://github.com/portofcontext/pctx), this runtime:
+- Aggregates multiple MCP servers (KAOS-managed or external)
+- Provides Code Mode for token-efficient multi-step operations
+- Executes TypeScript in sandboxed Deno environment
+
+```yaml
+spec:
+  runtime: pctx
+  params: |
+    {
+      "name": "unified-mcp",
+      "version": "1.0.0",
+      "servers": [
+        {
+          "name": "calculator",
+          "url": "http://mcpserver-calculator.default.svc.cluster.local:8000/mcp"
+        },
+        {
+          "name": "external",
+          "url": "https://external-mcp.example.com/mcp",
+          "auth": {
+            "type": "bearer",
+            "token": "${env:API_TOKEN}"
+          }
+        }
+      ]
+    }
+```
+
+**Config Structure:**
+- `name`: Name of your unified MCP server
+- `version`: Version string
+- `servers[]`: Array of upstream MCP servers
+  - `name`: Unique identifier (becomes TypeScript namespace)
+  - `url`: HTTP(S) URL of the MCP server endpoint
+  - `auth`: Optional authentication (bearer or headers)
+
+**Code Mode Benefits:**
+
+Traditional MCP flow requires passing all data through the LLM context. Code Mode executes operations in a sandbox, reducing token usage by up to 98.7%.
+
 ### kubernetes
 
 Kubernetes CRUD operations. Requires serviceAccountName with appropriate RBAC.
@@ -243,6 +290,34 @@ spec:
     def subtract(a: int, b: int) -> int:
         """Subtract b from a."""
         return a - b
+```
+
+### Unified MCP Server (pctx)
+
+Aggregate multiple MCP servers into a single endpoint with Code Mode:
+
+```yaml
+apiVersion: kaos.tools/v1alpha1
+kind: MCPServer
+metadata:
+  name: unified-tools
+spec:
+  runtime: pctx
+  params: |
+    {
+      "name": "unified-tools",
+      "version": "1.0.0",
+      "servers": [
+        {
+          "name": "calculator",
+          "url": "http://mcpserver-calculator.default.svc.cluster.local:8000/mcp"
+        },
+        {
+          "name": "echo",
+          "url": "http://mcpserver-echo-tools.default.svc.cluster.local:8000/mcp"
+        }
+      ]
+    }
 ```
 
 ### Kubernetes CRUD

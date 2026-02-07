@@ -160,15 +160,27 @@ class LocalMemory:
             logger.debug(f"Created new session for provided ID: {session_id}")
         return session_id
 
-    async def add_event(self, session_id: str, event: MemoryEvent) -> bool:
+    async def add_event(
+        self,
+        session_id: str,
+        event_or_type: Union[MemoryEvent, str],
+        content: Any = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> bool:
         """Add an event to a session.
+
+        Supports two call patterns:
+        1. add_event(session_id, event)  - Pass a MemoryEvent object
+        2. add_event(session_id, event_type, content, metadata)  - Create and add in one call
 
         Uses deque with maxlen for automatic O(1) bounded storage.
         Oldest events are automatically evicted when limit is reached.
 
         Args:
             session_id: The session ID
-            event: The event to add
+            event_or_type: Either a MemoryEvent or event type string
+            content: Event content (required if event_or_type is a string)
+            metadata: Optional metadata dictionary
 
         Returns:
             True if added successfully, False if session not found
@@ -177,6 +189,12 @@ class LocalMemory:
         if not session:
             logger.warning(f"Session {session_id} not found, event not added")
             return False
+
+        # Handle both call patterns
+        if isinstance(event_or_type, MemoryEvent):
+            event = event_or_type
+        else:
+            event = self.create_event(event_or_type, content, metadata)
 
         # Deque handles automatic eviction - no cleanup needed
         session.events.append(event)
@@ -368,7 +386,13 @@ class NullMemory:
         """Return the provided session ID."""
         return session_id
 
-    async def add_event(self, session_id: str, event: Optional[MemoryEvent]) -> bool:
+    async def add_event(
+        self,
+        session_id: str,
+        event_or_type: Union[Optional[MemoryEvent], str] = None,
+        content: Any = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> bool:
         """Silently accept and discard events."""
         return True
 

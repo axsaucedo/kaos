@@ -149,7 +149,11 @@ async def wait_for_mcp_server_ready(mcp_url: str, max_wait: int = 60):
         for _ in range(max_wait):
             try:
                 response = await client.get(f"{mcp_url}/mcp")
-                if response.status_code in [400, 406]:
+                # 400, 405, 406 all indicate server is running:
+                # - 400: Bad request (missing/invalid MCP headers)
+                # - 405: Method not allowed (pctx uses POST-only for /mcp)
+                # - 406: Not acceptable (FastMCP requires text/event-stream)
+                if response.status_code in [400, 405, 406]:
                     return  # Server is running
             except Exception:
                 pass

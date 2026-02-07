@@ -48,13 +48,13 @@ def infer_image_name(name: str, tag: str = "latest") -> str:
 
 
 def _wait_for_deployment(name: str, namespace: str | None, timeout: int) -> None:
-    """Wait for MCPServer deployment to be available."""
-    typer.echo("⏳ Waiting for deployment to be available...")
+    """Wait for MCPServer to be ready using status.ready field."""
+    typer.echo("⏳ Waiting for MCPServer to be ready...")
     wait_args = [
         "kubectl",
         "wait",
-        f"deployment/mcpserver-{name}",
-        "--for=condition=available",
+        f"mcpserver/{name}",
+        "--for=jsonpath={.status.ready}=true",
         f"--timeout={timeout}s",
     ]
     if namespace:
@@ -63,7 +63,7 @@ def _wait_for_deployment(name: str, namespace: str | None, timeout: int) -> None
     if wait_result.returncode != 0:
         typer.echo(wait_result.stderr or wait_result.stdout, err=True)
         sys.exit(wait_result.returncode)
-    typer.echo("✅ Deployment is available")
+    typer.echo("✅ MCPServer is ready")
 
 
 def _parse_env_vars(env_list: list[str] | None) -> list[tuple[str, str]]:
