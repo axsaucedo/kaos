@@ -56,6 +56,9 @@ def create_proxy_app(k8s_url: str | None = None) -> Starlette:
         
         Supports SSE streaming for text/event-stream responses by using
         httpx streaming and yielding chunks as they arrive.
+        
+        For MCP requests that need session ID headers preserved, we use
+        buffered mode to capture and forward the headers properly.
         """
         path = request.url.path
         query = str(request.url.query) if request.url.query else ""
@@ -77,14 +80,19 @@ def create_proxy_app(k8s_url: str | None = None) -> Starlette:
         # Check if this is likely an SSE streaming request
         accept_header = request.headers.get("accept", "")
         is_sse_request = "text/event-stream" in accept_header
+        
+        # Check if this is an MCP request (ends with /mcp) that may need session ID
+        # MCP initialize/tools/list responses are small, so we can buffer them
+        # to properly forward the mcp-session-id header
+        is_mcp_endpoint = path.endswith("/mcp")
 
-        if is_sse_request:
-            # Use streaming for SSE requests to avoid buffering
+        if is_sse_request and not is_mcp_endpoint:
+            # Use streaming for SSE requests (like agent chat) to avoid buffering
             return await _stream_proxy_request(
                 target_url, request.method, headers, body, ssl_context
             )
         else:
-            # Regular non-streaming request
+            # Buffered request - captures all headers properly including mcp-session-id
             async with httpx.AsyncClient(verify=ssl_context, timeout=120.0) as http_client:
                 response = await http_client.request(
                     method=request.method,
@@ -93,8 +101,12 @@ def create_proxy_app(k8s_url: str | None = None) -> Starlette:
                     content=body if body else None,
                 )
 
-                # Build response headers
-                response_headers = dict(response.headers)
+                # Build response headers, excluding encoding headers since
+                # httpx automatically decompresses content
+                response_headers = {
+                    k: v for k, v in response.headers.items()
+                    if k.lower() not in ('content-encoding', 'content-length', 'transfer-encoding')
+                }
 
                 return Response(
                     content=response.content,
@@ -112,8 +124,11 @@ def create_proxy_app(k8s_url: str | None = None) -> Starlette:
     ) -> StreamingResponse:
         """Proxy a streaming request, yielding chunks as they arrive.
         
-        This is essential for SSE (Server-Sent Events) to work properly,
+        This is used for SSE (Server-Sent Events) like agent chat to work properly,
         as the client expects to receive events incrementally.
+        
+        Note: This does NOT preserve response headers like mcp-session-id.
+        For MCP requests that need headers, use the buffered path instead.
         """
         async def generate() -> AsyncGenerator[bytes, None]:
             async with httpx.AsyncClient(verify=ssl_ctx, timeout=120.0) as http_client:
@@ -126,9 +141,6 @@ def create_proxy_app(k8s_url: str | None = None) -> Starlette:
                     async for chunk in response.aiter_bytes():
                         yield chunk
         
-        # Create streaming response with SSE headers
-        # Note: We can't easily get the actual status code from the stream before
-        # starting to yield, so we assume 200 for streaming. Errors will be in the stream.
         return StreamingResponse(
             generate(),
             media_type="text/event-stream",
