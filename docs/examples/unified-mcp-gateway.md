@@ -311,7 +311,7 @@ LLM: "Here's the final answer"
 
 With Code Mode, the agent writes TypeScript that executes all tools in one call:
 
-```typescript
+```text
 const sum = await calc.add({a: 42, b: 8});
 const result = await text.uppercase({text: "answer is " + sum});
 return result;
