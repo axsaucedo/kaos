@@ -21,25 +21,32 @@ This example demonstrates building an **optimized MCP gateway** using [pctx (Por
 
 ## Understanding Code Mode
 
-With traditional MCP, each tool call requires an LLM round-trip:
+With traditional MCP, each tool call requires an LLM round-trip, which means expensive tokens with context flying in and out:
 
 ```
-LLM: "I'll call add(42, 8)"       → Tool executes → Result
-LLM: "Now I'll call multiply"    → Tool executes → Result
-LLM: "Now I'll call uppercase"   → Tool executes → Result
+LLM: "I'll call add(42, 8)"      -> Tool executes -> Result
+LLM: "Now I'll call multiply"    -> Tool executes -> Result
+LLM: "Now I'll call power"       -> Tool executes -> Result
+LLM: "Now I'll call uppercase"   -> Tool executes -> Result
+LLM: "Now I'll call word count"   -> Tool executes -> Result
 LLM: "Here's the final answer"
 ```
 
-With Code Mode, the agent writes TypeScript that executes all tools in one call:
+With Code Mode, the agent writes TypeScript that executes all tools in one call which means we save significant amount of tokens and time:
 
 ```typescript .noeval
-// All tools execute in a single LLM round-trip
-const sum = await calc.add({a: 42, b: 8});
-const product = await calc.multiply({x: sum, y: 2});
-const squared = await calc.power({base: product, exponent: 2});
-const wordCount = await text.word_count({text: "The answer is " + squared});
-const result = await text.uppercase({text: "result: " + squared + " (words: " + wordCount + ")"});
-return result;
+LLM: "I'll call the following set of mcpservers in the code mode execution sandbox:
+
+    '''
+        const sum = await calc.add({a: 42, b: 8});
+        const product = await calc.multiply({x: sum, y: 2});
+        const squared = await calc.power({base: product, exponent: 2});
+        const wordCount = await text.word_count({text: "The answer is " + squared});
+        const result = await text.uppercase({text: "result: " + squared + " (words: " + wordCount + ")"});
+        return result;
+    '''
+        -> Tool executes -> Result
+LLM: "Here's the final answer"
 ```
 
 This reduces:
@@ -55,10 +62,6 @@ graph LR
     B --> C[pctx Gateway]
     C --> D[Calculator MCP]
     C --> E[Text Utils MCP]
-    D --> F[Tool Results]
-    E --> F
-    F --> B
-    B --> G[Final Response]
 ```
 
 ::: tip Why pctx?
@@ -253,8 +256,6 @@ Verify a tool_call event exists and no errors were recorded:
 kaos agent memory gateway-agent --json | grep -q "tool_call" || exit 1
 # Check no tool errors occurred
 kaos agent memory gateway-agent --json | grep -q "tool_error" && exit 1 || true
-# Check no delegation errors occurred
-kaos agent memory gateway-agent --json | grep -q "delegation_error" && exit 1 || true
 ```
 
 ## Cleanup
