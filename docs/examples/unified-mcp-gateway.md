@@ -211,29 +211,37 @@ Check that the agent card shows tools from the pctx gateway:
 ```python
 import subprocess
 import json
+import time
+import threading
 
-# Get the agent card
-result = subprocess.run(
-    ["kubectl", "exec", "deploy/agent-gateway-agent", "--", 
-     "curl", "-s", "http://localhost:8000/.well-known/agent"],
-    capture_output=True, text=True
+# Start port-forward in background
+pf_proc = subprocess.Popen(
+    ["kubectl", "port-forward", "svc/agent-gateway-agent", "18765:80"],
+    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
 )
+time.sleep(3)
 
-if result.returncode != 0:
-    raise AssertionError(f"Failed to get agent card: {result.stderr}")
-
-card = json.loads(result.stdout)
-
-# Verify agent has tool_execution capability
-assert "tool_execution" in card.get("capabilities", []), \
-    f"Missing tool_execution capability: {card}"
-
-# Verify skills are discovered (pctx exposes code_mode tool)
-skills = card.get("skills", [])
-assert len(skills) > 0, f"No skills discovered: {card}"
-
-print(f"SUCCESS: Agent discovered {len(skills)} tool(s) via pctx gateway")
-print(f"Capabilities: {card.get('capabilities', [])}")
+try:
+    import urllib.request
+    
+    # Get the agent card via port-forward
+    req = urllib.request.Request("http://localhost:18765/.well-known/agent")
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        card = json.loads(resp.read().decode())
+    
+    # Verify agent has tool_execution capability
+    assert "tool_execution" in card.get("capabilities", []), \
+        f"Missing tool_execution capability: {card}"
+    
+    # Verify skills are discovered (pctx exposes code_mode tool)
+    skills = card.get("skills", [])
+    assert len(skills) > 0, f"No skills discovered: {card}"
+    
+    print(f"SUCCESS: Agent discovered {len(skills)} tool(s) via pctx gateway")
+    print(f"Capabilities: {card.get('capabilities', [])}")
+finally:
+    pf_proc.terminate()
+    pf_proc.wait()
 ```
 
 ## Step 7: Verify Memory Events
@@ -243,27 +251,35 @@ Check that tool calls were recorded in memory:
 ```python
 import subprocess
 import json
+import time
 
-# Get memory events
-result = subprocess.run(
-    ["kubectl", "exec", "deploy/agent-gateway-agent", "--", 
-     "curl", "-s", "http://localhost:8000/memory/events"],
-    capture_output=True, text=True
+# Start port-forward in background
+pf_proc = subprocess.Popen(
+    ["kubectl", "port-forward", "svc/agent-gateway-agent", "18766:80"],
+    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
 )
+time.sleep(3)
 
-if result.returncode != 0:
-    raise AssertionError(f"Failed to get memory: {result.stderr}")
-
-memory = json.loads(result.stdout)
-events = memory.get("events", [])
-event_types = [e.get("event_type") for e in events]
-
-# Verify tool_call event exists (from code_mode execution)
-assert "tool_call" in event_types, \
-    f"No tool_call in memory events: {event_types}"
-
-print(f"SUCCESS: Found {len(events)} memory events")
-print(f"Event types: {set(event_types)}")
+try:
+    import urllib.request
+    
+    # Get memory events via port-forward
+    req = urllib.request.Request("http://localhost:18766/memory/events")
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        memory = json.loads(resp.read().decode())
+    
+    events = memory.get("events", [])
+    event_types = [e.get("event_type") for e in events]
+    
+    # Verify tool_call event exists (from code_mode execution)
+    assert "tool_call" in event_types, \
+        f"No tool_call in memory events: {event_types}"
+    
+    print(f"SUCCESS: Found {len(events)} memory events")
+    print(f"Event types: {set(event_types)}")
+finally:
+    pf_proc.terminate()
+    pf_proc.wait()
 ```
 
 ## Understanding Code Mode
