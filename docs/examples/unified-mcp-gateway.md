@@ -215,7 +215,7 @@ import time
 
 # Start port-forward in background
 pf_proc = subprocess.Popen(
-    ["kubectl", "port-forward", "svc/agent-gateway-agent", "18765:80"],
+    ["kubectl", "port-forward", "svc/agent-gateway-agent", "18765:8000"],
     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
 )
 time.sleep(5)
@@ -263,7 +263,7 @@ import time
 
 # Start port-forward in background
 pf_proc = subprocess.Popen(
-    ["kubectl", "port-forward", "svc/agent-gateway-agent", "18766:80"],
+    ["kubectl", "port-forward", "svc/agent-gateway-agent", "18766:8000"],
     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
 )
 time.sleep(5)
