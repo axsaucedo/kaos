@@ -91,6 +91,15 @@ export default withMermaid(defineConfig({
         ]
       },
       {
+        text: 'Examples',
+        items: [
+          { text: 'Custom MCP Server', link: '/examples/custom-mcp-server' },
+          { text: 'KAOS Monkey', link: '/examples/kaos-monkey' },
+          { text: 'Unified MCP Code Mode', link: '/examples/unified-mcp-gateway' },
+          { text: 'Multi-Agent Telemetry', link: '/examples/multi-agent-telemetry' }
+        ]
+      },
+      {
         text: 'Kubernetes Operator',
         items: [
           { text: 'Agent CRD', link: '/operator/agent-crd' },
@@ -115,14 +124,6 @@ export default withMermaid(defineConfig({
           },
           { text: 'MCP Tools', link: '/python-framework/mcp-tools' },
           { text: 'Model API Client', link: '/python-framework/model-api' }
-        ]
-      },
-      {
-        text: 'Examples',
-        items: [
-          { text: 'Custom MCP Server', link: '/examples/custom-mcp-server' },
-          { text: 'KAOS Monkey', link: '/examples/kaos-monkey' },
-          { text: 'Multi-Agent Telemetry', link: '/examples/multi-agent-telemetry' }
         ]
       },
       {
