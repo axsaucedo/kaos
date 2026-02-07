@@ -161,7 +161,16 @@ kaos mcp deploy unified-gateway --runtime pctx --params "$PCTX_CONFIG" --wait
 Create an agent connected to the pctx gateway. The mock responses demonstrate Code Mode - the agent writes TypeScript that calls multiple tools in sequence:
 
 ```bash
-MOCK_CODE='{"tool": "code_mode", "arguments": {"code": "const sum = await calc.add({a: 42, b: 8}); const product = await calc.multiply({x: sum, y: 2}); const squared = await calc.power({base: product, exponent: 2}); const wc = await text.word_count({text: \"The answer is \" + squared}); const result = await text.uppercase({text: \"RESULT: \" + squared + \" (\" + wc + \" words)\"}); return result;"}}'
+# Define the mock code response with formatted TypeScript
+read -r -d '' MOCK_CODE << 'MOCK_CODE_END' || true
+{
+  "tool": "code_mode",
+  "arguments": {
+    "code": "const sum = await calc.add({a: 42, b: 8}); const product = await calc.multiply({x: sum, y: 2}); const squared = await calc.power({base: product, exponent: 2}); const wc = await text.word_count({text: 'The answer is ' + squared}); const result = await text.uppercase({text: 'RESULT: ' + squared + ' (' + wc + ' words)'}); return result;"
+  }
+}
+MOCK_CODE_END
+
 MOCK_END='{}'
 MOCK_FINAL='I executed a complex calculation chain: 42+8=50, 50*2=100, 100^2=10000. The final result formatted in uppercase is "RESULT: 10000 (4 WORDS)".'
 
