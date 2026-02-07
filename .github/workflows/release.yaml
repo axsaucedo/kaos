@@ -243,18 +243,21 @@ jobs:
           sed -i "s/^version: .*/version: $NEXT_DEV/" operator/chart/Chart.yaml
           sed -i "s/^appVersion: .*/appVersion: \"$NEXT_DEV\"/" operator/chart/Chart.yaml
 
-          # Update Helm values.yaml image tags (use v prefix for image tags)
-          sed -i "s|axsauze/kaos-operator:v[0-9]*\.[0-9]*\.[0-9]*[^\"]*|axsauze/kaos-operator:v$NEXT_DEV|g" operator/chart/values.yaml
-          sed -i "s|axsauze/kaos-agent:v[0-9]*\.[0-9]*\.[0-9]*[^\"]*|axsauze/kaos-agent:v$NEXT_DEV|g" operator/chart/values.yaml
-          sed -i "s|axsauze/kaos-mcp-server:v[0-9]*\.[0-9]*\.[0-9]*[^\"]*|axsauze/kaos-mcp-server:v$NEXT_DEV|g" operator/chart/values.yaml
-          sed -i "s|axsauze/kaos-mcp-python-string:v[0-9]*\.[0-9]*\.[0-9]*[^\"]*|axsauze/kaos-mcp-python-string:v$NEXT_DEV|g" operator/chart/values.yaml
+          # Update Helm values.yaml image tags (must match VERSION file format without v prefix)
+          # Operator uses separate repository/tag fields
+          sed -i "s|^\(\s*tag:\s*\)[0-9]*\.[0-9]*\.[0-9]*[^\"]*|\1$NEXT_DEV|" operator/chart/values.yaml
+          # Data plane images use full image:tag format
+          sed -i "s|axsauze/kaos-agent:[0-9]*\.[0-9]*\.[0-9]*[^\"]*|axsauze/kaos-agent:$NEXT_DEV|g" operator/chart/values.yaml
+          sed -i "s|axsauze/kaos-mcp-server:[0-9]*\.[0-9]*\.[0-9]*[^\"]*|axsauze/kaos-mcp-server:$NEXT_DEV|g" operator/chart/values.yaml
+          sed -i "s|axsauze/kaos-mcp-python-string:[0-9]*\.[0-9]*\.[0-9]*[^\"]*|axsauze/kaos-mcp-python-string:$NEXT_DEV|g" operator/chart/values.yaml
+          sed -i "s|axsauze/kaos-mcp-pctx:[0-9]*\.[0-9]*\.[0-9]*[^\"]*|axsauze/kaos-mcp-pctx:$NEXT_DEV|g" operator/chart/values.yaml
 
           echo "Updated files:"
           cat VERSION
           grep "^version" data-plane/kaos-framework/pyproject.toml
           grep "^version" kaos-cli/pyproject.toml
           grep "^version:\|^appVersion:" operator/chart/Chart.yaml
-          grep -E "kaos-(operator|agent|mcp-server|mcp-python-string):" operator/chart/values.yaml
+          grep -E "tag:|kaos-(agent|mcp-server|mcp-python-string|mcp-pctx):" operator/chart/values.yaml
 
       - name: Create Pull Request
         if: steps.check-bump.outputs.skip != 'true'
@@ -270,7 +273,7 @@ jobs:
             - `VERSION` → `${{ steps.next.outputs.next_dev }}`
             - Python packages → `${{ steps.next.outputs.python_dev }}`
             - Helm chart → `${{ steps.next.outputs.next_dev }}`
-            - Helm values.yaml image tags → `v${{ steps.next.outputs.next_dev }}`
+            - Helm values.yaml image tags → `${{ steps.next.outputs.next_dev }}`
 
             ## What's Next
             This PR should be merged to prepare for the next development cycle.
