@@ -1,13 +1,14 @@
-"""CORS-enabled Kubernetes API proxy."""
+"""CORS-enabled Kubernetes API proxy with SSE streaming support."""
 
 import ssl
+from typing import AsyncGenerator
 
 import httpx
 from kubernetes import client, config
 from starlette.applications import Starlette
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
-from starlette.responses import Response
+from starlette.responses import Response, StreamingResponse
 from starlette.routing import Route
 
 
@@ -51,7 +52,11 @@ def create_proxy_app(k8s_url: str | None = None) -> Starlette:
         ssl_context = ssl.create_default_context(cafile=configuration.ssl_ca_cert)
 
     async def proxy_request(request: Request) -> Response:
-        """Proxy incoming requests to the Kubernetes API server."""
+        """Proxy incoming requests to the Kubernetes API server.
+        
+        Supports SSE streaming for text/event-stream responses by using
+        httpx streaming and yielding chunks as they arrive.
+        """
         path = request.url.path
         query = str(request.url.query) if request.url.query else ""
         target_url = f"{api_url}{path}"
@@ -62,30 +67,77 @@ def create_proxy_app(k8s_url: str | None = None) -> Starlette:
         headers = dict(auth_headers)
 
         # Copy relevant headers from request
-        for key in ["content-type", "accept", "mcp-session-id"]:
+        for key in ["content-type", "accept", "mcp-session-id", "cache-control", "x-session-id"]:
             if key in request.headers:
                 headers[key] = request.headers[key]
 
         # Get request body
         body = await request.body()
+        
+        # Check if this is likely an SSE streaming request
+        accept_header = request.headers.get("accept", "")
+        is_sse_request = "text/event-stream" in accept_header
 
-        async with httpx.AsyncClient(verify=ssl_context, timeout=120.0) as http_client:
-            response = await http_client.request(
-                method=request.method,
-                url=target_url,
-                headers=headers,
-                content=body if body else None,
+        if is_sse_request:
+            # Use streaming for SSE requests to avoid buffering
+            return await _stream_proxy_request(
+                target_url, request.method, headers, body, ssl_context
             )
+        else:
+            # Regular non-streaming request
+            async with httpx.AsyncClient(verify=ssl_context, timeout=120.0) as http_client:
+                response = await http_client.request(
+                    method=request.method,
+                    url=target_url,
+                    headers=headers,
+                    content=body if body else None,
+                )
 
-            # Build response headers
-            response_headers = dict(response.headers)
+                # Build response headers
+                response_headers = dict(response.headers)
 
-            return Response(
-                content=response.content,
-                status_code=response.status_code,
-                headers=response_headers,
-                media_type=response.headers.get("content-type"),
-            )
+                return Response(
+                    content=response.content,
+                    status_code=response.status_code,
+                    headers=response_headers,
+                    media_type=response.headers.get("content-type"),
+                )
+    
+    async def _stream_proxy_request(
+        target_url: str,
+        method: str,
+        headers: dict[str, str],
+        body: bytes | None,
+        ssl_ctx: ssl.SSLContext | bool,
+    ) -> StreamingResponse:
+        """Proxy a streaming request, yielding chunks as they arrive.
+        
+        This is essential for SSE (Server-Sent Events) to work properly,
+        as the client expects to receive events incrementally.
+        """
+        async def generate() -> AsyncGenerator[bytes, None]:
+            async with httpx.AsyncClient(verify=ssl_ctx, timeout=120.0) as http_client:
+                async with http_client.stream(
+                    method=method,
+                    url=target_url,
+                    headers=headers,
+                    content=body if body else None,
+                ) as response:
+                    async for chunk in response.aiter_bytes():
+                        yield chunk
+        
+        # Create streaming response with SSE headers
+        # Note: We can't easily get the actual status code from the stream before
+        # starting to yield, so we assume 200 for streaming. Errors will be in the stream.
+        return StreamingResponse(
+            generate(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",  # Disable nginx buffering
+            },
+        )
 
     routes = [
         Route(
