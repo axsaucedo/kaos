@@ -10,6 +10,8 @@ from kaos_cli.utils.crud import (
 )
 from kaos_cli.agent.deploy import deploy_agent
 from kaos_cli.agent.invoke import invoke_command
+from kaos_cli.agent.status import status_command
+from kaos_cli.agent.memory import memory_command
 
 app = typer.Typer(
     help="Agent management commands.",
@@ -196,4 +198,78 @@ def invoke_agent(
     """Send a message to an Agent via port-forward."""
     invoke_command(
         name=name, namespace=namespace, message=message, port=port, stream=stream
+    )
+
+
+@app.command(name="status")
+def status_agent(
+    name: str = typer.Argument(..., help="Name of the Agent."),
+    namespace: str = typer.Option(
+        None,
+        "--namespace",
+        "-n",
+        help="Namespace of the Agent.",
+    ),
+    port: int = typer.Option(
+        9002,
+        "--port",
+        "-p",
+        help="Local port for port-forwarding.",
+    ),
+    output_json: bool = typer.Option(
+        False,
+        "--json",
+        help="Output in JSON format.",
+    ),
+) -> None:
+    """Get agent status and capabilities via agent card.
+    
+    Examples:
+      kaos agent status my-agent
+      kaos agent status my-agent --json
+      kaos agent status my-agent -n my-namespace
+    """
+    status_command(name=name, namespace=namespace, port=port, output_json=output_json)
+
+
+@app.command(name="memory")
+def memory_agent(
+    name: str = typer.Argument(..., help="Name of the Agent."),
+    namespace: str = typer.Option(
+        None,
+        "--namespace",
+        "-n",
+        help="Namespace of the Agent.",
+    ),
+    session_id: str = typer.Option(
+        None,
+        "--session-id",
+        "-s",
+        help="Filter events by session ID.",
+    ),
+    port: int = typer.Option(
+        9003,
+        "--port",
+        "-p",
+        help="Local port for port-forwarding.",
+    ),
+    output_json: bool = typer.Option(
+        False,
+        "--json",
+        help="Output in JSON format.",
+    ),
+) -> None:
+    """Get agent memory events.
+    
+    Examples:
+      kaos agent memory my-agent
+      kaos agent memory my-agent --json
+      kaos agent memory my-agent --session-id abc123
+    """
+    memory_command(
+        name=name,
+        namespace=namespace,
+        session_id=session_id,
+        port=port,
+        output_json=output_json,
     )
