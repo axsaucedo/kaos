@@ -64,9 +64,8 @@ graph LR
     C --> E[Text Utils MCP]
 ```
 
-::: tip Why pctx?
+### Why pctx?
 pctx aggregates multiple MCP servers and exposes them through TypeScript namespaces. Each server becomes a namespace (e.g., `calc.add()`, `text.uppercase()`), enabling complex multi-tool orchestration in a single code block.
-:::
 
 The pctx config supports:
 - **Multiple servers**: Aggregate any number of MCP servers
