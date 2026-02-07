@@ -212,22 +212,30 @@ Check that the agent card shows tools from the pctx gateway:
 import subprocess
 import json
 import time
-import threading
 
 # Start port-forward in background
 pf_proc = subprocess.Popen(
     ["kubectl", "port-forward", "svc/agent-gateway-agent", "18765:80"],
     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
 )
-time.sleep(3)
+time.sleep(5)
 
 try:
     import urllib.request
+    import urllib.error
     
-    # Get the agent card via port-forward
-    req = urllib.request.Request("http://localhost:18765/.well-known/agent")
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        card = json.loads(resp.read().decode())
+    # Retry logic for port-forward to be ready
+    card = None
+    for attempt in range(10):
+        try:
+            req = urllib.request.Request("http://localhost:18765/.well-known/agent")
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                card = json.loads(resp.read().decode())
+            break
+        except (urllib.error.URLError, ConnectionRefusedError):
+            time.sleep(2)
+    
+    assert card is not None, "Failed to connect to agent after 10 attempts"
     
     # Verify agent has tool_execution capability
     assert "tool_execution" in card.get("capabilities", []), \
@@ -258,15 +266,24 @@ pf_proc = subprocess.Popen(
     ["kubectl", "port-forward", "svc/agent-gateway-agent", "18766:80"],
     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
 )
-time.sleep(3)
+time.sleep(5)
 
 try:
     import urllib.request
+    import urllib.error
     
-    # Get memory events via port-forward
-    req = urllib.request.Request("http://localhost:18766/memory/events")
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        memory = json.loads(resp.read().decode())
+    # Retry logic for port-forward to be ready
+    memory = None
+    for attempt in range(10):
+        try:
+            req = urllib.request.Request("http://localhost:18766/memory/events")
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                memory = json.loads(resp.read().decode())
+            break
+        except (urllib.error.URLError, ConnectionRefusedError):
+            time.sleep(2)
+    
+    assert memory is not None, "Failed to connect to agent after 10 attempts"
     
     events = memory.get("events", [])
     event_types = [e.get("event_type") for e in events]
