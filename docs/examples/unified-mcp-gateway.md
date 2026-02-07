@@ -65,6 +65,12 @@ graph LR
 pctx aggregates multiple MCP servers and exposes them through TypeScript namespaces. Each server becomes a namespace (e.g., `calc.add()`, `text.uppercase()`), enabling complex multi-tool orchestration in a single code block.
 :::
 
+The pctx config supports:
+- **Multiple servers**: Aggregate any number of MCP servers
+- **Custom namespaces**: Server names become TypeScript namespaces
+- **Authentication**: Add bearer tokens or custom headers
+- **External servers**: Reference any HTTP MCP endpoint
+
 ## Prerequisites
 
 - KAOS operator installed ([Installation Guide](/getting-started/installation))
@@ -102,7 +108,8 @@ We'll create two MCP servers showing both deployment methods.
 Deploy using the `kaos mcp deploy` command with `--wait` flag:
 
 ```bash
-export CALC_FUNCS='def add(a: int, b: int) -> int:
+export CALC_FUNCS='
+def add(a: int, b: int) -> int:
     """Add two numbers together."""
     return a + b
 
@@ -112,17 +119,21 @@ def multiply(x: int, y: int) -> int:
 
 def power(base: int, exponent: int) -> int:
     """Raise base to the power of exponent."""
-    return base ** exponent'
+    return base ** exponent
+'
 
-kaos mcp deploy calculator --runtime python-string --params "$CALC_FUNCS" --wait
+kaos mcp deploy calculator \
+    --runtime python-string \
+    --params "$CALC_FUNCS" \
+    --wait
 ```
 
 ### Text Utils MCP Server (CRD method)
 
-Alternatively, deploy using a Kubernetes manifest directly:
+MCP Servers and other resources can also be deployed directly with the k8s CRD instead of the CLI:
 
 ```bash
-kubectl apply -f - << 'TEXTUTILS_YAML'
+kubectl apply -f - << EOF
 apiVersion: kaos.tools/v1alpha1
 kind: MCPServer
 metadata:
@@ -133,15 +144,15 @@ spec:
     def uppercase(text: str) -> str:
         """Convert text to uppercase."""
         return text.upper()
-    
+
     def reverse(text: str) -> str:
         """Reverse the characters in text."""
         return text[::-1]
-    
+
     def word_count(text: str) -> int:
         """Count the number of words in text."""
         return len(text.split())
-TEXTUTILS_YAML
+EOF
 
 kubectl wait mcpserver/textutils --for=jsonpath='{.status.ready}'=true --timeout=180s
 ```
@@ -151,7 +162,21 @@ kubectl wait mcpserver/textutils --for=jsonpath='{.status.ready}'=true --timeout
 Create the pctx gateway that aggregates both upstream servers:
 
 ```bash
-export PCTX_CONFIG='{"name": "unified-gateway", "version": "1.0.0", "servers": [{"name": "calc", "url": "http://mcpserver-calculator.'$NAMESPACE'.svc.cluster.local:8000/mcp"}, {"name": "text", "url": "http://mcpserver-textutils.'$NAMESPACE'.svc.cluster.local:8000/mcp"}]}'
+export PCTX_CONFIG='
+{
+  "name": "unified-gateway",
+  "version": "1.0.0",
+  "servers": [
+    {
+      "name": "calc",
+      "url": "http://mcpserver-calculator.'$NAMESPACE'.svc.cluster.local:8000/mcp"
+    },
+    {
+      "name": "text",
+      "url": "http://mcpserver-textutils.'$NAMESPACE'.svc.cluster.local:8000/mcp"
+    }
+  ]
+}'
 
 kaos mcp deploy unified-gateway --runtime pctx --params "$PCTX_CONFIG" --wait
 ```
@@ -162,14 +187,18 @@ Create an agent connected to the pctx gateway. The mock responses demonstrate Co
 
 ```bash
 # Define the mock code response with formatted TypeScript
-read -r -d '' MOCK_CODE << 'MOCK_CODE_END' || true
-{
-  "tool": "code_mode",
-  "arguments": {
-    "code": "const sum = await calc.add({a: 42, b: 8}); const product = await calc.multiply({x: sum, y: 2}); const squared = await calc.power({base: product, exponent: 2}); const wc = await text.word_count({text: 'The answer is ' + squared}); const result = await text.uppercase({text: 'RESULT: ' + squared + ' (' + wc + ' words)'}); return result;"
-  }
-}
-MOCK_CODE_END
+MOCK_CODE="{\
+  \"tool\": \"code_mode\",\
+  \"arguments\": {\
+    \"code\": \"\
+    const sum = await calc.add({a: 42, b: 8});\
+    const product = await calc.multiply({x: sum, y: 2});\
+    const squared = await calc.power({base: product, exponent: 2});\
+    const wc = await text.word_count({text: 'The answer is ' + squared});\
+    const result = await text.uppercase({text: 'RESULT: ' + squared + ' (' + wc + ' words)'});\
+    return result;\"\
+  }\
+}"
 
 MOCK_END='{}'
 MOCK_FINAL='I executed a complex calculation chain: 42+8=50, 50*2=100, 100^2=10000. The final result formatted in uppercase is "RESULT: 10000 (4 WORDS)".'
@@ -205,7 +234,7 @@ kaos agent status gateway-agent
 Verify the output shows `tool_execution` capability:
 
 ```bash
-kaos agent status gateway-agent --json | grep -q "tool_execution" && echo "SUCCESS: Agent has tool_execution capability" || exit 1
+kaos agent status gateway-agent --json | grep -q "tool_execution" || exit 1
 ```
 
 ## Step 7: Verify Memory Events
@@ -219,32 +248,7 @@ kaos agent memory gateway-agent
 Verify a tool_call event exists:
 
 ```bash
-kaos agent memory gateway-agent --json | grep -q "tool_call" && echo "SUCCESS: Found tool_call event" || exit 1
-```
-
-## pctx Configuration Reference
-
-The pctx config supports:
-- **Multiple servers**: Aggregate any number of MCP servers
-- **Custom namespaces**: Server names become TypeScript namespaces
-- **Authentication**: Add bearer tokens or custom headers
-- **External servers**: Reference any HTTP MCP endpoint
-
-Example with authentication:
-
-```yaml .noeval
-spec:
-  runtime: pctx
-  params: |
-    {
-      "servers": [
-        {
-          "name": "private_api",
-          "url": "https://api.example.com/mcp",
-          "bearer": "your-token"
-        }
-      ]
-    }
+kaos agent memory gateway-agent --json | grep -q "tool_call" || exit 1
 ```
 
 ## Cleanup
