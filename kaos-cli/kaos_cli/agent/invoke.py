@@ -85,10 +85,13 @@ def invoke_command(
                                     if "choices" in chunk and chunk["choices"]:
                                         delta = chunk["choices"][0].get("delta", {})
                                         # Handle reasoning content (displayed before regular content)
-                                        if "reasoning_content" in delta:
-                                            typer.echo(delta["reasoning_content"], nl=False)
                                         if "content" in delta:
-                                            typer.echo(delta["content"], nl=False)
+                                            content = delta["content"]
+                                            if content.startswith("{"):
+                                                content = json.loads(content)
+                                                typer.echo(f'Reasoning step {content["step"]}/{content["max_steps"]} | Action: {content["action"]} | Target: {content["target"]}')
+                                            else:
+                                                typer.echo(delta["content"], nl=False)
                                 except json.JSONDecodeError:
                                     pass
                     typer.echo("")  # Final newline
