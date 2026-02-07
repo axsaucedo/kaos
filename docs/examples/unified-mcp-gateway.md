@@ -30,9 +30,15 @@ LLM: "Now I'll call uppercase"   → Tool executes → Result
 LLM: "Here's the final answer"
 ```
 
-With Code Mode, the agent writes TypeScript that executes all tools in one callWith Code Mode, the agent / All tools execute in a single LLM round-trip
-With Csum = await calc.add({a: 42, b: 8});
-const product = await calc.multiply({x: const product = await calc.multiply({xc.pconst product = await calc.multiply({x: const product = await calc.multiply({xc.pconst product = await calc.multiply({x: sult = await text.uppercase({text: "result: " + squared + " (words: " + wordCount + ")"});
+With Code Mode, the agent writes TypeScript that executes all tools in one call:
+
+```typescript .noeval
+// All tools execute in a single LLM round-trip
+const sum = await calc.add({a: 42, b: 8});
+const product = await calc.multiply({x: sum, y: 2});
+const squared = await calc.power({base: product, exponent: 2});
+const wordCount = await text.word_count({text: "The answer is " + squared});
+const result = await text.uppercase({text: "result: " + squared + " (words: " + wordCount + ")"});
 return result;
 ```
 
@@ -116,7 +122,8 @@ kaos mcp deploy calculator --runtime python-string --params "$CALC_FUNCS" --wait
 Alternatively, deploy using a Kubernetes manifest directly:
 
 ```bash
-cat <<'cat <<'cat <<'cat <<'cat <<'cat <<'cat <<'cat <<'cat <ha1
+kubectl apply -f - << 'TEXTUTILS_YAML'
+apiVersion: kaos.tools/v1alpha1
 kind: MCPServer
 metadata:
   name: textutils
@@ -134,11 +141,9 @@ spec:
     def word_count(text: str) -> int:
         """Count the number of words in text."""
         return len(text.split())
-EOF
+TEXTUTILS_YAML
 
-# Wait for the textutils server using kaos CLI
-kaos mcp deploy textutils --runtime python-string --wait 2>/dev/null || \
-    kubectl wait mcpserver/textutils --for=jsonpath='{.status.ready}'=true --timeout=180s
+kubectl wait mcpserver/textutils --for=jsonpath='{.status.ready}'=true --timeout=180s
 ```
 
 ## Step 3: Create the pctx Gateway
@@ -146,28 +151,35 @@ kaos mcp deploy textutils --runtime python-string --wait 2>/dev/null || \
 Create the pctx gateway that aggregates both upstream servers:
 
 ```bash
-export PCTX_CONFIG='{
-  "name": "unified-gateway",
-  "version": "1.0.0",
-  "servers": [
-    {
-      "name": "calc",
-      "url": "h      "url": "h      "url": "h      "url": "h      "url": 800      
-                                                                r-              ME        vc.cluster.local:8000/mcp"
-    }
-  ]
-}'
+export PCTX_CONFIG='{"name": "unified-gateway", "version": "1.0.0", "servers": [{"name": "calc", "url": "http://mcpserver-calculator.'$NAMESPACE'.svc.cluster.local:8000/mcp"}, {"name": "text", "url": "http://mcpserver-textutils.'$NAMESPACE'.svc.cluster.local:8000/mcp"}]}'
 
-kaos mcp deploy unifiekaos mcp deploy unifiekaos mcp depl$PCTX_CONFIG" --wait
+kaos mcp deploy unified-gateway --runtime pctx --params "$PCTX_CONFIG" --wait
 ```
 
 ## Step 4: Create the Agent
 
-Create an agent connected to the pctx gateway. The mock Create an agent connected to the pctx gatewawrCreate an agent connectels multCreate an agent connected to the pctock response: Agent uses Code Mode to execute a complex multi-tool workflow
-# This d# ons# This d# ons# This d# ons# This d# ons# Thisou# This d# ons# This d# ons# This d# ons# This d# ons# Thisou# This d# on"const sum = await calc.add({a: 42, b: 8}); const product = await calc.multiply({x: sum, y: # ); # This d# ons# This d# ons# This {ba# This d# ons# This d# ons# This d# ons# This d# ons# Thisou#{te# ThisThe answer is \" + squar# This d# ons# This d# ons#te# This d# ons# This \"RESULT: \" + squared # This d# ons# This ords)\"}); return result;"}}'
+Create an agent connected to the pctx gateway. The mock responses demonstrate Code Mode - the agent writes TypeScript that calls multiple tools in sequence:
+
+```bash
+MOCK_CODE='{"tool": "code_mode", "arguments": {"code": "const sum = await calc.add({a: 42, b: 8}); const product = await calc.multiply({x: sum, y: 2}); const squared = await calc.power({base: product, exponent: 2}); const wc = await text.word_count({text: \"The answer is \" + squared}); const result = await text.uppercase({text: \"RESULT: \" + squared + \" (\" + wc + \" words)\"}); return result;"}}'
 MOCK_END='{}'
-MOCK_FINAL='I executed a complex calculatMOCK_FINAL='I executed a complex calculatMOCK_FINAL='I executed a complex calculatMOCK_FINAL='I executed a complex 
-kkkkkagkkt keplkkkkkagkkt keplkkkkkagkkt keplkkkkkagkkt keplkkkkkagkkt keplkkkkkagkkt keplk --mcp kkkkkagkkt keplkkkkkagkkt strkkkkkagkkt keplkkkkkagkkt keplkkkkkagkkt keplkkkkkagkkt keplkkkkkagkkt keplkkkkkagkkt keplk --mcp kkkkkagkkt keplkkkkkagkkt strkkkkkagkkt keplkkkkkagkkt keplkkkkkagkkt keplkkkkkagkkt keplkkkkkagkkt keplkkkkkagkkt keplk --mcp kkkkkagkkt keplkkka request that triggers multi-tool orchestration:
+MOCK_FINAL='I executed a complex calculation chain: 42+8=50, 50*2=100, 100^2=10000. The final result formatted in uppercase is "RESULT: 10000 (4 WORDS)".'
+
+kaos agent deploy gateway-agent \
+    --modelapi gateway-api \
+    --model mock-model \
+    --mcp unified-gateway \
+    --instructions "You use Code Mode to orchestrate multiple tools efficiently." \
+    --mock-response "$MOCK_CODE" \
+    --mock-response "$MOCK_END" \
+    --mock-response "$MOCK_FINAL" \
+    --expose \
+    --wait
+```
+
+## Step 5: Invoke the Agent
+
+Send a request that triggers multi-tool orchestration:
 
 ```bash
 kaos agent invoke gateway-agent --message "Calculate (42+8)*2, square it, count the words in the result description, and format everything in uppercase"
@@ -184,9 +196,49 @@ kaos agent status gateway-agent
 Verify the output shows `tool_execution` capability:
 
 ```bash
-kaos agent status gateway-agent --json | grep -q "tool_execution" && echo "kaos agent status gateway-agent --json | grep -q "tool_execution" && echo "kaos agent status gateway-agent --json | grep -q "tool_execution" && echo "kaos rykaos agent status gateway-agent --json | grep -q "tool_execution" && echo "kaos agent status gateway-agent --json | grep -q "tool_execution" && echo "kaos agent status gateway-agent --json | grep -q "tool_execution" && echo "kaos rykaos agent status gateway-agent --json | grep -q "tool_execution" && echo "kaos agent status gateway-agent --json | grep -q "tool_execution" && echo "kaos agent status gateway-agent --js**Authentickaos agent status gateway-agent --json | grep -q "tool_execution" && echo "kaos agent status gateway-agent --json | grep -q "tool_execution" && echo "kc:ka rukaos agent status gateway-age
-                                                                          rl                              p"                                                         }
-      # Cleanup
+kaos agent status gateway-agent --json | grep -q "tool_execution" && echo "SUCCESS: Agent has tool_execution capability" || exit 1
+```
+
+## Step 7: Verify Memory Events
+
+Check that tool calls were recorded in memory:
+
+```bash
+kaos agent memory gateway-agent
+```
+
+Verify a tool_call event exists:
+
+```bash
+kaos agent memory gateway-agent --json | grep -q "tool_call" && echo "SUCCESS: Found tool_call event" || exit 1
+```
+
+## pctx Configuration Reference
+
+The pctx config supports:
+- **Multiple servers**: Aggregate any number of MCP servers
+- **Custom namespaces**: Server names become TypeScript namespaces
+- **Authentication**: Add bearer tokens or custom headers
+- **External servers**: Reference any HTTP MCP endpoint
+
+Example with authentication:
+
+```yaml .noeval
+spec:
+  runtime: pctx
+  params: |
+    {
+      "servers": [
+        {
+          "name": "private_api",
+          "url": "https://api.example.com/mcp",
+          "bearer": "your-token"
+        }
+      ]
+    }
+```
+
+## Cleanup
 
 ```bash
 kubectl delete namespace $NAMESPACE
