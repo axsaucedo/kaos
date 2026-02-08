@@ -188,7 +188,7 @@ When the agent framework sees this, it:
 ## Cleanup
 
 ```bash
-kubectl delete namespace $NAMESPACE
+kubectl delete namespace $NAMESPACE --wait=false
 ```
 
 ## Next Steps

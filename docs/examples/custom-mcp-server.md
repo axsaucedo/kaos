@@ -197,9 +197,9 @@ $ kaos agent invoke weather-agent --message "What's the weather like in London?"
 Remove the resources when done:
 
 ```console
-$ kaos agent delete weather-agent
-$ kaos mcp delete weather-mcp  
-$ kaos modelapi delete weather-api
+$ kaos agent delete weather-agent --wait=false
+$ kaos mcp delete weather-mcp --wait=false
+$ kaos modelapi delete weather-api --wait=false
 ```
 
 ## Next Steps

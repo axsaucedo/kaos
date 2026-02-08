@@ -267,7 +267,7 @@ kaos agent memory gateway-agent --json | grep -q '"success": true' || exit 1
 ## Cleanup
 
 ```bash
-kubectl delete namespace $NAMESPACE
+kubectl delete namespace $NAMESPACE --wait=false
 ```
 
 ## Next Steps
