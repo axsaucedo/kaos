@@ -3,16 +3,22 @@ ModelAPI client for OpenAI-compatible servers.
 
 Supports both streaming and non-streaming with proper error handling.
 Uses DEBUG_MOCK_RESPONSES env var for deterministic testing.
+Uses contextvars for request-specific mock response state (thread-safe).
 """
 
 import json
 import logging
 import os
+from contextvars import ContextVar
 from typing import Dict, List, Optional, AsyncIterator, Union
 from dataclasses import dataclass
 import httpx
 
 logger = logging.getLogger(__name__)
+
+# Context variable for per-request mock responses
+# Each async request context gets its own copy
+_mock_responses_ctx: ContextVar[Optional[List[str]]] = ContextVar("mock_responses", default=None)
 
 
 class ModelAPI:
@@ -40,18 +46,17 @@ class ModelAPI:
         self.api_key = api_key
 
         # Load mock responses template from env var if present
-        # This is the template - each request gets a fresh copy
+        # This is the template - each request gets a fresh copy via contextvars
         self._mock_responses_template: Optional[List[str]] = None
         mock_env = os.environ.get("DEBUG_MOCK_RESPONSES")
         if mock_env:
             try:
                 responses = json.loads(mock_env)
-                self._mock_responses_template = responses if isinstance(responses, list) else [responses]
+                self._mock_responses_template = (
+                    responses if isinstance(responses, list) else [responses]
+                )
             except json.JSONDecodeError:
                 self._mock_responses_template = [mock_env]
-        
-        # Current request's mock responses (reset per request cycle)
-        self._mock_responses: Optional[List[str]] = None
 
         # Build headers
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
@@ -66,22 +71,34 @@ class ModelAPI:
 
         logger.info(f"ModelAPI initialized: model={self.model}, api_base={self.api_base}")
         if self._mock_responses_template:
-            logger.info(f"ModelAPI using mock responses ({len(self._mock_responses_template)} configured)")
+            logger.info(
+                f"ModelAPI using mock responses ({len(self._mock_responses_template)} configured)"
+            )
 
     def reset_mock_responses(self) -> None:
-        """Reset mock responses to start a fresh cycle.
-        
+        """Reset mock responses in context for a fresh cycle.
+
         Call this at the start of each new request to ensure the mock
-        responses cycle through from the beginning.
+        responses cycle through from the beginning. Uses contextvars
+        so each async request context gets its own isolated copy.
         """
         if self._mock_responses_template:
-            self._mock_responses = list(self._mock_responses_template)
-            logger.debug(f"Reset mock responses ({len(self._mock_responses)} available)")
+            _mock_responses_ctx.set(list(self._mock_responses_template))
+            logger.debug(
+                f"Reset mock responses in context ({len(self._mock_responses_template)} available)"
+            )
 
     @property
     def has_mock_responses(self) -> bool:
         """Check if mock responses are configured."""
         return self._mock_responses_template is not None
+
+    def _get_next_mock_response(self) -> Optional[str]:
+        """Get next mock response from context, or None if unavailable."""
+        responses = _mock_responses_ctx.get()
+        if responses:
+            return responses.pop(0)
+        return None
 
     async def process_message(
         self,
@@ -99,9 +116,9 @@ class ModelAPI:
         Returns:
             str if stream=False, AsyncIterator[str] if stream=True
         """
-        # Check for mock response
-        if self._mock_responses:
-            mock_content = self._mock_responses.pop(0)
+        # Check for mock response from context
+        mock_content = self._get_next_mock_response()
+        if mock_content is not None:
             logger.debug(f"Using mock response: {mock_content[:50]}...")
             if stream:
 
