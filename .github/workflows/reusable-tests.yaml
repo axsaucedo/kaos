@@ -74,18 +74,19 @@ jobs:
             files: "e2e/test_mcp_tools_e2e.py"
           - name: multi-agent
             files: "e2e/test_agentic_loop_e2e.py e2e/test_multi_agent_e2e.py"
-          - name: examples
+          - name: example-kaos-monkey
             files: "e2e/test_examples_e2e.py"
+            pytest_filter: "test_custom_mcp_server_example or test_kaos_monkey_example"
+          - name: example-telemetry
+            files: "e2e/test_examples_e2e.py"
+            pytest_filter: "test_multi_agent_telemetry_example"
+          - name: examples-code-mode
+            files: "e2e/test_examples_e2e.py"
+            pytest_filter: "test_unified_mcp_gateway_example"
     name: E2E (${{ matrix.shard.name }})
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: operator/go.mod
-          cache-dependency-path: operator/go.sum
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -176,13 +177,15 @@ jobs:
 
       - name: Load images into KIND
         run: |
-          kind load docker-image ${{ env.REGISTRY }}/kaos-operator:${{ env.OPERATOR_TAG }} --name ${{ env.KIND_CLUSTER_NAME }}
-          kind load docker-image ${{ env.REGISTRY }}/kaos-agent:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }}
-          kind load docker-image ${{ env.REGISTRY }}/kaos-mcp-server:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }}
-          kind load docker-image ${{ env.REGISTRY }}/kaos-mcp-python-string:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }}
-          kind load docker-image ${{ env.REGISTRY }}/kaos-mcp-pctx:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }}
-          kind load docker-image ghcr.io/berriai/litellm:main-stable --name ${{ env.KIND_CLUSTER_NAME }}
-          kind load docker-image alpine/ollama:latest --name ${{ env.KIND_CLUSTER_NAME }}
+          # Load images in parallel for faster execution
+          kind load docker-image ${{ env.REGISTRY }}/kaos-operator:${{ env.OPERATOR_TAG }} --name ${{ env.KIND_CLUSTER_NAME }} &
+          kind load docker-image ${{ env.REGISTRY }}/kaos-agent:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }} &
+          kind load docker-image ${{ env.REGISTRY }}/kaos-mcp-server:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }} &
+          kind load docker-image ${{ env.REGISTRY }}/kaos-mcp-python-string:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }} &
+          kind load docker-image ${{ env.REGISTRY }}/kaos-mcp-pctx:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }} &
+          kind load docker-image ghcr.io/berriai/litellm:main-stable --name ${{ env.KIND_CLUSTER_NAME }} &
+          kind load docker-image alpine/ollama:latest --name ${{ env.KIND_CLUSTER_NAME }} &
+          wait
 
       - name: Install KAOS operator
         run: make -C operator kind-e2e-install-kaos IMAGE_TAG=${{ env.AGENT_TAG }} REGISTRY=${{ env.REGISTRY }}
@@ -204,8 +207,14 @@ jobs:
           export OPERATOR_MANAGED_EXTERNALLY=1
           export KIND_CLUSTER=true
           
+          # Build pytest command with optional filter
+          PYTEST_CMD="uv run pytest ${{ matrix.shard.files }} -v -n 2 --dist loadscope"
+          if [ -n "${{ matrix.shard.pytest_filter }}" ]; then
+            PYTEST_CMD="$PYTEST_CMD -k '${{ matrix.shard.pytest_filter }}'"
+          fi
+          
           # Run tests for this shard (2 workers on 2-core runner)
-          uv run pytest ${{ matrix.shard.files }} -v -n 2 --dist loadscope
+          eval $PYTEST_CMD
 
       - name: Collect logs on failure
         if: failure()
