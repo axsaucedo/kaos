@@ -74,13 +74,13 @@ jobs:
             files: "e2e/test_mcp_tools_e2e.py"
           - name: multi-agent
             files: "e2e/test_agentic_loop_e2e.py e2e/test_multi_agent_e2e.py"
-          - name: examples-1
+          - name: example-kaos-monkey
             files: "e2e/test_examples_e2e.py"
             pytest_filter: "test_custom_mcp_server_example or test_kaos_monkey_example"
-          - name: examples-2
+          - name: example-telemetry
             files: "e2e/test_examples_e2e.py"
             pytest_filter: "test_multi_agent_telemetry_example"
-          - name: examples-3
+          - name: examples-code-mode
             files: "e2e/test_examples_e2e.py"
             pytest_filter: "test_unified_mcp_gateway_example"
     name: E2E (${{ matrix.shard.name }})
