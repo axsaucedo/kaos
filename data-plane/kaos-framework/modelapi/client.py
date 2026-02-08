@@ -39,15 +39,19 @@ class ModelAPI:
         self.api_base = api_base.rstrip("/")
         self.api_key = api_key
 
-        # Load mock responses from env var if present
-        self._mock_responses: Optional[List[str]] = None
+        # Load mock responses template from env var if present
+        # This is the template - each request gets a fresh copy
+        self._mock_responses_template: Optional[List[str]] = None
         mock_env = os.environ.get("DEBUG_MOCK_RESPONSES")
         if mock_env:
             try:
                 responses = json.loads(mock_env)
-                self._mock_responses = responses if isinstance(responses, list) else [responses]
+                self._mock_responses_template = responses if isinstance(responses, list) else [responses]
             except json.JSONDecodeError:
-                self._mock_responses = [mock_env]
+                self._mock_responses_template = [mock_env]
+        
+        # Current request's mock responses (reset per request cycle)
+        self._mock_responses: Optional[List[str]] = None
 
         # Build headers
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
@@ -61,8 +65,23 @@ class ModelAPI:
         )
 
         logger.info(f"ModelAPI initialized: model={self.model}, api_base={self.api_base}")
-        if self._mock_responses:
-            logger.info(f"ModelAPI using mock responses ({len(self._mock_responses)} configured)")
+        if self._mock_responses_template:
+            logger.info(f"ModelAPI using mock responses ({len(self._mock_responses_template)} configured)")
+
+    def reset_mock_responses(self) -> None:
+        """Reset mock responses to start a fresh cycle.
+        
+        Call this at the start of each new request to ensure the mock
+        responses cycle through from the beginning.
+        """
+        if self._mock_responses_template:
+            self._mock_responses = list(self._mock_responses_template)
+            logger.debug(f"Reset mock responses ({len(self._mock_responses)} available)")
+
+    @property
+    def has_mock_responses(self) -> bool:
+        """Check if mock responses are configured."""
+        return self._mock_responses_template is not None
 
     async def process_message(
         self,
