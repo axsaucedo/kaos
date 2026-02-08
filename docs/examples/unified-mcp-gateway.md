@@ -190,16 +190,19 @@ Create an agent connected to the pctx gateway. The mock responses demonstrate Co
 ```bash
 # Define the mock code response with formatted TypeScript
 # pctx exposes the "execute" tool for running TypeScript code
+# Note: Use spaces or escaped tabs (\\t) - literal tabs break JSON parsing
 MOCK_CODE="{\
   \"tool\": \"execute\",\
   \"arguments\": {\
     \"code\": \"\
-    const sum = await calc.add({a: 42, b: 8});\
-    const product = await calc.multiply({x: sum, y: 2});\
-    const squared = await calc.power({base: product, exponent: 2});\
-    const wc = await text.word_count({text: 'The answer is ' + squared});\
-    const result = await text.uppercase({text: 'RESULT: ' + squared + ' (' + wc + ' words)'});\
-    return result;\"\
+        async function run() {\
+            const sum = await Calc.add({a: 42, b: 8});\
+            const product = await Calc.multiply({x: sum.result, y: 2});\
+            const squared = await Calc.power({base: product.result, exponent: 2});\
+            const wc = await Text.wordCount({text: 'The answer is ' + squared.result});\
+            const result = await Text.uppercase({text: 'RESULT: ' + squared.result + ' (' + wc.result + ' words)'});\
+            return result;\
+        }\"\
   }\
 }"
 
@@ -255,12 +258,16 @@ Verify a tool_call event exists and no errors were recorded:
 kaos agent memory gateway-agent --json | grep -q "tool_call" || exit 1
 # Check no tool errors occurred
 kaos agent memory gateway-agent --json | grep -q "tool_error" && exit 1 || true
+# Check no pctx errors occurred
+kaos agent memory gateway-agent --json | grep -q '"success": false' && exit 1 || true
+# Check that there was an explicit pass on pctx
+kaos agent memory gateway-agent --json | grep -q '"success": true' || exit 1
 ```
 
 ## Cleanup
 
 ```bash
-kubectl delete namespace $NAMESPACE
+kubectl delete namespace $NAMESPACE --wait=false
 ```
 
 ## Next Steps

@@ -26,7 +26,16 @@ class MockModelAPI(ModelAPI):
         self.call_count = 0
         self.model = "mock"
         self.api_base = "mock://localhost"
-        self._mock_responses: Optional[List[str]] = None  # Not used in this mock
+        self._mock_responses_template: Optional[List[str]] = None  # Not used in this mock
+
+    def reset_mock_responses(self) -> None:
+        """No-op for this mock - it generates responses dynamically."""
+        pass
+
+    @property
+    def has_mock_responses(self) -> bool:
+        """This mock doesn't use template-based responses."""
+        return False
 
     async def process_message(
         self, messages: List[Dict], stream: bool = False, seed: Optional[int] = None
@@ -478,3 +487,92 @@ class TestAgentServer:
         assert server.app is not None
 
         logger.info("✓ AgentServer creation works correctly")
+
+
+class TestMockResponsesReset:
+    """Tests for mock responses per-request reset behavior using contextvars."""
+
+    @pytest.mark.asyncio
+    async def test_mock_responses_reset_per_request(self, monkeypatch):
+        """Test that mock responses reset for each new request.
+
+        Each call to reset_mock_responses() should set up a fresh copy
+        in the context for that request to cycle through.
+        """
+        import json
+        from modelapi.client import _mock_responses_ctx
+
+        mock_responses = json.dumps(['{"tool": "test"}', "{}", "Final answer"])
+        monkeypatch.setenv("DEBUG_MOCK_RESPONSES", mock_responses)
+
+        # Create a real ModelAPI (will pick up env var)
+        model_api = ModelAPI(model="test", api_base="http://localhost:8000")
+
+        # Verify mock responses template is configured
+        assert model_api.has_mock_responses
+        assert model_api._mock_responses_template is not None
+        assert len(model_api._mock_responses_template) == 3
+
+        # Initially, context has no mock responses (not reset yet)
+        assert _mock_responses_ctx.get() is None
+
+        # First reset - should set all 3 responses in context
+        model_api.reset_mock_responses()
+        ctx_responses = _mock_responses_ctx.get()
+        assert ctx_responses is not None
+        assert len(ctx_responses) == 3
+
+        # Consume one response via process_message
+        result = await model_api.process_message([{"role": "user", "content": "test"}])
+        assert result == '{"tool": "test"}'
+        ctx_after_consume = _mock_responses_ctx.get()
+        assert ctx_after_consume is not None
+        assert len(ctx_after_consume) == 2
+
+        # Reset again - should have all 3 responses again
+        model_api.reset_mock_responses()
+        ctx_after_reset = _mock_responses_ctx.get()
+        assert ctx_after_reset is not None
+        assert len(ctx_after_reset) == 3
+
+        # Consume first response again (proves reset worked)
+        result = await model_api.process_message([{"role": "user", "content": "test"}])
+        assert result == '{"tool": "test"}'
+
+        await model_api.close()
+        logger.info("✓ Mock responses reset correctly per request")
+
+    @pytest.mark.asyncio
+    async def test_mock_responses_independent_between_resets(self, monkeypatch):
+        """Test that consuming mock responses doesn't affect template."""
+        import json
+        from modelapi.client import _mock_responses_ctx
+
+        mock_responses = json.dumps(["response1", "response2"])
+        monkeypatch.setenv("DEBUG_MOCK_RESPONSES", mock_responses)
+
+        model_api = ModelAPI(model="test", api_base="http://localhost:8000")
+
+        # Consume all responses
+        model_api.reset_mock_responses()
+        await model_api.process_message([{"role": "user", "content": "test"}])
+        await model_api.process_message([{"role": "user", "content": "test"}])
+
+        # All consumed from context
+        ctx_responses = _mock_responses_ctx.get()
+        assert ctx_responses is not None
+        assert len(ctx_responses) == 0
+
+        # Template should still be intact
+        template = model_api._mock_responses_template
+        assert template is not None
+        assert len(template) == 2
+
+        # Reset should restore full set in context
+        model_api.reset_mock_responses()
+        ctx_after_reset = _mock_responses_ctx.get()
+        assert ctx_after_reset is not None
+        assert len(ctx_after_reset) == 2
+
+        await model_api.close()
+        logger.info("✓ Template preserved after consuming responses")

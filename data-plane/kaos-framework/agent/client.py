@@ -380,6 +380,8 @@ class Agent:
             For testing, set DEBUG_MOCK_RESPONSES env var to a JSON array of responses
             that will be used instead of calling the model API.
         """
+        # Reset mock responses at start of each request for fresh cycle
+        self.model_api.reset_mock_responses()
         # Get or create session
         if session_id:
             session_id = await self.memory.get_or_create_session(session_id, "agent", "user")

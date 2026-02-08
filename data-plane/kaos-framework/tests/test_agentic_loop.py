@@ -31,11 +31,22 @@ class MockModelAPI(ModelAPI):
     def __init__(self, responses: Optional[list] = None):
         """Initialize with a list of responses to return in sequence."""
         self.responses = list(responses) if responses else ["Default mock response"]
+        self._responses_original = list(self.responses)  # Keep original for reset
         self.call_count = 0
         self.model = "mock"
         self.api_base = "mock://localhost"
         self.client = None  # Not used
-        self._mock_responses: Optional[List[str]] = None  # Not used in mock
+        self._mock_responses_template: Optional[List[str]] = None  # Not used in mock
+
+    def reset_mock_responses(self) -> None:
+        """Reset mock responses to start a fresh cycle."""
+        self.responses = list(self._responses_original)
+        self.call_count = 0
+
+    @property
+    def has_mock_responses(self) -> bool:
+        """Check if mock responses are configured."""
+        return bool(self._responses_original)
 
     async def process_message(self, messages, stream=False, seed: Optional[int] = None):
         """Return next response from the list.

@@ -172,7 +172,7 @@ The `kubernetes` runtime provides many useful tools:
 ## Cleanup
 
 ```bash
-kubectl delete namespace $NAMESPACE
+kubectl delete namespace $NAMESPACE --wait=false
 ```
 
 ## Next Steps
