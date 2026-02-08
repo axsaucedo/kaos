@@ -79,7 +79,10 @@ jobs:
             pytest_filter: "test_custom_mcp_server_example or test_kaos_monkey_example"
           - name: examples-2
             files: "e2e/test_examples_e2e.py"
-            pytest_filter: "test_multi_agent_telemetry_example or test_unified_mcp_gateway_example"
+            pytest_filter: "test_multi_agent_telemetry_example"
+          - name: examples-3
+            files: "e2e/test_examples_e2e.py"
+            pytest_filter: "test_unified_mcp_gateway_example"
     name: E2E (${{ matrix.shard.name }})
     steps:
       - name: Checkout
@@ -114,36 +117,16 @@ jobs:
           echo "AGENT_TAG=$VERSION" >> $GITHUB_ENV
           echo "Using VERSION: $VERSION"
 
-      - name: Build operator image
-        uses: docker/build-push-action@v6
+      - name: Build all images in parallel
+        uses: docker/bake-action@v5
         with:
-          context: ./operator
+          files: |
+            docker-bake.hcl
+          targets: default
           load: true
-          tags: ${{ env.REGISTRY }}/kaos-operator:${{ env.OPERATOR_TAG }}
-          cache-from: type=gha,scope=operator-e2e
-          cache-to: type=gha,scope=operator-e2e,mode=max
-          github-token: ${{ github.token }}
-
-      - name: Build agent image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./data-plane/kaos-framework
-          load: true
-          tags: ${{ env.REGISTRY }}/kaos-agent:${{ env.AGENT_TAG }}
-          cache-from: type=gha,scope=agent-e2e
-          cache-to: type=gha,scope=agent-e2e,mode=max
-          github-token: ${{ github.token }}
-
-      - name: Build LiteLLM image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./operator/hack
-          file: ./operator/hack/Dockerfile.litellm
-          load: true
-          tags: ghcr.io/berriai/litellm:main-stable
-          cache-from: type=gha,scope=litellm-e2e
-          cache-to: type=gha,scope=litellm-e2e,mode=max
-          github-token: ${{ github.token }}
+          set: |
+            *.cache-from=type=gha
+            *.cache-to=type=gha,mode=max
 
       - name: Pull Ollama image
         run: docker pull alpine/ollama:latest
@@ -151,26 +134,6 @@ jobs:
       - name: Tag MCP server image
         run: |
           docker tag ${{ env.REGISTRY }}/kaos-agent:${{ env.AGENT_TAG }} ${{ env.REGISTRY }}/kaos-mcp-server:${{ env.AGENT_TAG }}
-
-      - name: Build MCP python-string image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./data-plane/mcp-servers/python-string
-          load: true
-          tags: ${{ env.REGISTRY }}/kaos-mcp-python-string:${{ env.AGENT_TAG }}
-          cache-from: type=gha,scope=mcp-python-string-e2e
-          cache-to: type=gha,scope=mcp-python-string-e2e,mode=max
-          github-token: ${{ github.token }}
-
-      - name: Build MCP pctx image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./data-plane/mcp-servers/pctx
-          load: true
-          tags: ${{ env.REGISTRY }}/kaos-mcp-pctx:${{ env.AGENT_TAG }}
-          cache-from: type=gha,scope=mcp-pctx-e2e
-          cache-to: type=gha,scope=mcp-pctx-e2e,mode=max
-          github-token: ${{ github.token }}
 
       - name: Load images into KIND
         run: |
