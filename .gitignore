@@ -67,3 +67,5 @@ vendor/
 venv/
 wheels/
 PROGRESS.md
+.roborev.toml
+.husky/
