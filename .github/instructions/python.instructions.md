@@ -41,11 +41,21 @@ The agent uses native OpenAI function calling via the `tools` API:
 ### Tool/Delegation Format
 - MCP tools are converted to OpenAI `tools` format via `_build_tools_param()`
 - Sub-agents are exposed as `delegate_to_{agent_name}` tool functions with a `task` string parameter
+- Unavailable sub-agents (failed init) are automatically excluded from tool registration
 - Model returns structured `tool_calls` array — no JSON parsing from content text
+- Multiple tool calls in a single response are executed in parallel via `asyncio.gather()`
 
 ### Key Classes
-- `ToolCall(id, name, arguments)`: Represents a single tool call from model response
+- `ToolCall(id, name, arguments)`: Represents a single tool call. Arguments auto-normalize from JSON string or dict via `__post_init__`
 - `ModelResponse(content, tool_calls, finish_reason)`: Structured response from `ModelAPI.process_message()`
+
+### Phase 2 Streaming Optimization
+- When Phase 1 exits with content (no tool_calls), that content is yielded directly without re-calling the model
+- Streaming model call only happens when Phase 1 produced no content (e.g., after tool call execution)
+
+### Validation & Error Handling
+- `max_steps` is clamped to minimum 1 (with warning log)
+- Empty model responses (no content, no tool_calls) log warnings and store `format_warning` memory events
 
 ### Mock Response Pattern
 For testing, use `DEBUG_MOCK_RESPONSES` with tool_calls JSON or plain text:
