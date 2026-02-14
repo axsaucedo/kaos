@@ -186,6 +186,9 @@ class Agent:
             agent.name: agent for agent in (sub_agents or [])
         }
         self.max_steps = max_steps
+        if self.max_steps < 1:
+            logger.warning(f"max_steps={max_steps} is invalid, clamping to 1")
+            self.max_steps = 1
         self.memory_context_limit = memory_context_limit
         self.memory_enabled = memory_enabled
 

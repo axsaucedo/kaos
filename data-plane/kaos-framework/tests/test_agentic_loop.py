@@ -125,6 +125,18 @@ class TestMaxStepsConfig:
         agent = Agent(name="test", model_api=model_api, max_steps=3)
         assert agent.max_steps == 3
 
+    def test_max_steps_zero_clamped_to_one(self):
+        """Test that max_steps=0 is clamped to 1."""
+        model_api = MockModelAPI(["test"])
+        agent = Agent(name="test", model_api=model_api, max_steps=0)
+        assert agent.max_steps == 1
+
+    def test_max_steps_negative_clamped_to_one(self):
+        """Test that negative max_steps is clamped to 1."""
+        model_api = MockModelAPI(["test"])
+        agent = Agent(name="test", model_api=model_api, max_steps=-5)
+        assert agent.max_steps == 1
+
 
 class TestAgenticLoopToolCalling:
     """Tests for tool calling in the agentic loop."""
