@@ -142,19 +142,27 @@ async def test_delegation_with_memory_verification(
     """
     task_id = f"LOOP_TASK_{int(time.time())}"
 
-    # Create worker with mock response - two-phase: action(none) -> final
+    # Create worker with mock response - just the final text response
     worker_spec, worker_name = create_agentic_loop_worker(
         test_namespace,
         shared_modelapi,
         "-del",
-        mock_responses=["{}", f"Task {task_id} processed successfully by worker."],
+        mock_responses=[f"Task {task_id} processed successfully by worker."],
     )
 
-    # Create coordinator with mock response that triggers delegation
-    # Two-phase: action(delegate) -> action(none) -> final
+    # Create coordinator with mock response that triggers delegation via tool_calls
     coord_mock_responses = [
-        f'{{"agent": "{worker_name}", "task": "Process task {task_id}"}}',
-        "{}",
+        json.dumps(
+            {
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "name": f"delegate_to_{worker_name}",
+                        "arguments": {"task": f"Process task {task_id}"},
+                    }
+                ]
+            }
+        ),
         f"The worker has completed task {task_id}.",
     ]
     coord_spec, coord_name = create_agentic_loop_coordinator(
@@ -257,19 +265,27 @@ async def test_agent_processes_with_memory_events(
     """
     task_id = f"MEM_{int(time.time())}"
 
-    # Create worker with mock response - two-phase: action(none) -> final
+    # Create worker with mock response - just the final text response
     worker_spec, worker_name = create_agentic_loop_worker(
         test_namespace,
         shared_modelapi,
         "-mem",
-        mock_responses=["{}", f"Memory test {task_id} completed."],
+        mock_responses=[f"Memory test {task_id} completed."],
     )
 
-    # Create coordinator with delegation mock response
-    # Two-phase: action(delegate) -> action(none) -> final
+    # Create coordinator with delegation mock response via tool_calls
     coord_mock_responses = [
-        f'{{"agent": "{worker_name}", "task": "Process memory test {task_id}"}}',
-        "{}",
+        json.dumps(
+            {
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "name": f"delegate_to_{worker_name}",
+                        "arguments": {"task": f"Process memory test {task_id}"},
+                    }
+                ]
+            }
+        ),
         f"Memory test {task_id} has been processed.",
     ]
     coord_spec, coord_name = create_agentic_loop_coordinator(

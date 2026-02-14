@@ -171,20 +171,29 @@ async def test_multi_agent_delegation_with_memory(
     task_id = f"K8S_DELEGATE_{int(time.time())}"
 
     # Create resources with mock responses configured
-    # Two-phase pattern:
-    # Coordinator: action(delegate) -> action(none) -> final response
-    # Worker: action(none) -> final response
+    # Native tool calling:
+    # Coordinator: tool_calls(delegate_to_worker) -> final response
+    # Worker: just final text response
     resources = create_multi_agent_resources(
         test_namespace,
         shared_modelapi,
         "-mem",
         mock_responses={
             f"multi-coord-mem": [
-                f'{{"agent": "multi-w1-mem", "task": "Process task {task_id}"}}',
-                "{}",
+                json.dumps(
+                    {
+                        "tool_calls": [
+                            {
+                                "id": "call_1",
+                                "name": "delegate_to_multi-w1-mem",
+                                "arguments": {"task": f"Process task {task_id}"},
+                            }
+                        ]
+                    }
+                ),
                 f"The worker has completed task {task_id}.",
             ],
-            "multi-w1-mem": ["{}", f"Task {task_id} processed by worker-1."],
+            "multi-w1-mem": [f"Task {task_id} processed by worker-1."],
         },
     )
 
