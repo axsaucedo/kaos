@@ -133,6 +133,11 @@ class AgentServerSettings(BaseSettings):
     # Individual URLs via MCP_SERVER_<NAME>_URL env vars
     mcp_servers: str = ""
 
+    # Function calling mode (from K8s operator)
+    # "native" sends tools via the OpenAI tools API parameter
+    # "text" uses text-based tool parsing without the tools API parameter
+    function_calling: str = "native"
+
     # Agentic loop configuration (from K8s operator)
     agentic_loop_max_steps: int = 5
 
