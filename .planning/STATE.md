@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-13)
 ## Current Position
 
 Phase: 1 of 12 (Native Tool Calling & Structured Output)
-Plan: 4 of 7 in current phase
+Plan: 6 of 7 in current phase
 Status: Executing
-Last activity: 2026-02-14 — Completed 01-04-PLAN.md (Streaming Tool Call Delta Accumulation)
+Last activity: 2026-02-14 — Completed 01-06-PLAN.md (Operator & E2E Test Updates for FunctionCalling)
 
-Progress: [████░░░░░░] 5%
+Progress: [████████░░] 8%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 4
+- Total plans completed: 6
 - Average duration: 4 min
-- Total execution time: ~17 min
+- Total execution time: ~21 min
 
 **By Phase:**
 
@@ -31,9 +31,10 @@ Progress: [████░░░░░░] 5%
 | Phase 01 P02 | 4 min | 3 tasks | 8 files |
 | Phase 01 P03 | 5 min | 3 tasks | 1 file |
 | Phase 01 P04 | 2 min | 2 tasks | 2 files |
+| Phase 01 P06 | 4 min | 2 tasks | 6 files |
 
 **Recent Trend:**
-- Last 3 plans: 4min, 5min, 2min
+- Last 3 plans: 5min, 2min, 4min
 - Trend: Fast
 
 *Updated after each plan completion*
@@ -53,6 +54,8 @@ Recent decisions affecting current work:
 - [Phase 01 P03]: tools kwarg conditionally passed to process_message to avoid breaking mock subclasses
 - [Phase 01 P04]: _stream_response refactored as dispatcher — _stream_text for text, _accumulate_stream for tools
 - [Phase 01 P04]: Tools streaming fully consumes stream and returns ModelResponse (agentic loop needs complete response)
+- [Phase 01 P06]: Integration tests use full envtest reconciliation path since constructEnvVars is a method on AgentReconciler
+- [Phase 01 P06]: E2E tests set functionCalling=text in CRD config and FUNCTION_CALLING=text in subprocess env vars for smollm2 compat
 
 ### Pending Todos
 
@@ -65,5 +68,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-14
-Stopped at: Completed 01-04-PLAN.md
+Stopped at: Completed 01-06-PLAN.md
 Resume file: None
