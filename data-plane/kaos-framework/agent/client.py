@@ -855,9 +855,18 @@ class Agent:
                 otel.span_success()
 
     async def _call_model_streaming(
-        self, messages: List[Dict[str, str]], model_name: str, seed: Optional[int] = None
+        self,
+        messages: List[Dict[str, str]],
+        model_name: str,
+        seed: Optional[int] = None,
+        tools: Optional[List[dict]] = None,
     ) -> AsyncIterator[str]:
-        """Call the model API with streaming and tracing."""
+        """Call the model API with streaming and tracing.
+
+        When tools are provided, process_message returns ModelResponse (accumulated
+        from stream deltas). When no tools, returns AsyncIterator[str] as before.
+        If a ModelResponse is returned, yields its content as a single chunk.
+        """
         otel.span_begin(
             "model.inference.stream",
             kind=SpanKind.CLIENT,
@@ -868,11 +877,19 @@ class Agent:
         failed = False
         try:
             logger.debug(f"Model streaming call: {model_name}, messages count: {len(messages)}")
-            response = await self.model_api.process_message(messages, stream=True, seed=seed)
+            kwargs: Dict[str, Any] = {"stream": True, "seed": seed}
+            if tools is not None:
+                kwargs["tools"] = tools
+            response = await self.model_api.process_message(messages, **kwargs)
 
-            # response is an AsyncIterator when stream=True
-            async for chunk in cast(AsyncIterator[str], response):
-                yield chunk
+            if isinstance(response, ModelResponse):
+                # Tools case: stream accumulated into ModelResponse
+                if response.content:
+                    yield response.content
+            else:
+                # Text case: response is AsyncIterator[str]
+                async for chunk in cast(AsyncIterator[str], response):
+                    yield chunk
 
         except Exception as e:
             failed = True
