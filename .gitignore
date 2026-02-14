@@ -68,3 +68,5 @@ venv/
 wheels/
 PROGRESS.md
 .planning/
+.roborev.toml
+.husky/
