@@ -463,34 +463,11 @@ class Agent:
                                 }
                             )
 
-                        async def _exec_tool(tc: ToolCall) -> Dict[str, Any]:
-                            try:
-                                result = await self._execute_tool(tc.name, tc.arguments)  # type: ignore[arg-type]
-                                await self.memory.add_event(
-                                    session_id,
-                                    "tool_result",
-                                    {"tool": tc.name, "result": result},
-                                )
-                                return {
-                                    "role": "tool",
-                                    "tool_call_id": tc.id,
-                                    "content": f"{_step_context(step)} Tool result: {json.dumps(result)}",
-                                }
-                            except Exception as e:
-                                error_msg = str(e)
-                                await self.memory.add_event(
-                                    session_id,
-                                    "tool_error",
-                                    {"tool": tc.name, "error": error_msg},
-                                )
-                                return {
-                                    "role": "tool",
-                                    "tool_call_id": tc.id,
-                                    "content": f"{_step_context(step)} Tool execution failed: {error_msg}",
-                                }
-
                         tool_results = await asyncio.gather(
-                            *[_exec_tool(tc) for tc in regular_calls]
+                            *[
+                                self._execute_tool_with_memory(tc, session_id, _step_context(step))
+                                for tc in regular_calls
+                            ]
                         )
                         messages.extend(tool_results)
 
@@ -673,6 +650,38 @@ class Agent:
         finally:
             if not failed:
                 otel.span_success()
+
+    async def _execute_tool_with_memory(
+        self, tc: ToolCall, session_id: str, step_context: str
+    ) -> Dict[str, Any]:
+        """Execute a tool call and record result/error in memory.
+
+        Returns a role='tool' message dict for appending to conversation.
+        """
+        try:
+            result = await self._execute_tool(tc.name, tc.arguments)  # type: ignore[arg-type]
+            await self.memory.add_event(
+                session_id,
+                "tool_result",
+                {"tool": tc.name, "result": result},
+            )
+            return {
+                "role": "tool",
+                "tool_call_id": tc.id,
+                "content": f"{step_context} Tool result: {json.dumps(result)}",
+            }
+        except Exception as e:
+            error_msg = str(e)
+            await self.memory.add_event(
+                session_id,
+                "tool_error",
+                {"tool": tc.name, "error": error_msg},
+            )
+            return {
+                "role": "tool",
+                "tool_call_id": tc.id,
+                "content": f"{step_context} Tool execution failed: {error_msg}",
+            }
 
     async def _execute_tool(self, tool_name: str, tool_args: Dict[str, Any]) -> Any:
         """Execute a tool with tracing."""
