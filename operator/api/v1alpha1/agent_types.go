@@ -109,6 +109,14 @@ type AgentConfig struct {
 	// +kubebuilder:validation:Optional
 	Instructions string `json:"instructions,omitempty"`
 
+	// FunctionCalling controls how the agent handles tool calling.
+	// "native" (default) sends tools via the OpenAI tools API parameter.
+	// "text" uses text-based tool parsing without the tools API parameter.
+	// +kubebuilder:validation:Enum=native;text
+	// +kubebuilder:default=native
+	// +optional
+	FunctionCalling string `json:"functionCalling,omitempty"`
+
 	// ReasoningLoopMaxSteps is the maximum number of reasoning steps before stopping
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=20

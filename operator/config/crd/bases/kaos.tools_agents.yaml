@@ -77,6 +77,16 @@ spec:
                     description: Description is a human-readable description of the
                       agent
                     type: string
+                  functionCalling:
+                    default: native
+                    description: |-
+                      FunctionCalling controls how the agent handles tool calling.
+                      "native" (default) sends tools via the OpenAI tools API parameter.
+                      "text" uses text-based tool parsing without the tools API parameter.
+                    enum:
+                    - native
+                    - text
+                    type: string
                   instructions:
                     description: Instructions are the system instructions for the
                       agent
