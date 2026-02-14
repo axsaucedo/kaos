@@ -209,6 +209,7 @@ MOCK_CODE="{\
   }]\
 }"
 
+MOCK_FINAL_LOOP='No more actions needed.'
 MOCK_FINAL='I executed a complex calculation chain: 42+8=50, 50*2=100, 100^2=10000. The final result formatted in uppercase is "RESULT: 10000 (4 WORDS)".'
 
 kaos agent deploy gateway-agent \
@@ -217,6 +218,7 @@ kaos agent deploy gateway-agent \
     --mcp unified-gateway \
     --instructions "You use Code Mode to orchestrate multiple tools efficiently." \
     --mock-response "$MOCK_CODE" \
+    --mock-response "$MOCK_FINAL_LOOP" \
     --mock-response "$MOCK_FINAL" \
     --expose \
     --wait

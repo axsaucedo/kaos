@@ -111,7 +111,8 @@ Create the agent with mock responses. The `--mock-response` flag can be used mul
 # Each tool call response triggers real MCP tool execution
 MOCK1='{"tool_calls": [{"id": "call_1", "name": "pods_list", "arguments": {"namespace": "'$NAMESPACE'"}}]}'
 MOCK2='{"tool_calls": [{"id": "call_2", "name": "pods_delete", "arguments": {"namespace": "'$NAMESPACE'", "name": "chaos-victim"}}]}'
-MOCK3='Done! I have deleted the chaos-victim pod to simulate a failure scenario.'
+MOCK3='No more actions needed.'
+MOCK4='Done! I have deleted the chaos-victim pod to simulate a failure scenario.'
 
 kaos agent deploy kaos-monkey \
     --modelapi chaos-api \
@@ -121,6 +122,7 @@ kaos agent deploy kaos-monkey \
     --mock-response "$MOCK1" \
     --mock-response "$MOCK2" \
     --mock-response "$MOCK3" \
+    --mock-response "$MOCK4" \
     --expose \
     --wait
 ```

@@ -66,6 +66,13 @@ Create a shared ModelAPI for all agents (using mock responses for testing):
 kaos modelapi deploy team-api --mode proxy --wait
 ```
 
+Wait for the ModelAPI pod to be fully ready (volumes mounted, LiteLLM configured):
+
+```bash
+kubectl wait --for=condition=available deployment/modelapi-team-api --timeout=120s
+kubectl rollout status deployment/modelapi-team-api --timeout=120s
+```
+
 ## Step 2: Create the Researcher Agent
 
 Create a specialist agent that handles research tasks:
@@ -106,6 +113,7 @@ kaos agent deploy coordinator \
     --instructions "You are a coordinator that delegates to specialist agents." \
     --mock-response '{"tool_calls": [{"id": "call_1", "name": "delegate_to_researcher", "arguments": {"task": "Research AI adoption trends in enterprises"}}]}' \
     --mock-response '{"tool_calls": [{"id": "call_2", "name": "delegate_to_analyst", "arguments": {"task": "Analyze the growth patterns from the research"}}]}' \
+    --mock-response "No more actions needed." \
     --mock-response "Based on input from my team: AI is growing with 40% YoY growth, especially in customer service automation." \
     --sub-agent researcher \
     --sub-agent analyst \
@@ -114,6 +122,14 @@ kaos agent deploy coordinator \
 ```
 
 ## Step 5: Test the Multi-Agent System
+
+Ensure all agent deployments are fully ready before sending requests:
+
+```bash
+kubectl wait --for=condition=available deployment/agent-researcher --timeout=120s
+kubectl wait --for=condition=available deployment/agent-analyst --timeout=120s
+kubectl wait --for=condition=available deployment/agent-coordinator --timeout=120s
+```
 
 Send a request to the coordinator and watch it delegate:
 
