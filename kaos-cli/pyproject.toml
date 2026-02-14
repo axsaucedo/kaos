@@ -19,4 +19,5 @@ kaos = "kaos_cli.main:app"
 package = true
 dev-dependencies = [
     "pytest>=8.0.0",
+    "pyyaml>=6.0.0",
 ]
