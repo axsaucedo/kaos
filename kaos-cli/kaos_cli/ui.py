@@ -6,18 +6,28 @@ import sys
 import threading
 import time
 import webbrowser
+from typing import Optional
 from urllib.parse import urlencode
 
 import typer
 import uvicorn
 
 from kaos_cli import __version__
+from kaos_cli.install import MONITORING_BACKENDS
 
 # Default monitoring configuration
 DEFAULT_MONITORING_NAMESPACE = "monitoring"
+
+# SigNoz config
 SIGNOZ_SERVICE_NAME = "signoz"
 SIGNOZ_SERVICE_PORT = 8080
-SIGNOZ_LOCAL_PORT = 8011
+
+# Jaeger config
+JAEGER_SERVICE_NAME = "jaeger-query"
+JAEGER_SERVICE_PORT = 16686
+
+# Shared local port for monitoring UI
+MONITORING_LOCAL_PORT = 8011
 
 # KAOS UI hosted on GitHub Pages
 KAOS_UI_BASE = "https://axsaucedo.github.io/kaos-ui"
@@ -44,11 +54,19 @@ def get_ui_version(override_version: str | None) -> str:
     return f"v{cli_version}" if not cli_version.startswith("v") else cli_version
 
 
-def check_signoz_service(namespace: str) -> bool:
-    """Check if SigNoz frontend service exists in the specified namespace."""
+def _get_monitoring_config(backend: str) -> tuple[str, int]:
+    """Return (service_name, service_port) for the given monitoring backend."""
+    if backend == "jaeger":
+        return JAEGER_SERVICE_NAME, JAEGER_SERVICE_PORT
+    return SIGNOZ_SERVICE_NAME, SIGNOZ_SERVICE_PORT
+
+
+def check_monitoring_service(backend: str, namespace: str) -> bool:
+    """Check if monitoring service exists in the specified namespace."""
+    service_name, _ = _get_monitoring_config(backend)
     try:
         result = subprocess.run(
-            ["kubectl", "get", "svc", SIGNOZ_SERVICE_NAME, "-n", namespace],
+            ["kubectl", "get", "svc", service_name, "-n", namespace],
             capture_output=True,
             text=True,
         )
@@ -57,15 +75,16 @@ def check_signoz_service(namespace: str) -> bool:
         return False
 
 
-def start_signoz_port_forward(namespace: str) -> subprocess.Popen | None:
-    """Start kubectl port-forward for SigNoz frontend service."""
+def start_monitoring_port_forward(backend: str, namespace: str) -> subprocess.Popen | None:
+    """Start kubectl port-forward for monitoring frontend service."""
+    service_name, service_port = _get_monitoring_config(backend)
     try:
         process = subprocess.Popen(
             [
                 "kubectl",
                 "port-forward",
-                f"svc/{SIGNOZ_SERVICE_NAME}",
-                f"{SIGNOZ_LOCAL_PORT}:{SIGNOZ_SERVICE_PORT}",
+                f"svc/{service_name}",
+                f"{MONITORING_LOCAL_PORT}:{service_port}",
                 "-n",
                 namespace,
             ],
@@ -74,7 +93,7 @@ def start_signoz_port_forward(namespace: str) -> subprocess.Popen | None:
         )
         return process
     except Exception as e:
-        typer.echo(f"Failed to start SigNoz port-forward: {e}", err=True)
+        typer.echo(f"Failed to start {backend} port-forward: {e}", err=True)
         return None
 
 
@@ -84,40 +103,38 @@ def ui_command(
     namespace: str,
     no_browser: bool,
     version: str | None = None,
-    monitoring_enabled: bool = False,
+    monitoring_enabled: str | None = None,
     monitoring_namespace: str = DEFAULT_MONITORING_NAMESPACE,
 ) -> None:
     """Start a CORS-enabled proxy to the Kubernetes API server."""
     from kaos_cli.proxy import create_proxy_app
 
-    signoz_process: subprocess.Popen | None = None
+    monitoring_process: subprocess.Popen | None = None
 
-    # Check and start SigNoz port-forward if monitoring enabled
+    # Check and start monitoring port-forward if enabled
     if monitoring_enabled:
-        typer.echo(f"Checking for SigNoz in namespace '{monitoring_namespace}'...")
-        if check_signoz_service(monitoring_namespace):
-            signoz_process = start_signoz_port_forward(monitoring_namespace)
-            if signoz_process:
+        backend = monitoring_enabled
+        service_name, _ = _get_monitoring_config(backend)
+        typer.echo(f"Checking for {backend} in namespace '{monitoring_namespace}'...")
+        if check_monitoring_service(backend, monitoring_namespace):
+            monitoring_process = start_monitoring_port_forward(
+                backend, monitoring_namespace
+            )
+            if monitoring_process:
                 typer.echo(
-                    f"SigNoz UI available at http://localhost:{SIGNOZ_LOCAL_PORT}"
+                    f"{backend.capitalize()} UI available at http://localhost:{MONITORING_LOCAL_PORT}"
                 )
             else:
-                typer.echo("Warning: Failed to start SigNoz port-forward", err=True)
+                typer.echo(
+                    f"Warning: Failed to start {backend} port-forward", err=True
+                )
         else:
             typer.echo(
-                f"Error: SigNoz service '{SIGNOZ_SERVICE_NAME}' not found in namespace '{monitoring_namespace}'.",
+                f"Error: {backend} service '{service_name}' not found in namespace '{monitoring_namespace}'.",
                 err=True,
             )
             typer.echo(
-                "To install SigNoz, follow the docs: https://axsaucedo.github.io/kaos/latest/operator/telemetry/",
-                err=True,
-            )
-            typer.echo(
-                f"  1. Install SigNoz in the '{monitoring_namespace}' namespace",
-                err=True,
-            )
-            typer.echo(
-                "  2. Install KAOS with telemetry enabled: kaos system install --set telemetry.enabled=true --set telemetry.endpoint=http://signoz-otel-collector.monitoring:4317",
+                "To install monitoring, use: kaos system install --monitoring-enabled <backend>",
                 err=True,
             )
             raise typer.Exit(1)
@@ -148,8 +165,8 @@ def ui_command(
 
     def handle_signal(signum: int, frame: object) -> None:
         typer.echo("\nShutting down...")
-        if signoz_process:
-            signoz_process.terminate()
+        if monitoring_process:
+            monitoring_process.terminate()
         sys.exit(0)
 
     signal.signal(signal.SIGINT, handle_signal)

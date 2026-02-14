@@ -36,6 +36,7 @@ kaos system install [OPTIONS]
 | `--version` | | latest | Chart version |
 | `--set` | | | Helm values |
 | `--wait` | | false | Wait for ready |
+| `--monitoring-enabled` | | | Install monitoring stack (`signoz` or `jaeger`) |
 
 ### kaos system uninstall
 
@@ -400,8 +401,10 @@ kaos ui [OPTIONS]
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--k8s-url` | auto | Kubernetes API URL |
-| `--expose-port` | `8080` | Local proxy port |
+| `--expose-port` | `8010` | Local proxy port |
 | `--no-browser` | false | Don't open browser |
+| `--monitoring-enabled` | | Enable monitoring UI (`signoz` or `jaeger`) |
+| `--monitoring-namespace` | `monitoring` | Monitoring namespace |
 
 ---
 

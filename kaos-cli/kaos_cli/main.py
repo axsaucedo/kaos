@@ -1,8 +1,11 @@
 """KAOS CLI main entry point."""
 
+from typing import Optional
+
 import typer
 
 from kaos_cli.ui import ui_command
+from kaos_cli.install import MONITORING_BACKENDS
 from kaos_cli.system import app as system_app
 from kaos_cli.mcp import app as mcp_app
 from kaos_cli.agent import app as agent_app
@@ -51,18 +54,24 @@ def ui(
         "-v",
         help="UI version to use (e.g., 'dev', 'v0.1.3'). Defaults to CLI version.",
     ),
-    monitoring_enabled: bool = typer.Option(
-        False,
+    monitoring_enabled: Optional[str] = typer.Option(
+        None,
         "--monitoring-enabled",
-        help="Enable SigNoz monitoring UI port-forward.",
+        help=f"Enable monitoring UI port-forward. Options: {', '.join(MONITORING_BACKENDS)}.",
     ),
     monitoring_namespace: str = typer.Option(
         "monitoring",
         "--monitoring-namespace",
-        help="Namespace where SigNoz is installed.",
+        help="Namespace where monitoring is installed.",
     ),
 ) -> None:
     """Start a CORS-enabled proxy and open the KAOS UI."""
+    if monitoring_enabled is not None and monitoring_enabled not in MONITORING_BACKENDS:
+        typer.echo(
+            f"Error: Invalid monitoring backend '{monitoring_enabled}'. Options: {', '.join(MONITORING_BACKENDS)}",
+            err=True,
+        )
+        raise typer.Exit(1)
     ui_command(
         k8s_url=k8s_url,
         expose_port=expose_port,

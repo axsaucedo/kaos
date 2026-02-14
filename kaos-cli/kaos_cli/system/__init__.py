@@ -2,6 +2,7 @@
 
 import subprocess
 import sys
+from typing import Optional
 
 import typer
 
@@ -9,6 +10,7 @@ from kaos_cli.system.install import install_command, uninstall_command
 from kaos_cli.system.create_rbac import create_rbac_command
 from kaos_cli.system.status import status_command
 from kaos_cli.system.runtimes import runtimes_command
+from kaos_cli.install import MONITORING_BACKENDS
 
 app = typer.Typer(
     help="System management commands for KAOS operator.",
@@ -44,13 +46,20 @@ def install(
         "--wait",
         help="Wait for pods to be ready before returning.",
     ),
-    monitoring_enabled: bool = typer.Option(
-        False,
+    monitoring_enabled: Optional[str] = typer.Option(
+        None,
         "--monitoring-enabled",
-        help="Install SigNoz monitoring stack and enable telemetry.",
+        help=f"Install monitoring stack and enable telemetry. Options: {', '.join(MONITORING_BACKENDS)}. Default: signoz.",
     ),
 ) -> None:
     """Install the KAOS operator using Helm."""
+    # Default to signoz if flag provided without value
+    if monitoring_enabled is not None and monitoring_enabled not in MONITORING_BACKENDS:
+        typer.echo(
+            f"Error: Invalid monitoring backend '{monitoring_enabled}'. Options: {', '.join(MONITORING_BACKENDS)}",
+            err=True,
+        )
+        raise typer.Exit(1)
     install_command(
         namespace=namespace,
         release_name=release_name,

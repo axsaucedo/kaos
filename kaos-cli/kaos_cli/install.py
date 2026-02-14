@@ -37,11 +37,13 @@ def run_helm_command(
         raise
 
 
-def _install_monitoring() -> bool:
+MONITORING_BACKENDS = ("signoz", "jaeger")
+
+
+def _install_signoz() -> bool:
     """Install SigNoz monitoring stack."""
     typer.echo("Installing SigNoz monitoring stack...")
 
-    # Add SigNoz helm repo
     result = run_helm_command(
         ["repo", "add", "signoz", "https://charts.signoz.io", "--force-update"],
         check=False,
@@ -51,7 +53,6 @@ def _install_monitoring() -> bool:
 
     run_helm_command(["repo", "update"], check=False)
 
-    # Install SigNoz
     result = run_helm_command(
         [
             "upgrade",
@@ -73,13 +74,77 @@ def _install_monitoring() -> bool:
     return True
 
 
+def _install_jaeger() -> bool:
+    """Install Jaeger all-in-one with OTLP collector."""
+    typer.echo("Installing Jaeger all-in-one...")
+
+    result = run_helm_command(
+        [
+            "repo",
+            "add",
+            "jaegertracing",
+            "https://jaegertracing.github.io/helm-charts",
+            "--force-update",
+        ],
+        check=False,
+    )
+    if result.returncode != 0 and "already exists" not in result.stderr:
+        typer.echo(f"Warning adding Jaeger repo: {result.stderr}", err=True)
+
+    run_helm_command(["repo", "update"], check=False)
+
+    result = run_helm_command(
+        [
+            "upgrade",
+            "--install",
+            "jaeger",
+            "jaegertracing/jaeger",
+            "--namespace",
+            "observability",
+            "--create-namespace",
+            "--set",
+            "allInOne.enabled=true",
+            "--set",
+            "collector.enabled=false",
+            "--set",
+            "query.enabled=false",
+            "--set",
+            "agent.enabled=false",
+            "--set",
+            "provisionDataStore.cassandra=false",
+            "--wait",
+        ],
+        check=False,
+    )
+    if result.returncode != 0:
+        typer.echo(f"Error installing Jaeger: {result.stderr}", err=True)
+        return False
+
+    typer.echo("✅ Jaeger installed in 'observability' namespace")
+    return True
+
+
+def _install_monitoring(backend: str) -> bool:
+    """Install monitoring stack for the given backend."""
+    if backend == "jaeger":
+        return _install_jaeger()
+    return _install_signoz()
+
+
+def _get_otel_endpoint(backend: str) -> str:
+    """Return the OTLP collector endpoint for the given backend."""
+    if backend == "jaeger":
+        return "http://jaeger-collector.observability:4317"
+    return "http://signoz-otel-collector.observability:4317"
+
+
 def install_command(
     namespace: str,
     release_name: str,
     version: str | None,
     set_values: list[str],
     wait: bool,
-    monitoring_enabled: bool = False,
+    monitoring_enabled: str | None = None,
 ) -> None:
     """Install the KAOS operator using Helm."""
     if not check_helm_installed():
@@ -89,7 +154,7 @@ def install_command(
 
     # Install monitoring first if requested
     if monitoring_enabled:
-        if not _install_monitoring():
+        if not _install_monitoring(monitoring_enabled):
             typer.echo("Warning: Monitoring installation failed, continuing...", err=True)
 
     typer.echo(f"Installing KAOS operator to namespace '{namespace}'...")
@@ -129,13 +194,9 @@ def install_command(
 
     # Add telemetry settings if monitoring is enabled
     if monitoring_enabled:
+        otel_endpoint = _get_otel_endpoint(monitoring_enabled)
         helm_args.extend(["--set", "telemetry.enabled=true"])
-        helm_args.extend(
-            [
-                "--set",
-                "telemetry.endpoint=http://signoz-otel-collector.observability:4317",
-            ]
-        )
+        helm_args.extend(["--set", f"telemetry.endpoint={otel_endpoint}"])
 
     typer.echo(f"Installing chart {HELM_CHART_NAME}...")
     result = run_helm_command(helm_args)
