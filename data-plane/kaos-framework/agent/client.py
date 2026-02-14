@@ -459,7 +459,7 @@ class Agent:
 
                         async def _exec_tool(tc: ToolCall) -> Dict[str, Any]:
                             try:
-                                result = await self._execute_tool(tc.name, tc.arguments)
+                                result = await self._execute_tool(tc.name, tc.arguments)  # type: ignore[arg-type]
                                 await self.memory.add_event(
                                     session_id,
                                     "tool_result",

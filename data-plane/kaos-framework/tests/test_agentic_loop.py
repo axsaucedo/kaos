@@ -883,3 +883,42 @@ class TestStreamingPhase2Reuse:
         assert mock_model.call_count == 3
 
         logger.info("✓ Streaming calls model when Phase 1 has no content")
+
+
+class TestToolCallArgumentNormalization:
+    """Tests for ToolCall argument handling consistency."""
+
+    def test_toolcall_dict_arguments(self):
+        """Test ToolCall with dict arguments."""
+        tc = ToolCall(id="1", name="test", arguments={"key": "value"})
+        assert tc.arguments == {"key": "value"}
+
+    def test_toolcall_string_arguments_parsed(self):
+        """Test ToolCall with JSON string arguments auto-parsed to dict."""
+        tc = ToolCall(id="1", name="test", arguments='{"key": "value"}')
+        assert tc.arguments == {"key": "value"}
+
+    def test_toolcall_invalid_string_arguments(self):
+        """Test ToolCall with invalid JSON string defaults to empty dict."""
+        tc = ToolCall(id="1", name="test", arguments="not json")
+        assert tc.arguments == {}
+
+    def test_toolcall_from_openai_string_arguments(self):
+        """Test from_openai with JSON string arguments."""
+        tc = ToolCall.from_openai(
+            {
+                "id": "call_1",
+                "function": {"name": "echo", "arguments": '{"msg": "hi"}'},
+            }
+        )
+        assert tc.arguments == {"msg": "hi"}
+
+    def test_toolcall_from_openai_dict_arguments(self):
+        """Test from_openai with already-parsed dict arguments."""
+        tc = ToolCall.from_openai(
+            {
+                "id": "call_1",
+                "function": {"name": "echo", "arguments": {"msg": "hi"}},
+            }
+        )
+        assert tc.arguments == {"msg": "hi"}

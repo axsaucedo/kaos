@@ -28,21 +28,24 @@ class ToolCall:
 
     id: str
     name: str
-    arguments: Dict[str, Any]
+    arguments: Union[Dict[str, Any], str]
+
+    def __post_init__(self):
+        """Normalize arguments: parse JSON strings to dict."""
+        if isinstance(self.arguments, str):
+            try:
+                self.arguments = json.loads(self.arguments)
+            except json.JSONDecodeError:
+                self.arguments = {}
 
     @classmethod
     def from_openai(cls, tc: Dict[str, Any]) -> "ToolCall":
         """Create ToolCall from OpenAI API format."""
         func = tc.get("function", {})
-        args_str = func.get("arguments", "{}")
-        try:
-            args = json.loads(args_str) if isinstance(args_str, str) else args_str
-        except json.JSONDecodeError:
-            args = {}
         return cls(
             id=tc.get("id", ""),
             name=func.get("name", ""),
-            arguments=args,
+            arguments=func.get("arguments", "{}"),
         )
 
 
