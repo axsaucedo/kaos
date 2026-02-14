@@ -209,6 +209,57 @@ class TestAgenticLoopToolCalling:
 
         logger.info("✓ Tool call with arguments works")
 
+    @pytest.mark.asyncio
+    async def test_multiple_tool_calls_parallel(self):
+        """Test that multiple tool calls in a single response are executed in parallel."""
+        tool_call_response = ModelResponse(
+            tool_calls=[
+                ToolCall(id="call_1", name="calculator", arguments={"a": 1, "b": 2}),
+                ToolCall(id="call_2", name="echo", arguments={"message": "hi"}),
+            ],
+            finish_reason="tool_calls",
+        )
+        final_response = "Calculated 3 and echoed hi."
+
+        mock_model = MockModelAPI(responses=[tool_call_response, final_response])
+        mock_mcp = MockMCPClient(
+            tools={
+                "calculator": ("Add two numbers", {"sum": 3}),
+                "echo": ("Echo a message", {"echo": "hi"}),
+            }
+        )
+        memory = LocalMemory()
+
+        agent = Agent(
+            name="multi-tool",
+            model_api=mock_model,
+            mcp_clients=[mock_mcp],
+            memory=memory,
+            max_steps=5,
+        )
+
+        result = []
+        async for chunk in agent.process_message("Calculate 1+2 and echo hi"):
+            result.append(chunk)
+
+        # Both tools should have been called
+        assert len(mock_mcp.call_log) == 2
+        tool_names = {c["tool"] for c in mock_mcp.call_log}
+        assert tool_names == {"calculator", "echo"}
+
+        # Model called twice: tool_calls response -> final response
+        assert mock_model.call_count == 2
+
+        # Memory should have both tool_call and tool_result events
+        sessions = await memory.list_sessions()
+        events = await memory.get_session_events(sessions[0])
+        tool_call_events = [e for e in events if e.event_type == "tool_call"]
+        tool_result_events = [e for e in events if e.event_type == "tool_result"]
+        assert len(tool_call_events) == 2
+        assert len(tool_result_events) == 2
+
+        logger.info("✓ Multiple parallel tool calls work")
+
 
 class TestAgenticLoopDelegation:
     """Tests for agent delegation in the agentic loop."""

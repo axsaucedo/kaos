@@ -14,6 +14,7 @@ Key design principles:
 - RemoteAgent.process_message() uses /v1/chat/completions
 """
 
+import asyncio
 import json
 import logging
 from typing import List, Dict, Any, Optional, AsyncIterator, Union, cast
@@ -406,12 +407,9 @@ class Agent:
                 # Get model response with tools
                 response = await self._call_model(messages, model_name, seed=seed, tools=tools)
 
-                # If model returned tool calls, execute them
+                # If model returned tool calls, execute them (supports parallel)
                 if response.has_tool_calls:
-                    # Process the first tool call (one at a time for now)
-                    tc = response.tool_calls[0]
-
-                    # Add assistant message with tool call to conversation
+                    # Add assistant message with ALL tool calls to conversation
                     assistant_msg: Dict[str, Any] = {
                         "role": "assistant",
                         "content": response.content,
@@ -424,12 +422,71 @@ class Agent:
                                     "arguments": json.dumps(tc.arguments),
                                 },
                             }
+                            for tc in response.tool_calls
                         ],
                     }
                     messages.append(assistant_msg)
 
-                    # Check if this is a delegation tool
-                    if tc.name.startswith(DELEGATION_TOOL_PREFIX):
+                    # Separate delegation and regular tool calls
+                    delegation_calls = []
+                    regular_calls = []
+                    for tc in response.tool_calls:
+                        if tc.name.startswith(DELEGATION_TOOL_PREFIX):
+                            delegation_calls.append(tc)
+                        else:
+                            regular_calls.append(tc)
+
+                    # Execute regular tool calls in parallel
+                    if regular_calls:
+                        for tc in regular_calls:
+                            await self.memory.add_event(
+                                session_id,
+                                "tool_call",
+                                {"tool": tc.name, "arguments": tc.arguments},
+                            )
+                            yield json.dumps(
+                                {
+                                    "type": "progress",
+                                    "step": step + 1,
+                                    "max_steps": self.max_steps,
+                                    "action": "tool_call",
+                                    "target": tc.name,
+                                }
+                            )
+
+                        async def _exec_tool(tc: ToolCall) -> Dict[str, Any]:
+                            try:
+                                result = await self._execute_tool(tc.name, tc.arguments)
+                                await self.memory.add_event(
+                                    session_id,
+                                    "tool_result",
+                                    {"tool": tc.name, "result": result},
+                                )
+                                return {
+                                    "role": "tool",
+                                    "tool_call_id": tc.id,
+                                    "content": f"{_step_context(step)} Tool result: {json.dumps(result)}",
+                                }
+                            except Exception as e:
+                                error_msg = str(e)
+                                await self.memory.add_event(
+                                    session_id,
+                                    "tool_error",
+                                    {"tool": tc.name, "error": error_msg},
+                                )
+                                return {
+                                    "role": "tool",
+                                    "tool_call_id": tc.id,
+                                    "content": f"{_step_context(step)} Tool execution failed: {error_msg}",
+                                }
+
+                        tool_results = await asyncio.gather(
+                            *[_exec_tool(tc) for tc in regular_calls]
+                        )
+                        messages.extend(tool_results)
+
+                    # Execute delegation calls sequentially (order may matter)
+                    for tc in delegation_calls:
                         agent_name = tc.name[len(DELEGATION_TOOL_PREFIX) :]
                         task = tc.arguments.get("task", "")
 
@@ -443,8 +500,7 @@ class Agent:
                             )
                             continue
 
-                        # Emit progress block
-                        progress = json.dumps(
+                        yield json.dumps(
                             {
                                 "type": "progress",
                                 "step": step + 1,
@@ -453,7 +509,6 @@ class Agent:
                                 "target": agent_name,
                             }
                         )
-                        yield progress
 
                         try:
                             context_messages = [m for m in messages if m.get("role") != "system"]
@@ -467,7 +522,6 @@ class Agent:
                                     "content": f"{_step_context(step)} Agent response: {delegation_result}",
                                 }
                             )
-                            continue
                         except ValueError as e:
                             messages.append(
                                 {
@@ -476,60 +530,8 @@ class Agent:
                                     "content": f"{_step_context(step)} Delegation failed: {e}",
                                 }
                             )
-                            continue
-                    else:
-                        # Regular tool call
-                        tool_name = tc.name
-                        tool_args = tc.arguments
 
-                        await self.memory.add_event(
-                            session_id,
-                            "tool_call",
-                            {"tool": tool_name, "arguments": tool_args},
-                        )
-
-                        # Emit progress block
-                        progress = json.dumps(
-                            {
-                                "type": "progress",
-                                "step": step + 1,
-                                "max_steps": self.max_steps,
-                                "action": "tool_call",
-                                "target": tool_name,
-                            }
-                        )
-                        yield progress
-
-                        try:
-                            tool_result = await self._execute_tool(tool_name, tool_args)
-                            await self.memory.add_event(
-                                session_id,
-                                "tool_result",
-                                {"tool": tool_name, "result": tool_result},
-                            )
-                            messages.append(
-                                {
-                                    "role": "tool",
-                                    "tool_call_id": tc.id,
-                                    "content": f"{_step_context(step)} Tool result: {json.dumps(tool_result)}",
-                                }
-                            )
-                            continue
-                        except Exception as e:
-                            error_msg = str(e)
-                            await self.memory.add_event(
-                                session_id,
-                                "tool_error",
-                                {"tool": tool_name, "error": error_msg},
-                            )
-                            messages.append(
-                                {
-                                    "role": "tool",
-                                    "tool_call_id": tc.id,
-                                    "content": f"{_step_context(step)} Tool execution failed: {error_msg}",
-                                }
-                            )
-                            continue
+                    continue
 
                 # No tool calls - model wants to respond directly, proceed to Phase 2
                 break
