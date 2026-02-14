@@ -38,6 +38,9 @@ spec:
     # Max reasoning loop iterations (1-20, default: 5)
     reasoningLoopMaxSteps: 5
     
+    # Function calling mode: "native" (default) or "text"
+    functionCalling: native
+    
     # Memory system configuration
     memory:
       enabled: true           # Enable/disable memory (default: true)
@@ -192,6 +195,29 @@ config:
 ```
 
 The reasoning loop runs tool calls and delegations until the model produces a final response or max steps is reached.
+
+#### config.functionCalling
+
+Controls how the agent communicates tool usage with the language model:
+
+```yaml
+config:
+  functionCalling: native  # Default: "native", Options: "native" | "text"
+```
+
+| Value | Behavior | When to Use |
+|-------|----------|-------------|
+| `native` (default) | Sends tools via the OpenAI `tools` API parameter. The model returns structured `tool_calls` in its response. | Models with native function calling support (GPT-4, Claude, Mistral Large, Llama 3, etc.) |
+| `text` | Includes tool descriptions in the system prompt. The model returns tool calls as JSON in its text response. The agent parses the JSON using text matching. | Models without function calling support (smaller models, Ollama local models like smollm2, etc.) |
+
+**Native mode** provides more reliable tool dispatch since the model uses structured output for tool calls. If a model is configured with `native` mode but doesn't return `tool_calls` when tools are available, the agent raises an error.
+
+**Text mode** is the fallback for models that don't support the `tools` API parameter. The text parser handles nested JSON, escaped quotes, multiple JSON objects, and code-fenced JSON blocks.
+
+**Sub-agent delegation:**
+
+- **Native mode**: Sub-agents are registered as tools named `delegate_to_<agent-name>`. The model delegates by calling these tools with a `{"task": "..."}` argument.
+- **Text mode**: Sub-agents are delegated using the `{"agent": "<name>", "task": "..."}` JSON format in the model's text response.
 
 #### config.memory
 
