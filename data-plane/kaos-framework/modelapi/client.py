@@ -134,7 +134,7 @@ class ModelAPI:
 
         # Call real API
         if stream:
-            return self._stream_response(messages, seed=seed, tools=tools)
+            return await self._stream_response(messages, seed=seed, tools=tools)
         return await self._complete_response(messages, seed=seed, tools=tools)
 
     async def _complete_response(
@@ -192,13 +192,26 @@ class ModelAPI:
         messages: List[Dict[str, str]],
         seed: Optional[int] = None,
         tools: Optional[List[dict]] = None,
+    ) -> Union[AsyncIterator[str], "ModelResponse"]:
+        """Streaming completion - returns text iterator or ModelResponse.
+
+        When tools are provided, consumes the entire stream and accumulates
+        tool call deltas into a ModelResponse (needed for agentic loop Phase 1).
+        When no tools, returns an async iterator yielding text chunks.
+        """
+        if tools:
+            return await self._accumulate_stream(messages, seed=seed, tools=tools)
+        return self._stream_text(messages, seed=seed)
+
+    async def _stream_text(
+        self,
+        messages: List[Dict[str, str]],
+        seed: Optional[int] = None,
     ) -> AsyncIterator[str]:
-        """Streaming completion - yields content chunks."""
+        """Stream text content chunks via SSE."""
         payload: Dict[str, Any] = {"model": self.model, "messages": messages, "stream": True}
         if seed is not None:
             payload["seed"] = seed
-        if tools is not None:
-            payload["tools"] = tools
 
         try:
             async with self.client.stream(
@@ -229,6 +242,94 @@ class ModelAPI:
         except httpx.HTTPError as e:
             logger.error(f"HTTP error in streaming: {e}")
             raise
+
+    async def _accumulate_stream(
+        self,
+        messages: List[Dict[str, str]],
+        seed: Optional[int] = None,
+        tools: Optional[List[dict]] = None,
+    ) -> "ModelResponse":
+        """Consume stream fully, accumulating tool call deltas into ModelResponse.
+
+        OpenAI streaming sends tool calls as deltas across multiple chunks:
+        - First chunk has index, id, function name
+        - Subsequent chunks append to function arguments
+        This method accumulates all deltas and builds complete ToolCall objects.
+        """
+        payload: Dict[str, Any] = {"model": self.model, "messages": messages, "stream": True}
+        if seed is not None:
+            payload["seed"] = seed
+        if tools is not None:
+            payload["tools"] = tools
+
+        tool_calls_by_index: Dict[int, dict] = {}
+        content_parts: List[str] = []
+
+        try:
+            async with self.client.stream(
+                "POST",
+                "/v1/chat/completions",
+                json=payload,
+                headers={"Accept": "text/event-stream"},
+            ) as response:
+                response.raise_for_status()
+
+                async for line in response.aiter_lines():
+                    line = line.strip()
+                    if not line or not line.startswith("data: "):
+                        continue
+                    data_str = line[6:]
+                    if data_str == "[DONE]" or not data_str.strip():
+                        continue
+                    try:
+                        data = json.loads(data_str)
+                        if "choices" not in data or not data["choices"]:
+                            continue
+                        delta = data["choices"][0].get("delta", {})
+
+                        # Accumulate tool call deltas
+                        if "tool_calls" in delta:
+                            for tc_delta in delta["tool_calls"]:
+                                idx = tc_delta["index"]
+                                if idx not in tool_calls_by_index:
+                                    tool_calls_by_index[idx] = {
+                                        "id": "",
+                                        "name": "",
+                                        "arguments": "",
+                                    }
+                                if "id" in tc_delta:
+                                    tool_calls_by_index[idx]["id"] = tc_delta["id"]
+                                if "function" in tc_delta:
+                                    fn = tc_delta["function"]
+                                    if "name" in fn:
+                                        tool_calls_by_index[idx]["name"] += fn["name"]
+                                    if "arguments" in fn:
+                                        tool_calls_by_index[idx]["arguments"] += fn["arguments"]
+
+                        # Accumulate content
+                        if "content" in delta and delta["content"]:
+                            content_parts.append(delta["content"])
+                    except json.JSONDecodeError:
+                        pass
+
+        except httpx.HTTPError as e:
+            logger.error(f"HTTP error in stream accumulation: {e}")
+            raise
+
+        # Build ToolCall objects sorted by index
+        tool_calls = None
+        if tool_calls_by_index:
+            tool_calls = [
+                ToolCall(
+                    id=tool_calls_by_index[i]["id"],
+                    name=tool_calls_by_index[i]["name"],
+                    arguments=tool_calls_by_index[i]["arguments"],
+                )
+                for i in sorted(tool_calls_by_index.keys())
+            ]
+
+        content = "".join(content_parts) if content_parts else None
+        return ModelResponse(content=content, tool_calls=tool_calls)
 
     async def close(self):
         """Close HTTP client and cleanup resources."""
