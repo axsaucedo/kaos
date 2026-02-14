@@ -61,7 +61,7 @@ For CLI/UI documentation, see the [CLI Guide](https://axsaucedo.github.io/kaos/c
 pip install kaos-cli
 
 # Install KAOS in your cluster
-kaos install
+kaos system install
 
 # Create a few resources
 kaos modelapi deploy my-api --mode Hosted --model "smollm2:135m"

@@ -27,7 +27,7 @@ pip install kaos-cli
 ### Step 2: Install the Operator
 
 ```bash
-kaos install
+kaos system install
 ```
 
 This installs the KAOS operator to your cluster using the published Helm chart.

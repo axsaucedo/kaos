@@ -371,7 +371,7 @@ helm install signoz signoz/signoz -n monitoring --create-namespace
 
 2. Install KAOS with telemetry pointing to SigNoz:
 ```bash
-kaos install --set telemetry.enabled=true \
+kaos system install --set telemetry.enabled=true \
   --set telemetry.endpoint=http://signoz-otel-collector.monitoring:4317
 ```
 

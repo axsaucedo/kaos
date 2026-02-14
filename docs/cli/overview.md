@@ -23,7 +23,7 @@ pipx install kaos-cli
 Install the KAOS operator to your Kubernetes cluster:
 
 ```bash
-kaos install
+kaos system install
 ```
 
 This installs the operator to the `kaos-system` namespace using Helm.

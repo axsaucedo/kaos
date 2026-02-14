@@ -117,7 +117,7 @@ def ui_command(
                 err=True,
             )
             typer.echo(
-                "  2. Install KAOS with telemetry enabled: kaos install --set telemetry.enabled=true --set telemetry.endpoint=http://signoz-otel-collector.monitoring:4317",
+                "  2. Install KAOS with telemetry enabled: kaos system install --set telemetry.enabled=true --set telemetry.endpoint=http://signoz-otel-collector.monitoring:4317",
                 err=True,
             )
             raise typer.Exit(1)
