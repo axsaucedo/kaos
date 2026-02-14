@@ -62,6 +62,7 @@ def create_multi_agent_resources(
             "config": {
                 "description": "Worker agent 1",
                 "instructions": f"You are {worker1_name}. Always mention '{worker1_name}' in responses. Be brief.",
+                "functionCalling": "text",
             },
             "container": {"env": get_env(worker1_name, f"You are {worker1_name}.")},
             "agentNetwork": {"access": []},
@@ -78,6 +79,7 @@ def create_multi_agent_resources(
             "config": {
                 "description": "Worker agent 2",
                 "instructions": f"You are {worker2_name}. Always mention '{worker2_name}' in responses. Be brief.",
+                "functionCalling": "text",
             },
             "container": {"env": get_env(worker2_name, f"You are {worker2_name}.")},
             "agentNetwork": {"access": []},
@@ -94,6 +96,7 @@ def create_multi_agent_resources(
             "config": {
                 "description": "Coordinator agent",
                 "instructions": f"You are the coordinator. You manage {worker1_name} and {worker2_name}.",
+                "functionCalling": "text",
             },
             "container": {"env": get_env(coord_name, "You are the coordinator.")},
             "agentNetwork": {"access": [worker1_name, worker2_name]},

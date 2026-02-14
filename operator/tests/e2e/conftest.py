@@ -479,6 +479,7 @@ def create_agent_resource(
     config = {
         "description": "E2E test echo agent",
         "instructions": "You are a helpful test assistant.",
+        "functionCalling": "text",
     }
 
     if reasoning_loop_max_steps is not None:

@@ -96,6 +96,7 @@ def create_agent_with_mcp(
                 "description": "Agent with MCP tools",
                 "instructions": "You have access to echo and reverse tools. Use them to help users.",
                 "reasoningLoopMaxSteps": 5,
+                "functionCalling": "text",
             },
             "container": {"env": env},
             "agentNetwork": {"access": []},
@@ -342,6 +343,7 @@ async def test_agent_multiple_mcp_servers(test_namespace: str, shared_modelapi: 
             "config": {
                 "description": "Agent with multiple MCP tools",
                 "instructions": "You have access to echo, reverse, and uppercase tools.",
+                "functionCalling": "text",
             },
             "container": {
                 "env": [

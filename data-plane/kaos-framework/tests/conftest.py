@@ -182,6 +182,7 @@ def multi_agent_cluster():
             "MODEL_API_URL": os.getenv("MODEL_API_URL", "http://localhost:11434/v1"),
             "MODEL_NAME": os.getenv("MODEL_NAME", "smollm2:135m"),
             "AGENT_LOG_LEVEL": "INFO",
+            "FUNCTION_CALLING": "text",
         },
         "worker-2": {
             "AGENT_NAME": "worker-2",
@@ -191,6 +192,7 @@ def multi_agent_cluster():
             "MODEL_API_URL": os.getenv("MODEL_API_URL", "http://localhost:11434/v1"),
             "MODEL_NAME": os.getenv("MODEL_NAME", "smollm2:135m"),
             "AGENT_LOG_LEVEL": "INFO",
+            "FUNCTION_CALLING": "text",
         },
         "coordinator": {
             "AGENT_NAME": "coordinator",
@@ -203,6 +205,7 @@ def multi_agent_cluster():
             "PEER_AGENT_WORKER_1_CARD_URL": "http://localhost:8012/.well-known/agent",
             "PEER_AGENT_WORKER_2_CARD_URL": "http://localhost:8013/.well-known/agent",
             "AGENT_LOG_LEVEL": "INFO",
+            "FUNCTION_CALLING": "text",
         },
     }
 
@@ -337,6 +340,7 @@ def agent_server(mcp_server):
                 "MCP_SERVERS": "echo_server",
                 "MCP_SERVER_ECHO_SERVER_URL": mcp_server.url,
                 "AGENT_LOG_LEVEL": "INFO",
+                "FUNCTION_CALLING": "text",
             },
         )
 
@@ -366,6 +370,7 @@ def agent_server_no_mcp():
                 "MODEL_API_URL": os.getenv("MODEL_API_URL", "http://localhost:11434/v1"),
                 "MODEL_NAME": os.getenv("MODEL_NAME", "smollm2:135m"),
                 "AGENT_LOG_LEVEL": "INFO",
+                "FUNCTION_CALLING": "text",
             },
         )
 
