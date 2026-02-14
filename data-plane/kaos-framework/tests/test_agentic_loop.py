@@ -531,6 +531,41 @@ class TestSystemPromptBuilding:
         logger.info("✓ Tools param includes delegation tools")
 
     @pytest.mark.asyncio
+    async def test_unavailable_sub_agents_excluded_from_tools(self):
+        """Test that unavailable sub-agents are not registered as tools."""
+        mock_model = MockModelAPI(responses=["test"])
+
+        active_remote = RemoteAgent(name="active-worker", card_url="http://localhost:9999")
+        active_remote.agent_card = type(  # type: ignore[assignment]
+            "AgentCard",
+            (),
+            {
+                "name": "active-worker",
+                "description": "Active worker",
+                "url": "http://localhost:9999",
+                "capabilities": [],
+            },
+        )()
+        active_remote._active = True
+
+        inactive_remote = RemoteAgent(name="dead-worker", card_url="http://localhost:9998")
+        inactive_remote._active = False
+
+        agent = Agent(
+            name="coordinator",
+            model_api=mock_model,
+            sub_agents=[active_remote, inactive_remote],
+        )
+
+        tools = await agent._build_tools_param()
+        assert tools is not None
+        tool_names = [t["function"]["name"] for t in tools]
+        assert "delegate_to_active-worker" in tool_names
+        assert "delegate_to_dead-worker" not in tool_names
+
+        logger.info("✓ Unavailable sub-agents excluded from tools")
+
+    @pytest.mark.asyncio
     async def test_system_prompt_includes_user_provided_prompt(self):
         """Test that system prompt includes user-provided system prompt."""
         mock_model = MockModelAPI(responses=["Response with user context."])

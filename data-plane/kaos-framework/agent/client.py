@@ -218,13 +218,19 @@ class Agent:
                 }
                 tools.append(tool_def)
 
-        # Add delegation tools for sub-agents
+        # Add delegation tools for sub-agents (skip unavailable)
         for sub_agent in self.sub_agents.values():
             if not sub_agent._active:
                 await sub_agent._init()
 
+            if not sub_agent._active:
+                logger.warning(
+                    f"Sub-agent '{sub_agent.name}' is unavailable, skipping tool registration"
+                )
+                continue
+
             description = f"Delegate a task to the {sub_agent.name} agent."
-            if sub_agent._active and sub_agent.agent_card:
+            if sub_agent.agent_card:
                 description = (
                     f"Delegate a task to the {sub_agent.agent_card.name} agent: "
                     f"{sub_agent.agent_card.description}"
