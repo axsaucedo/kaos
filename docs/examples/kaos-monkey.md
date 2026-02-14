@@ -107,12 +107,11 @@ kubectl wait pod/chaos-victim --for=condition=ready --timeout=60s
 Create the agent with mock responses. The `--mock-response` flag can be used multiple times - each response is consumed in sequence:
 
 ```bash
-# Build mock responses with JSON action format
-# Two-phase loop: action1 -> action2 -> no-action -> final
-MOCK1='{"tool": "pods_list", "arguments": {"namespace": "'$NAMESPACE'"}}'
-MOCK2='{"tool": "pods_delete", "arguments": {"namespace": "'$NAMESPACE'", "name": "chaos-victim"}}'
-MOCK3='{}'
-MOCK4='Done! I have deleted the chaos-victim pod to simulate a failure scenario.'
+# Build mock responses with native tool_calls format
+# Each tool call response triggers real MCP tool execution
+MOCK1='{"tool_calls": [{"id": "call_1", "name": "pods_list", "arguments": {"namespace": "'$NAMESPACE'"}}]}'
+MOCK2='{"tool_calls": [{"id": "call_2", "name": "pods_delete", "arguments": {"namespace": "'$NAMESPACE'", "name": "chaos-victim"}}]}'
+MOCK3='Done! I have deleted the chaos-victim pod to simulate a failure scenario.'
 
 kaos agent deploy kaos-monkey \
     --modelapi chaos-api \
@@ -122,7 +121,6 @@ kaos agent deploy kaos-monkey \
     --mock-response "$MOCK1" \
     --mock-response "$MOCK2" \
     --mock-response "$MOCK3" \
-    --mock-response "$MOCK4" \
     --expose \
     --wait
 ```
@@ -154,7 +152,7 @@ else:
 
 ## Understanding Mock Responses
 
-The mock responses include JSON action blocks (e.g., `{"tool": "..."}`) that trigger **real** MCP tool execution - only the LLM reasoning is mocked.
+The mock responses use `tool_calls` format (e.g., `{"tool_calls": [{"id": "...", "name": "...", "arguments": {...}}]}`) that trigger **real** MCP tool execution via native function calling - only the LLM reasoning is mocked.
 
 This is essential for:
 - **Testing**: Deterministic behavior in CI/CD

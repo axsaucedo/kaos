@@ -96,7 +96,7 @@ kaos agent deploy analyst \
 
 ## Step 4: Create the Coordinator Agent
 
-Create the coordinator that delegates to specialists. The coordinator uses multiple mock responses - one for each step of its reasoning:
+Create the coordinator that delegates to specialists. The coordinator uses mock responses with native `tool_calls` format for delegation:
 
 
 ```bash
@@ -104,9 +104,8 @@ kaos agent deploy coordinator \
     --modelapi team-api \
     --model mock-model \
     --instructions "You are a coordinator that delegates to specialist agents." \
-    --mock-response '{"agent": "researcher", "task": "Research AI adoption trends in enterprises"}' \
-    --mock-response '{"agent": "analyst", "task": "Analyze the growth patterns from the research"}' \
-    --mock-response '{}' \
+    --mock-response '{"tool_calls": [{"id": "call_1", "name": "delegate_to_researcher", "arguments": {"task": "Research AI adoption trends in enterprises"}}]}' \
+    --mock-response '{"tool_calls": [{"id": "call_2", "name": "delegate_to_analyst", "arguments": {"task": "Analyze the growth patterns from the research"}}]}' \
     --mock-response "Based on input from my team: AI is growing with 40% YoY growth, especially in customer service automation." \
     --sub-agent researcher \
     --sub-agent analyst \
@@ -172,18 +171,18 @@ This sends traces and metrics to your OTEL collector for observability.
 
 ## How Delegation Works
 
-The coordinator's mock responses include JSON delegation actions:
+The coordinator's mock responses use native `tool_calls` format for delegation:
 
 ```json
-{"agent": "researcher", "task": "Research AI trends"}
+{"tool_calls": [{"id": "call_1", "name": "delegate_to_researcher", "arguments": {"task": "Research AI trends"}}]}
 ```
 
-When the agent framework sees this, it:
-1. Looks up the `researcher` agent in the sub-agents list
+When the agent framework sees a `delegate_to_{name}` tool call, it:
+1. Extracts the agent name from the tool name (e.g., `delegate_to_researcher` → `researcher`)
 2. Sends the task as a message to that agent
 3. Waits for the response
-4. Includes the response in the conversation context
-5. Continues to the next mock response
+4. Includes the response in the conversation context as a tool result
+5. Continues to the next model call
 
 ## Cleanup
 
