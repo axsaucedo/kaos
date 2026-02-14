@@ -27,6 +27,10 @@ cd data-plane/kaos-framework && source .venv/bin/activate
 python -m pytest tests/ -v      # Tests
 make lint                       # Linting (required for CI)
 
+# CLI (kaos-cli)
+cd kaos-cli && source .venv/bin/activate
+python -m pytest tests/ -v      # CLI integration tests
+
 # Go (operator)
 cd operator
 make generate manifests         # After changing CRD types
@@ -53,7 +57,9 @@ kaos-cli/                  # CLI tool
 ├── kaos_cli/system/       # System commands (install, create-rbac)
 ├── kaos_cli/mcp/          # MCP commands (init, build, deploy)
 ├── kaos_cli/agent/        # Agent commands
-└── kaos_cli/modelapi/     # ModelAPI commands
+├── kaos_cli/modelapi/     # ModelAPI commands
+├── kaos_cli/samples/      # Samples commands (list, deploy, delete)
+└── tests/                 # CLI integration tests (dry-run YAML validation)
 
 operator/                  # K8s operator (Go, kubebuilder)
 ├── api/v1alpha1/          # CRD definitions
