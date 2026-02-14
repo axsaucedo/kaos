@@ -188,25 +188,28 @@ kaos mcp deploy unified-gateway --runtime pctx --params "$PCTX_CONFIG" --wait
 Create an agent connected to the pctx gateway. The mock responses demonstrate Code Mode - the agent writes TypeScript that calls multiple tools in sequence using pctx's `execute` tool:
 
 ```bash
-# Define the mock code response with formatted TypeScript
+# Define the mock code response with native tool_calls format
 # pctx exposes the "execute" tool for running TypeScript code
 # Note: Use spaces or escaped tabs (\\t) - literal tabs break JSON parsing
 MOCK_CODE="{\
-  \"tool\": \"execute\",\
-  \"arguments\": {\
-    \"code\": \"\
-        async function run() {\
-            const sum = await Calc.add({a: 42, b: 8});\
-            const product = await Calc.multiply({x: sum.result, y: 2});\
-            const squared = await Calc.power({base: product.result, exponent: 2});\
-            const wc = await Text.wordCount({text: 'The answer is ' + squared.result});\
-            const result = await Text.uppercase({text: 'RESULT: ' + squared.result + ' (' + wc.result + ' words)'});\
-            return result;\
-        }\"\
-  }\
+  \"tool_calls\": [{\
+    \"id\": \"call_1\",\
+    \"name\": \"execute\",\
+    \"arguments\": {\
+      \"code\": \"\
+          async function run() {\
+              const sum = await Calc.add({a: 42, b: 8});\
+              const product = await Calc.multiply({x: sum.result, y: 2});\
+              const squared = await Calc.power({base: product.result, exponent: 2});\
+              const wc = await Text.wordCount({text: 'The answer is ' + squared.result});\
+              const result = await Text.uppercase({text: 'RESULT: ' + squared.result + ' (' + wc.result + ' words)'});\
+              return result;\
+          }\"\
+    }\
+  }]\
 }"
 
-MOCK_END='{}'
+MOCK_FINAL_LOOP='No more actions needed.'
 MOCK_FINAL='I executed a complex calculation chain: 42+8=50, 50*2=100, 100^2=10000. The final result formatted in uppercase is "RESULT: 10000 (4 WORDS)".'
 
 kaos agent deploy gateway-agent \
@@ -215,7 +218,7 @@ kaos agent deploy gateway-agent \
     --mcp unified-gateway \
     --instructions "You use Code Mode to orchestrate multiple tools efficiently." \
     --mock-response "$MOCK_CODE" \
-    --mock-response "$MOCK_END" \
+    --mock-response "$MOCK_FINAL_LOOP" \
     --mock-response "$MOCK_FINAL" \
     --expose \
     --wait

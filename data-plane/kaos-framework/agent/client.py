@@ -2,23 +2,26 @@
 Agent client implementation for OpenAI-compatible API.
 
 Clean, simple implementation with proper streaming support and tool integration.
-Includes agentic loop for tool calling and agent delegation.
+Includes agentic loop using native OpenAI function calling for tool execution
+and agent delegation.
 Instrumented with OpenTelemetry for tracing and metrics.
 
 Key design principles:
-- Agent decides when to delegate/call tools based on model response
+- Agent uses native OpenAI tools API for structured tool calling
+- Sub-agent delegation exposed as delegate_to_{name} tool functions
 - Server only routes requests, never interprets delegation
 - DEBUG_MOCK_RESPONSES env var handled by ModelAPI for testing
 - RemoteAgent.process_message() uses /v1/chat/completions
 """
 
+import asyncio
 import json
 import logging
 from typing import List, Dict, Any, Optional, AsyncIterator, Union, cast
 import httpx
 from dataclasses import dataclass
 
-from modelapi.client import ModelAPI
+from modelapi.client import ModelAPI, ModelResponse, ToolCall
 from agent.memory import LocalMemory, NullMemory
 from mcptools.client import MCPClient
 from telemetry.manager import (
@@ -36,29 +39,7 @@ logger = logging.getLogger(__name__)
 # Type alias for memory implementations
 Memory = LocalMemory | NullMemory
 
-# System prompt templates for agentic loop
-TOOLS_INSTRUCTIONS = """
-To use a tool, include this JSON in your response:
-{"tool": "tool_name", "arguments": {"arg1": "value1"}}
-
-You may include reasoning or context before/after the JSON.
-Wait for the tool result before providing your final answer.
-"""
-
-AGENT_INSTRUCTIONS = """
-To delegate a task to another agent, include this JSON in your response:
-{"agent": "agent_name", "task": "task description"}
-
-You may include reasoning or context before/after the JSON.
-Wait for the agent's response before providing your final answer.
-"""
-
-NO_ACTION_INSTRUCTIONS = """
-When you have all the information needed to provide a final answer, include:
-{}
-
-Then the system will ask you to provide your final response.
-"""
+DELEGATION_TOOL_PREFIX = "delegate_to_"
 
 
 @dataclass
@@ -210,93 +191,83 @@ class Agent:
 
         logger.info(f"Agent initialized: {name}")
 
-    async def _get_tools_prompt(self) -> Optional[str]:
-        """Build complete tools section for system prompt.
+    async def _build_tools_param(self) -> Optional[List[Dict[str, Any]]]:
+        """Build OpenAI tools parameter from MCP tools and sub-agents.
 
         Returns:
-            Complete tools section with header and instructions, or None if no tools.
+            List of tool definitions in OpenAI format, or None if no tools.
         """
-        if not self.mcp_clients:
-            return None
+        tools = []
 
-        tools_desc = []
+        # Add MCP tools
         for mcp_client in self.mcp_clients:
             if not mcp_client._active:
                 await mcp_client._init()
             for tool in mcp_client.get_tools():
-                # Use input_schema (MCP standard) for parameter description
                 schema = tool.input_schema if tool.input_schema else {}
-                params_str = json.dumps(schema, indent=2) if schema else "{}"
-                tools_desc.append(
-                    f"- **{tool.name}**: {tool.description}\n  Parameters: {params_str}"
-                )
+                tool_def = {
+                    "type": "function",
+                    "function": {
+                        "name": tool.name,
+                        "description": tool.description,
+                        "parameters": schema if schema else {"type": "object", "properties": {}},
+                    },
+                }
+                tools.append(tool_def)
 
-        if not tools_desc:
-            return None
-
-        return "\n## Available Tools\n" + "\n".join(tools_desc) + "\n" + TOOLS_INSTRUCTIONS
-
-    async def _get_agents_prompt(self) -> Optional[str]:
-        """Build complete agents section for system prompt.
-
-        Returns:
-            Complete agents section with header and instructions, or None if no agents.
-        """
-        if not self.sub_agents:
-            return None
-
-        available = []
-        unavailable = []
-
+        # Add delegation tools for sub-agents (skip unavailable)
         for sub_agent in self.sub_agents.values():
             if not sub_agent._active:
                 await sub_agent._init()
 
-            if sub_agent._active and sub_agent.agent_card:
-                available.append(
-                    f"- **{sub_agent.agent_card.name}**: {sub_agent.agent_card.description}"
+            if not sub_agent._active:
+                logger.warning(
+                    f"Sub-agent '{sub_agent.name}' is unavailable, skipping tool registration"
                 )
-            else:
-                unavailable.append(f"- **{sub_agent.name}**: (unavailable)")
+                continue
 
-        if not available and not unavailable:
-            return None
+            description = f"Delegate a task to the {sub_agent.name} agent."
+            if sub_agent.agent_card:
+                description = (
+                    f"Delegate a task to the {sub_agent.agent_card.name} agent: "
+                    f"{sub_agent.agent_card.description}"
+                )
 
-        parts = available
-        if unavailable:
-            parts.append("\n**Unavailable agents:**")
-            parts.extend(unavailable)
+            tool_def = {
+                "type": "function",
+                "function": {
+                    "name": f"{DELEGATION_TOOL_PREFIX}{sub_agent.name}",
+                    "description": description,
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "task": {
+                                "type": "string",
+                                "description": "The task to delegate to the agent.",
+                            }
+                        },
+                        "required": ["task"],
+                    },
+                },
+            }
+            tools.append(tool_def)
 
-        return (
-            "\n## Available Agents for Delegation\n" + "\n".join(parts) + "\n" + AGENT_INSTRUCTIONS
-        )
+        return tools if tools else None
 
     async def _build_system_prompt(self, user_system_prompt: Optional[str] = None) -> str:
-        """Build enhanced system prompt with tools, agents info, and optional user prompt.
+        """Build system prompt for the agent.
 
         Args:
             user_system_prompt: Optional user-provided system prompt to merge.
 
         Returns:
-            Complete system prompt with clear section markers.
+            Complete system prompt.
         """
         parts = []
 
         # Agent's core system prompt
         parts.append("## Agent System Prompt")
         parts.append(self.instructions)
-
-        tools_prompt = await self._get_tools_prompt()
-        if tools_prompt:
-            parts.append(tools_prompt)
-
-        agents_prompt = await self._get_agents_prompt()
-        if agents_prompt:
-            parts.append(agents_prompt)
-
-        # Add no-action instruction if we have tools or agents
-        if tools_prompt or agents_prompt:
-            parts.append(NO_ACTION_INSTRUCTIONS)
 
         # User-provided system prompt (if any)
         if user_system_prompt:
@@ -307,56 +278,6 @@ class Agent:
             )
 
         return "\n".join(parts)
-
-    def _parse_action(self, content: str) -> Dict[str, Any]:
-        """Parse action JSON from model response.
-
-        Looks for a JSON object anywhere in the response that represents an action.
-        The model can include reasoning/context before or after the JSON.
-        Returns the parsed action dict, or empty dict if no valid action found.
-
-        Action formats:
-        - Tool call: {"tool": "name", "arguments": {...}}
-        - Delegation: {"agent": "name", "task": "..."}
-        - No action: {}
-        """
-        content = content.strip()
-
-        # Try to parse the entire content as JSON first (pure JSON response)
-        try:
-            parsed = json.loads(content)
-            if isinstance(parsed, dict):
-                return parsed
-        except json.JSONDecodeError:
-            pass
-
-        # Look for JSON objects in the content (may have surrounding text)
-        # Find all potential JSON objects using brace matching
-        i = 0
-        while i < len(content):
-            if content[i] == "{":
-                # Find matching closing brace
-                depth = 0
-                start = i
-                for j in range(i, len(content)):
-                    if content[j] == "{":
-                        depth += 1
-                    elif content[j] == "}":
-                        depth -= 1
-                        if depth == 0:
-                            candidate = content[start : j + 1]
-                            try:
-                                parsed = json.loads(candidate)
-                                if isinstance(parsed, dict):
-                                    # Check if it's a valid action (tool, agent, or empty)
-                                    if "tool" in parsed or "agent" in parsed or parsed == {}:
-                                        return parsed
-                            except json.JSONDecodeError:
-                                pass
-                            break
-            i += 1
-
-        return {}
 
     async def process_message(
         self,
@@ -414,10 +335,11 @@ class Agent:
                         user_system_prompt = msg.get("content", "")
                         break
 
-            # Build enhanced system prompt with tools/agents info
+            # Build system prompt and tools parameter
             system_prompt = await self._build_system_prompt(user_system_prompt)
+            tools_param = await self._build_tools_param()
             logger.debug(f"System prompt built ({len(system_prompt)} chars)")
-            logger.debug(f"System prompt preview: {system_prompt[:300]}...")
+            logger.debug(f"Tools param: {len(tools_param) if tools_param else 0} tools")
             messages = [{"role": "system", "content": system_prompt}]
 
             # Handle both string and array input formats
@@ -444,7 +366,9 @@ class Agent:
 
             # Agentic loop - iterate up to max_steps
             logger.debug(f"Starting agentic loop with {len(messages)} messages")
-            async for chunk in self._agentic_loop(messages, session_id, stream, seed=seed):
+            async for chunk in self._agentic_loop(
+                messages, session_id, stream, seed=seed, tools=tools_param
+            ):
                 yield chunk
 
         except Exception as e:
@@ -464,11 +388,12 @@ class Agent:
         session_id: str,
         stream: bool,
         seed: Optional[int] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
     ) -> AsyncIterator[str]:
-        """Execute the two-phase agentic loop with tracing.
+        """Execute the agentic loop using native OpenAI function calling.
 
-        Phase 1: Action collection - non-streaming model calls to collect tool/delegation results
-        Phase 2: Final response - streaming model call to produce the user-visible response
+        Phase 1: Action collection - model returns tool_calls which are executed
+        Phase 2: Final response - when model responds with content (no tool_calls)
         """
         model_name = self.model_api.model if self.model_api else "unknown"
 
@@ -476,161 +401,184 @@ class Agent:
             """Generate step context metadata for the model."""
             return f"[Step {step + 1}/{self.max_steps}]"
 
+        # Track whether any tools/delegations were executed in Phase 1
+        tools_executed = False
+
         # Phase 1: Action Collection Loop
-        for step in range(self.max_steps):
-            logger.debug(f"Agentic loop step {step + 1}/{self.max_steps}")
+        # Skip entirely if no tools available (tools is None) or max_steps is 0
+        if tools is not None and self.max_steps > 0:
+            for step in range(self.max_steps):
+                logger.debug(f"Agentic loop step {step + 1}/{self.max_steps}")
 
-            # Start step span
-            step_attrs = {"step": step + 1, "max_steps": self.max_steps, "phase": "action"}
-            otel.span_begin(f"agent.step.{step + 1}", attrs=step_attrs)
-            step_failed = False
-            try:
-                # Get model response (non-streaming for action collection)
-                content = await self._call_model(messages, model_name, seed=seed)
+                # Start step span
+                step_attrs = {"step": step + 1, "max_steps": self.max_steps, "phase": "action"}
+                otel.span_begin(f"agent.step.{step + 1}", attrs=step_attrs)
+                step_failed = False
+                try:
+                    # Get model response with tools
+                    response = await self._call_model(messages, model_name, seed=seed, tools=tools)
 
-                # Parse action from response
-                action = self._parse_action(content)
-
-                # Check for tool call
-                if action.get("tool"):
-                    tool_name = action["tool"]
-                    tool_args = action.get("arguments", {})
-
-                    await self.memory.add_event(session_id, "tool_call", action)
-
-                    # Emit progress block
-                    progress = json.dumps(
-                        {
-                            "type": "progress",
-                            "step": step + 1,
-                            "max_steps": self.max_steps,
-                            "action": "tool_call",
-                            "target": tool_name,
+                    # If model returned tool calls, execute them (supports parallel)
+                    if response.has_tool_calls:
+                        tools_executed = True
+                        # Add assistant message with ALL tool calls to conversation
+                        assistant_msg: Dict[str, Any] = {
+                            "role": "assistant",
+                            "content": response.content,
+                            "tool_calls": [
+                                {
+                                    "id": tc.id,
+                                    "type": "function",
+                                    "function": {
+                                        "name": tc.name,
+                                        "arguments": json.dumps(tc.arguments),
+                                    },
+                                }
+                                for tc in response.tool_calls
+                            ],
                         }
-                    )
-                    yield progress
+                        messages.append(assistant_msg)
 
-                    try:
-                        tool_result = await self._execute_tool(tool_name, tool_args)
+                        # Separate delegation and regular tool calls
+                        delegation_calls = []
+                        regular_calls = []
+                        for tc in response.tool_calls:
+                            if tc.name.startswith(DELEGATION_TOOL_PREFIX):
+                                delegation_calls.append(tc)
+                            else:
+                                regular_calls.append(tc)
 
+                        # Execute regular tool calls in parallel
+                        if regular_calls:
+                            for tc in regular_calls:
+                                await self.memory.add_event(
+                                    session_id,
+                                    "tool_call",
+                                    {"tool": tc.name, "arguments": tc.arguments},
+                                )
+                                yield json.dumps(
+                                    {
+                                        "type": "progress",
+                                        "step": step + 1,
+                                        "max_steps": self.max_steps,
+                                        "action": "tool_call",
+                                        "target": tc.name,
+                                    }
+                                )
+
+                            tool_results = await asyncio.gather(
+                                *[
+                                    self._execute_tool_with_memory(
+                                        tc, session_id, _step_context(step)
+                                    )
+                                    for tc in regular_calls
+                                ]
+                            )
+                            messages.extend(tool_results)
+
+                        # Execute delegation calls sequentially (order may matter)
+                        for tc in delegation_calls:
+                            agent_name = tc.name[len(DELEGATION_TOOL_PREFIX) :]
+                            task = tc.arguments.get("task", "")
+
+                            if not task:
+                                messages.append(
+                                    {
+                                        "role": "tool",
+                                        "tool_call_id": tc.id,
+                                        "content": f"{_step_context(step)} Invalid delegation: missing 'task'",
+                                    }
+                                )
+                                continue
+
+                            await self.memory.add_event(
+                                session_id,
+                                "tool_call",
+                                {"tool": tc.name, "arguments": tc.arguments},
+                            )
+
+                            yield json.dumps(
+                                {
+                                    "type": "progress",
+                                    "step": step + 1,
+                                    "max_steps": self.max_steps,
+                                    "action": "delegate",
+                                    "target": agent_name,
+                                }
+                            )
+
+                            try:
+                                context_messages = [
+                                    m for m in messages if m.get("role") != "system"
+                                ]
+                                delegation_result = await self._execute_delegation(
+                                    agent_name, task, context_messages, session_id
+                                )
+                                messages.append(
+                                    {
+                                        "role": "tool",
+                                        "tool_call_id": tc.id,
+                                        "content": f"{_step_context(step)} Agent response: {delegation_result}",
+                                    }
+                                )
+                            except ValueError as e:
+                                messages.append(
+                                    {
+                                        "role": "tool",
+                                        "tool_call_id": tc.id,
+                                        "content": f"{_step_context(step)} Delegation failed: {e}",
+                                    }
+                                )
+
+                        continue
+
+                    # No tool calls - model wants to respond directly, proceed to Phase 2
+                    if not response.content:
+                        logger.warning(
+                            f"Model returned no tool_calls and no content at step {step + 1}"
+                        )
                         await self.memory.add_event(
-                            session_id, "tool_result", {"tool": tool_name, "result": tool_result}
+                            session_id,
+                            "format_warning",
+                            f"Model returned empty response at step {step + 1}",
                         )
+                    break
 
-                        messages.append({"role": "assistant", "content": content})
-                        messages.append(
-                            {
-                                "role": "user",
-                                "content": f"{_step_context(step)} Tool result: {json.dumps(tool_result)}",
-                            }
-                        )
-                        continue
+                except Exception as e:
+                    step_failed = True
+                    otel.span_failure(e)
+                    raise
+                finally:
+                    if not step_failed:
+                        otel.span_success()
+            else:
+                # Max steps reached without completing - yield warning and return
+                max_steps_msg = f"Reached maximum reasoning steps ({self.max_steps})"
+                logger.warning(max_steps_msg)
+                yield max_steps_msg
+                return
 
-                    except Exception as e:
-                        error_msg = str(e)
-                        await self.memory.add_event(
-                            session_id, "tool_error", {"tool": tool_name, "error": error_msg}
-                        )
-                        messages.append({"role": "assistant", "content": content})
-                        messages.append(
-                            {
-                                "role": "user",
-                                "content": f"{_step_context(step)} Tool execution failed: {error_msg}",
-                            }
-                        )
-                        continue
-
-                # Check for delegation
-                if action.get("agent"):
-                    agent_name = action["agent"]
-                    task = action.get("task", "")
-
-                    if not task:
-                        messages.append({"role": "assistant", "content": content})
-                        messages.append(
-                            {
-                                "role": "user",
-                                "content": f"{_step_context(step)} Invalid delegation: missing 'task'",
-                            }
-                        )
-                        continue
-
-                    # Emit progress block
-                    progress = json.dumps(
-                        {
-                            "type": "progress",
-                            "step": step + 1,
-                            "max_steps": self.max_steps,
-                            "action": "delegate",
-                            "target": agent_name,
-                        }
-                    )
-                    yield progress
-
-                    try:
-                        context_messages = [m for m in messages if m.get("role") != "system"]
-
-                        delegation_result = await self._execute_delegation(
-                            agent_name, task, context_messages, session_id
-                        )
-
-                        messages.append({"role": "assistant", "content": content})
-                        messages.append(
-                            {
-                                "role": "user",
-                                "content": f"{_step_context(step)} Agent response: {delegation_result}",
-                            }
-                        )
-                        continue
-
-                    except ValueError as e:
-                        messages.append({"role": "assistant", "content": content})
-                        messages.append(
-                            {
-                                "role": "user",
-                                "content": f"{_step_context(step)} Delegation failed: {e}",
-                            }
-                        )
-                        continue
-
-                # No action (empty dict or no recognized action) - proceed to Phase 2
-                break
-
-            except Exception as e:
-                step_failed = True
-                otel.span_failure(e)
-                raise
-            finally:
-                if not step_failed:
-                    otel.span_success()
-        else:
-            # Max steps reached without completing - yield warning and return
-            max_steps_msg = f"Reached maximum reasoning steps ({self.max_steps})"
-            logger.warning(max_steps_msg)
-            yield max_steps_msg
-            return
-
-        # Phase 2: Final Response (streaming)
+        # Phase 2: Final Response
+        # Only inject context-gathering instruction when tools/delegations were executed
+        if tools_executed:
+            messages.append(
+                {
+                    "role": "user",
+                    "content": "Now provide your final response to the user based on the information gathered.",
+                }
+            )
         otel.span_begin("agent.response", attrs={"phase": "final", "stream": stream})
         final_failed = False
         try:
-            # Add instruction to provide final response
-            messages.append(
-                {"role": "user", "content": "Now provide your final response to the user."}
-            )
-
             if stream:
-                # True streaming from model
                 full_response = ""
                 async for chunk in self._call_model_streaming(messages, model_name, seed=seed):
                     full_response += chunk
                     yield chunk
-
-                # Record the complete response in memory
                 await self.memory.add_event(session_id, "agent_response", full_response)
             else:
-                # Non-streaming final response
-                content = await self._call_model(messages, model_name, seed=seed)
+                final_resp = await self._call_model(messages, model_name, seed=seed)
+                content = final_resp.content or ""
                 await self.memory.add_event(session_id, "agent_response", content)
                 yield content
 
@@ -672,9 +620,13 @@ class Agent:
                 otel.span_success()
 
     async def _call_model(
-        self, messages: List[Dict[str, str]], model_name: str, seed: Optional[int] = None
-    ) -> str:
-        """Call the model API with tracing."""
+        self,
+        messages: List[Dict[str, str]],
+        model_name: str,
+        seed: Optional[int] = None,
+        tools: Optional[List[Dict[str, Any]]] = None,
+    ) -> ModelResponse:
+        """Call the model API with tracing. Returns ModelResponse."""
         otel.span_begin(
             "model.inference",
             kind=SpanKind.CLIENT,
@@ -687,14 +639,22 @@ class Agent:
             logger.debug(f"Model call: {model_name}, messages count: {len(messages)}")
             # Log the last user message for debugging
             for msg in reversed(messages):
-                if msg.get("role") in ("user", "task-delegation"):
-                    logger.debug(f"Model input (last user msg): {msg.get('content', '')[:200]}...")
+                if msg.get("role") in ("user", "task-delegation", "tool"):
+                    logger.debug(f"Model input (last msg): {msg.get('content', '')[:200]}...")
                     break
-            content = cast(
-                str, await self.model_api.process_message(messages, stream=False, seed=seed)
+            response = await self.model_api.process_message(
+                messages, stream=False, seed=seed, tools=tools
             )
-            logger.debug(f"Model response ({len(content)} chars): {content[:200]}...")
-            return content
+            if isinstance(response, ModelResponse):
+                logger.debug(
+                    f"Model response: content={len(response.content or '')} chars, "
+                    f"tool_calls={len(response.tool_calls)}"
+                )
+                if not response.content and not response.has_tool_calls:
+                    logger.warning("Model returned response with neither content nor tool_calls")
+                return response
+            # Fallback for streaming iterator (shouldn't happen with stream=False)
+            return ModelResponse(content=str(response), finish_reason="stop")
         except Exception as e:
             failed = True
             logger.error(f"Model call failed: {type(e).__name__}: {e}")
@@ -703,6 +663,38 @@ class Agent:
         finally:
             if not failed:
                 otel.span_success()
+
+    async def _execute_tool_with_memory(
+        self, tc: ToolCall, session_id: str, step_context: str
+    ) -> Dict[str, Any]:
+        """Execute a tool call and record result/error in memory.
+
+        Returns a role='tool' message dict for appending to conversation.
+        """
+        try:
+            result = await self._execute_tool(tc.name, tc.arguments)  # type: ignore[arg-type]
+            await self.memory.add_event(
+                session_id,
+                "tool_result",
+                {"tool": tc.name, "result": result},
+            )
+            return {
+                "role": "tool",
+                "tool_call_id": tc.id,
+                "content": f"{step_context} Tool result: {json.dumps(result)}",
+            }
+        except Exception as e:
+            error_msg = str(e)
+            await self.memory.add_event(
+                session_id,
+                "tool_error",
+                {"tool": tc.name, "error": error_msg},
+            )
+            return {
+                "role": "tool",
+                "tool_call_id": tc.id,
+                "content": f"{step_context} Tool execution failed: {error_msg}",
+            }
 
     async def _execute_tool(self, tool_name: str, tool_args: Dict[str, Any]) -> Any:
         """Execute a tool with tracing."""

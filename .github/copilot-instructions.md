@@ -76,7 +76,8 @@ tmp/                       # Local work files (gitignored)
 - `operator/api/v1alpha1/*_types.go`: CRD schemas
 - `operator/controllers/*_controller.go`: Reconciliation logic
 - `operator/chart/`: Helm chart (generated from kustomize)
-- `data-plane/kaos-framework/agent/client.py`: Agent runtime core
+- `data-plane/kaos-framework/agent/client.py`: Agent runtime core (native function calling via OpenAI tools API)
+- `data-plane/kaos-framework/modelapi/client.py`: Model API client with `ModelResponse`/`ToolCall` dataclasses
 
 ## Testing Notes
 

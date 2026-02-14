@@ -13,7 +13,7 @@ from typing import List, Dict, Optional
 from agent.client import Agent, RemoteAgent, AgentCard
 from agent.memory import LocalMemory, NullMemory
 from agent.server import AgentServer
-from modelapi.client import ModelAPI, LiteLLM
+from modelapi.client import ModelAPI, ModelResponse, LiteLLM
 
 logger = logging.getLogger(__name__)
 
@@ -38,18 +38,18 @@ class MockModelAPI(ModelAPI):
         return False
 
     async def process_message(
-        self, messages: List[Dict], stream: bool = False, seed: Optional[int] = None
+        self, messages: List[Dict], stream: bool = False, seed: Optional[int] = None, tools=None
     ):
         """Return a mock response based on the name.
 
-        Returns str if stream=False, AsyncIterator[str] if stream=True.
+        Returns ModelResponse if stream=False, AsyncIterator[str] if stream=True.
         """
         self.call_count += 1
         user_msg = next((m["content"] for m in messages if m["role"] == "user"), "")
         content = f"[{self.name}] Response to: {user_msg}"
         if stream:
             return self._yield_content(content)
-        return content
+        return ModelResponse(content=content, finish_reason="stop")
 
     async def _yield_content(self, content: str):
         """Yield content as streaming chunks."""
@@ -502,7 +502,13 @@ class TestMockResponsesReset:
         import json
         from modelapi.client import _mock_responses_ctx
 
-        mock_responses = json.dumps(['{"tool": "test"}', "{}", "Final answer"])
+        # Mock responses: a tool_calls response, then text
+        mock_responses = json.dumps(
+            [
+                json.dumps({"tool_calls": [{"id": "call_1", "name": "test", "arguments": {}}]}),
+                "Final answer",
+            ]
+        )
         monkeypatch.setenv("DEBUG_MOCK_RESPONSES", mock_responses)
 
         # Create a real ModelAPI (will pick up env var)
@@ -511,33 +517,35 @@ class TestMockResponsesReset:
         # Verify mock responses template is configured
         assert model_api.has_mock_responses
         assert model_api._mock_responses_template is not None
-        assert len(model_api._mock_responses_template) == 3
+        assert len(model_api._mock_responses_template) == 2
 
         # Initially, context has no mock responses (not reset yet)
         assert _mock_responses_ctx.get() is None
 
-        # First reset - should set all 3 responses in context
+        # First reset - should set all 2 responses in context
         model_api.reset_mock_responses()
         ctx_responses = _mock_responses_ctx.get()
         assert ctx_responses is not None
-        assert len(ctx_responses) == 3
+        assert len(ctx_responses) == 2
 
         # Consume one response via process_message
         result = await model_api.process_message([{"role": "user", "content": "test"}])
-        assert result == '{"tool": "test"}'
+        assert isinstance(result, ModelResponse)
+        assert result.has_tool_calls
         ctx_after_consume = _mock_responses_ctx.get()
         assert ctx_after_consume is not None
-        assert len(ctx_after_consume) == 2
+        assert len(ctx_after_consume) == 1
 
-        # Reset again - should have all 3 responses again
+        # Reset again - should have all 2 responses again
         model_api.reset_mock_responses()
         ctx_after_reset = _mock_responses_ctx.get()
         assert ctx_after_reset is not None
-        assert len(ctx_after_reset) == 3
+        assert len(ctx_after_reset) == 2
 
         # Consume first response again (proves reset worked)
         result = await model_api.process_message([{"role": "user", "content": "test"}])
-        assert result == '{"tool": "test"}'
+        assert isinstance(result, ModelResponse)
+        assert result.has_tool_calls
 
         await model_api.close()
         logger.info("✓ Mock responses reset correctly per request")
@@ -555,8 +563,12 @@ class TestMockResponsesReset:
 
         # Consume all responses
         model_api.reset_mock_responses()
-        await model_api.process_message([{"role": "user", "content": "test"}])
-        await model_api.process_message([{"role": "user", "content": "test"}])
+        result1 = await model_api.process_message([{"role": "user", "content": "test"}])
+        assert isinstance(result1, ModelResponse)
+        assert result1.content == "response1"
+        result2 = await model_api.process_message([{"role": "user", "content": "test"}])
+        assert isinstance(result2, ModelResponse)
+        assert result2.content == "response2"
 
         # All consumed from context
         ctx_responses = _mock_responses_ctx.get()
