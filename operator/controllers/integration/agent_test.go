@@ -410,6 +410,177 @@ var _ = Describe("Agent Controller", func() {
 		// In a real cluster, the deployment would be garbage collected via OwnerReferences
 	})
 
+	It("should set FUNCTION_CALLING env var to native by default", func() {
+		modelAPIName := uniqueAgentName("fc-default-modelapi")
+		agentName := uniqueAgentName("fc-default-agent")
+
+		modelAPI := &kaosv1alpha1.ModelAPI{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      modelAPIName,
+				Namespace: namespace,
+			},
+			Spec: kaosv1alpha1.ModelAPISpec{
+				Mode: kaosv1alpha1.ModelAPIModeProxy,
+				ProxyConfig: &kaosv1alpha1.ProxyConfig{
+					Models: []string{"mock-model"},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, modelAPI)).To(Succeed())
+		defer func() {
+			k8sClient.Delete(ctx, modelAPI)
+		}()
+
+		agent := &kaosv1alpha1.Agent{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      agentName,
+				Namespace: namespace,
+			},
+			Spec: kaosv1alpha1.AgentSpec{
+				ModelAPI:            modelAPIName,
+				Model:               "mock-model",
+				WaitForDependencies: boolPtr(false),
+				Config: &kaosv1alpha1.AgentConfig{
+					Description: "Agent with default function calling",
+					// FunctionCalling not set — should default to "native"
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, agent)).To(Succeed())
+		defer func() {
+			k8sClient.Delete(ctx, agent)
+		}()
+
+		deployment := &appsv1.Deployment{}
+		Eventually(func() error {
+			return k8sClient.Get(ctx, types.NamespacedName{
+				Name:      fmt.Sprintf("agent-%s", agentName),
+				Namespace: namespace,
+			}, deployment)
+		}, timeout, interval).Should(Succeed())
+
+		container := deployment.Spec.Template.Spec.Containers[0]
+		envMap := make(map[string]string)
+		for _, env := range container.Env {
+			envMap[env.Name] = env.Value
+		}
+		Expect(envMap).To(HaveKeyWithValue("FUNCTION_CALLING", "native"))
+	})
+
+	It("should set FUNCTION_CALLING env var to text when specified", func() {
+		modelAPIName := uniqueAgentName("fc-text-modelapi")
+		agentName := uniqueAgentName("fc-text-agent")
+
+		modelAPI := &kaosv1alpha1.ModelAPI{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      modelAPIName,
+				Namespace: namespace,
+			},
+			Spec: kaosv1alpha1.ModelAPISpec{
+				Mode: kaosv1alpha1.ModelAPIModeProxy,
+				ProxyConfig: &kaosv1alpha1.ProxyConfig{
+					Models: []string{"mock-model"},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, modelAPI)).To(Succeed())
+		defer func() {
+			k8sClient.Delete(ctx, modelAPI)
+		}()
+
+		agent := &kaosv1alpha1.Agent{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      agentName,
+				Namespace: namespace,
+			},
+			Spec: kaosv1alpha1.AgentSpec{
+				ModelAPI:            modelAPIName,
+				Model:               "mock-model",
+				WaitForDependencies: boolPtr(false),
+				Config: &kaosv1alpha1.AgentConfig{
+					Description:     "Agent with text function calling",
+					FunctionCalling: "text",
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, agent)).To(Succeed())
+		defer func() {
+			k8sClient.Delete(ctx, agent)
+		}()
+
+		deployment := &appsv1.Deployment{}
+		Eventually(func() error {
+			return k8sClient.Get(ctx, types.NamespacedName{
+				Name:      fmt.Sprintf("agent-%s", agentName),
+				Namespace: namespace,
+			}, deployment)
+		}, timeout, interval).Should(Succeed())
+
+		container := deployment.Spec.Template.Spec.Containers[0]
+		envMap := make(map[string]string)
+		for _, env := range container.Env {
+			envMap[env.Name] = env.Value
+		}
+		Expect(envMap).To(HaveKeyWithValue("FUNCTION_CALLING", "text"))
+	})
+
+	It("should set FUNCTION_CALLING env var to native when explicitly specified", func() {
+		modelAPIName := uniqueAgentName("fc-native-modelapi")
+		agentName := uniqueAgentName("fc-native-agent")
+
+		modelAPI := &kaosv1alpha1.ModelAPI{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      modelAPIName,
+				Namespace: namespace,
+			},
+			Spec: kaosv1alpha1.ModelAPISpec{
+				Mode: kaosv1alpha1.ModelAPIModeProxy,
+				ProxyConfig: &kaosv1alpha1.ProxyConfig{
+					Models: []string{"mock-model"},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, modelAPI)).To(Succeed())
+		defer func() {
+			k8sClient.Delete(ctx, modelAPI)
+		}()
+
+		agent := &kaosv1alpha1.Agent{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      agentName,
+				Namespace: namespace,
+			},
+			Spec: kaosv1alpha1.AgentSpec{
+				ModelAPI:            modelAPIName,
+				Model:               "mock-model",
+				WaitForDependencies: boolPtr(false),
+				Config: &kaosv1alpha1.AgentConfig{
+					Description:     "Agent with explicit native function calling",
+					FunctionCalling: "native",
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, agent)).To(Succeed())
+		defer func() {
+			k8sClient.Delete(ctx, agent)
+		}()
+
+		deployment := &appsv1.Deployment{}
+		Eventually(func() error {
+			return k8sClient.Get(ctx, types.NamespacedName{
+				Name:      fmt.Sprintf("agent-%s", agentName),
+				Namespace: namespace,
+			}, deployment)
+		}, timeout, interval).Should(Succeed())
+
+		container := deployment.Spec.Template.Spec.Containers[0]
+		envMap := make(map[string]string)
+		for _, env := range container.Env {
+			envMap[env.Name] = env.Value
+		}
+		Expect(envMap).To(HaveKeyWithValue("FUNCTION_CALLING", "native"))
+	})
+
 	It("should fail agent when model is not supported by ModelAPI", func() {
 		modelAPIName := uniqueAgentName("unsupported-modelapi")
 		agentName := uniqueAgentName("unsupported-agent")
