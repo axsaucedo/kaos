@@ -125,17 +125,17 @@ class TestMaxStepsConfig:
         agent = Agent(name="test", model_api=model_api, max_steps=3)
         assert agent.max_steps == 3
 
-    def test_max_steps_zero_clamped_to_one(self):
-        """Test that max_steps=0 is clamped to 1."""
+    def test_max_steps_zero_allowed(self):
+        """Test that max_steps=0 is allowed (skips Phase 1 reasoning)."""
         model_api = MockModelAPI(["test"])
         agent = Agent(name="test", model_api=model_api, max_steps=0)
-        assert agent.max_steps == 1
+        assert agent.max_steps == 0
 
-    def test_max_steps_negative_clamped_to_one(self):
-        """Test that negative max_steps is clamped to 1."""
+    def test_max_steps_negative_allowed(self):
+        """Test that negative max_steps is allowed (skips Phase 1 reasoning)."""
         model_api = MockModelAPI(["test"])
         agent = Agent(name="test", model_api=model_api, max_steps=-5)
-        assert agent.max_steps == 1
+        assert agent.max_steps == -5
 
 
 class TestAgenticLoopToolCalling:
@@ -396,6 +396,58 @@ class TestAgenticLoopMaxSteps:
 
         logger.info("✓ Max steps limit works")
 
+    @pytest.mark.asyncio
+    async def test_no_tools_skips_phase1(self):
+        """Test that agent with no tools/agents skips Phase 1 entirely."""
+        mock_model = MockModelAPI(responses=["Direct response."])
+        memory = LocalMemory()
+
+        agent = Agent(
+            name="simple-agent",
+            model_api=mock_model,
+            memory=memory,
+            max_steps=5,
+        )
+
+        result = []
+        async for chunk in agent.process_message("Hello"):
+            result.append(chunk)
+
+        response = "".join(result)
+        assert "Direct response." in response
+        # Only 1 model call for Phase 2 (Phase 1 skipped)
+        assert mock_model.call_count == 1
+
+        logger.info("✓ No tools skips Phase 1")
+
+    @pytest.mark.asyncio
+    async def test_max_steps_zero_skips_phase1(self):
+        """Test that max_steps=0 skips Phase 1 even with tools available."""
+        mock_model = MockModelAPI(responses=["Direct response."])
+        mock_mcp = MockMCPClient(tools={"echo": ("Echo tool", {"result": "ok"})})
+        memory = LocalMemory()
+
+        agent = Agent(
+            name="no-reasoning-agent",
+            model_api=mock_model,
+            mcp_clients=[mock_mcp],
+            memory=memory,
+            max_steps=0,
+        )
+
+        result = []
+        async for chunk in agent.process_message("Hello"):
+            result.append(chunk)
+
+        response = "".join(result)
+        assert "Direct response." in response
+        # Only 1 model call for Phase 2 (Phase 1 skipped due to max_steps=0)
+        assert mock_model.call_count == 1
+        # No tools should have been called
+        assert len(mock_mcp.call_log) == 0
+
+        logger.info("✓ max_steps=0 skips Phase 1")
+
 
 class TestMemoryContextLimit:
     """Tests for configurable memory context limit."""
@@ -634,7 +686,7 @@ class TestSystemPromptBuilding:
 
         # Verify result
         assert len(result) > 0
-        assert mock_model.call_count == 2  # Phase 1 (no tools, breaks) + Phase 2 final
+        assert mock_model.call_count == 1  # No tools → Phase 1 skipped, Phase 2 only
 
         logger.info("✓ Process message merges user system prompt")
 
@@ -651,10 +703,8 @@ class TestMockResponseEnvVar:
         memory = LocalMemory()
 
         # Set mock responses via env var BEFORE creating ModelAPI
-        # Two responses: Phase 1 (breaks loop) + Phase 2 (final answer)
-        os.environ["DEBUG_MOCK_RESPONSES"] = json.dumps(
-            ["Phase 1 break", "Mocked response from env"]
-        )
+        # No tools → Phase 1 skipped, only Phase 2 response needed
+        os.environ["DEBUG_MOCK_RESPONSES"] = json.dumps(["Mocked response from env"])
 
         try:
             # Use real ModelAPI - it reads env var in __init__
@@ -834,11 +884,13 @@ class TestFormatWarnings:
         final_response = "Here is my response."
 
         mock_model = MockModelAPI(responses=[empty_response, final_response])
+        mock_mcp = MockMCPClient(tools={"echo": ("Echo tool", {"result": "ok"})})
         memory = LocalMemory()
 
         agent = Agent(
             name="warn-agent",
             model_api=mock_model,
+            mcp_clients=[mock_mcp],
             memory=memory,
             max_steps=5,
         )
@@ -865,11 +917,13 @@ class TestFormatWarnings:
         final_response = "Here is my response."
 
         mock_model = MockModelAPI(responses=[empty_response, final_response])
+        mock_mcp = MockMCPClient(tools={"echo": ("Echo tool", {"result": "ok"})})
         memory = LocalMemory()
 
         agent = Agent(
             name="warn-agent",
             model_api=mock_model,
+            mcp_clients=[mock_mcp],
             memory=memory,
             max_steps=5,
         )
@@ -896,11 +950,13 @@ class TestPhase2FinalResponse:
         final_response = "Final synthesized answer."
 
         mock_model = MockModelAPI(responses=[phase1_response, final_response])
+        mock_mcp = MockMCPClient(tools={"echo": ("Echo tool", {"result": "ok"})})
         memory = LocalMemory()
 
         agent = Agent(
             name="phase2-agent",
             model_api=mock_model,
+            mcp_clients=[mock_mcp],
             memory=memory,
             max_steps=5,
         )
@@ -912,7 +968,7 @@ class TestPhase2FinalResponse:
         response = "".join(result)
         assert "Final synthesized answer." in response
 
-        # Model called twice: Phase 1 (no tool_calls) → Phase 2 (final response)
+        # Model called twice: Phase 1 (no tool_calls, breaks) → Phase 2 (final response)
         assert mock_model.call_count == 2
 
         logger.info("✓ Phase 2 always calls model for final response")
@@ -924,11 +980,13 @@ class TestPhase2FinalResponse:
         streaming_final = "Streamed final answer."
 
         mock_model = MockModelAPI(responses=[phase1_response, streaming_final])
+        mock_mcp = MockMCPClient(tools={"echo": ("Echo tool", {"result": "ok"})})
         memory = LocalMemory()
 
         agent = Agent(
             name="stream-agent",
             model_api=mock_model,
+            mcp_clients=[mock_mcp],
             memory=memory,
             max_steps=5,
         )
