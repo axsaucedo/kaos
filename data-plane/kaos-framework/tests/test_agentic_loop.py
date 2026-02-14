@@ -981,3 +981,115 @@ class TestNativeToolCalling:
         assert mock_model.all_tools_calls[-1] is None
 
         logger.info("✓ Native tools parameter sent correctly")
+
+
+class TestParseActionEdgeCases:
+    """Tests for _parse_action edge cases: nested JSON, escaped quotes, multiple objects."""
+
+    def _make_agent(self):
+        """Create an agent instance for testing _parse_action."""
+        mock_model = MockModelAPI(["test"])
+        return Agent(name="parser-test", model_api=mock_model)
+
+    def test_nested_json_in_tool_arguments(self):
+        """Test parsing tool call with nested JSON objects in arguments."""
+        agent = self._make_agent()
+        content = '{"tool": "write_file", "arguments": {"path": "config.json", "content": "{\\"key\\": \\"value\\"}"}}'
+        result = agent._parse_action(content)
+        assert result["tool"] == "write_file"
+        assert result["arguments"]["path"] == "config.json"
+
+    def test_escaped_quotes_in_string_values(self):
+        """Test parsing JSON with escaped quotes inside string values."""
+        agent = self._make_agent()
+        content = '{"tool": "echo", "arguments": {"text": "He said \\"hello\\""}}'
+        result = agent._parse_action(content)
+        assert result["tool"] == "echo"
+        assert "hello" in result["arguments"]["text"]
+
+    def test_multiple_json_objects_returns_first_action(self):
+        """Test that multiple JSON objects returns the first valid action."""
+        agent = self._make_agent()
+        content = """I'll do two things:
+```json
+{"tool": "read_file", "arguments": {"path": "a.txt"}}
+```
+Then:
+```json
+{"tool": "read_file", "arguments": {"path": "b.txt"}}
+```"""
+        result = agent._parse_action(content)
+        assert result["tool"] == "read_file"
+        assert result["arguments"]["path"] == "a.txt"
+
+    def test_json_in_code_fences(self):
+        """Test parsing JSON wrapped in code fences."""
+        agent = self._make_agent()
+        content = """Here is the action:
+```json
+{"tool": "search", "arguments": {"query": "test"}}
+```
+That's the search."""
+        result = agent._parse_action(content)
+        assert result["tool"] == "search"
+        assert result["arguments"]["query"] == "test"
+
+    def test_pretty_printed_json(self):
+        """Test parsing pretty-printed JSON with whitespace and newlines."""
+        agent = self._make_agent()
+        content = """{
+    "tool": "calculator",
+    "arguments": {
+        "a": 5,
+        "b": 3
+    }
+}"""
+        result = agent._parse_action(content)
+        assert result["tool"] == "calculator"
+        assert result["arguments"]["a"] == 5
+
+    def test_deeply_nested_json(self):
+        """Test parsing deeply nested JSON structures."""
+        agent = self._make_agent()
+        content = '{"tool": "api_call", "arguments": {"body": {"data": {"items": [{"id": 1}]}}}}'
+        result = agent._parse_action(content)
+        assert result["tool"] == "api_call"
+        assert result["arguments"]["body"]["data"]["items"][0]["id"] == 1
+
+    def test_braces_inside_strings_ignored(self):
+        """Test that braces inside string values don't break brace matching."""
+        agent = self._make_agent()
+        content = '{"tool": "echo", "arguments": {"text": "use {curly} braces {here}"}}'
+        result = agent._parse_action(content)
+        assert result["tool"] == "echo"
+        assert "{curly}" in result["arguments"]["text"]
+
+    def test_no_valid_action_returns_empty(self):
+        """Test that content without valid action JSON returns empty dict."""
+        agent = self._make_agent()
+        result = agent._parse_action("Just a plain text response with no JSON.")
+        assert result == {}
+
+    def test_empty_action_detected(self):
+        """Test that empty JSON object is detected as no-action signal."""
+        agent = self._make_agent()
+        result = agent._parse_action("I'm done now. {}")
+        assert result == {}
+
+    def test_extract_json_objects_returns_all(self):
+        """Test that _extract_json_objects extracts all JSON objects from text."""
+        agent = self._make_agent()
+        content = 'First: {"a": 1} then {"b": 2} and {"c": 3}'
+        results = agent._extract_json_objects(content)
+        assert len(results) == 3
+        assert results[0] == {"a": 1}
+        assert results[1] == {"b": 2}
+        assert results[2] == {"c": 3}
+
+    def test_backslash_in_json_string(self):
+        """Test parsing JSON with backslashes in string values."""
+        agent = self._make_agent()
+        content = '{"tool": "write", "arguments": {"path": "C:\\\\Users\\\\file.txt"}}'
+        result = agent._parse_action(content)
+        assert result["tool"] == "write"
+        assert "Users" in result["arguments"]["path"]

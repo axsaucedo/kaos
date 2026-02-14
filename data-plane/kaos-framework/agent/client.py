@@ -376,6 +376,13 @@ class Agent:
         The model can include reasoning/context before or after the JSON.
         Returns the parsed action dict, or empty dict if no valid action found.
 
+        Handles edge cases:
+        - Nested JSON objects/arrays in tool arguments
+        - Escaped quotes within JSON string values
+        - Multiple JSON objects in a single response (returns first valid action)
+        - JSON inside code fences (```json ... ```)
+        - Pretty-printed JSON with whitespace/newlines
+
         Action formats:
         - Tool call: {"tool": "name", "arguments": {...}}
         - Delegation: {"agent": "name", "task": "..."}
@@ -391,33 +398,90 @@ class Agent:
         except json.JSONDecodeError:
             pass
 
-        # Look for JSON objects in the content (may have surrounding text)
-        # Find all potential JSON objects using brace matching
-        i = 0
-        while i < len(content):
-            if content[i] == "{":
-                # Find matching closing brace
-                depth = 0
-                start = i
-                for j in range(i, len(content)):
-                    if content[j] == "{":
-                        depth += 1
-                    elif content[j] == "}":
-                        depth -= 1
-                        if depth == 0:
-                            candidate = content[start : j + 1]
-                            try:
-                                parsed = json.loads(candidate)
-                                if isinstance(parsed, dict):
-                                    # Check if it's a valid action (tool, agent, or empty)
-                                    if "tool" in parsed or "agent" in parsed or parsed == {}:
-                                        return parsed
-                            except json.JSONDecodeError:
-                                pass
-                            break
-            i += 1
+        # Extract all JSON objects from the content using string-aware brace matching.
+        # Scans for '{', then tracks nesting depth while skipping braces inside
+        # JSON string literals (between unescaped quotes).
+        actions = self._extract_json_objects(content)
+
+        # Return first valid action, or empty dict if none found
+        for action in actions:
+            if "tool" in action or "agent" in action or action == {}:
+                return action
 
         return {}
+
+    def _extract_json_objects(self, content: str) -> List[Dict[str, Any]]:
+        """Extract all valid JSON objects from text using string-aware brace matching.
+
+        Properly handles:
+        - Braces inside JSON string values (skipped, not counted)
+        - Escaped quotes inside strings (e.g. \\" does not end the string)
+        - Nested objects and arrays at any depth
+        - Multiple JSON objects separated by arbitrary text
+        """
+        results: List[Dict[str, Any]] = []
+        i = 0
+        length = len(content)
+
+        while i < length:
+            if content[i] == "{":
+                # Found a potential JSON object start — use string-aware matching
+                end = self._find_matching_brace(content, i)
+                if end is not None:
+                    candidate = content[i : end + 1]
+                    try:
+                        parsed = json.loads(candidate)
+                        if isinstance(parsed, dict):
+                            results.append(parsed)
+                            # Continue scanning after this object for more
+                            i = end + 1
+                            continue
+                    except json.JSONDecodeError:
+                        pass
+            i += 1
+
+        return results
+
+    @staticmethod
+    def _find_matching_brace(content: str, start: int) -> Optional[int]:
+        """Find the matching closing brace for an opening brace at `start`.
+
+        Tracks whether we are inside a JSON string literal to avoid counting
+        braces that appear within string values. Handles escaped quotes (\\"
+        inside strings) so they don't toggle the in-string state.
+
+        Returns the index of the matching '}', or None if not found.
+        """
+        depth = 0
+        in_string = False
+        length = len(content)
+        i = start
+
+        while i < length:
+            ch = content[i]
+
+            if in_string:
+                if ch == "\\" and i + 1 < length:
+                    # Skip escaped character (e.g. \\", \\\\, \\n) — don't
+                    # let the next char toggle in_string or affect depth.
+                    i += 2
+                    continue
+                if ch == '"':
+                    # Unescaped quote ends the string
+                    in_string = False
+            else:
+                if ch == '"':
+                    in_string = True
+                elif ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        return i
+
+            i += 1
+
+        return None
 
     async def process_message(
         self,
