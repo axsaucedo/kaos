@@ -28,32 +28,40 @@ make format                     # Auto-format code
 | `MODEL_API_URL` | LLM API base URL (required) |
 | `MODEL_NAME` | Model name (required) |
 | `AGENT_SUB_AGENTS` | Direct format: `"name:url,name:url"` |
-| `DEBUG_MOCK_RESPONSES` | JSON array of mock responses for two-phase loop |
+| `DEBUG_MOCK_RESPONSES` | JSON array of mock responses (tool_calls JSON or plain text) |
 | `OTEL_ENABLED` | Enable OpenTelemetry instrumentation |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP exporter endpoint |
 
-## Two-Phase Agentic Loop
+## Native Function Calling (Agentic Loop)
 
-The agent uses a two-phase agentic loop:
-1. **Phase 1 (Action Collection)**: Non-streaming model calls to collect tool/delegation actions
-2. **Phase 2 (Final Response)**: Streaming model call for final user-visible response
+The agent uses native OpenAI function calling via the `tools` API:
+1. **Phase 1 (Tool Calling)**: Non-streaming model calls with `tools` parameter. Model returns `tool_calls` in response to invoke MCP tools or delegate to sub-agents. Loops until model responds with content only (no tool_calls).
+2. **Phase 2 (Final Response)**: Streaming model call for final user-visible response.
 
-### Action Format (JSON)
-- Tool call: `{"tool": "name", "arguments": {...}}`
-- Delegation: `{"agent": "name", "task": "..."}`
-- No action: `{}` (signals end of action phase)
+### Tool/Delegation Format
+- MCP tools are converted to OpenAI `tools` format via `_build_tools_param()`
+- Sub-agents are exposed as `delegate_to_{agent_name}` tool functions with a `task` string parameter
+- Model returns structured `tool_calls` array — no JSON parsing from content text
+
+### Key Classes
+- `ToolCall(id, name, arguments)`: Represents a single tool call from model response
+- `ModelResponse(content, tool_calls, finish_reason)`: Structured response from `ModelAPI.process_message()`
 
 ### Mock Response Pattern
-For testing, include action responses then `{}` then final response:
+For testing, use `DEBUG_MOCK_RESPONSES` with tool_calls JSON or plain text:
 ```bash
-export DEBUG_MOCK_RESPONSES='["{\"tool\": \"echo\", \"arguments\": {}}", "{}", "Done."]'
+# Tool call then final response (2 entries, no {} needed)
+export DEBUG_MOCK_RESPONSES='["{\"tool_calls\": [{\"id\": \"call_1\", \"name\": \"echo\", \"arguments\": {\"message\": \"hi\"}}]}", "Done."]'
+# Plain text response only
+export DEBUG_MOCK_RESPONSES='["Hello, world!"]'
 ```
 
 ## Testing Patterns
 - Use `DEBUG_MOCK_RESPONSES` for deterministic tests
 - Tests use `pytest-asyncio` for async test functions
 - Use `@pytest.mark.parametrize` for testing multiple cases
-- Mock responses must follow two-phase pattern (action -> `{}` -> final)
+- Tool call mocks use `tool_calls` key, plain text mocks are just strings
+- No `{}` no-action signal needed — absence of `tool_calls` signals completion
 
 ## Code Style
 - Use `black` for formatting

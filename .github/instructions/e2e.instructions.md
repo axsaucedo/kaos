@@ -104,6 +104,33 @@ spec:
       value: DEBUG
 ```
 
+### Mock Response Patterns (DEBUG_MOCK_RESPONSES)
+
+E2E tests use `DEBUG_MOCK_RESPONSES` env var with native function calling format:
+
+**Tool call (MCP tool):**
+```json
+[
+  "{\"tool_calls\": [{\"id\": \"call_1\", \"name\": \"echo\", \"arguments\": {\"message\": \"hello\"}}]}",
+  "The echo tool returned the result."
+]
+```
+
+**Delegation (sub-agent):**
+```json
+[
+  "{\"tool_calls\": [{\"id\": \"call_1\", \"name\": \"delegate_to_worker-name\", \"arguments\": {\"task\": \"Process this\"}}]}",
+  "The worker completed the task."
+]
+```
+
+**Worker (plain text, no tools):**
+```json
+["Task completed by worker."]
+```
+
+Note: No `{}` no-action signal needed. Responses without `tool_calls` key signal completion.
+
 ### Key Patterns
 - Tests create unique namespaces per session
 - `wait_for_ready()` helper waits for resource Ready status
