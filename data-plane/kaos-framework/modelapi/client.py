@@ -36,6 +36,7 @@ class ToolCall:
             try:
                 self.arguments = json.loads(self.arguments)
             except json.JSONDecodeError:
+                logger.warning(f"Malformed tool call arguments (invalid JSON): {self.arguments}")
                 self.arguments = {}
 
     @classmethod

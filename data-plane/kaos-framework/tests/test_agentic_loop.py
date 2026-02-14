@@ -987,6 +987,12 @@ class TestToolCallArgumentNormalization:
         tc = ToolCall(id="1", name="test", arguments="not json")
         assert tc.arguments == {}
 
+    def test_toolcall_invalid_string_arguments_logs_warning(self, caplog):
+        """Test ToolCall with invalid JSON string logs a warning."""
+        with caplog.at_level(logging.WARNING, logger="modelapi.client"):
+            ToolCall(id="1", name="test", arguments="bad json")
+        assert any("Malformed tool call arguments" in r.message for r in caplog.records)
+
     def test_toolcall_from_openai_string_arguments(self):
         """Test from_openai with JSON string arguments."""
         tc = ToolCall.from_openai(
