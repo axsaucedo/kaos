@@ -566,20 +566,22 @@ class Agent:
         otel.span_begin("agent.response", attrs={"phase": "final", "stream": stream})
         final_failed = False
         try:
-            if stream:
-                # True streaming from model
+            # Reuse Phase 1 content if model already provided a final answer
+            phase1_content = response.content or ""
+            if phase1_content:
+                await self.memory.add_event(session_id, "agent_response", phase1_content)
+                yield phase1_content
+            elif stream:
+                # No content from Phase 1 - stream from model
                 full_response = ""
                 async for chunk in self._call_model_streaming(messages, model_name, seed=seed):
                     full_response += chunk
                     yield chunk
                 await self.memory.add_event(session_id, "agent_response", full_response)
             else:
-                # Use content from the last model response if available
-                content = response.content or ""
-                if not content:
-                    # Fallback: ask model for final response
-                    final_resp = await self._call_model(messages, model_name, seed=seed)
-                    content = final_resp.content or ""
+                # No content from Phase 1 - get final response from model
+                final_resp = await self._call_model(messages, model_name, seed=seed)
+                content = final_resp.content or ""
                 await self.memory.add_event(session_id, "agent_response", content)
                 yield content
 

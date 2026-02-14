@@ -820,3 +820,66 @@ class TestFormatWarnings:
         assert any("no tool_calls and no content" in r.message for r in caplog.records)
 
         logger.info("✓ Empty response warning logging works")
+
+
+class TestStreamingPhase2Reuse:
+    """Tests for Phase 2 streaming reusing Phase 1 content."""
+
+    @pytest.mark.asyncio
+    async def test_streaming_reuses_phase1_content(self):
+        """Test that streaming yields Phase 1 content without re-calling the model."""
+        # Model returns content directly (no tool calls) in Phase 1
+        direct_response = ModelResponse(content="Direct answer.", finish_reason="stop")
+
+        mock_model = MockModelAPI(responses=[direct_response])
+        memory = LocalMemory()
+
+        agent = Agent(
+            name="stream-agent",
+            model_api=mock_model,
+            memory=memory,
+            max_steps=5,
+        )
+
+        result = []
+        async for chunk in agent.process_message("test", stream=True):
+            result.append(chunk)
+
+        response = "".join(result)
+        assert "Direct answer." in response
+
+        # Model should be called exactly once (Phase 1 only, no Phase 2 re-call)
+        assert mock_model.call_count == 1
+
+        logger.info("✓ Streaming reuses Phase 1 content")
+
+    @pytest.mark.asyncio
+    async def test_streaming_calls_model_when_no_phase1_content(self):
+        """Test that streaming calls model when Phase 1 has no content (after tool calls)."""
+        tool_call_response = ModelResponse(
+            tool_calls=[ToolCall(id="call_1", name="echo", arguments={"msg": "hi"})],
+            finish_reason="tool_calls",
+        )
+        # Phase 1 exits with no content after tool calls, Phase 2 should stream
+        no_content_response = ModelResponse(content=None, finish_reason="stop")
+
+        mock_model = MockModelAPI(responses=[tool_call_response, no_content_response, "Streamed."])
+        mock_mcp = MockMCPClient(tools={"echo": ("Echo", {"echo": "hi"})})
+        memory = LocalMemory()
+
+        agent = Agent(
+            name="stream-agent",
+            model_api=mock_model,
+            mcp_clients=[mock_mcp],
+            memory=memory,
+            max_steps=5,
+        )
+
+        result = []
+        async for chunk in agent.process_message("test", stream=True):
+            result.append(chunk)
+
+        # Should have called model 3 times: tool_call → no_content → streaming
+        assert mock_model.call_count == 3
+
+        logger.info("✓ Streaming calls model when Phase 1 has no content")
