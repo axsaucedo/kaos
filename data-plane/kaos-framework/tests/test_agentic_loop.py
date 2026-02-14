@@ -346,6 +346,15 @@ class TestAgenticLoopDelegation:
         assert "delegation_request" in event_types
         assert "delegation_response" in event_types
 
+        # Verify tool_call event emitted before delegation_request (symmetry with regular tools)
+        tool_call_events = [e for e in events if e.event_type == "tool_call"]
+        delegation_events = [e for e in events if e.event_type == "delegation_request"]
+        assert len(tool_call_events) >= 1
+        assert len(delegation_events) == 1
+        # The delegation tool_call should reference the delegate_to_ tool
+        delegation_tool_call = [e for e in tool_call_events if "delegate_to_" in str(e.content)]
+        assert len(delegation_tool_call) == 1
+
         logger.info("✓ Delegation detection and execution works")
 
 

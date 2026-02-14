@@ -486,6 +486,12 @@ class Agent:
                             )
                             continue
 
+                        await self.memory.add_event(
+                            session_id,
+                            "tool_call",
+                            {"tool": tc.name, "arguments": tc.arguments},
+                        )
+
                         yield json.dumps(
                             {
                                 "type": "progress",
