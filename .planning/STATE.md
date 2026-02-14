@@ -10,9 +10,9 @@ See: .planning/PROJECT.md (updated 2026-02-13)
 ## Current Position
 
 Phase: 1 of 12 (Native Tool Calling & Structured Output)
-Plan: 7 of 7 in current phase
-Status: Executing
-Last activity: 2026-02-14 — Completed 01-05-PLAN.md (Test Updates for ModelResponse and Native Tool Calling)
+Plan: 7 of 7 in current phase — PHASE COMPLETE
+Status: Phase 1 Complete
+Last activity: 2026-02-14 — Completed 01-07-PLAN.md (Text Parser Edge Cases & functionCalling Documentation)
 
 Progress: [████████░░] 8%
 
@@ -33,9 +33,10 @@ Progress: [████████░░] 8%
 | Phase 01 P04 | 2 min | 2 tasks | 2 files |
 | Phase 01 P05 | 3 min | 3 tasks | 2 files |
 | Phase 01 P06 | 4 min | 2 tasks | 6 files |
+| Phase 01 P07 | 4 min | 2 tasks | 3 files |
 
 **Recent Trend:**
-- Last 3 plans: 2min, 3min, 4min
+- Last 3 plans: 3min, 4min, 4min
 - Trend: Fast
 
 *Updated after each plan completion*
@@ -59,6 +60,8 @@ Recent decisions affecting current work:
 - [Phase 01 P06]: E2E tests set functionCalling=text in CRD config and FUNCTION_CALLING=text in subprocess env vars for smollm2 compat
 - [Phase 01 P05]: MockModelAPI auto-wraps strings/dicts in ModelResponse for backward compat — no existing test changes needed
 - [Phase 01 P05]: all_tools_calls list tracks every call's tools param since Phase 2 overwrites last_tools to None
+- [Phase 01 P07]: functionCalling docs added to docs/operator/agent-crd.md (not plan-specified docs/docs/getting-started/configuration.md which didn't exist)
+- [Phase 01 P07]: Parser improvements kept as methods on Agent class (_find_matching_brace, _extract_json_objects) rather than standalone utils
 
 ### Pending Todos
 
@@ -71,5 +74,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-14
-Stopped at: Completed 01-05-PLAN.md
+Stopped at: Completed 01-07-PLAN.md — Phase 1 fully complete (all 7 plans executed)
 Resume file: None
