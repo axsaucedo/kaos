@@ -12,8 +12,9 @@ from typing import List, Dict, Optional
 
 from agent.client import Agent, RemoteAgent, AgentCard
 from agent.memory import LocalMemory, NullMemory
-from agent.server import AgentServer
-from modelapi.client import ModelAPI, LiteLLM
+from agent.server import AgentServer, AgentServerSettings
+from mcptools.client import MCPClient, Tool
+from modelapi.client import ModelAPI, LiteLLM, ModelResponse, ToolCall
 
 logger = logging.getLogger(__name__)
 
@@ -38,18 +39,24 @@ class MockModelAPI(ModelAPI):
         return False
 
     async def process_message(
-        self, messages: List[Dict], stream: bool = False, seed: Optional[int] = None
+        self,
+        messages: List[Dict],
+        stream: bool = False,
+        seed: Optional[int] = None,
+        tools: Optional[List[Dict]] = None,
     ):
         """Return a mock response based on the name.
 
-        Returns str if stream=False, AsyncIterator[str] if stream=True.
+        Returns ModelResponse if stream=False, AsyncIterator[str] if stream=True.
+        Stores tools parameter for assertion in tests.
         """
         self.call_count += 1
+        self.last_tools = tools
         user_msg = next((m["content"] for m in messages if m["role"] == "user"), "")
         content = f"[{self.name}] Response to: {user_msg}"
         if stream:
             return self._yield_content(content)
-        return content
+        return ModelResponse(content=content)
 
     async def _yield_content(self, content: str):
         """Yield content as streaming chunks."""
@@ -576,3 +583,117 @@ class TestMockResponsesReset:
 
         await model_api.close()
         logger.info("✓ Template preserved after consuming responses")
+
+
+class MockMCPClient(MCPClient):
+    """Mock MCP client for testing _get_tools_for_api."""
+
+    def __init__(self, tools: Optional[Dict] = None):
+        self._mcp_url = "mock://mcp"
+        self._tools: Dict[str, Tool] = {}
+        self._active = True
+        tools = tools or {}
+        for name, desc in tools.items():
+            self._tools[name] = Tool(
+                name=name,
+                description=desc,
+                input_schema={"type": "object", "properties": {}},
+            )
+
+    async def _init(self):
+        return True
+
+    def get_tools(self):
+        return list(self._tools.values())
+
+    async def close(self):
+        pass
+
+
+class TestFunctionCallingParameter:
+    """Tests for function_calling parameter on Agent and AgentServerSettings."""
+
+    def test_agent_function_calling_default(self):
+        """Agent defaults to function_calling='text' for backward compatibility."""
+        mock_llm = MockModelAPI("fc-default")
+        agent = Agent(name="fc-default", model_api=mock_llm)
+        assert agent.function_calling == "text"
+
+    def test_agent_function_calling_text(self):
+        """Agent accepts function_calling='text'."""
+        mock_llm = MockModelAPI("fc-text")
+        agent = Agent(name="fc-text", model_api=mock_llm, function_calling="text")
+        assert agent.function_calling == "text"
+
+    def test_agent_function_calling_native(self):
+        """Agent accepts function_calling='native'."""
+        mock_llm = MockModelAPI("fc-native")
+        agent = Agent(name="fc-native", model_api=mock_llm, function_calling="native")
+        assert agent.function_calling == "native"
+
+    def test_function_calling_from_settings(self):
+        """AgentServerSettings defaults to function_calling='native'."""
+        settings = AgentServerSettings(
+            agent_name="test",
+            model_name="test-model",
+            model_api_url="http://localhost:8000",
+        )
+        assert settings.function_calling == "native"
+
+
+class TestGetToolsForAPI:
+    """Tests for Agent._get_tools_for_api() returning OpenAI tools format."""
+
+    @pytest.mark.asyncio
+    async def test_get_tools_for_api_with_mcp_tools(self):
+        """_get_tools_for_api converts MCP tools to OpenAI format."""
+        mock_llm = MockModelAPI("tools-test")
+        mcp = MockMCPClient(tools={"get_weather": "Get weather forecast"})
+        agent = Agent(name="tools-test", model_api=mock_llm, mcp_clients=[mcp])
+
+        tools = await agent._get_tools_for_api()
+        assert len(tools) == 1
+        assert tools[0]["type"] == "function"
+        assert tools[0]["function"]["name"] == "get_weather"
+        assert tools[0]["function"]["description"] == "Get weather forecast"
+        assert "parameters" in tools[0]["function"]
+
+    @pytest.mark.asyncio
+    async def test_get_tools_for_api_with_sub_agents(self):
+        """_get_tools_for_api registers sub-agents as delegate_to_ pseudo-tools."""
+        mock_llm = MockModelAPI("delegate-test")
+        sub = RemoteAgent(name="coder", card_url="http://localhost:8001")
+        agent = Agent(name="delegate-test", model_api=mock_llm, sub_agents=[sub])
+
+        tools = await agent._get_tools_for_api()
+        delegate_tools = [t for t in tools if t["function"]["name"].startswith("delegate_to_")]
+        assert len(delegate_tools) == 1
+        assert delegate_tools[0]["function"]["name"] == "delegate_to_coder"
+        assert delegate_tools[0]["function"]["parameters"]["required"] == ["task"]
+
+        await sub.close()
+
+    @pytest.mark.asyncio
+    async def test_get_tools_for_api_combined(self):
+        """_get_tools_for_api returns both MCP tools and delegation pseudo-tools."""
+        mock_llm = MockModelAPI("combined-test")
+        mcp = MockMCPClient(tools={"search": "Search the web"})
+        sub = RemoteAgent(name="writer", card_url="http://localhost:8002")
+        agent = Agent(name="combined-test", model_api=mock_llm, mcp_clients=[mcp], sub_agents=[sub])
+
+        tools = await agent._get_tools_for_api()
+        assert len(tools) == 2
+        names = [t["function"]["name"] for t in tools]
+        assert "search" in names
+        assert "delegate_to_writer" in names
+
+        await sub.close()
+
+    @pytest.mark.asyncio
+    async def test_get_tools_for_api_empty(self):
+        """_get_tools_for_api returns empty list when no tools or sub-agents."""
+        mock_llm = MockModelAPI("empty-test")
+        agent = Agent(name="empty-test", model_api=mock_llm)
+
+        tools = await agent._get_tools_for_api()
+        assert tools == []
