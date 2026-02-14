@@ -194,6 +194,7 @@ class Agent:
         max_steps: int = 5,
         memory_context_limit: int = 6,
         memory_enabled: bool = True,
+        function_calling: str = "text",
     ):
         self.name = name
         self.instructions = instructions
@@ -207,6 +208,7 @@ class Agent:
         self.max_steps = max_steps
         self.memory_context_limit = memory_context_limit
         self.memory_enabled = memory_enabled
+        self.function_calling = function_calling
 
         logger.info(f"Agent initialized: {name}")
 
@@ -270,6 +272,59 @@ class Agent:
         return (
             "\n## Available Agents for Delegation\n" + "\n".join(parts) + "\n" + AGENT_INSTRUCTIONS
         )
+
+    async def _get_tools_for_api(self) -> List[dict]:
+        """Convert MCP tools and sub-agents to OpenAI tools format for native function calling."""
+        tools: List[dict] = []
+
+        # Convert MCP tools
+        for mcp_client in self.mcp_clients:
+            if not mcp_client._active:
+                await mcp_client._init()
+            for tool in mcp_client.get_tools():
+                tools.append(
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": tool.name,
+                            "description": tool.description or "",
+                            "parameters": tool.input_schema,
+                        },
+                    }
+                )
+
+        # Register sub-agents as pseudo-tools
+        for agent_name, sub_agent in self.sub_agents.items():
+            description = ""
+            if sub_agent.agent_card:
+                description = sub_agent.agent_card.description
+            tools.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": f"delegate_to_{agent_name}",
+                        "description": f"Delegate a task to the {agent_name} sub-agent. {description}",
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "task": {
+                                    "type": "string",
+                                    "description": "The task to delegate to the sub-agent",
+                                }
+                            },
+                            "required": ["task"],
+                        },
+                    },
+                }
+            )
+
+        return tools
+
+    def _is_delegation_call(self, tool_name: str) -> Optional[str]:
+        """Check if tool call is a delegation pseudo-tool. Returns agent name or None."""
+        if tool_name.startswith("delegate_to_"):
+            return tool_name[len("delegate_to_") :]
+        return None
 
     async def _build_system_prompt(self, user_system_prompt: Optional[str] = None) -> str:
         """Build enhanced system prompt with tools, agents info, and optional user prompt.
