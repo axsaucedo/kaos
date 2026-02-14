@@ -50,24 +50,25 @@ The agent uses native OpenAI function calling via the `tools` API:
 - `ModelResponse(content, tool_calls, finish_reason)`: Structured response from `ModelAPI.process_message()`
 
 ### Phase 2 Final Response
-- Phase 1 focuses exclusively on tool call processing
-- Phase 2 always injects a "provide your final response" user message and calls the model
+- Phase 1 is skipped entirely when no tools/agents or max_steps=0
+- Phase 2 always calls the model for the final response
+- "Provide your final response based on information gathered" instruction is only injected when tools/delegations were executed
 - Streaming or non-streaming based on the original request
 - Both delegation and regular tool calls emit `tool_call` memory events before execution
 
 ### Validation & Error Handling
-- `max_steps` is clamped to minimum 1 (with warning log)
+- `max_steps=0` is valid (disables reasoning/Phase 1)
 - Empty model responses (no content, no tool_calls) log warnings and store `format_warning` memory events
 - Malformed tool call arguments (invalid JSON) log warnings and default to `{}`
 
 ### Mock Response Pattern
 For testing, use `DEBUG_MOCK_RESPONSES` with tool_calls JSON or plain text.
-Phase 2 always calls the model, so mock arrays need responses for both phases:
+Response count depends on whether Phase 1 runs:
 ```bash
-# Tool call → loop break → Phase 2 final (3 entries)
+# No tools/agents: Phase 1 skipped, only Phase 2 (1 entry)
+export DEBUG_MOCK_RESPONSES='["Hello, world!"]'
+# With tools: tool call → loop break → Phase 2 final (3 entries)
 export DEBUG_MOCK_RESPONSES='["{\"tool_calls\": [{\"id\": \"call_1\", \"name\": \"echo\", \"arguments\": {\"message\": \"hi\"}}]}", "No more actions.", "Done."]'
-# Plain text: Phase 1 (no tool_calls, breaks loop) → Phase 2 final (2 entries)
-export DEBUG_MOCK_RESPONSES='["Thinking...", "Hello, world!"]'
 ```
 
 ## Testing Patterns
@@ -76,7 +77,8 @@ export DEBUG_MOCK_RESPONSES='["Thinking...", "Hello, world!"]'
 - Use `@pytest.mark.parametrize` for testing multiple cases
 - Tool call mocks use `tool_calls` key, plain text mocks are just strings
 - No `{}` no-action signal needed — absence of `tool_calls` signals completion
-- Every test needs N+1 mock responses (N for Phase 1 steps + 1 for Phase 2 final)
+- Agents with tools: N+1 mock responses (N for Phase 1 steps + 1 for Phase 2 final)
+- Agents without tools: 1 mock response (Phase 2 only)
 
 ## Code Style
 - Use `black` for formatting

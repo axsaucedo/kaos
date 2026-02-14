@@ -147,10 +147,7 @@ async def test_delegation_with_memory_verification(
         test_namespace,
         shared_modelapi,
         "-del",
-        mock_responses=[
-            f"Task {task_id} processed successfully by worker.",
-            f"Task {task_id} processed successfully by worker.",
-        ],
+        mock_responses=[f"Task {task_id} processed successfully by worker."],
     )
 
     # Create coordinator with mock response that triggers delegation via tool_calls
@@ -274,10 +271,7 @@ async def test_agent_processes_with_memory_events(
         test_namespace,
         shared_modelapi,
         "-mem",
-        mock_responses=[
-            f"Memory test {task_id} completed.",
-            f"Memory test {task_id} completed.",
-        ],
+        mock_responses=[f"Memory test {task_id} completed."],
     )
 
     # Create coordinator with delegation mock response via tool_calls
