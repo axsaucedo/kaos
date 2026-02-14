@@ -67,3 +67,4 @@ vendor/
 venv/
 wheels/
 PROGRESS.md
+.planning/
