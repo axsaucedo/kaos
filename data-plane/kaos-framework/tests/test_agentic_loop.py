@@ -2,8 +2,8 @@
 Agentic Loop tests with deterministic mock responses.
 
 Tests the agentic loop functionality including:
-- Tool calling with mock responses
-- Agent delegation with mock responses
+- Tool calling via native OpenAI function calling
+- Agent delegation via delegate_to_{name} tool functions
 - Memory event verification
 - Max steps limit
 """
@@ -16,17 +16,22 @@ from multiprocessing import Process
 from typing import Optional, List, Dict, Any
 from unittest.mock import AsyncMock
 
-from agent.client import Agent, RemoteAgent
+from agent.client import Agent, RemoteAgent, DELEGATION_TOOL_PREFIX
 from agent.memory import LocalMemory
 from agent.server import AgentServerSettings, create_agent_server
-from modelapi.client import ModelAPI
+from modelapi.client import ModelAPI, ModelResponse, ToolCall
 from mcptools.client import MCPClient, Tool
 
 logger = logging.getLogger(__name__)
 
 
 class MockModelAPI(ModelAPI):
-    """Mock ModelAPI that returns predetermined responses."""
+    """Mock ModelAPI that returns predetermined responses.
+
+    Responses can be:
+    - str: returned as ModelResponse(content=str)
+    - ModelResponse: returned directly
+    """
 
     def __init__(self, responses: Optional[list] = None):
         """Initialize with a list of responses to return in sequence."""
@@ -48,16 +53,19 @@ class MockModelAPI(ModelAPI):
         """Check if mock responses are configured."""
         return bool(self._responses_original)
 
-    async def process_message(self, messages, stream=False, seed: Optional[int] = None):
+    async def process_message(self, messages, stream=False, seed: Optional[int] = None, tools=None):
         """Return next response from the list.
 
-        Returns str if stream=False, AsyncIterator[str] if stream=True.
+        Returns ModelResponse if stream=False, AsyncIterator[str] if stream=True.
         """
-        content = self.responses[min(self.call_count, len(self.responses) - 1)]
+        resp = self.responses[min(self.call_count, len(self.responses) - 1)]
         self.call_count += 1
         if stream:
-            return self._yield_content(content)
-        return content
+            content = resp.content if isinstance(resp, ModelResponse) else resp
+            return self._yield_content(content or "")
+        if isinstance(resp, ModelResponse):
+            return resp
+        return ModelResponse(content=resp, finish_reason="stop")
 
     async def _yield_content(self, content: str):
         """Yield content as streaming chunks."""
@@ -124,15 +132,14 @@ class TestAgenticLoopToolCalling:
     @pytest.mark.asyncio
     async def test_tool_call_detected_and_executed(self):
         """Test that a tool call in model response triggers tool execution."""
-        # Mock response with JSON action format
-        # Two-phase loop: action -> (tool exec) -> no-action -> final response
-        tool_call_response = '{"tool": "calculator", "arguments": {"a": 5, "b": 3}}'
-        no_action_response = "{}"  # Signal to proceed to final response
+        # Native function calling: model returns tool_calls, then content response
+        tool_call_response = ModelResponse(
+            tool_calls=[ToolCall(id="call_1", name="calculator", arguments={"a": 5, "b": 3})],
+            finish_reason="tool_calls",
+        )
         final_response = "The result is 8."
 
-        mock_model = MockModelAPI(
-            responses=[tool_call_response, no_action_response, final_response]
-        )
+        mock_model = MockModelAPI(responses=[tool_call_response, final_response])
         mock_mcp = MockMCPClient(tools={"calculator": ("Add two numbers", {"sum": 8})})
         memory = LocalMemory()
 
@@ -155,8 +162,8 @@ class TestAgenticLoopToolCalling:
         assert len(mock_mcp.call_log) == 1
         assert mock_mcp.call_log[0]["tool"] == "calculator"
 
-        # Verify model was called: action(tool) -> action(none) -> final response
-        assert mock_model.call_count == 3
+        # Verify model was called: tool_call response -> final response
+        assert mock_model.call_count == 2
 
         # Verify memory has tool events
         sessions = await memory.list_sessions()
@@ -171,20 +178,15 @@ class TestAgenticLoopToolCalling:
         logger.info("✓ Tool call detection and execution works")
 
     @pytest.mark.asyncio
-    async def test_tool_call_with_context(self):
-        """Test that tool calls work when model includes reasoning context."""
-        # Model response with reasoning before JSON action
-        tool_call_with_context = """I'll use the calculator to compute this sum.
-
-{"tool": "calculator", "arguments": {"a": 5, "b": 3}}
-
-Let me wait for the result."""
-        no_action_response = "{}"
+    async def test_tool_call_with_arguments(self):
+        """Test that tool calls pass arguments correctly."""
+        tool_call_response = ModelResponse(
+            tool_calls=[ToolCall(id="call_1", name="calculator", arguments={"a": 5, "b": 3})],
+            finish_reason="tool_calls",
+        )
         final_response = "The result is 8."
 
-        mock_model = MockModelAPI(
-            responses=[tool_call_with_context, no_action_response, final_response]
-        )
+        mock_model = MockModelAPI(responses=[tool_call_response, final_response])
         mock_mcp = MockMCPClient(tools={"calculator": ("Add two numbers", {"sum": 8})})
         memory = LocalMemory()
 
@@ -200,12 +202,12 @@ Let me wait for the result."""
         async for chunk in agent.process_message("What is 5 + 3?"):
             result.append(chunk)
 
-        # Verify tool was called even with context around JSON
+        # Verify tool was called with correct arguments
         assert len(mock_mcp.call_log) == 1
         assert mock_mcp.call_log[0]["tool"] == "calculator"
-        assert mock_model.call_count == 3
+        assert mock_mcp.call_log[0]["args"] == {"a": 5, "b": 3}
 
-        logger.info("✓ Tool call with context works")
+        logger.info("✓ Tool call with arguments works")
 
 
 class TestAgenticLoopDelegation:
@@ -213,15 +215,21 @@ class TestAgenticLoopDelegation:
 
     @pytest.mark.asyncio
     async def test_delegation_detected_and_executed(self):
-        """Test that a delegation in model response triggers sub-agent invocation."""
-        # JSON action format - two phase: action(delegate) -> action(none) -> final
-        delegation_response = '{"agent": "worker", "task": "Process this data"}'
-        no_action_response = "{}"
+        """Test that a delegation tool call triggers sub-agent invocation."""
+        # Native function calling: model calls delegate_to_worker tool
+        delegation_response = ModelResponse(
+            tool_calls=[
+                ToolCall(
+                    id="call_1",
+                    name="delegate_to_worker",
+                    arguments={"task": "Process this data"},
+                )
+            ],
+            finish_reason="tool_calls",
+        )
         final_response = "The worker processed the data successfully."
 
-        mock_model = MockModelAPI(
-            responses=[delegation_response, no_action_response, final_response]
-        )
+        mock_model = MockModelAPI(responses=[delegation_response, final_response])
         memory = LocalMemory()
 
         # Create mock remote agent
@@ -237,7 +245,6 @@ class TestAgenticLoopDelegation:
             },
         )()
         mock_remote._active = True
-        # process_message now takes messages list, not just task string
         mock_remote.process_message = AsyncMock(return_value="Data processed")  # type: ignore[method-assign]
 
         agent = Agent(
@@ -261,8 +268,8 @@ class TestAgenticLoopDelegation:
         assert call_args[-1]["role"] == "task-delegation"
         assert "Process this data" in call_args[-1]["content"]
 
-        # Verify model calls: action(delegate) -> action(none) -> final response
-        assert mock_model.call_count == 3
+        # Verify model calls: delegation tool_call -> final response
+        assert mock_model.call_count == 2
 
         # Verify memory has delegation events
         sessions = await memory.list_sessions()
@@ -281,8 +288,11 @@ class TestAgenticLoopMaxSteps:
     @pytest.mark.asyncio
     async def test_max_steps_prevents_infinite_loop(self):
         """Test that max_steps prevents infinite tool call loops."""
-        # JSON action format - model always returns a tool call
-        infinite_tool_call = '{"tool": "loop_tool", "arguments": {}}'
+        # Model always returns a tool call
+        infinite_tool_call = ModelResponse(
+            tool_calls=[ToolCall(id="call_1", name="loop_tool", arguments={})],
+            finish_reason="tool_calls",
+        )
 
         mock_model = MockModelAPI(responses=[infinite_tool_call] * 10)
         mock_mcp = MockMCPClient(tools={"loop_tool": ("Loops forever", {"result": "ok"})})
@@ -331,8 +341,16 @@ class TestMemoryContextLimit:
     @pytest.mark.asyncio
     async def test_delegation_respects_memory_context_limit(self):
         """Test that delegation uses memory_context_limit to limit context messages."""
-        # JSON action format
-        delegation_response = '{"agent": "worker", "task": "Do the work"}'
+        delegation_response = ModelResponse(
+            tool_calls=[
+                ToolCall(
+                    id="call_1",
+                    name="delegate_to_worker",
+                    arguments={"task": "Do the work"},
+                )
+            ],
+            finish_reason="tool_calls",
+        )
         final_response = "Done."
 
         mock_model = MockModelAPI(responses=[delegation_response, final_response])
@@ -377,11 +395,11 @@ class TestMemoryContextLimit:
 
 
 class TestSystemPromptBuilding:
-    """Tests for system prompt construction with tools and agents."""
+    """Tests for system prompt construction and tools parameter building."""
 
     @pytest.mark.asyncio
-    async def test_system_prompt_includes_tools(self):
-        """Test that system prompt includes available tools."""
+    async def test_tools_param_includes_mcp_tools(self):
+        """Test that _build_tools_param includes available MCP tools."""
         mock_model = MockModelAPI(responses=["I have tools available."])
         mock_mcp = MockMCPClient(
             tools={
@@ -397,19 +415,26 @@ class TestSystemPromptBuilding:
             mcp_clients=[mock_mcp],
         )
 
-        prompt = await agent._build_system_prompt()
+        tools = await agent._build_tools_param()
+        assert tools is not None
+        assert len(tools) == 2
 
-        assert "You are a helpful agent." in prompt
-        assert "search" in prompt.lower()
-        assert "calculate" in prompt.lower()
-        # Check for JSON tool call format instruction
-        assert '"tool":' in prompt
+        tool_names = [t["function"]["name"] for t in tools]
+        assert "search" in tool_names
+        assert "calculate" in tool_names
 
-        logger.info("✓ System prompt includes tools")
+        # Verify OpenAI format
+        for tool in tools:
+            assert tool["type"] == "function"
+            assert "name" in tool["function"]
+            assert "description" in tool["function"]
+            assert "parameters" in tool["function"]
+
+        logger.info("✓ Tools param includes MCP tools")
 
     @pytest.mark.asyncio
-    async def test_system_prompt_includes_agents(self):
-        """Test that system prompt includes available sub-agents."""
+    async def test_tools_param_includes_delegation_tools(self):
+        """Test that _build_tools_param includes delegation tools for sub-agents."""
         mock_model = MockModelAPI(responses=["I can delegate."])
 
         mock_remote = RemoteAgent(name="worker", card_url="http://localhost:9999")
@@ -423,6 +448,7 @@ class TestSystemPromptBuilding:
                 "capabilities": ["task_execution"],
             },
         )()
+        mock_remote._active = True
 
         agent = Agent(
             name="coordinator",
@@ -431,13 +457,15 @@ class TestSystemPromptBuilding:
             sub_agents=[mock_remote],
         )
 
-        prompt = await agent._build_system_prompt()
+        tools = await agent._build_tools_param()
+        assert tools is not None
+        assert len(tools) == 1
 
-        assert "You coordinate work." in prompt
-        assert "worker" in prompt.lower()
-        assert "delegate" in prompt.lower()
+        delegation_tool = tools[0]
+        assert delegation_tool["function"]["name"] == "delegate_to_worker"
+        assert "task" in delegation_tool["function"]["parameters"]["properties"]
 
-        logger.info("✓ System prompt includes agents")
+        logger.info("✓ Tools param includes delegation tools")
 
     @pytest.mark.asyncio
     async def test_system_prompt_includes_user_provided_prompt(self):
@@ -469,8 +497,7 @@ class TestSystemPromptBuilding:
     @pytest.mark.asyncio
     async def test_process_message_merges_user_system_prompt(self):
         """Test that process_message correctly merges user system prompts."""
-        # Two-phase: no-action (empty response) -> final response
-        mock_model = MockModelAPI(responses=["{}", "Response considering user context."])
+        mock_model = MockModelAPI(responses=["Response considering user context."])
 
         agent = Agent(
             name="test-agent",
@@ -488,9 +515,9 @@ class TestSystemPromptBuilding:
         ):
             result.append(chunk)
 
-        # Verify the model was called: action check + final response
+        # Verify result
         assert len(result) > 0
-        assert mock_model.call_count == 2
+        assert mock_model.call_count == 1  # No tools, so direct response
 
         logger.info("✓ Process message merges user system prompt")
 
@@ -507,8 +534,8 @@ class TestMockResponseEnvVar:
         memory = LocalMemory()
 
         # Set mock responses via env var BEFORE creating ModelAPI
-        # Two-phase loop: action(none) -> final response
-        os.environ["DEBUG_MOCK_RESPONSES"] = json.dumps(["{}", "Mocked response from env"])
+        # Simple text response (no tool calls)
+        os.environ["DEBUG_MOCK_RESPONSES"] = json.dumps(["Mocked response from env"])
 
         try:
             # Use real ModelAPI - it reads env var in __init__
@@ -540,11 +567,15 @@ class TestMockResponseEnvVar:
         mock_mcp = MockMCPClient(tools={"calculator": ("Add two numbers", {"sum": 8})})
         memory = LocalMemory()
 
-        # Set mock responses for tool call then final response BEFORE creating ModelAPI
-        # JSON action format: action(tool) -> action(none) -> final response
+        # Mock responses: tool call (as tool_calls format) then final response
         mock_responses = [
-            '{"tool": "calculator", "arguments": {"a": 5, "b": 3}}',
-            "{}",
+            json.dumps(
+                {
+                    "tool_calls": [
+                        {"id": "call_1", "name": "calculator", "arguments": {"a": 5, "b": 3}}
+                    ]
+                }
+            ),
             "The result is 8.",
         ]
         os.environ["DEBUG_MOCK_RESPONSES"] = json.dumps(mock_responses)
@@ -586,15 +617,32 @@ class TestMemoryEventTracking:
     @pytest.mark.asyncio
     async def test_complete_workflow_memory_tracking(self):
         """Test that all events are properly tracked in memory."""
-        # Workflow: tool call -> delegation -> no-action -> final response (JSON action format)
-        responses = [
-            '{"tool": "fetch", "arguments": {"url": "http://example.com"}}',
-            '{"agent": "analyzer", "task": "Analyze the data"}',
-            "{}",  # No action - proceed to final response
-            "Based on my analysis, the result is complete.",
-        ]
+        # Workflow: tool call -> delegation -> final response
+        tool_call_response = ModelResponse(
+            tool_calls=[
+                ToolCall(
+                    id="call_1",
+                    name="fetch",
+                    arguments={"url": "http://example.com"},
+                )
+            ],
+            finish_reason="tool_calls",
+        )
+        delegation_response = ModelResponse(
+            tool_calls=[
+                ToolCall(
+                    id="call_2",
+                    name="delegate_to_analyzer",
+                    arguments={"task": "Analyze the data"},
+                )
+            ],
+            finish_reason="tool_calls",
+        )
+        final_response = "Based on my analysis, the result is complete."
 
-        mock_model = MockModelAPI(responses=responses)
+        mock_model = MockModelAPI(
+            responses=[tool_call_response, delegation_response, final_response]
+        )
         mock_mcp = MockMCPClient(tools={"fetch": ("Fetch URL", {"data": "example"})})
 
         mock_remote = RemoteAgent(name="analyzer", card_url="http://localhost:9999")
