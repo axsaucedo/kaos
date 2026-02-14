@@ -668,6 +668,7 @@ def create_agent_server(
         memory_context_limit=settings.memory_context_limit,
         memory=memory,
         memory_enabled=settings.memory_enabled,
+        function_calling=settings.function_calling,
     )
 
     server = AgentServer(
