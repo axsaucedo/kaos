@@ -451,6 +451,16 @@ func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *
 				Value: agent.Spec.Config.Instructions,
 			})
 		}
+
+		// FunctionCalling defaults to "native" when not specified
+		functionCalling := agent.Spec.Config.FunctionCalling
+		if functionCalling == "" {
+			functionCalling = "native"
+		}
+		env = append(env, corev1.EnvVar{
+			Name:  "FUNCTION_CALLING",
+			Value: functionCalling,
+		})
 	}
 
 	// Add user-provided container env vars
