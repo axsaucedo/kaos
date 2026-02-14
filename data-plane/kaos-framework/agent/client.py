@@ -329,6 +329,10 @@ class Agent:
     async def _build_system_prompt(self, user_system_prompt: Optional[str] = None) -> str:
         """Build enhanced system prompt with tools, agents info, and optional user prompt.
 
+        In native mode, tool schemas are sent via the API parameter, so they are
+        omitted from the system prompt. In text mode, tool schemas and format
+        instructions are included so the model can output structured JSON actions.
+
         Args:
             user_system_prompt: Optional user-provided system prompt to merge.
 
@@ -341,17 +345,19 @@ class Agent:
         parts.append("## Agent System Prompt")
         parts.append(self.instructions)
 
-        tools_prompt = await self._get_tools_prompt()
-        if tools_prompt:
-            parts.append(tools_prompt)
+        if self.function_calling == "text":
+            # Text mode: include tool schemas and format instructions in prompt
+            tools_prompt = await self._get_tools_prompt()
+            if tools_prompt:
+                parts.append(tools_prompt)
 
-        agents_prompt = await self._get_agents_prompt()
-        if agents_prompt:
-            parts.append(agents_prompt)
+            agents_prompt = await self._get_agents_prompt()
+            if agents_prompt:
+                parts.append(agents_prompt)
 
-        # Add no-action instruction if we have tools or agents
-        if tools_prompt or agents_prompt:
-            parts.append(NO_ACTION_INSTRUCTIONS)
+            # Add no-action instruction if we have tools or agents
+            if tools_prompt or agents_prompt:
+                parts.append(NO_ACTION_INSTRUCTIONS)
 
         # User-provided system prompt (if any)
         if user_system_prompt:
