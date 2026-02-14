@@ -207,19 +207,38 @@ class ModelAPI:
 
 
 @dataclass
+class ToolCall:
+    """Structured tool call from the model API.
+
+    Represents a native function call returned by the model,
+    with the call ID, function name, and JSON-encoded arguments.
+    """
+
+    id: str  # tool call ID from the API (e.g. "call_abc123")
+    name: str  # function name (e.g. "get_weather", "delegate_to_coder")
+    arguments: str  # JSON string of arguments
+
+
+@dataclass
+class ModelResponse:
+    """Structured response from the model API.
+
+    Wraps both text content and tool calls in a single type,
+    allowing downstream consumers to handle either path.
+    """
+
+    content: Optional[str] = None  # text content (may be None if only tool_calls)
+    tool_calls: Optional[List[ToolCall]] = None  # structured tool calls from native API
+    role: str = "assistant"  # message role
+    raw: Optional[dict] = None  # raw API response for debugging
+
+
+@dataclass
 class ModelMessage:
     """Backwards compatibility message model."""
 
     role: str
     content: str
-
-
-@dataclass
-class ModelResponse:
-    """Backwards compatibility response model."""
-
-    content: str
-    finish_reason: str
 
 
 # For backwards compatibility during migration
