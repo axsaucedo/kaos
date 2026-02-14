@@ -747,3 +747,64 @@ class TestMemoryEventTracking:
         assert user_idx < tool_idx < delegation_idx < response_idx
 
         logger.info("✓ Complete workflow memory tracking works")
+
+
+class TestFormatWarnings:
+    """Tests for format warning logging and memory events."""
+
+    @pytest.mark.asyncio
+    async def test_empty_response_stores_format_warning(self):
+        """Test that empty model response (no content, no tool_calls) stores format warning."""
+        # Model returns empty response (no content, no tool_calls), then final response
+        empty_response = ModelResponse(content=None, finish_reason="stop")
+        final_response = "Here is my response."
+
+        mock_model = MockModelAPI(responses=[empty_response, final_response])
+        memory = LocalMemory()
+
+        agent = Agent(
+            name="warn-agent",
+            model_api=mock_model,
+            memory=memory,
+            max_steps=5,
+        )
+
+        result = []
+        async for chunk in agent.process_message("test"):
+            result.append(chunk)
+
+        # Verify format_warning was stored in memory
+        sessions = await memory.list_sessions()
+        events = await memory.get_session_events(sessions[0])
+        event_types = [e.event_type for e in events]
+
+        assert "format_warning" in event_types
+        warning_event = next(e for e in events if e.event_type == "format_warning")
+        assert "empty response" in warning_event.content.lower()
+
+        logger.info("✓ Empty response format warning works")
+
+    @pytest.mark.asyncio
+    async def test_empty_response_logs_warning(self, caplog):
+        """Test that empty model response logs a warning."""
+        empty_response = ModelResponse(content=None, finish_reason="stop")
+        final_response = "Here is my response."
+
+        mock_model = MockModelAPI(responses=[empty_response, final_response])
+        memory = LocalMemory()
+
+        agent = Agent(
+            name="warn-agent",
+            model_api=mock_model,
+            memory=memory,
+            max_steps=5,
+        )
+
+        with caplog.at_level(logging.WARNING, logger="agent.client"):
+            result = []
+            async for chunk in agent.process_message("test"):
+                result.append(chunk)
+
+        assert any("no tool_calls and no content" in r.message for r in caplog.records)
+
+        logger.info("✓ Empty response warning logging works")

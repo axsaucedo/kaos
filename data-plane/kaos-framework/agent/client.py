@@ -534,6 +534,15 @@ class Agent:
                     continue
 
                 # No tool calls - model wants to respond directly, proceed to Phase 2
+                if not response.content:
+                    logger.warning(
+                        f"Model returned no tool_calls and no content at step {step + 1}"
+                    )
+                    await self.memory.add_event(
+                        session_id,
+                        "format_warning",
+                        f"Model returned empty response at step {step + 1}",
+                    )
                 break
 
             except Exception as e:
@@ -639,6 +648,8 @@ class Agent:
                     f"Model response: content={len(response.content or '')} chars, "
                     f"tool_calls={len(response.tool_calls)}"
                 )
+                if not response.content and not response.has_tool_calls:
+                    logger.warning("Model returned response with neither content nor tool_calls")
                 return response
             # Fallback for streaming iterator (shouldn't happen with stream=False)
             return ModelResponse(content=str(response), finish_reason="stop")
