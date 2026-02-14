@@ -408,6 +408,55 @@ kaos ui [OPTIONS]
 
 ---
 
+## kaos samples
+
+Deploy and manage example configurations from `operator/config/samples/`.
+
+### kaos samples list
+
+List available sample configurations.
+
+```bash
+kaos samples list
+```
+
+### kaos samples deploy
+
+Deploy a sample configuration with optional overrides.
+
+```bash
+kaos samples deploy NAME [OPTIONS]
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--namespace` | `-n` | Override namespace for all resources |
+| `--wait` | | Wait for deployments to be available |
+| `--wait-timeout` | | Timeout in seconds (default: 120) |
+| `--dry-run` | | Print YAML instead of deploying |
+| `--modelapi` | | Override ModelAPI name reference |
+| `--mode` | | Override ModelAPI mode (Proxy/Hosted) |
+| `--model` | `-m` | Override model name |
+| `--api-secret` | | Override API secret (secretname:key) |
+
+**Examples:**
+```bash
+kaos samples deploy 1-simple-echo-agent
+kaos samples deploy 3-hierarchical-agents --namespace my-ns
+kaos samples deploy 1-simple-echo-agent --model "llama3:8b" --dry-run
+kaos samples deploy 1-simple-echo-agent --api-secret nebius-secrets:api-key
+```
+
+### kaos samples delete
+
+Delete a sample's resources.
+
+```bash
+kaos samples delete NAME
+```
+
+---
+
 ## Environment Variables
 
 | Variable | Description |
