@@ -38,6 +38,7 @@ class MockModelAPI(ModelAPI):
         self.client = None  # Not used
         self._mock_responses_template: Optional[List[str]] = None  # Not used in mock
         self.last_tools: Optional[List[dict]] = None
+        self.all_tools_calls: List[Optional[List[dict]]] = []
 
     def reset_mock_responses(self) -> None:
         """Reset mock responses to start a fresh cycle."""
@@ -64,6 +65,7 @@ class MockModelAPI(ModelAPI):
         response = self.responses[min(self.call_count, len(self.responses) - 1)]
         self.call_count += 1
         self.last_tools = tools
+        self.all_tools_calls.append(tools)
 
         if stream:
             content = (
@@ -678,3 +680,304 @@ class TestMemoryEventTracking:
         assert user_idx < tool_idx < delegation_idx < response_idx
 
         logger.info("✓ Complete workflow memory tracking works")
+
+
+class TestNativeToolCalling:
+    """Tests for native tool calling path (function_calling='native')."""
+
+    @pytest.mark.asyncio
+    async def test_native_tool_dispatch(self):
+        """Test that native mode dispatches tool_calls from ModelResponse to MCP tools."""
+        mock_responses = [
+            # First call: model returns tool call
+            ModelResponse(
+                content=None,
+                tool_calls=[
+                    ToolCall(
+                        id="call_1",
+                        name="get_weather",
+                        arguments='{"city": "London"}',
+                    )
+                ],
+            ),
+            # Second call: model returns final answer after seeing tool result
+            ModelResponse(content="The weather in London is sunny."),
+        ]
+
+        mock_model = MockModelAPI(responses=mock_responses)
+        mock_mcp = MockMCPClient(
+            tools={"get_weather": ("Get weather for a city", {"weather": "sunny"})}
+        )
+        memory = LocalMemory()
+
+        agent = Agent(
+            name="native-tool-agent",
+            model_api=mock_model,
+            mcp_clients=[mock_mcp],
+            memory=memory,
+            max_steps=5,
+            function_calling="native",
+        )
+
+        result = []
+        async for chunk in agent.process_message("What is the weather in London?"):
+            result.append(chunk)
+
+        response = "".join(result)
+
+        # Verify tool was called
+        assert len(mock_mcp.call_log) == 1
+        assert mock_mcp.call_log[0]["tool"] == "get_weather"
+        assert mock_mcp.call_log[0]["args"] == {"city": "London"}
+
+        # Verify final response contains expected content
+        assert "sunny" in response.lower()
+
+        # Verify memory events
+        sessions = await memory.list_sessions()
+        events = await memory.get_session_events(sessions[0])
+        event_types = [e.event_type for e in events]
+        assert "tool_call" in event_types
+        assert "tool_result" in event_types
+        assert "agent_response" in event_types
+
+        logger.info("✓ Native tool dispatch works")
+
+    @pytest.mark.asyncio
+    async def test_native_delegation_via_pseudo_tool(self):
+        """Test that delegate_to_<name> tool calls trigger sub-agent delegation."""
+        mock_responses = [
+            # Model returns delegation pseudo-tool call
+            ModelResponse(
+                content=None,
+                tool_calls=[
+                    ToolCall(
+                        id="call_1",
+                        name="delegate_to_coder",
+                        arguments='{"task": "write hello world"}',
+                    )
+                ],
+            ),
+            # Model returns final answer after delegation
+            ModelResponse(content="Delegation complete."),
+        ]
+
+        mock_model = MockModelAPI(responses=mock_responses)
+        memory = LocalMemory()
+
+        # Create mock remote sub-agent
+        mock_remote = RemoteAgent(name="coder", card_url="http://localhost:9999")
+        mock_remote.agent_card = type(  # type: ignore[assignment]
+            "AgentCard",
+            (),
+            {
+                "name": "coder",
+                "description": "Coder agent",
+                "url": "http://localhost:9999",
+                "capabilities": ["task_execution"],
+            },
+        )()
+        mock_remote._active = True
+        mock_remote.process_message = AsyncMock(return_value="Code written")  # type: ignore[method-assign]
+
+        agent = Agent(
+            name="coordinator",
+            model_api=mock_model,
+            sub_agents=[mock_remote],
+            memory=memory,
+            max_steps=5,
+            function_calling="native",
+        )
+
+        result = []
+        async for chunk in agent.process_message("Write hello world"):
+            result.append(chunk)
+
+        # Verify delegation occurred
+        mock_remote.process_message.assert_called_once()  # type: ignore[union-attr]
+        call_args = mock_remote.process_message.call_args[0][0]  # type: ignore[union-attr]
+        assert isinstance(call_args, list)
+        assert call_args[-1]["role"] == "task-delegation"
+        assert "write hello world" in call_args[-1]["content"]
+
+        # Verify memory events
+        sessions = await memory.list_sessions()
+        events = await memory.get_session_events(sessions[0])
+        event_types = [e.event_type for e in events]
+        assert "delegation_request" in event_types
+        assert "delegation_response" in event_types
+
+        logger.info("✓ Native delegation via pseudo-tool works")
+
+    @pytest.mark.asyncio
+    async def test_native_error_on_empty_response(self):
+        """Test that native mode raises ValueError when model returns no tool_calls and no content."""
+        mock_responses = [
+            # Model returns empty response (no tool_calls, no content)
+            ModelResponse(content=None, tool_calls=None),
+        ]
+
+        mock_model = MockModelAPI(responses=mock_responses)
+        mock_mcp = MockMCPClient(tools={"get_weather": ("Get weather", {"weather": "sunny"})})
+        memory = LocalMemory()
+
+        agent = Agent(
+            name="error-agent",
+            model_api=mock_model,
+            mcp_clients=[mock_mcp],
+            memory=memory,
+            max_steps=5,
+            function_calling="native",
+        )
+
+        result = []
+        async for chunk in agent.process_message("What is the weather?"):
+            result.append(chunk)
+
+        response = "".join(result)
+        # Agent catches ValueError and returns error message
+        assert "error" in response.lower()
+
+        logger.info("✓ Native error on empty response works")
+
+    @pytest.mark.asyncio
+    async def test_native_content_without_tool_calls_is_final_answer(self):
+        """Test that native mode treats content-only response as final answer."""
+        mock_responses = [
+            # Model returns content without tool_calls — treated as direct answer
+            ModelResponse(content="I can answer without tools: 42"),
+        ]
+
+        mock_model = MockModelAPI(responses=mock_responses)
+        mock_mcp = MockMCPClient(tools={"calculator": ("Calculate things", {"result": 42})})
+        memory = LocalMemory()
+
+        agent = Agent(
+            name="direct-answer-agent",
+            model_api=mock_model,
+            mcp_clients=[mock_mcp],
+            memory=memory,
+            max_steps=5,
+            function_calling="native",
+        )
+
+        result = []
+        async for chunk in agent.process_message("What is the answer?"):
+            result.append(chunk)
+
+        response = "".join(result)
+        # Model call count: 1 (action phase) + 1 (final phase) = 2
+        assert mock_model.call_count == 2
+        # No tools should have been called
+        assert len(mock_mcp.call_log) == 0
+
+        logger.info("✓ Native content without tool_calls is final answer")
+
+    @pytest.mark.asyncio
+    async def test_text_mode_unchanged(self):
+        """Test that text mode uses _parse_action and does NOT send tools parameter."""
+        mock_responses = [
+            # Text mode: JSON action format for tool calling
+            ModelResponse(content='{"tool": "get_weather", "arguments": {"city": "London"}}'),
+            ModelResponse(content="{}"),  # No action - proceed to final
+            ModelResponse(content="The weather is sunny."),
+        ]
+
+        mock_model = MockModelAPI(responses=mock_responses)
+        mock_mcp = MockMCPClient(
+            tools={"get_weather": ("Get weather for a city", {"weather": "sunny"})}
+        )
+        memory = LocalMemory()
+
+        agent = Agent(
+            name="text-mode-agent",
+            model_api=mock_model,
+            mcp_clients=[mock_mcp],
+            memory=memory,
+            max_steps=5,
+            function_calling="text",  # Explicitly text mode
+        )
+
+        result = []
+        async for chunk in agent.process_message("What is the weather?"):
+            result.append(chunk)
+
+        # Verify tools param was NOT sent (text mode)
+        assert mock_model.last_tools is None
+
+        # Verify tool was still dispatched via text parsing
+        assert len(mock_mcp.call_log) == 1
+        assert mock_mcp.call_log[0]["tool"] == "get_weather"
+
+        logger.info("✓ Text mode unchanged (no tools param, text parsing works)")
+
+    @pytest.mark.asyncio
+    async def test_native_tools_parameter_sent(self):
+        """Test that native mode passes tools to process_message via _get_tools_for_api."""
+        mock_responses = [
+            # Model returns content (direct answer) — just need to verify tools were sent
+            ModelResponse(content="Here is your answer."),
+        ]
+
+        mock_model = MockModelAPI(responses=mock_responses)
+        mock_mcp = MockMCPClient(
+            tools={
+                "search": ("Search for info", {"results": []}),
+                "calculate": ("Do math", {"result": 42}),
+            }
+        )
+        memory = LocalMemory()
+
+        # Create a sub-agent to check pseudo-tool registration
+        mock_remote = RemoteAgent(name="helper", card_url="http://localhost:9999")
+        mock_remote.agent_card = type(  # type: ignore[assignment]
+            "AgentCard",
+            (),
+            {
+                "name": "helper",
+                "description": "Helper agent",
+                "url": "http://localhost:9999",
+                "capabilities": [],
+            },
+        )()
+        mock_remote._active = True
+
+        agent = Agent(
+            name="tools-param-agent",
+            model_api=mock_model,
+            mcp_clients=[mock_mcp],
+            sub_agents=[mock_remote],
+            memory=memory,
+            max_steps=5,
+            function_calling="native",
+        )
+
+        result = []
+        async for chunk in agent.process_message("Test tools parameter"):
+            result.append(chunk)
+
+        # Verify tools were sent to process_message in Phase 1 (action collection)
+        # Phase 2 (final response) does not send tools, so check the first call
+        assert len(mock_model.all_tools_calls) >= 1
+        phase1_tools = mock_model.all_tools_calls[0]
+        assert phase1_tools is not None
+        assert len(phase1_tools) == 3  # 2 MCP tools + 1 pseudo-tool
+
+        # Verify OpenAI format
+        for tool in phase1_tools:
+            assert tool["type"] == "function"
+            assert "function" in tool
+            assert "name" in tool["function"]
+            assert "parameters" in tool["function"]
+
+        # Verify pseudo-tool for sub-agent
+        delegate_tools = [
+            t for t in phase1_tools if t["function"]["name"].startswith("delegate_to_")
+        ]
+        assert len(delegate_tools) == 1
+        assert delegate_tools[0]["function"]["name"] == "delegate_to_helper"
+
+        # Verify Phase 2 does NOT send tools
+        assert mock_model.all_tools_calls[-1] is None
+
+        logger.info("✓ Native tools parameter sent correctly")
