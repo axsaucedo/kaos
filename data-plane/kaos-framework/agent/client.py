@@ -18,7 +18,7 @@ from typing import List, Dict, Any, Optional, AsyncIterator, Union, cast
 import httpx
 from dataclasses import dataclass
 
-from modelapi.client import ModelAPI
+from modelapi.client import ModelAPI, ModelResponse
 from agent.memory import LocalMemory, NullMemory
 from mcptools.client import MCPClient
 from telemetry.manager import (
@@ -531,6 +531,12 @@ class Agent:
             """Generate step context metadata for the model."""
             return f"[Step {step + 1}/{self.max_steps}]"
 
+        # Determine tools for native mode
+        if self.function_calling == "native":
+            api_tools = await self._get_tools_for_api()
+        else:
+            api_tools = None  # Text mode: no tools parameter
+
         # Phase 1: Action Collection Loop
         for step in range(self.max_steps):
             logger.debug(f"Agentic loop step {step + 1}/{self.max_steps}")
@@ -541,115 +547,255 @@ class Agent:
             step_failed = False
             try:
                 # Get model response (non-streaming for action collection)
-                content = await self._call_model(messages, model_name, seed=seed)
+                response = await self._call_model(messages, model_name, seed=seed, tools=api_tools)
 
-                # Parse action from response
-                action = self._parse_action(content)
-
-                # Check for tool call
-                if action.get("tool"):
-                    tool_name = action["tool"]
-                    tool_args = action.get("arguments", {})
-
-                    await self.memory.add_event(session_id, "tool_call", action)
-
-                    # Emit progress block
-                    progress = json.dumps(
-                        {
-                            "type": "progress",
-                            "step": step + 1,
-                            "max_steps": self.max_steps,
-                            "action": "tool_call",
-                            "target": tool_name,
+                if self.function_calling == "native" and isinstance(response, ModelResponse):
+                    # Native path: read tool_calls from ModelResponse
+                    if response.tool_calls:
+                        # Build assistant message with tool_calls for conversation history
+                        assistant_msg: Dict[str, Any] = {
+                            "role": "assistant",
+                            "content": response.content or "",
+                            "tool_calls": [
+                                {
+                                    "id": tc.id,
+                                    "type": "function",
+                                    "function": {
+                                        "name": tc.name,
+                                        "arguments": tc.arguments,
+                                    },
+                                }
+                                for tc in response.tool_calls
+                            ],
                         }
+                        messages.append(assistant_msg)
+
+                        # Execute each tool call
+                        for tool_call in response.tool_calls:
+                            agent_name = self._is_delegation_call(tool_call.name)
+                            if agent_name:
+                                # Delegation pseudo-tool
+                                task_args = json.loads(tool_call.arguments)
+                                task = task_args.get("task", "")
+
+                                # Emit progress block
+                                progress = json.dumps(
+                                    {
+                                        "type": "progress",
+                                        "step": step + 1,
+                                        "max_steps": self.max_steps,
+                                        "action": "delegate",
+                                        "target": agent_name,
+                                    }
+                                )
+                                yield progress
+
+                                try:
+                                    context_messages = [
+                                        m for m in messages if m.get("role") != "system"
+                                    ]
+                                    delegation_result = await self._execute_delegation(
+                                        agent_name, task, context_messages, session_id
+                                    )
+                                    messages.append(
+                                        {
+                                            "role": "tool",
+                                            "tool_call_id": tool_call.id,
+                                            "content": delegation_result,
+                                        }
+                                    )
+                                except (ValueError, RuntimeError) as e:
+                                    messages.append(
+                                        {
+                                            "role": "tool",
+                                            "tool_call_id": tool_call.id,
+                                            "content": f"Delegation failed: {e}",
+                                        }
+                                    )
+                            else:
+                                # Regular tool call
+                                tool_args = json.loads(tool_call.arguments)
+                                await self.memory.add_event(
+                                    session_id,
+                                    "tool_call",
+                                    {"tool": tool_call.name, "arguments": tool_args},
+                                )
+
+                                # Emit progress block
+                                progress = json.dumps(
+                                    {
+                                        "type": "progress",
+                                        "step": step + 1,
+                                        "max_steps": self.max_steps,
+                                        "action": "tool_call",
+                                        "target": tool_call.name,
+                                    }
+                                )
+                                yield progress
+
+                                try:
+                                    tool_result = await self._execute_tool(
+                                        tool_call.name, tool_args
+                                    )
+                                    await self.memory.add_event(
+                                        session_id,
+                                        "tool_result",
+                                        {"tool": tool_call.name, "result": tool_result},
+                                    )
+                                    messages.append(
+                                        {
+                                            "role": "tool",
+                                            "tool_call_id": tool_call.id,
+                                            "content": json.dumps(tool_result),
+                                        }
+                                    )
+                                except Exception as e:
+                                    await self.memory.add_event(
+                                        session_id,
+                                        "tool_error",
+                                        {"tool": tool_call.name, "error": str(e)},
+                                    )
+                                    messages.append(
+                                        {
+                                            "role": "tool",
+                                            "tool_call_id": tool_call.id,
+                                            "content": f"Tool execution failed: {e}",
+                                        }
+                                    )
+                        continue  # Model will see tool results in next iteration
+
+                    elif response.content:
+                        # No tool_calls but has content: final answer, break to Phase 2
+                        break
+
+                    elif api_tools:
+                        # No tool_calls and no content but tools were sent: error
+                        raise ValueError(
+                            f"Model did not return tool_calls in native mode. "
+                            f"Response: {response.content[:200] if response.content else '(empty)'}"
+                        )
+
+                else:
+                    # Text path: use _parse_action on response content
+                    content = (
+                        response.content
+                        if isinstance(response, ModelResponse)
+                        else cast(str, response)
                     )
-                    yield progress
+                    if content is None:
+                        content = ""
 
-                    try:
-                        tool_result = await self._execute_tool(tool_name, tool_args)
+                    # Parse action from response
+                    action = self._parse_action(content)
 
-                        await self.memory.add_event(
-                            session_id, "tool_result", {"tool": tool_name, "result": tool_result}
-                        )
+                    # Check for tool call
+                    if action.get("tool"):
+                        tool_name = action["tool"]
+                        tool_args = action.get("arguments", {})
 
-                        messages.append({"role": "assistant", "content": content})
-                        messages.append(
+                        await self.memory.add_event(session_id, "tool_call", action)
+
+                        # Emit progress block
+                        progress = json.dumps(
                             {
-                                "role": "user",
-                                "content": f"{_step_context(step)} Tool result: {json.dumps(tool_result)}",
+                                "type": "progress",
+                                "step": step + 1,
+                                "max_steps": self.max_steps,
+                                "action": "tool_call",
+                                "target": tool_name,
                             }
                         )
-                        continue
+                        yield progress
 
-                    except Exception as e:
-                        error_msg = str(e)
-                        await self.memory.add_event(
-                            session_id, "tool_error", {"tool": tool_name, "error": error_msg}
-                        )
-                        messages.append({"role": "assistant", "content": content})
-                        messages.append(
+                        try:
+                            tool_result = await self._execute_tool(tool_name, tool_args)
+
+                            await self.memory.add_event(
+                                session_id,
+                                "tool_result",
+                                {"tool": tool_name, "result": tool_result},
+                            )
+
+                            messages.append({"role": "assistant", "content": content})
+                            messages.append(
+                                {
+                                    "role": "user",
+                                    "content": f"{_step_context(step)} Tool result: {json.dumps(tool_result)}",
+                                }
+                            )
+                            continue
+
+                        except Exception as e:
+                            error_msg = str(e)
+                            await self.memory.add_event(
+                                session_id,
+                                "tool_error",
+                                {"tool": tool_name, "error": error_msg},
+                            )
+                            messages.append({"role": "assistant", "content": content})
+                            messages.append(
+                                {
+                                    "role": "user",
+                                    "content": f"{_step_context(step)} Tool execution failed: {error_msg}",
+                                }
+                            )
+                            continue
+
+                    # Check for delegation
+                    if action.get("agent"):
+                        agent_name = action["agent"]
+                        task = action.get("task", "")
+
+                        if not task:
+                            messages.append({"role": "assistant", "content": content})
+                            messages.append(
+                                {
+                                    "role": "user",
+                                    "content": f"{_step_context(step)} Invalid delegation: missing 'task'",
+                                }
+                            )
+                            continue
+
+                        # Emit progress block
+                        progress = json.dumps(
                             {
-                                "role": "user",
-                                "content": f"{_step_context(step)} Tool execution failed: {error_msg}",
+                                "type": "progress",
+                                "step": step + 1,
+                                "max_steps": self.max_steps,
+                                "action": "delegate",
+                                "target": agent_name,
                             }
                         )
-                        continue
+                        yield progress
 
-                # Check for delegation
-                if action.get("agent"):
-                    agent_name = action["agent"]
-                    task = action.get("task", "")
+                        try:
+                            context_messages = [m for m in messages if m.get("role") != "system"]
 
-                    if not task:
-                        messages.append({"role": "assistant", "content": content})
-                        messages.append(
-                            {
-                                "role": "user",
-                                "content": f"{_step_context(step)} Invalid delegation: missing 'task'",
-                            }
-                        )
-                        continue
+                            delegation_result = await self._execute_delegation(
+                                agent_name, task, context_messages, session_id
+                            )
 
-                    # Emit progress block
-                    progress = json.dumps(
-                        {
-                            "type": "progress",
-                            "step": step + 1,
-                            "max_steps": self.max_steps,
-                            "action": "delegate",
-                            "target": agent_name,
-                        }
-                    )
-                    yield progress
+                            messages.append({"role": "assistant", "content": content})
+                            messages.append(
+                                {
+                                    "role": "user",
+                                    "content": f"{_step_context(step)} Agent response: {delegation_result}",
+                                }
+                            )
+                            continue
 
-                    try:
-                        context_messages = [m for m in messages if m.get("role") != "system"]
+                        except ValueError as e:
+                            messages.append({"role": "assistant", "content": content})
+                            messages.append(
+                                {
+                                    "role": "user",
+                                    "content": f"{_step_context(step)} Delegation failed: {e}",
+                                }
+                            )
+                            continue
 
-                        delegation_result = await self._execute_delegation(
-                            agent_name, task, context_messages, session_id
-                        )
-
-                        messages.append({"role": "assistant", "content": content})
-                        messages.append(
-                            {
-                                "role": "user",
-                                "content": f"{_step_context(step)} Agent response: {delegation_result}",
-                            }
-                        )
-                        continue
-
-                    except ValueError as e:
-                        messages.append({"role": "assistant", "content": content})
-                        messages.append(
-                            {
-                                "role": "user",
-                                "content": f"{_step_context(step)} Delegation failed: {e}",
-                            }
-                        )
-                        continue
-
-                # No action (empty dict or no recognized action) - proceed to Phase 2
-                break
+                    # No action (empty dict or no recognized action) - proceed to Phase 2
+                    break
 
             except Exception as e:
                 step_failed = True
@@ -684,8 +830,13 @@ class Agent:
                 # Record the complete response in memory
                 await self.memory.add_event(session_id, "agent_response", full_response)
             else:
-                # Non-streaming final response
-                content = await self._call_model(messages, model_name, seed=seed)
+                # Non-streaming final response (no tools in Phase 2)
+                response = await self._call_model(messages, model_name, seed=seed)
+                content = (
+                    response.content or ""
+                    if isinstance(response, ModelResponse)
+                    else cast(str, response)
+                )
                 await self.memory.add_event(session_id, "agent_response", content)
                 yield content
 
@@ -727,9 +878,16 @@ class Agent:
                 otel.span_success()
 
     async def _call_model(
-        self, messages: List[Dict[str, str]], model_name: str, seed: Optional[int] = None
-    ) -> str:
-        """Call the model API with tracing."""
+        self,
+        messages: List[Dict[str, str]],
+        model_name: str,
+        seed: Optional[int] = None,
+        tools: Optional[List[dict]] = None,
+    ) -> Union[str, ModelResponse]:
+        """Call the model API with tracing.
+
+        Returns str (from mock path) or ModelResponse (from real API).
+        """
         otel.span_begin(
             "model.inference",
             kind=SpanKind.CLIENT,
@@ -745,11 +903,19 @@ class Agent:
                 if msg.get("role") in ("user", "task-delegation"):
                     logger.debug(f"Model input (last user msg): {msg.get('content', '')[:200]}...")
                     break
-            content = cast(
-                str, await self.model_api.process_message(messages, stream=False, seed=seed)
-            )
-            logger.debug(f"Model response ({len(content)} chars): {content[:200]}...")
-            return content
+            kwargs: Dict[str, Any] = {"stream": False, "seed": seed}
+            if tools is not None:
+                kwargs["tools"] = tools
+            response = await self.model_api.process_message(messages, **kwargs)
+            if isinstance(response, ModelResponse):
+                logger.debug(
+                    f"Model response (ModelResponse, {len(response.content or '')} chars): "
+                    f"{(response.content or '')[:200]}..."
+                )
+            else:
+                content = cast(str, response)
+                logger.debug(f"Model response ({len(content)} chars): {content[:200]}...")
+            return response  # type: ignore[return-value]
         except Exception as e:
             failed = True
             logger.error(f"Model call failed: {type(e).__name__}: {e}")
