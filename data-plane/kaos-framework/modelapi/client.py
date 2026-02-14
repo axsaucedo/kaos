@@ -10,7 +10,7 @@ import json
 import logging
 import os
 from contextvars import ContextVar
-from typing import Dict, List, Optional, AsyncIterator, Union
+from typing import Any, Dict, List, Optional, AsyncIterator, Union
 from dataclasses import dataclass
 import httpx
 
@@ -105,16 +105,19 @@ class ModelAPI:
         messages: List[Dict[str, str]],
         stream: bool = False,
         seed: Optional[int] = None,
-    ) -> Union[str, AsyncIterator[str]]:
+        tools: Optional[List[dict]] = None,
+    ) -> Union[str, "ModelResponse", AsyncIterator[str]]:
         """Process messages and return response.
 
         Args:
             messages: OpenAI-format messages
-            stream: If True, returns AsyncIterator[str]; if False, returns str
+            stream: If True, returns AsyncIterator[str]; if False, returns str or ModelResponse
             seed: Optional seed for reproducible generation
+            tools: Optional list of tool definitions in OpenAI format for native function calling
 
         Returns:
-            str if stream=False, AsyncIterator[str] if stream=True
+            str (mock path) or ModelResponse (real API) if stream=False,
+            AsyncIterator[str] if stream=True
         """
         # Check for mock response from context
         mock_content = self._get_next_mock_response()
@@ -131,16 +134,21 @@ class ModelAPI:
 
         # Call real API
         if stream:
-            return self._stream_response(messages, seed=seed)
-        return await self._complete_response(messages, seed=seed)
+            return self._stream_response(messages, seed=seed, tools=tools)
+        return await self._complete_response(messages, seed=seed, tools=tools)
 
     async def _complete_response(
-        self, messages: List[Dict[str, str]], seed: Optional[int] = None
-    ) -> str:
-        """Non-streaming completion - returns content string."""
-        payload = {"model": self.model, "messages": messages, "stream": False}
+        self,
+        messages: List[Dict[str, str]],
+        seed: Optional[int] = None,
+        tools: Optional[List[dict]] = None,
+    ) -> "ModelResponse":
+        """Non-streaming completion - returns ModelResponse."""
+        payload: Dict[str, Any] = {"model": self.model, "messages": messages, "stream": False}
         if seed is not None:
             payload["seed"] = seed
+        if tools is not None:
+            payload["tools"] = tools
 
         try:
             response = await self.client.post("/v1/chat/completions", json=payload)
@@ -150,7 +158,27 @@ class ModelAPI:
             if "choices" not in data or not data["choices"]:
                 raise ValueError("Invalid response format: missing choices")
 
-            return data["choices"][0]["message"]["content"]
+            message = data["choices"][0]["message"]
+            content = message.get("content")
+
+            # Extract tool calls if present
+            raw_tool_calls = message.get("tool_calls")
+            tool_calls = None
+            if raw_tool_calls:
+                tool_calls = [
+                    ToolCall(
+                        id=tc["id"],
+                        name=tc["function"]["name"],
+                        arguments=tc["function"]["arguments"],
+                    )
+                    for tc in raw_tool_calls
+                ]
+
+            return ModelResponse(
+                content=content,
+                tool_calls=tool_calls if tool_calls else None,
+                raw=data,
+            )
 
         except httpx.HTTPError as e:
             logger.error(f"HTTP error in completion: {e}")
@@ -160,12 +188,17 @@ class ModelAPI:
             raise ValueError(f"Invalid JSON response: {e}")
 
     async def _stream_response(
-        self, messages: List[Dict[str, str]], seed: Optional[int] = None
+        self,
+        messages: List[Dict[str, str]],
+        seed: Optional[int] = None,
+        tools: Optional[List[dict]] = None,
     ) -> AsyncIterator[str]:
         """Streaming completion - yields content chunks."""
-        payload = {"model": self.model, "messages": messages, "stream": True}
+        payload: Dict[str, Any] = {"model": self.model, "messages": messages, "stream": True}
         if seed is not None:
             payload["seed"] = seed
+        if tools is not None:
+            payload["tools"] = tools
 
         try:
             async with self.client.stream(
