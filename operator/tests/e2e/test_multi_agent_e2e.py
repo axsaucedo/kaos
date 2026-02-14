@@ -191,9 +191,13 @@ async def test_multi_agent_delegation_with_memory(
                         ]
                     }
                 ),
+                "No more actions needed.",
                 f"The worker has completed task {task_id}.",
             ],
-            "multi-w1-mem": [f"Task {task_id} processed by worker-1."],
+            "multi-w1-mem": [
+                f"Task {task_id} processed by worker-1.",
+                f"Task {task_id} processed by worker-1.",
+            ],
         },
     )
 

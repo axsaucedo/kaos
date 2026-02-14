@@ -144,14 +144,15 @@ class TestAgenticLoopToolCalling:
     @pytest.mark.asyncio
     async def test_tool_call_detected_and_executed(self):
         """Test that a tool call in model response triggers tool execution."""
-        # Native function calling: model returns tool_calls, then content response
+        # Native function calling: model returns tool_calls, then no-tool break, then final
         tool_call_response = ModelResponse(
             tool_calls=[ToolCall(id="call_1", name="calculator", arguments={"a": 5, "b": 3})],
             finish_reason="tool_calls",
         )
+        loop_break = ModelResponse(content=None, finish_reason="stop")
         final_response = "The result is 8."
 
-        mock_model = MockModelAPI(responses=[tool_call_response, final_response])
+        mock_model = MockModelAPI(responses=[tool_call_response, loop_break, final_response])
         mock_mcp = MockMCPClient(tools={"calculator": ("Add two numbers", {"sum": 8})})
         memory = LocalMemory()
 
@@ -174,8 +175,8 @@ class TestAgenticLoopToolCalling:
         assert len(mock_mcp.call_log) == 1
         assert mock_mcp.call_log[0]["tool"] == "calculator"
 
-        # Verify model was called: tool_call response -> final response
-        assert mock_model.call_count == 2
+        # Verify model was called: tool_call → loop break → Phase 2 final
+        assert mock_model.call_count == 3
 
         # Verify memory has tool events
         sessions = await memory.list_sessions()
@@ -196,9 +197,10 @@ class TestAgenticLoopToolCalling:
             tool_calls=[ToolCall(id="call_1", name="calculator", arguments={"a": 5, "b": 3})],
             finish_reason="tool_calls",
         )
+        loop_break = ModelResponse(content=None, finish_reason="stop")
         final_response = "The result is 8."
 
-        mock_model = MockModelAPI(responses=[tool_call_response, final_response])
+        mock_model = MockModelAPI(responses=[tool_call_response, loop_break, final_response])
         mock_mcp = MockMCPClient(tools={"calculator": ("Add two numbers", {"sum": 8})})
         memory = LocalMemory()
 
@@ -231,9 +233,10 @@ class TestAgenticLoopToolCalling:
             ],
             finish_reason="tool_calls",
         )
+        loop_break = ModelResponse(content=None, finish_reason="stop")
         final_response = "Calculated 3 and echoed hi."
 
-        mock_model = MockModelAPI(responses=[tool_call_response, final_response])
+        mock_model = MockModelAPI(responses=[tool_call_response, loop_break, final_response])
         mock_mcp = MockMCPClient(
             tools={
                 "calculator": ("Add two numbers", {"sum": 3}),
@@ -259,8 +262,8 @@ class TestAgenticLoopToolCalling:
         tool_names = {c["tool"] for c in mock_mcp.call_log}
         assert tool_names == {"calculator", "echo"}
 
-        # Model called twice: tool_calls response -> final response
-        assert mock_model.call_count == 2
+        # Model called 3 times: tool_calls → loop break → Phase 2 final
+        assert mock_model.call_count == 3
 
         # Memory should have both tool_call and tool_result events
         sessions = await memory.list_sessions()
@@ -290,9 +293,10 @@ class TestAgenticLoopDelegation:
             ],
             finish_reason="tool_calls",
         )
+        loop_break = ModelResponse(content=None, finish_reason="stop")
         final_response = "The worker processed the data successfully."
 
-        mock_model = MockModelAPI(responses=[delegation_response, final_response])
+        mock_model = MockModelAPI(responses=[delegation_response, loop_break, final_response])
         memory = LocalMemory()
 
         # Create mock remote agent
@@ -331,8 +335,8 @@ class TestAgenticLoopDelegation:
         assert call_args[-1]["role"] == "task-delegation"
         assert "Process this data" in call_args[-1]["content"]
 
-        # Verify model calls: delegation tool_call -> final response
-        assert mock_model.call_count == 2
+        # Verify model calls: delegation tool_call → loop break → Phase 2 final
+        assert mock_model.call_count == 3
 
         # Verify memory has delegation events
         sessions = await memory.list_sessions()
@@ -416,7 +420,13 @@ class TestMemoryContextLimit:
         )
         final_response = "Done."
 
-        mock_model = MockModelAPI(responses=[delegation_response, final_response])
+        mock_model = MockModelAPI(
+            responses=[
+                delegation_response,
+                ModelResponse(content=None, finish_reason="stop"),
+                final_response,
+            ]
+        )
         memory = LocalMemory()
 
         # Create mock remote agent
@@ -615,7 +625,7 @@ class TestSystemPromptBuilding:
 
         # Verify result
         assert len(result) > 0
-        assert mock_model.call_count == 1  # No tools, so direct response
+        assert mock_model.call_count == 2  # Phase 1 (no tools, breaks) + Phase 2 final
 
         logger.info("✓ Process message merges user system prompt")
 
@@ -632,8 +642,10 @@ class TestMockResponseEnvVar:
         memory = LocalMemory()
 
         # Set mock responses via env var BEFORE creating ModelAPI
-        # Simple text response (no tool calls)
-        os.environ["DEBUG_MOCK_RESPONSES"] = json.dumps(["Mocked response from env"])
+        # Two responses: Phase 1 (breaks loop) + Phase 2 (final answer)
+        os.environ["DEBUG_MOCK_RESPONSES"] = json.dumps(
+            ["Phase 1 break", "Mocked response from env"]
+        )
 
         try:
             # Use real ModelAPI - it reads env var in __init__
@@ -665,7 +677,7 @@ class TestMockResponseEnvVar:
         mock_mcp = MockMCPClient(tools={"calculator": ("Add two numbers", {"sum": 8})})
         memory = LocalMemory()
 
-        # Mock responses: tool call (as tool_calls format) then final response
+        # Mock responses: tool call → loop break (no tool_calls) → final response
         mock_responses = [
             json.dumps(
                 {
@@ -674,6 +686,7 @@ class TestMockResponseEnvVar:
                     ]
                 }
             ),
+            "No more tools needed.",
             "The result is 8.",
         ]
         os.environ["DEBUG_MOCK_RESPONSES"] = json.dumps(mock_responses)
@@ -739,7 +752,12 @@ class TestMemoryEventTracking:
         final_response = "Based on my analysis, the result is complete."
 
         mock_model = MockModelAPI(
-            responses=[tool_call_response, delegation_response, final_response]
+            responses=[
+                tool_call_response,
+                delegation_response,
+                ModelResponse(content=None, finish_reason="stop"),
+                final_response,
+            ]
         )
         mock_mcp = MockMCPClient(tools={"fetch": ("Fetch URL", {"data": "example"})})
 
@@ -857,16 +875,46 @@ class TestFormatWarnings:
         logger.info("✓ Empty response warning logging works")
 
 
-class TestStreamingPhase2Reuse:
-    """Tests for Phase 2 streaming reusing Phase 1 content."""
+class TestPhase2FinalResponse:
+    """Tests for Phase 2 always calling model with final-response instruction."""
 
     @pytest.mark.asyncio
-    async def test_streaming_reuses_phase1_content(self):
-        """Test that streaming yields Phase 1 content without re-calling the model."""
-        # Model returns content directly (no tool calls) in Phase 1
-        direct_response = ModelResponse(content="Direct answer.", finish_reason="stop")
+    async def test_phase2_always_calls_model_for_final_response(self):
+        """Test that Phase 2 always calls model even when Phase 1 had content."""
+        # Phase 1: model returns content (no tool calls) → breaks loop
+        # Phase 2: must call model again with final-response instruction
+        phase1_response = ModelResponse(content="Intermediate thought.", finish_reason="stop")
+        final_response = "Final synthesized answer."
 
-        mock_model = MockModelAPI(responses=[direct_response])
+        mock_model = MockModelAPI(responses=[phase1_response, final_response])
+        memory = LocalMemory()
+
+        agent = Agent(
+            name="phase2-agent",
+            model_api=mock_model,
+            memory=memory,
+            max_steps=5,
+        )
+
+        result = []
+        async for chunk in agent.process_message("test"):
+            result.append(chunk)
+
+        response = "".join(result)
+        assert "Final synthesized answer." in response
+
+        # Model called twice: Phase 1 (no tool_calls) → Phase 2 (final response)
+        assert mock_model.call_count == 2
+
+        logger.info("✓ Phase 2 always calls model for final response")
+
+    @pytest.mark.asyncio
+    async def test_phase2_streaming_calls_model(self):
+        """Test that streaming Phase 2 calls model (not reusing Phase 1 content)."""
+        phase1_response = ModelResponse(content="Thinking...", finish_reason="stop")
+        streaming_final = "Streamed final answer."
+
+        mock_model = MockModelAPI(responses=[phase1_response, streaming_final])
         memory = LocalMemory()
 
         agent = Agent(
@@ -880,30 +928,28 @@ class TestStreamingPhase2Reuse:
         async for chunk in agent.process_message("test", stream=True):
             result.append(chunk)
 
-        response = "".join(result)
-        assert "Direct answer." in response
+        # Model called twice: Phase 1 (non-streaming) + Phase 2 (streaming)
+        assert mock_model.call_count == 2
 
-        # Model should be called exactly once (Phase 1 only, no Phase 2 re-call)
-        assert mock_model.call_count == 1
-
-        logger.info("✓ Streaming reuses Phase 1 content")
+        logger.info("✓ Phase 2 streaming calls model")
 
     @pytest.mark.asyncio
-    async def test_streaming_calls_model_when_no_phase1_content(self):
-        """Test that streaming calls model when Phase 1 has no content (after tool calls)."""
+    async def test_phase2_after_tool_calls(self):
+        """Test Phase 2 after tool execution calls model with final instruction."""
         tool_call_response = ModelResponse(
             tool_calls=[ToolCall(id="call_1", name="echo", arguments={"msg": "hi"})],
             finish_reason="tool_calls",
         )
-        # Phase 1 exits with no content after tool calls, Phase 2 should stream
-        no_content_response = ModelResponse(content=None, finish_reason="stop")
+        # Phase 1 second call: no tool_calls → break
+        no_tool_response = ModelResponse(content=None, finish_reason="stop")
+        final_response = "Based on the tool results, here is my answer."
 
-        mock_model = MockModelAPI(responses=[tool_call_response, no_content_response, "Streamed."])
+        mock_model = MockModelAPI(responses=[tool_call_response, no_tool_response, final_response])
         mock_mcp = MockMCPClient(tools={"echo": ("Echo", {"echo": "hi"})})
         memory = LocalMemory()
 
         agent = Agent(
-            name="stream-agent",
+            name="tool-agent",
             model_api=mock_model,
             mcp_clients=[mock_mcp],
             memory=memory,
@@ -911,13 +957,16 @@ class TestStreamingPhase2Reuse:
         )
 
         result = []
-        async for chunk in agent.process_message("test", stream=True):
+        async for chunk in agent.process_message("test"):
             result.append(chunk)
 
-        # Should have called model 3 times: tool_call → no_content → streaming
+        response = "".join(result)
+        assert "Based on the tool results" in response
+
+        # Model called 3 times: tool_call → no_tool → final
         assert mock_model.call_count == 3
 
-        logger.info("✓ Streaming calls model when Phase 1 has no content")
+        logger.info("✓ Phase 2 after tool calls works")
 
 
 class TestToolCallArgumentNormalization:

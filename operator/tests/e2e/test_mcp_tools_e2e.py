@@ -240,6 +240,7 @@ async def test_agent_tool_calling_with_memory(
                 ]
             }
         ),
+        "No more actions needed.",
         f"The echo tool returned the result for task {task_id}.",
     ]
 
