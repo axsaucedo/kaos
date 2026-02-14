@@ -19,7 +19,7 @@ from unittest.mock import AsyncMock
 from agent.client import Agent, RemoteAgent
 from agent.memory import LocalMemory
 from agent.server import AgentServerSettings, create_agent_server
-from modelapi.client import ModelAPI
+from modelapi.client import ModelAPI, ModelResponse, ToolCall
 from mcptools.client import MCPClient, Tool
 
 logger = logging.getLogger(__name__)
@@ -37,6 +37,7 @@ class MockModelAPI(ModelAPI):
         self.api_base = "mock://localhost"
         self.client = None  # Not used
         self._mock_responses_template: Optional[List[str]] = None  # Not used in mock
+        self.last_tools: Optional[List[dict]] = None
 
     def reset_mock_responses(self) -> None:
         """Reset mock responses to start a fresh cycle."""
@@ -48,16 +49,45 @@ class MockModelAPI(ModelAPI):
         """Check if mock responses are configured."""
         return bool(self._responses_original)
 
-    async def process_message(self, messages, stream=False, seed: Optional[int] = None):
+    async def process_message(
+        self,
+        messages,
+        stream=False,
+        seed: Optional[int] = None,
+        tools: Optional[List[dict]] = None,
+    ):
         """Return next response from the list.
 
-        Returns str if stream=False, AsyncIterator[str] if stream=True.
+        Returns ModelResponse if stream=False, AsyncIterator[str] if stream=True.
+        Supports string, dict, and ModelResponse response formats.
         """
-        content = self.responses[min(self.call_count, len(self.responses) - 1)]
+        response = self.responses[min(self.call_count, len(self.responses) - 1)]
         self.call_count += 1
+        self.last_tools = tools
+
         if stream:
+            content = (
+                response
+                if isinstance(response, str)
+                else (
+                    response.content or "" if isinstance(response, ModelResponse) else str(response)
+                )
+            )
             return self._yield_content(content)
-        return content
+
+        # Return ModelResponse for non-streaming
+        if isinstance(response, ModelResponse):
+            return response
+        if isinstance(response, dict):
+            tool_calls = None
+            if "tool_calls" in response:
+                tool_calls = [
+                    ToolCall(id=tc["id"], name=tc["name"], arguments=tc["arguments"])
+                    for tc in response["tool_calls"]
+                ]
+            return ModelResponse(content=response.get("content"), tool_calls=tool_calls)
+        # Plain string: wrap in ModelResponse
+        return ModelResponse(content=response)
 
     async def _yield_content(self, content: str):
         """Yield content as streaming chunks."""
