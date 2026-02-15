@@ -2,12 +2,14 @@
 Agent client implementation for OpenAI-compatible API.
 
 Clean, simple implementation with proper streaming support and tool integration.
-Includes agentic loop using native OpenAI function calling for tool execution
-and agent delegation.
+Includes agentic loop with dual-mode tool calling:
+- native: Uses OpenAI tools API for structured function calling
+- string: Uses text-based JSON parsing from model content
+- auto: Tries native first, falls back to string on unsupported models
 Instrumented with OpenTelemetry for tracing and metrics.
 
 Key design principles:
-- Agent uses native OpenAI tools API for structured tool calling
+- Agent supports native, string, and auto tool call modes
 - Sub-agent delegation exposed as delegate_to_{name} tool functions
 - Server only routes requests, never interprets delegation
 - DEBUG_MOCK_RESPONSES env var handled by ModelAPI for testing
@@ -17,6 +19,7 @@ Key design principles:
 import asyncio
 import json
 import logging
+import re
 from typing import List, Dict, Any, Optional, AsyncIterator, Union, cast
 import httpx
 from dataclasses import dataclass
@@ -40,6 +43,33 @@ logger = logging.getLogger(__name__)
 Memory = LocalMemory | NullMemory
 
 DELEGATION_TOOL_PREFIX = "delegate_to_"
+
+# Valid tool call modes
+TOOL_CALL_MODES = ("auto", "native", "string")
+
+# System prompt templates for string-mode tool calling
+TOOLS_INSTRUCTIONS = """
+To use a tool, include this JSON in your response:
+{"tool": "tool_name", "arguments": {"arg1": "value1"}}
+
+You may include reasoning or context before/after the JSON.
+Wait for the tool result before providing your final answer.
+"""
+
+AGENT_INSTRUCTIONS = """
+To delegate a task to another agent, include this JSON in your response:
+{"agent": "agent_name", "task": "task description"}
+
+You may include reasoning or context before/after the JSON.
+Wait for the agent's response before providing your final answer.
+"""
+
+NO_ACTION_INSTRUCTIONS = """
+When you have all the information needed to provide a final answer, include:
+{}
+
+Then the system will ask you to provide your final response.
+"""
 
 
 @dataclass
@@ -175,6 +205,7 @@ class Agent:
         max_steps: int = 5,
         memory_context_limit: int = 6,
         memory_enabled: bool = True,
+        tool_call_mode: str = "auto",
     ):
         self.name = name
         self.instructions = instructions
@@ -189,7 +220,20 @@ class Agent:
         self.memory_context_limit = memory_context_limit
         self.memory_enabled = memory_enabled
 
-        logger.info(f"Agent initialized: {name}")
+        if tool_call_mode not in TOOL_CALL_MODES:
+            logger.warning(f"Invalid tool_call_mode '{tool_call_mode}', defaulting to 'auto'")
+            tool_call_mode = "auto"
+        self.tool_call_mode = tool_call_mode
+        # For auto mode, tracks resolved mode after first attempt
+        self._resolved_tool_call_mode: Optional[str] = None
+
+        logger.info(f"Agent initialized: {name} (tool_call_mode={self.tool_call_mode})")
+
+    def _get_effective_mode(self) -> str:
+        """Get the effective tool call mode, considering auto-mode resolution."""
+        if self.tool_call_mode == "auto":
+            return self._resolved_tool_call_mode or "native"
+        return self.tool_call_mode
 
     async def _build_tools_param(self) -> Optional[List[Dict[str, Any]]]:
         """Build OpenAI tools parameter from MCP tools and sub-agents.
@@ -254,8 +298,125 @@ class Agent:
 
         return tools if tools else None
 
+    async def _get_tools_prompt(self) -> Optional[str]:
+        """Build text-based tools section for system prompt (string mode).
+
+        Returns:
+            Complete tools section with descriptions and instructions, or None if no tools.
+        """
+        if not self.mcp_clients:
+            return None
+
+        tools_desc = []
+        for mcp_client in self.mcp_clients:
+            if not mcp_client._active:
+                await mcp_client._init()
+            for tool in mcp_client.get_tools():
+                schema = tool.input_schema if tool.input_schema else {}
+                params_str = json.dumps(schema, indent=2) if schema else "{}"
+                tools_desc.append(
+                    f"- **{tool.name}**: {tool.description}\n  Parameters: {params_str}"
+                )
+
+        if not tools_desc:
+            return None
+
+        return "\n## Available Tools\n" + "\n".join(tools_desc) + "\n" + TOOLS_INSTRUCTIONS
+
+    async def _get_agents_prompt(self) -> Optional[str]:
+        """Build text-based agents section for system prompt (string mode).
+
+        Returns:
+            Complete agents section with descriptions and instructions, or None if no agents.
+        """
+        if not self.sub_agents:
+            return None
+
+        available = []
+        for sub_agent in self.sub_agents.values():
+            if not sub_agent._active:
+                await sub_agent._init()
+
+            if sub_agent._active and sub_agent.agent_card:
+                available.append(
+                    f"- **{sub_agent.agent_card.name}**: {sub_agent.agent_card.description}"
+                )
+
+        if not available:
+            return None
+
+        return (
+            "\n## Available Agents for Delegation\n"
+            + "\n".join(available)
+            + "\n"
+            + AGENT_INSTRUCTIONS
+        )
+
+    def _parse_action(self, content: str) -> Dict[str, Any]:
+        """Parse action JSON from model response content (string mode).
+
+        Looks for JSON objects in the response that represent tool calls or delegations.
+        Returns the parsed action dict, or empty dict if no valid action found.
+
+        Action formats:
+        - Tool call: {"tool": "name", "arguments": {...}}
+        - Delegation: {"agent": "name", "task": "..."}
+        - No action: {}
+        """
+        content = content.strip()
+
+        # Try to parse the entire content as JSON first
+        try:
+            parsed = json.loads(content)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+
+        # Find JSON objects in content using brace matching
+        i = 0
+        while i < len(content):
+            if content[i] == "{":
+                depth = 0
+                start = i
+                in_string = False
+                escape_next = False
+                for j in range(i, len(content)):
+                    if escape_next:
+                        escape_next = False
+                        continue
+                    if content[j] == "\\":
+                        escape_next = True
+                        continue
+                    if content[j] == '"' and not escape_next:
+                        in_string = not in_string
+                        continue
+                    if in_string:
+                        continue
+                    if content[j] == "{":
+                        depth += 1
+                    elif content[j] == "}":
+                        depth -= 1
+                        if depth == 0:
+                            candidate = content[start : j + 1]
+                            try:
+                                parsed = json.loads(candidate)
+                                if isinstance(parsed, dict):
+                                    return parsed
+                            except json.JSONDecodeError:
+                                pass
+                            break
+                i += 1
+            else:
+                i += 1
+
+        return {}
+
     async def _build_system_prompt(self, user_system_prompt: Optional[str] = None) -> str:
         """Build system prompt for the agent.
+
+        In string mode, includes text-based tool/agent descriptions and instructions.
+        In native mode, tools are declared structurally via the API.
 
         Args:
             user_system_prompt: Optional user-provided system prompt to merge.
@@ -263,11 +424,25 @@ class Agent:
         Returns:
             Complete system prompt.
         """
+        effective_mode = self._get_effective_mode()
         parts = []
 
         # Agent's core system prompt
         parts.append("## Agent System Prompt")
         parts.append(self.instructions)
+
+        # String mode: add text-based tool/agent prompts
+        if effective_mode == "string":
+            tools_prompt = await self._get_tools_prompt()
+            if tools_prompt:
+                parts.append(tools_prompt)
+
+            agents_prompt = await self._get_agents_prompt()
+            if agents_prompt:
+                parts.append(agents_prompt)
+
+            if tools_prompt or agents_prompt:
+                parts.append(NO_ACTION_INSTRUCTIONS)
 
         # User-provided system prompt (if any)
         if user_system_prompt:
