@@ -194,7 +194,7 @@ def _uninstall_monitoring(backend: str, namespace: str) -> bool:
 def _get_otel_endpoint(backend: str, namespace: str) -> str:
     """Return the OTLP collector endpoint for the given backend."""
     if backend == "jaeger":
-        return f"http://jaeger-collector.{namespace}:4317"
+        return f"http://jaeger.{namespace}:4317"
     return f"http://signoz-otel-collector.{namespace}:4317"
 
 
