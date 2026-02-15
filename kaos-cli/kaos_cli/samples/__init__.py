@@ -84,7 +84,7 @@ def _apply_overrides(
         if namespace:
             if kind == "Namespace":
                 meta["name"] = namespace
-            elif "namespace" in meta:
+            else:
                 meta["namespace"] = namespace
 
         spec = doc.get("spec", {})
@@ -209,7 +209,7 @@ def deploy_sample(
         Path(tmp_path).unlink()
 
 
-def delete_sample(name: str) -> None:
+def delete_sample(name: str, namespace: str | None = None) -> None:
     """Delete a sample's resources."""
     sample_path = _find_sample(name)
     if not sample_path:
@@ -217,8 +217,29 @@ def delete_sample(name: str) -> None:
         typer.echo(f"Available samples: {', '.join(_get_sample_names())}", err=True)
         raise typer.Exit(1)
 
-    args = ["kubectl", "delete", "-f", str(sample_path), "--ignore-not-found"]
-    result = subprocess.run(args, capture_output=True, text=True)
+    if namespace:
+        # Apply namespace override and delete from temp file
+        raw_content = sample_path.read_text()
+        yaml_content = _apply_overrides(
+            raw_content,
+            modelapi_name=None,
+            mode=None,
+            model=None,
+            api_secret=None,
+            namespace=namespace,
+        )
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            tmp_path = f.name
+        try:
+            args = ["kubectl", "delete", "-f", tmp_path, "--ignore-not-found"]
+            result = subprocess.run(args, capture_output=True, text=True)
+        finally:
+            Path(tmp_path).unlink()
+    else:
+        args = ["kubectl", "delete", "-f", str(sample_path), "--ignore-not-found"]
+        result = subprocess.run(args, capture_output=True, text=True)
+
     if result.returncode != 0:
         typer.echo(result.stderr or result.stdout, err=True)
         raise typer.Exit(result.returncode)
@@ -295,10 +316,17 @@ def deploy_cmd(
 @app.command(name="delete")
 def delete_cmd(
     name: str = typer.Argument(..., help="Name of the sample to delete."),
+    namespace: str = typer.Option(
+        None,
+        "--namespace",
+        "-n",
+        help="Namespace override (must match the namespace used during deploy).",
+    ),
 ) -> None:
     """Delete a sample's resources.
 
     Examples:
       kaos samples delete 1-simple-echo-agent
+      kaos samples delete 1-simple-echo-agent --namespace custom-ns
     """
-    delete_sample(name=name)
+    delete_sample(name=name, namespace=namespace)

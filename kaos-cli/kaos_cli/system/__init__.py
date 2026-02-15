@@ -48,7 +48,7 @@ def install(
     monitoring_enabled: str | None = typer.Option(
         None,
         "--monitoring-enabled",
-        help=f"Install monitoring stack and enable telemetry. Options: {', '.join(MONITORING_BACKENDS)}. Default: signoz.",
+        help=f"Install monitoring stack and enable telemetry. Options: {', '.join(MONITORING_BACKENDS)}.",
     ),
 ) -> None:
     """Install the KAOS operator using Helm."""
@@ -82,9 +82,24 @@ def uninstall(
         "--release-name",
         help="Helm release name.",
     ),
+    monitoring_enabled: str | None = typer.Option(
+        None,
+        "--monitoring-enabled",
+        help=f"Also uninstall monitoring stack. Options: {', '.join(MONITORING_BACKENDS)}.",
+    ),
 ) -> None:
     """Uninstall the KAOS operator."""
-    uninstall_command(namespace=namespace, release_name=release_name)
+    if monitoring_enabled is not None and monitoring_enabled not in MONITORING_BACKENDS:
+        typer.echo(
+            f"Error: Invalid monitoring backend '{monitoring_enabled}'. Options: {', '.join(MONITORING_BACKENDS)}",
+            err=True,
+        )
+        raise typer.Exit(1)
+    uninstall_command(
+        namespace=namespace,
+        release_name=release_name,
+        monitoring_enabled=monitoring_enabled,
+    )
 
 
 @app.command(name="create-rbac")

@@ -12,10 +12,7 @@ import typer
 import uvicorn
 
 from kaos_cli import __version__
-from kaos_cli.install import MONITORING_BACKENDS
-
-# Default monitoring configuration
-DEFAULT_MONITORING_NAMESPACE = "observability"
+from kaos_cli.install import DEFAULT_NAMESPACE, MONITORING_BACKENDS
 
 # SigNoz config
 SIGNOZ_SERVICE_NAME = "signoz"
@@ -35,7 +32,6 @@ KAOS_UI_BASE = "https://axsaucedo.github.io/kaos-ui"
 def get_ui_version(override_version: str | None) -> str:
     """Determine the UI version path based on CLI version or override."""
     if override_version:
-        # User explicitly set version - "dev" stays as is, others get v prefix
         if override_version.lower() == "dev":
             return "dev"
         return (
@@ -44,12 +40,10 @@ def get_ui_version(override_version: str | None) -> str:
             else f"v{override_version}"
         )
 
-    # Use CLI version - if it's a dev version, use /dev/
     cli_version = __version__
     if "dev" in cli_version.lower() or cli_version.startswith("0.0"):
         return "dev"
 
-    # For release versions, use the version number
     return f"v{cli_version}" if not cli_version.startswith("v") else cli_version
 
 
@@ -103,7 +97,7 @@ def ui_command(
     no_browser: bool,
     version: str | None = None,
     monitoring_enabled: str | None = None,
-    monitoring_namespace: str = DEFAULT_MONITORING_NAMESPACE,
+    system_namespace: str = DEFAULT_NAMESPACE,
 ) -> None:
     """Start a CORS-enabled proxy to the Kubernetes API server."""
     from kaos_cli.proxy import create_proxy_app
@@ -114,10 +108,10 @@ def ui_command(
     if monitoring_enabled:
         backend = monitoring_enabled
         service_name, _ = _get_monitoring_config(backend)
-        typer.echo(f"Checking for {backend} in namespace '{monitoring_namespace}'...")
-        if check_monitoring_service(backend, monitoring_namespace):
+        typer.echo(f"Checking for {backend} in namespace '{system_namespace}'...")
+        if check_monitoring_service(backend, system_namespace):
             monitoring_process = start_monitoring_port_forward(
-                backend, monitoring_namespace
+                backend, system_namespace
             )
             if monitoring_process:
                 typer.echo(
@@ -129,7 +123,7 @@ def ui_command(
                 )
         else:
             typer.echo(
-                f"Error: {backend} service '{service_name}' not found in namespace '{monitoring_namespace}'.",
+                f"Error: {backend} service '{service_name}' not found in namespace '{system_namespace}'.",
                 err=True,
             )
             typer.echo(
@@ -148,10 +142,8 @@ def ui_command(
 
     # Build UI URL with query parameters
     query_params = {}
-    # Only add kubernetesUrl if not using default port
     if expose_port != 8010:
         query_params["kubernetesUrl"] = f"http://localhost:{expose_port}"
-    # Only add namespace if not using default
     if namespace and namespace != "default":
         query_params["namespace"] = namespace
 
@@ -171,7 +163,6 @@ def ui_command(
     signal.signal(signal.SIGINT, handle_signal)
     signal.signal(signal.SIGTERM, handle_signal)
 
-    # Open browser after a short delay to allow server to start
     if not no_browser:
 
         def open_browser() -> None:

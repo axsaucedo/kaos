@@ -1,5 +1,6 @@
 """KAOS install/uninstall commands for the Kubernetes operator."""
 
+import json
 import shutil
 import subprocess
 import sys
@@ -40,7 +41,25 @@ def run_helm_command(
 MONITORING_BACKENDS = ("signoz", "jaeger")
 
 
-def _install_signoz() -> bool:
+def _create_jaeger_ui_config(namespace: str) -> None:
+    """Create ConfigMap with Jaeger UI config for dark theme."""
+    ui_config = json.dumps({"themes": {"enabled": True}})
+    cm_yaml = (
+        f"apiVersion: v1\nkind: ConfigMap\nmetadata:\n"
+        f"  name: jaeger-ui-config\n  namespace: {namespace}\n"
+        f"data:\n  ui-config.json: '{ui_config}'\n"
+    )
+    result = subprocess.run(
+        ["kubectl", "apply", "-f", "-"],
+        input=cm_yaml,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        typer.echo(f"Warning: Could not create Jaeger UI config: {result.stderr}", err=True)
+
+
+def _install_signoz(namespace: str) -> bool:
     """Install SigNoz monitoring stack."""
     typer.echo("Installing SigNoz monitoring stack...")
 
@@ -60,7 +79,7 @@ def _install_signoz() -> bool:
             "signoz",
             "signoz/signoz",
             "--namespace",
-            "observability",
+            namespace,
             "--create-namespace",
             "--wait",
         ],
@@ -70,12 +89,12 @@ def _install_signoz() -> bool:
         typer.echo(f"Error installing SigNoz: {result.stderr}", err=True)
         return False
 
-    typer.echo("✅ SigNoz monitoring installed in 'observability' namespace")
+    typer.echo(f"✅ SigNoz monitoring installed in '{namespace}' namespace")
     return True
 
 
-def _install_jaeger() -> bool:
-    """Install Jaeger all-in-one with OTLP collector."""
+def _install_jaeger(namespace: str) -> bool:
+    """Install Jaeger all-in-one with OTLP collector and dark mode."""
     typer.echo("Installing Jaeger all-in-one...")
 
     result = run_helm_command(
@@ -93,6 +112,14 @@ def _install_jaeger() -> bool:
 
     run_helm_command(["repo", "update"], check=False)
 
+    # Create ConfigMap before Helm install to avoid mount race condition
+    subprocess.run(
+        ["kubectl", "create", "namespace", namespace],
+        capture_output=True,
+        text=True,
+    )
+    _create_jaeger_ui_config(namespace)
+
     result = run_helm_command(
         [
             "upgrade",
@@ -100,7 +127,7 @@ def _install_jaeger() -> bool:
             "jaeger",
             "jaegertracing/jaeger",
             "--namespace",
-            "observability",
+            namespace,
             "--create-namespace",
             "--set",
             "allInOne.enabled=true",
@@ -124,45 +151,51 @@ def _install_jaeger() -> bool:
         typer.echo(f"Error installing Jaeger: {result.stderr}", err=True)
         return False
 
-    # Create UI config ConfigMap for dark mode
-    _create_jaeger_ui_config()
-
-    typer.echo("✅ Jaeger installed in 'observability' namespace (dark mode enabled)")
+    typer.echo(f"✅ Jaeger installed in '{namespace}' namespace (dark mode enabled)")
     return True
 
 
-def _create_jaeger_ui_config() -> None:
-    """Create ConfigMap with Jaeger UI config for dark theme."""
-    import json
-
-    ui_config = json.dumps({"themes": {"enabled": True}})
-    cm_yaml = (
-        f"apiVersion: v1\nkind: ConfigMap\nmetadata:\n"
-        f"  name: jaeger-ui-config\n  namespace: observability\n"
-        f"data:\n  ui-config.json: '{ui_config}'\n"
-    )
-    result = subprocess.run(
-        ["kubectl", "apply", "-f", "-"],
-        input=cm_yaml,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
-        typer.echo(f"Warning: Could not create Jaeger UI config: {result.stderr}", err=True)
-
-
-def _install_monitoring(backend: str) -> bool:
+def _install_monitoring(backend: str, namespace: str) -> bool:
     """Install monitoring stack for the given backend."""
     if backend == "jaeger":
-        return _install_jaeger()
-    return _install_signoz()
+        return _install_jaeger(namespace)
+    return _install_signoz(namespace)
 
 
-def _get_otel_endpoint(backend: str) -> str:
+def _uninstall_monitoring(backend: str, namespace: str) -> bool:
+    """Uninstall monitoring stack for the given backend."""
+    release = "jaeger" if backend == "jaeger" else "signoz"
+    typer.echo(f"Uninstalling {backend} from namespace '{namespace}'...")
+
+    result = run_helm_command(
+        ["uninstall", release, "--namespace", namespace],
+        check=False,
+    )
+
+    if result.returncode == 0:
+        # Clean up Jaeger UI ConfigMap if applicable
+        if backend == "jaeger":
+            subprocess.run(
+                ["kubectl", "delete", "configmap", "jaeger-ui-config",
+                 "-n", namespace, "--ignore-not-found"],
+                capture_output=True,
+                text=True,
+            )
+        typer.echo(f"✅ {backend.capitalize()} uninstalled from '{namespace}'")
+        return True
+    elif "not found" in result.stderr.lower():
+        typer.echo(f"{backend.capitalize()} release not found in namespace '{namespace}'.")
+        return True
+    else:
+        typer.echo(f"Error uninstalling {backend}: {result.stderr}", err=True)
+        return False
+
+
+def _get_otel_endpoint(backend: str, namespace: str) -> str:
     """Return the OTLP collector endpoint for the given backend."""
     if backend == "jaeger":
-        return "http://jaeger-collector.observability:4317"
-    return "http://signoz-otel-collector.observability:4317"
+        return f"http://jaeger-collector.{namespace}:4317"
+    return f"http://signoz-otel-collector.{namespace}:4317"
 
 
 def install_command(
@@ -179,9 +212,9 @@ def install_command(
         typer.echo("See: https://helm.sh/docs/intro/install/", err=True)
         sys.exit(1)
 
-    # Install monitoring first if requested
+    # Install monitoring first if requested (in same namespace as operator)
     if monitoring_enabled:
-        if not _install_monitoring(monitoring_enabled):
+        if not _install_monitoring(monitoring_enabled, namespace):
             typer.echo("Warning: Monitoring installation failed, continuing...", err=True)
 
     typer.echo(f"Installing KAOS operator to namespace '{namespace}'...")
@@ -221,7 +254,7 @@ def install_command(
 
     # Add telemetry settings if monitoring is enabled
     if monitoring_enabled:
-        otel_endpoint = _get_otel_endpoint(monitoring_enabled)
+        otel_endpoint = _get_otel_endpoint(monitoring_enabled, namespace)
         helm_args.extend(["--set", "telemetry.enabled=true"])
         helm_args.extend(["--set", f"telemetry.endpoint={otel_endpoint}"])
 
@@ -241,11 +274,19 @@ def install_command(
         sys.exit(1)
 
 
-def uninstall_command(namespace: str, release_name: str) -> None:
+def uninstall_command(
+    namespace: str,
+    release_name: str,
+    monitoring_enabled: str | None = None,
+) -> None:
     """Uninstall the KAOS operator using Helm."""
     if not check_helm_installed():
         typer.echo("Error: helm is not installed.", err=True)
         sys.exit(1)
+
+    # Uninstall monitoring if requested
+    if monitoring_enabled:
+        _uninstall_monitoring(monitoring_enabled, namespace)
 
     typer.echo(f"Uninstalling KAOS operator from namespace '{namespace}'...")
 

@@ -371,7 +371,7 @@ kaos system install --monitoring-enabled signoz
 2. Or install manually and configure telemetry:
 ```bash
 kaos system install --set telemetry.enabled=true \
-  --set telemetry.endpoint=http://signoz-otel-collector.observability:4317
+  --set telemetry.endpoint=http://signoz-otel-collector.kaos-system:4317
 ```
 
 3. Access the SigNoz UI via the KAOS CLI:
@@ -408,11 +408,12 @@ Jaeger is installed with dark mode theme support enabled by default.
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--monitoring-enabled` | none | Enable monitoring. Options: `signoz`, `jaeger` |
-| `--monitoring-namespace` | `observability` | Namespace where monitoring is installed |
 
-Example with custom namespace:
+Monitoring is installed in the same namespace as the KAOS operator (default: `kaos-system`).
+
+To uninstall monitoring along with the operator:
 ```bash
-kaos ui --monitoring-enabled signoz --monitoring-namespace custom-ns
+kaos system uninstall --monitoring-enabled signoz
 ```
 
 ## Using with Uptrace

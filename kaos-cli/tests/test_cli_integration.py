@@ -373,8 +373,10 @@ class TestSamples:
         docs = list(yaml.safe_load_all(result.output))
         ns_doc = next(d for d in docs if d and d["kind"] == "Namespace")
         assert ns_doc["metadata"]["name"] == "custom-ns"
-        agent = next(d for d in docs if d and d["kind"] == "Agent")
-        assert agent["metadata"]["namespace"] == "custom-ns"
+        # All non-Namespace resources get the namespace override
+        for doc in docs:
+            if doc and doc["kind"] != "Namespace":
+                assert doc["metadata"]["namespace"] == "custom-ns"
 
     def test_deploy_sample_with_model_override(self):
         result = runner.invoke(
@@ -437,6 +439,44 @@ class TestSamples:
         docs = list(yaml.safe_load_all(result.output))
         agents = [d for d in docs if d and d["kind"] == "Agent"]
         assert len(agents) == 3  # coordinator + 2 workers
+
+    def test_namespace_override_applies_to_all_resources(self):
+        """Verify namespace override applies even to resources without existing namespace."""
+        result = runner.invoke(
+            app,
+            [
+                "samples",
+                "deploy",
+                "1-simple-echo-agent",
+                "--namespace",
+                "test-ns",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0
+        docs = list(yaml.safe_load_all(result.output))
+        for doc in docs:
+            if doc and doc["kind"] != "Namespace":
+                assert doc["metadata"].get("namespace") == "test-ns", (
+                    f"{doc['kind']} {doc['metadata']['name']} missing namespace override"
+                )
+
+
+# ─── Package data bundling ──────────────────────────────────────────────
+
+
+class TestPackageData:
+    def test_samples_data_dir_exists(self):
+        from kaos_cli.samples import SAMPLES_DIR
+        assert SAMPLES_DIR.exists()
+
+    def test_samples_data_contains_files(self):
+        from kaos_cli.samples import _get_sample_files
+        files = _get_sample_files()
+        assert len(files) == 5
+        names = [f.stem for f in files]
+        assert "1-simple-echo-agent" in names
+        assert "5-proxy-external-api" in names
 
 
 # ─── Monitoring validation ──────────────────────────────────────────────

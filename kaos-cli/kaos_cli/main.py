@@ -3,7 +3,7 @@
 import typer
 
 from kaos_cli.ui import ui_command
-from kaos_cli.install import MONITORING_BACKENDS
+from kaos_cli.install import DEFAULT_NAMESPACE, MONITORING_BACKENDS
 from kaos_cli.system import app as system_app
 from kaos_cli.mcp import app as mcp_app
 from kaos_cli.agent import app as agent_app
@@ -59,10 +59,10 @@ def ui(
         "--monitoring-enabled",
         help=f"Enable monitoring UI port-forward. Options: {', '.join(MONITORING_BACKENDS)}.",
     ),
-    monitoring_namespace: str = typer.Option(
-        "observability",
-        "--monitoring-namespace",
-        help="Namespace where monitoring is installed.",
+    system_namespace: str = typer.Option(
+        DEFAULT_NAMESPACE,
+        "--system-namespace",
+        help="Namespace where KAOS system and monitoring are installed.",
     ),
 ) -> None:
     """Start a CORS-enabled proxy and open the KAOS UI."""
@@ -79,7 +79,7 @@ def ui(
         no_browser=no_browser,
         version=version,
         monitoring_enabled=monitoring_enabled,
-        monitoring_namespace=monitoring_namespace,
+        system_namespace=system_namespace,
     )
 
 

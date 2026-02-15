@@ -46,6 +46,12 @@ Uninstall the KAOS operator.
 kaos system uninstall [OPTIONS]
 ```
 
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--namespace` | `kaos-system` | Namespace to uninstall from |
+| `--release-name` | `kaos-operator` | Helm release name |
+| `--monitoring-enabled` | | Also uninstall monitoring (`signoz` or `jaeger`) |
+
 ### kaos system status
 
 Show cluster status.
@@ -404,7 +410,7 @@ kaos ui [OPTIONS]
 | `--expose-port` | `8010` | Local proxy port |
 | `--no-browser` | false | Don't open browser |
 | `--monitoring-enabled` | | Enable monitoring UI (`signoz` or `jaeger`) |
-| `--monitoring-namespace` | `monitoring` | Monitoring namespace |
+| `--system-namespace` | `kaos-system` | Namespace where KAOS system and monitoring are installed |
 
 ---
 
@@ -452,8 +458,12 @@ kaos samples deploy 1-simple-echo-agent --api-secret nebius-secrets:api-key
 Delete a sample's resources.
 
 ```bash
-kaos samples delete NAME
+kaos samples delete NAME [OPTIONS]
 ```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--namespace` | | Namespace override (must match namespace used during deploy) |
 
 ---
 
