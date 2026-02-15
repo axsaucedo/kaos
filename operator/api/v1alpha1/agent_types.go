@@ -115,6 +115,14 @@ type AgentConfig struct {
 	// +kubebuilder:default=5
 	ReasoningLoopMaxSteps *int32 `json:"reasoningLoopMaxSteps,omitempty"`
 
+	// ToolCallMode controls how the agent invokes tools and sub-agents.
+	// - auto (default): tries native tool calling first, falls back to string-based if unsupported
+	// - native: uses OpenAI tools API for structured function calling
+	// - string: uses text-based JSON parsing from model content
+	// +kubebuilder:validation:Enum=auto;native;string
+	// +kubebuilder:default="auto"
+	ToolCallMode string `json:"toolCallMode,omitempty"`
+
 	// Memory configures the agent's memory system
 	// +kubebuilder:validation:Optional
 	Memory *MemoryConfig `json:"memory,omitempty"`

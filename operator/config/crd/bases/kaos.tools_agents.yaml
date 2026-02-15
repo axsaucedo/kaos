@@ -146,6 +146,18 @@ spec:
                           Example: "http://otel-collector.observability:4317"
                         type: string
                     type: object
+                  toolCallMode:
+                    default: auto
+                    description: |-
+                      ToolCallMode controls how the agent invokes tools and sub-agents.
+                      - auto (default): tries native tool calling first, falls back to string-based if unsupported
+                      - native: uses OpenAI tools API for structured function calling
+                      - string: uses text-based JSON parsing from model content
+                    enum:
+                    - auto
+                    - native
+                    - string
+                    type: string
                 type: object
               container:
                 description: Container provides shorthand container overrides (image,
