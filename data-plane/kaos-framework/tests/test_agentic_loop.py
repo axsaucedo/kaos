@@ -1301,3 +1301,211 @@ class TestParseAction:
         )
         assert result["tool"] == "search"
         assert result["arguments"]["options"]["limit"] == 10
+
+
+class FailThenSucceedMockModelAPI(MockModelAPI):
+    """MockModelAPI that raises an HTTP error on the first call when tools are passed,
+    then succeeds on subsequent calls (simulating native tools not supported)."""
+
+    def __init__(self, responses, fail_message="tools are not supported by this model"):
+        super().__init__(responses)
+        self._fail_message = fail_message
+        self._failed = False
+
+    async def process_message(self, messages, stream=False, seed=None, tools=None):
+        if tools is not None and not self._failed:
+            self._failed = True
+            request = httpx.Request("POST", "http://mock/v1/chat/completions")
+            response = httpx.Response(
+                400,
+                request=request,
+                content=self._fail_message.encode(),
+            )
+            raise httpx.HTTPStatusError(
+                self._fail_message,
+                request=request,
+                response=response,
+            )
+        return await super().process_message(messages, stream=stream, seed=seed, tools=tools)
+
+
+@pytest.mark.asyncio(loop_scope="session")
+class TestAutoModeFallback:
+    """Test auto-mode fallback from native to string tool calling."""
+
+    @pytest.mark.asyncio
+    async def test_auto_mode_native_success(self):
+        """Auto mode uses native when model supports tools."""
+        mock_model = MockModelAPI(
+            [
+                ModelResponse(
+                    content=None,
+                    tool_calls=[ToolCall(id="call_1", name="echo", arguments={"message": "hi"})],
+                    finish_reason="tool_calls",
+                ),
+                ModelResponse(content="No more actions.", finish_reason="stop"),
+                "Final answer.",
+            ]
+        )
+        mock_mcp = MockMCPClient(tools={"echo": ("Echo tool", "echo: hi")})
+        memory = LocalMemory()
+
+        agent = Agent(
+            name="auto-native-test",
+            model_api=mock_model,
+            mcp_clients=[mock_mcp],
+            memory=memory,
+            max_steps=5,
+            tool_call_mode="auto",
+        )
+
+        result = []
+        async for chunk in agent.process_message("Say hi"):
+            result.append(chunk)
+
+        # Should have used native mode (no fallback)
+        assert agent._resolved_tool_call_mode is None
+        assert agent._get_effective_mode() == "native"
+        # Final response should be present
+        full = " ".join(result)
+        assert "Final" in full or "answer" in full
+
+    @pytest.mark.asyncio
+    async def test_auto_mode_fallback_to_string(self):
+        """Auto mode falls back to string when model rejects tools."""
+        mock_model = FailThenSucceedMockModelAPI(
+            responses=[
+                # After fallback, string-mode Phase 1 responses
+                '{"tool": "echo", "arguments": {"message": "hello"}}',
+                "{}",
+                # Phase 2 final response
+                "Task completed via string mode.",
+            ],
+            fail_message="tools are not supported by this model",
+        )
+        mock_mcp = MockMCPClient(tools={"echo": ("Echo tool", "echo: hello")})
+        memory = LocalMemory()
+
+        agent = Agent(
+            name="auto-fallback-test",
+            model_api=mock_model,
+            mcp_clients=[mock_mcp],
+            memory=memory,
+            max_steps=5,
+            tool_call_mode="auto",
+        )
+
+        result = []
+        async for chunk in agent.process_message("Say hello"):
+            result.append(chunk)
+
+        # Should have fallen back to string mode
+        assert agent._resolved_tool_call_mode == "string"
+        assert agent._get_effective_mode() == "string"
+        full = " ".join(result)
+        assert "Task completed" in full or "string mode" in full
+
+    @pytest.mark.asyncio
+    async def test_auto_mode_remembers_fallback(self):
+        """After falling back, subsequent calls use string mode directly."""
+        mock_model = FailThenSucceedMockModelAPI(
+            responses=[
+                # First request: fallback to string mode
+                '{"tool": "echo", "arguments": {"message": "first"}}',
+                "{}",
+                "First done via string.",
+                # Second request: already string mode (3 responses: tool call, no-action, final)
+                '{"tool": "echo", "arguments": {"message": "second"}}',
+                "{}",
+                "Second done via string.",
+            ],
+        )
+        mock_mcp = MockMCPClient(tools={"echo": ("Echo tool", "echo result")})
+        memory = LocalMemory()
+
+        agent = Agent(
+            name="auto-persist-test",
+            model_api=mock_model,
+            mcp_clients=[mock_mcp],
+            memory=memory,
+            max_steps=5,
+            tool_call_mode="auto",
+        )
+
+        # First call - triggers fallback
+        result1 = []
+        async for chunk in agent.process_message("First call"):
+            result1.append(chunk)
+        assert agent._resolved_tool_call_mode == "string"
+
+        # Second call - should use string directly (no native retry)
+        result2 = []
+        async for chunk in agent.process_message("Second call"):
+            result2.append(chunk)
+        assert agent._resolved_tool_call_mode == "string"
+        # Model should NOT have received a tools param on second call
+        # (FailThenSucceedMockModelAPI would only fail once, but since resolved
+        # mode is string, tools param is never passed on second call)
+
+    @pytest.mark.asyncio
+    async def test_auto_mode_non_tools_error_propagates(self):
+        """Non-tools errors in auto mode are not caught as fallback."""
+
+        class FailWithOtherError(MockModelAPI):
+            async def process_message(self, messages, stream=False, seed=None, tools=None):
+                if self.call_count == 0:
+                    self.call_count += 1
+                    raise ValueError("Some other error")
+                return await super().process_message(messages, stream, seed, tools)
+
+        mock_model = FailWithOtherError(responses=["Response"])
+        mock_mcp = MockMCPClient(tools={"echo": ("Echo tool", "result")})
+        memory = LocalMemory()
+
+        agent = Agent(
+            name="auto-other-error",
+            model_api=mock_model,
+            mcp_clients=[mock_mcp],
+            memory=memory,
+            max_steps=5,
+            tool_call_mode="auto",
+        )
+
+        result = []
+        async for chunk in agent.process_message("Test"):
+            result.append(chunk)
+
+        # Should NOT have fallen back to string mode
+        assert agent._resolved_tool_call_mode is None
+        # Error should have been caught by process_message's outer handler
+        full = " ".join(result)
+        assert "error" in full.lower()
+
+    @pytest.mark.asyncio
+    async def test_is_tools_not_supported_error(self):
+        """Test the error detection helper."""
+        agent = Agent(name="helper-test", model_api=MockModelAPI(), tool_call_mode="auto")
+
+        # HTTP 400 with tools message -> True
+        request = httpx.Request("POST", "http://test")
+        response = httpx.Response(400, request=request, content=b"tools not supported")
+        exc = httpx.HTTPStatusError("tools not supported", request=request, response=response)
+        assert Agent._is_tools_not_supported_error(exc) is True
+
+        # HTTP 422 with function_call message -> True
+        response = httpx.Response(422, request=request, content=b"function_call not allowed")
+        exc = httpx.HTTPStatusError("function_call not allowed", request=request, response=response)
+        assert Agent._is_tools_not_supported_error(exc) is True
+
+        # HTTP 500 (not 400/422) -> False
+        response = httpx.Response(500, request=request, content=b"tools error")
+        exc = httpx.HTTPStatusError("tools error", request=request, response=response)
+        assert Agent._is_tools_not_supported_error(exc) is False
+
+        # HTTP 400 without tools keyword -> False
+        response = httpx.Response(400, request=request, content=b"invalid request")
+        exc = httpx.HTTPStatusError("invalid request", request=request, response=response)
+        assert Agent._is_tools_not_supported_error(exc) is False
+
+        # Non-HTTP error -> False
+        assert Agent._is_tools_not_supported_error(ValueError("tools error")) is False

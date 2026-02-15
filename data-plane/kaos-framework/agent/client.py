@@ -235,6 +235,18 @@ class Agent:
             return self._resolved_tool_call_mode or "native"
         return self.tool_call_mode
 
+    @staticmethod
+    def _is_tools_not_supported_error(exc: Exception) -> bool:
+        """Check if an exception indicates the model doesn't support native tool calling."""
+        error_text = str(exc).lower()
+        keywords = ["tool", "function", "tools", "function_call", "function calling"]
+        status_match = isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in (
+            400,
+            422,
+        )
+        keyword_match = any(kw in error_text for kw in keywords)
+        return status_match and keyword_match
+
     async def _build_tools_param(self) -> Optional[List[Dict[str, Any]]]:
         """Build OpenAI tools parameter from MCP tools and sub-agents.
 
@@ -583,6 +595,10 @@ class Agent:
         Phase 1: Action collection - model returns tool_calls (native) or JSON in
                  content (string) which are executed. Loops until no more actions.
         Phase 2: Final response - streaming/non-streaming model call for user output.
+
+        In auto mode, if native tool calling fails with a tools-not-supported error,
+        the agent falls back to string mode and retries. The resolved mode is persisted
+        so subsequent requests don't retry native.
         """
         model_name = self.model_api.model if self.model_api else "unknown"
         effective_mode = self._get_effective_mode()
@@ -643,6 +659,27 @@ class Agent:
                     break
 
                 except Exception as e:
+                    # Auto-mode fallback: if native tools not supported, switch to string
+                    if (
+                        self.tool_call_mode == "auto"
+                        and effective_mode == "native"
+                        and self._is_tools_not_supported_error(e)
+                    ):
+                        logger.warning(
+                            f"Native tool calling not supported by model, "
+                            f"falling back to string mode: {e}"
+                        )
+                        self._resolved_tool_call_mode = "string"
+                        effective_mode = "string"
+
+                        # Rebuild system prompt with string-mode tool descriptions
+                        new_system_prompt = await self._build_system_prompt()
+                        messages[0] = {"role": "system", "content": new_system_prompt}
+
+                        otel.span_success()
+                        step_failed = True  # skip finally span_success
+                        # Restart from step 0 in string mode — break and re-enter loop
+                        break
                     step_failed = True
                     otel.span_failure(e)
                     raise
@@ -655,6 +692,49 @@ class Agent:
                 logger.warning(max_steps_msg)
                 yield max_steps_msg
                 return
+
+            # If we fell back to string mode, re-run Phase 1 loop
+            if self.tool_call_mode == "auto" and effective_mode == "string" and not tools_executed:
+                for step in range(self.max_steps):
+                    logger.debug(
+                        f"Agentic loop step {step + 1}/{self.max_steps} (mode=string, fallback)"
+                    )
+                    step_attrs = {
+                        "step": step + 1,
+                        "max_steps": self.max_steps,
+                        "phase": "action",
+                        "mode": "string",
+                    }
+                    otel.span_begin(f"agent.step.{step + 1}", attrs=step_attrs)
+                    step_failed = False
+                    try:
+                        result = self._phase1_string_step(
+                            messages, model_name, session_id, step, seed
+                        )
+                        should_continue = False
+                        async for item in result:
+                            if item == "__CONTINUE__":
+                                should_continue = True
+                                tools_executed = True
+                            elif item == "__BREAK__":
+                                pass
+                            else:
+                                yield item
+                        if should_continue:
+                            continue
+                        break
+                    except Exception as e:
+                        step_failed = True
+                        otel.span_failure(e)
+                        raise
+                    finally:
+                        if not step_failed:
+                            otel.span_success()
+                else:
+                    max_steps_msg = f"Reached maximum reasoning steps ({self.max_steps})"
+                    logger.warning(max_steps_msg)
+                    yield max_steps_msg
+                    return
 
         # Phase 2: Final Response
         # Only inject context-gathering instruction when tools/delegations were executed
