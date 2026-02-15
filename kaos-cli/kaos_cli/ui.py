@@ -19,7 +19,7 @@ SIGNOZ_SERVICE_NAME = "signoz"
 SIGNOZ_SERVICE_PORT = 8080
 
 # Jaeger config
-JAEGER_SERVICE_NAME = "jaeger-query"
+JAEGER_SERVICE_NAME = "jaeger"
 JAEGER_SERVICE_PORT = 16686
 
 # Shared local port for monitoring UI
