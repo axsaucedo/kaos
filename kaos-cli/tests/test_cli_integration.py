@@ -246,7 +246,7 @@ class TestModelAPIDeployDryRun:
         assert result.exit_code == 0
         docs = list(yaml.safe_load_all(result.output))
         api = docs[0]
-        secret_ref = api["spec"]["proxyConfig"]["apiKey"]["secretKeyRef"]
+        secret_ref = api["spec"]["proxyConfig"]["apiKey"]["valueFrom"]["secretKeyRef"]
         assert secret_ref["name"] == "my-secret"
         assert secret_ref["key"] == "api-key"
 
@@ -466,11 +466,11 @@ class TestSamples:
 
 
 class TestPackageData:
-    def test_samples_data_dir_exists(self):
+    def test_samples_dir_resolves(self):
         from kaos_cli.samples import SAMPLES_DIR
-        assert SAMPLES_DIR.exists()
+        assert SAMPLES_DIR.exists(), f"SAMPLES_DIR not found: {SAMPLES_DIR}"
 
-    def test_samples_data_contains_files(self):
+    def test_samples_dir_contains_files(self):
         from kaos_cli.samples import _get_sample_files
         files = _get_sample_files()
         assert len(files) == 5

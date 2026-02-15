@@ -7,7 +7,7 @@ from pathlib import Path
 import typer
 import yaml
 
-# Resolve samples directory: use bundled package data if available, fall back to repo
+# Resolve samples directory: bundled package data (copied at build time), or repo path
 _PACKAGE_DATA_DIR = Path(__file__).resolve().parent / "data"
 _REPO_SAMPLES_DIR = (
     Path(__file__).resolve().parent.parent.parent.parent
@@ -15,7 +15,17 @@ _REPO_SAMPLES_DIR = (
     / "config"
     / "samples"
 )
-SAMPLES_DIR = _PACKAGE_DATA_DIR if _PACKAGE_DATA_DIR.exists() else _REPO_SAMPLES_DIR
+
+def _resolve_samples_dir() -> Path:
+    """Resolve samples directory, preferring bundled data, falling back to repo."""
+    pkg_yamls = list(_PACKAGE_DATA_DIR.glob("*.yaml")) if _PACKAGE_DATA_DIR.exists() else []
+    if pkg_yamls:
+        return _PACKAGE_DATA_DIR
+    if _REPO_SAMPLES_DIR.exists():
+        return _REPO_SAMPLES_DIR
+    return _PACKAGE_DATA_DIR  # will be empty, handled by _get_sample_files
+
+SAMPLES_DIR = _resolve_samples_dir()
 
 
 def _get_sample_files() -> list[Path]:

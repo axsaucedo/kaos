@@ -69,3 +69,6 @@ wheels/
 PROGRESS.md
 .roborev.toml
 .husky/
+
+# Samples data (copied at build time from operator/config/samples)
+kaos-cli/kaos_cli/samples/data/*.yaml
