@@ -1,0 +1,193 @@
+---
+# Sample 3: Hierarchical Agent System
+# Complex multi-level hierarchy: supervisor -> team leads -> workers
+# Demonstrates python-string runtime for dynamic MCP tool creation
+# Deploy: kubectl apply -f 3-hierarchical-agents.yaml
+#
+# # IMPORTANT:
+# You need to create the nebius secret with the respective API key - you can use:
+# kubectl create secret generic nebius-secrets \
+#     -n kaos-hierarchy /
+#     --from-literal /
+#     "api-key=$NEBIUS_KEY"
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kaos-hierarchy
+  labels:
+    app.kubernetes.io/part-of: kaos-sample-hierarchy
+
+---
+# ModelAPI: Proxy to Nebius with deepseek model
+apiVersion: kaos.tools/v1alpha1
+kind: ModelAPI
+metadata:
+  name: hierarchy-modelapi
+  namespace: kaos-hierarchy
+spec:
+  mode: Proxy
+  proxyConfig:
+    models:
+    - "*"
+    provider: nebius
+    apiKey:
+      valueFrom:
+        secretKeyRef:
+          name: nebius-secrets
+          key: api-key
+
+---
+# MCPServer: Echo tool
+apiVersion: kaos.tools/v1alpha1
+kind: MCPServer
+metadata:
+  name: hierarchy-echo-mcp
+  namespace: kaos-hierarchy
+spec:
+  runtime: python-string
+  params: |
+    def echo(message: str) -> str:
+        """Echo the provided message back."""
+        return f"Echo: {message}"
+
+---
+# MCPServer: Calculator tool using params
+apiVersion: kaos.tools/v1alpha1
+kind: MCPServer
+metadata:
+  name: hierarchy-calc-mcp
+  namespace: kaos-hierarchy
+spec:
+  runtime: python-string
+  params: |
+    def calculate(expression: str) -> str:
+        """Evaluate a mathematical expression safely."""
+        try:
+            # Only allow safe math operations
+            allowed = set('0123456789+-*/.() ')
+            if not all(c in allowed for c in expression):
+                return "Error: Invalid characters in expression"
+            result = eval(expression)
+            return str(result)
+        except Exception as e:
+            return f"Error: {str(e)}"
+
+---
+# Agent: Supervisor - top of hierarchy
+apiVersion: kaos.tools/v1alpha1
+kind: Agent
+metadata:
+  name: supervisor
+  namespace: kaos-hierarchy
+spec:
+  modelAPI: hierarchy-modelapi
+  model: deepseek-ai/DeepSeek-V3-0324-fast
+  mcpServers:
+  - hierarchy-echo-mcp
+  config:
+    description: "Supervisor agent at top of hierarchy"
+    instructions: |
+      You are the supervisor. You delegate to research-lead and analysis-lead.
+    reasoningLoopMaxSteps: 10
+  agentNetwork:
+    access:
+    - research-lead
+    - analysis-lead
+
+---
+# Agent: Research Lead
+apiVersion: kaos.tools/v1alpha1
+kind: Agent
+metadata:
+  name: research-lead
+  namespace: kaos-hierarchy
+spec:
+  modelAPI: hierarchy-modelapi
+  model: deepseek-ai/DeepSeek-V3-0324-fast
+  mcpServers:
+  - hierarchy-echo-mcp
+  config:
+    description: "Research team lead"
+    instructions: |
+      You are the research team lead. You manage researcher-1 and researcher-2.
+    reasoningLoopMaxSteps: 5
+  agentNetwork:
+    access:
+    - researcher-1
+    - researcher-2
+
+---
+# Agent: Analysis Lead
+apiVersion: kaos.tools/v1alpha1
+kind: Agent
+metadata:
+  name: analysis-lead
+  namespace: kaos-hierarchy
+spec:
+  modelAPI: hierarchy-modelapi
+  model: deepseek-ai/DeepSeek-V3-0324-fast
+  mcpServers:
+  - hierarchy-calc-mcp
+  config:
+    description: "Analysis team lead"
+    instructions: |
+      You are the analysis team lead. You manage analyst-1 and have a calculator.
+    reasoningLoopMaxSteps: 5
+  agentNetwork:
+    access:
+    - analyst-1
+
+---
+# Agent: Researcher 1
+apiVersion: kaos.tools/v1alpha1
+kind: Agent
+metadata:
+  name: researcher-1
+  namespace: kaos-hierarchy
+spec:
+  modelAPI: hierarchy-modelapi
+  model: deepseek-ai/DeepSeek-V3-0324-fast
+  mcpServers:
+  - hierarchy-echo-mcp
+  config:
+    description: "Research worker 1"
+    instructions: |
+      You are researcher-1. You conduct research and report to research-lead.
+    reasoningLoopMaxSteps: 3
+
+---
+# Agent: Researcher 2
+apiVersion: kaos.tools/v1alpha1
+kind: Agent
+metadata:
+  name: researcher-2
+  namespace: kaos-hierarchy
+spec:
+  modelAPI: hierarchy-modelapi
+  model: deepseek-ai/DeepSeek-V3-0324-fast
+  mcpServers:
+  - hierarchy-echo-mcp
+  config:
+    description: "Research worker 2"
+    instructions: |
+      You are researcher-2. You conduct research and report to research-lead.
+    reasoningLoopMaxSteps: 3
+
+---
+# Agent: Analyst 1
+apiVersion: kaos.tools/v1alpha1
+kind: Agent
+metadata:
+  name: analyst-1
+  namespace: kaos-hierarchy
+spec:
+  modelAPI: hierarchy-modelapi
+  model: deepseek-ai/DeepSeek-V3-0324-fast
+  mcpServers:
+  - hierarchy-calc-mcp
+  config:
+    description: "Analysis worker"
+    instructions: |
+      You are analyst-1. You perform analysis using the calculator tool.
+    reasoningLoopMaxSteps: 3

@@ -1,33 +1,21 @@
 """KAOS samples commands - deploy example configurations."""
 
-import os
-import re
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
-from typing import Optional
 
 import typer
+import yaml
 
-# Resolve samples directory relative to repo root
-_CLI_DIR = Path(__file__).resolve().parent.parent.parent
-_REPO_ROOT = _CLI_DIR.parent
-SAMPLES_DIR = _REPO_ROOT / "operator" / "config" / "samples"
-
-# Override map: CLI param → YAML field replacements
-# Each override specifies which YAML patterns to find and replace
-MODELAPI_OVERRIDE_FIELDS = {
-    "mode": {
-        "pattern": r"(spec:\s*\n\s+mode:\s+)\S+",
-        "replace": r"\g<1>{value}",
-    },
-    "model": {
-        # Override hostedConfig.model for Hosted mode
-        "pattern": r"(hostedConfig:\s*\n\s+model:\s+)\S+",
-        "replace": r"\g<1>{value}",
-    },
-}
+# Resolve samples directory: use bundled package data if available, fall back to repo
+_PACKAGE_DATA_DIR = Path(__file__).resolve().parent / "data"
+_REPO_SAMPLES_DIR = (
+    Path(__file__).resolve().parent.parent.parent.parent
+    / "operator"
+    / "config"
+    / "samples"
+)
+SAMPLES_DIR = _PACKAGE_DATA_DIR if _PACKAGE_DATA_DIR.exists() else _REPO_SAMPLES_DIR
 
 
 def _get_sample_files() -> list[Path]:
@@ -74,79 +62,57 @@ def _apply_overrides(
     api_secret: str | None,
     namespace: str | None,
 ) -> str:
-    """Apply CLI overrides to sample YAML content."""
-    # Override namespace in all resources
-    if namespace:
-        # Replace namespace in metadata
-        yaml_content = re.sub(
-            r"(metadata:\s*\n\s+name:\s+\S+\s*\n\s+namespace:\s+)\S+",
-            rf"\g<1>{namespace}",
-            yaml_content,
-        )
-        # Replace namespace in Namespace resource
-        yaml_content = re.sub(
-            r"(kind: Namespace\s*\nmetadata:\s*\n\s+name:\s+)\S+",
-            rf"\g<1>{namespace}",
-            yaml_content,
-        )
+    """Apply CLI overrides to sample YAML content using YAML parser."""
+    docs = list(yaml.safe_load_all(yaml_content))
 
-    # Override ModelAPI reference in Agent specs
-    if modelapi_name:
-        yaml_content = re.sub(
-            r"(spec:\s*\n\s+modelAPI:\s+)\S+",
-            rf"\g<1>{modelapi_name}",
-            yaml_content,
-        )
-
-    # Override mode in ModelAPI specs
-    if mode:
-        yaml_content = re.sub(
-            r"(\bmode:\s+)(Proxy|Hosted)",
-            rf"\g<1>{mode}",
-            yaml_content,
-        )
-
-    # Override model in hostedConfig and Agent model field
-    if model:
-        yaml_content = re.sub(
-            r"(hostedConfig:\s*\n\s+model:\s+)\"?[^\"'\n]+\"?",
-            rf'\g<1>"{model}"',
-            yaml_content,
-        )
-        yaml_content = re.sub(
-            r"(spec:\s*\n\s+modelAPI:\s+\S+\s*\n\s+model:\s+)\"?[^\"'\n]+\"?",
-            rf'\g<1>"{model}"',
-            yaml_content,
-        )
-
-    # Override API secret in ModelAPI specs
+    # Parse api_secret once
+    secret_name = secret_key = None
     if api_secret:
         if ":" in api_secret:
-            secret_name, key_name = api_secret.split(":", 1)
+            secret_name, secret_key = api_secret.split(":", 1)
         else:
-            secret_name = api_secret
-            key_name = "api-key"
-        secret_block = f"""apiKey:
-      valueFrom:
-        secretKeyRef:
-          name: {secret_name}
-          key: {key_name}"""
-        # If proxyConfig already has apiKey, replace it
-        if "apiKey:" in yaml_content:
-            yaml_content = re.sub(
-                r"apiKey:\s*\n\s+valueFrom:\s*\n\s+secretKeyRef:\s*\n\s+name:\s+\S+\s*\n\s+key:\s+\S+",
-                secret_block,
-                yaml_content,
-            )
-        else:
-            # Add apiKey to proxyConfig sections
-            yaml_content = re.sub(
-                r"(proxyConfig:\s*\n(?:\s+\S.*\n)*)",
-                rf"\g<1>    {secret_block}\n",
-                yaml_content,
-            )
+            secret_name, secret_key = api_secret, "api-key"
 
-    return yaml_content
+    for doc in docs:
+        if not doc or not isinstance(doc, dict):
+            continue
+
+        kind = doc.get("kind", "")
+        meta = doc.get("metadata", {})
+
+        # Namespace override
+        if namespace:
+            if kind == "Namespace":
+                meta["name"] = namespace
+            elif "namespace" in meta:
+                meta["namespace"] = namespace
+
+        spec = doc.get("spec", {})
+
+        if kind == "Agent":
+            if modelapi_name:
+                spec["modelAPI"] = modelapi_name
+            if model:
+                spec["model"] = model
+
+        if kind == "ModelAPI":
+            if mode:
+                spec["mode"] = mode
+            hosted = spec.get("hostedConfig")
+            if hosted and model:
+                hosted["model"] = model
+            proxy = spec.get("proxyConfig")
+            if proxy and secret_name:
+                proxy["apiKey"] = {
+                    "valueFrom": {
+                        "secretKeyRef": {
+                            "name": secret_name,
+                            "key": secret_key,
+                        }
+                    }
+                }
+
+    return yaml.dump_all(docs, default_flow_style=False, sort_keys=False)
 
 
 def list_samples() -> None:
@@ -181,13 +147,13 @@ def deploy_sample(
     if not sample_path:
         typer.echo(f"Error: Sample '{name}' not found.", err=True)
         typer.echo(f"Available samples: {', '.join(_get_sample_names())}", err=True)
-        sys.exit(1)
+        raise typer.Exit(1)
 
-    yaml_content = sample_path.read_text()
+    raw_content = sample_path.read_text()
 
     # Apply overrides
     yaml_content = _apply_overrides(
-        yaml_content,
+        raw_content,
         modelapi_name=modelapi,
         mode=mode,
         model=model,
@@ -209,7 +175,7 @@ def deploy_sample(
         result = subprocess.run(args, capture_output=True, text=True)
         if result.returncode != 0:
             typer.echo(result.stderr or result.stdout, err=True)
-            sys.exit(result.returncode)
+            raise typer.Exit(result.returncode)
         typer.echo(result.stdout)
         typer.echo(f"\n✅ Deployed sample '{name}'")
 
@@ -217,11 +183,12 @@ def deploy_sample(
             # Determine the namespace to wait in
             ns = namespace
             if not ns:
-                # Extract first namespace from the YAML
-                ns_match = re.search(
-                    r"kind: Namespace\s*\nmetadata:\s*\n\s+name:\s+(\S+)", yaml_content
-                )
-                ns = ns_match.group(1) if ns_match else "default"
+                docs = list(yaml.safe_load_all(yaml_content))
+                for doc in docs:
+                    if doc and doc.get("kind") == "Namespace":
+                        ns = doc["metadata"]["name"]
+                        break
+                ns = ns or "default"
             typer.echo(f"⏳ Waiting for resources in namespace '{ns}'...")
             wait_args = [
                 "kubectl",
@@ -248,13 +215,13 @@ def delete_sample(name: str) -> None:
     if not sample_path:
         typer.echo(f"Error: Sample '{name}' not found.", err=True)
         typer.echo(f"Available samples: {', '.join(_get_sample_names())}", err=True)
-        sys.exit(1)
+        raise typer.Exit(1)
 
     args = ["kubectl", "delete", "-f", str(sample_path), "--ignore-not-found"]
     result = subprocess.run(args, capture_output=True, text=True)
     if result.returncode != 0:
         typer.echo(result.stderr or result.stdout, err=True)
-        sys.exit(result.returncode)
+        raise typer.Exit(result.returncode)
     typer.echo(result.stdout)
     typer.echo(f"\n✅ Deleted sample '{name}'")
 

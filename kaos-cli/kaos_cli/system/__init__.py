@@ -2,7 +2,6 @@
 
 import subprocess
 import sys
-from typing import Optional
 
 import typer
 
@@ -46,7 +45,7 @@ def install(
         "--wait",
         help="Wait for pods to be ready before returning.",
     ),
-    monitoring_enabled: Optional[str] = typer.Option(
+    monitoring_enabled: str | None = typer.Option(
         None,
         "--monitoring-enabled",
         help=f"Install monitoring stack and enable telemetry. Options: {', '.join(MONITORING_BACKENDS)}. Default: signoz.",

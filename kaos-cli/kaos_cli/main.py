@@ -1,7 +1,5 @@
 """KAOS CLI main entry point."""
 
-from typing import Optional
-
 import typer
 
 from kaos_cli.ui import ui_command
@@ -56,13 +54,13 @@ def ui(
         "-v",
         help="UI version to use (e.g., 'dev', 'v0.1.3'). Defaults to CLI version.",
     ),
-    monitoring_enabled: Optional[str] = typer.Option(
+    monitoring_enabled: str | None = typer.Option(
         None,
         "--monitoring-enabled",
         help=f"Enable monitoring UI port-forward. Options: {', '.join(MONITORING_BACKENDS)}.",
     ),
     monitoring_namespace: str = typer.Option(
-        "monitoring",
+        "observability",
         "--monitoring-namespace",
         help="Namespace where monitoring is installed.",
     ),

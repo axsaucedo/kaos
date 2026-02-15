@@ -6,7 +6,6 @@ import sys
 import threading
 import time
 import webbrowser
-from typing import Optional
 from urllib.parse import urlencode
 
 import typer
@@ -16,7 +15,7 @@ from kaos_cli import __version__
 from kaos_cli.install import MONITORING_BACKENDS
 
 # Default monitoring configuration
-DEFAULT_MONITORING_NAMESPACE = "monitoring"
+DEFAULT_MONITORING_NAMESPACE = "observability"
 
 # SigNoz config
 SIGNOZ_SERVICE_NAME = "signoz"

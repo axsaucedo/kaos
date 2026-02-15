@@ -1,0 +1,112 @@
+---
+# Sample 2: Multi-Agent with MCP Servers
+# A coordinator agent with two worker agents, all with access to echo MCP tool
+# Deploy: kubectl apply -f 2-multi-agent-mcp.yaml
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kaos-multi
+  labels:
+    app.kubernetes.io/part-of: kaos-sample-multi
+
+---
+# ModelAPI: Hosted Ollama with smollm2 model (runs in-cluster)
+apiVersion: kaos.tools/v1alpha1
+kind: ModelAPI
+metadata:
+  name: multi-modelapi
+  namespace: kaos-multi
+spec:
+  mode: Hosted
+  hostedConfig:
+    model: "smollm2:135m"
+  container:
+    env:
+    - name: OLLAMA_DEBUG
+      value: "false"
+
+---
+# MCPServer: Echo tool for all agents
+apiVersion: kaos.tools/v1alpha1
+kind: MCPServer
+metadata:
+  name: multi-echo-mcp
+  namespace: kaos-multi
+spec:
+  runtime: python-string
+  params: |
+    def echo(message: str) -> str:
+        """Echo the provided message back."""
+        return f"Echo: {message}"
+
+---
+# Agent: Coordinator - orchestrates worker agents
+apiVersion: kaos.tools/v1alpha1
+kind: Agent
+metadata:
+  name: coordinator
+  namespace: kaos-multi
+spec:
+  modelAPI: multi-modelapi
+  model: "smollm2:135m"  # Required: must match hosted model
+  mcpServers:
+  - multi-echo-mcp
+  config:
+    description: "Coordinator agent that orchestrates worker agents"
+    instructions: |
+      You are a coordinator agent.
+      You can delegate tasks to worker-1 and worker-2.
+      Use worker-1 for general tasks and worker-2 for specialized tasks.
+      You also have access to an echo tool for testing.
+    reasoningLoopMaxSteps: 10
+  agentNetwork:
+    access:
+    - worker-1
+    - worker-2
+
+---
+# Agent: Worker 1 - general purpose worker
+apiVersion: kaos.tools/v1alpha1
+kind: Agent
+metadata:
+  name: worker-1
+  namespace: kaos-multi
+spec:
+  modelAPI: multi-modelapi
+  model: "smollm2:135m"  # Required: must match hosted model
+  mcpServers:
+  - multi-echo-mcp
+  config:
+    description: "Worker agent 1 for general tasks"
+    instructions: |
+      You are worker-1, a general purpose worker agent.
+      You can be delegated tasks from the coordinator.
+      You have access to an echo tool for testing.
+      Process tasks and return results clearly.
+    reasoningLoopMaxSteps: 5
+  agentNetwork:
+    access: []
+
+---
+# Agent: Worker 2 - specialized worker
+apiVersion: kaos.tools/v1alpha1
+kind: Agent
+metadata:
+  name: worker-2
+  namespace: kaos-multi
+spec:
+  modelAPI: multi-modelapi
+  model: "smollm2:135m"  # Required: must match hosted model
+  mcpServers:
+  - multi-echo-mcp
+  config:
+    description: "Worker agent 2 for specialized tasks"
+    instructions: |
+      You are worker-2, a specialized worker agent.
+      You can be delegated tasks from the coordinator.
+      You have access to an echo tool for testing.
+      Focus on detailed analysis and specialized processing.
+    reasoningLoopMaxSteps: 5
+  agentNetwork:
+    access: []

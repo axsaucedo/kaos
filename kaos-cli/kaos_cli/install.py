@@ -112,6 +112,10 @@ def _install_jaeger() -> bool:
             "agent.enabled=false",
             "--set",
             "provisionDataStore.cassandra=false",
+            "--set-json",
+            'allInOne.extraEnv=[{"name":"QUERY_UI_CONFIG","value":"/etc/jaeger/ui-config.json"}]',
+            "--set-json",
+            'allInOne.extraConfigmapMounts=[{"name":"jaeger-ui-config","mountPath":"/etc/jaeger","configMap":"jaeger-ui-config"}]',
             "--wait",
         ],
         check=False,
@@ -120,8 +124,31 @@ def _install_jaeger() -> bool:
         typer.echo(f"Error installing Jaeger: {result.stderr}", err=True)
         return False
 
-    typer.echo("✅ Jaeger installed in 'observability' namespace")
+    # Create UI config ConfigMap for dark mode
+    _create_jaeger_ui_config()
+
+    typer.echo("✅ Jaeger installed in 'observability' namespace (dark mode enabled)")
     return True
+
+
+def _create_jaeger_ui_config() -> None:
+    """Create ConfigMap with Jaeger UI config for dark theme."""
+    import json
+
+    ui_config = json.dumps({"themes": {"enabled": True}})
+    cm_yaml = (
+        f"apiVersion: v1\nkind: ConfigMap\nmetadata:\n"
+        f"  name: jaeger-ui-config\n  namespace: observability\n"
+        f"data:\n  ui-config.json: '{ui_config}'\n"
+    )
+    result = subprocess.run(
+        ["kubectl", "apply", "-f", "-"],
+        input=cm_yaml,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        typer.echo(f"Warning: Could not create Jaeger UI config: {result.stderr}", err=True)
 
 
 def _install_monitoring(backend: str) -> bool:
