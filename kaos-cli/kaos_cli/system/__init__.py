@@ -8,8 +8,8 @@ import typer
 from kaos_cli.system.install import install_command, uninstall_command
 from kaos_cli.system.create_rbac import create_rbac_command
 from kaos_cli.system.status import status_command
+from kaos_cli.install import DEFAULT_RELEASE_NAME, MONITORING_BACKENDS
 from kaos_cli.system.runtimes import runtimes_command
-from kaos_cli.install import MONITORING_BACKENDS
 
 app = typer.Typer(
     help="System management commands for KAOS operator.",
@@ -26,7 +26,7 @@ def install(
         help="Kubernetes namespace to install into.",
     ),
     release_name: str = typer.Option(
-        "kaos-operator",
+        DEFAULT_RELEASE_NAME,
         "--release-name",
         help="Helm release name.",
     ),
@@ -78,11 +78,10 @@ def uninstall(
         help="Kubernetes namespace to uninstall from.",
     ),
     release_name: str = typer.Option(
-        "kaos-operator",
+        DEFAULT_RELEASE_NAME,
         "--release-name",
         help="Helm release name.",
-    ),
-    monitoring_enabled: str | None = typer.Option(
+    ),    monitoring_enabled: str | None = typer.Option(
         None,
         "--monitoring-enabled",
         help=f"Also uninstall monitoring stack. Options: {', '.join(MONITORING_BACKENDS)}.",

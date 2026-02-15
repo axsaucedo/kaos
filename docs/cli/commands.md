@@ -49,7 +49,7 @@ kaos system uninstall [OPTIONS]
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--namespace` | `kaos-system` | Namespace to uninstall from |
-| `--release-name` | `kaos-operator` | Helm release name |
+| `--release-name` | `kaos` | Helm release name |
 | `--monitoring-enabled` | | Also uninstall monitoring (`signoz` or `jaeger`) |
 
 ### kaos system status
