@@ -1079,3 +1079,225 @@ class TestToolCallArgumentNormalization:
             }
         )
         assert tc.arguments == {"msg": "hi"}
+
+
+class TestStringModeToolCalling:
+    """Tests for string-mode tool calling in the agentic loop."""
+
+    @pytest.mark.asyncio
+    async def test_string_mode_tool_call(self):
+        """Test that string mode parses tool call JSON from content."""
+        tool_response = ModelResponse(
+            content='I will use the calculator. {"tool": "calculator", "arguments": {"a": 5, "b": 3}}',
+            finish_reason="stop",
+        )
+        no_action_response = ModelResponse(content="{}", finish_reason="stop")
+        final_response = "The result is 8."
+
+        mock_model = MockModelAPI(responses=[tool_response, no_action_response, final_response])
+        mock_mcp = MockMCPClient(tools={"calculator": ("Add two numbers", {"sum": 8})})
+        memory = LocalMemory()
+
+        agent = Agent(
+            name="string-tool-agent",
+            model_api=mock_model,
+            mcp_clients=[mock_mcp],
+            memory=memory,
+            max_steps=5,
+            tool_call_mode="string",
+        )
+
+        result = []
+        async for chunk in agent.process_message("What is 5 + 3?"):
+            result.append(chunk)
+
+        # Verify tool was called
+        assert len(mock_mcp.call_log) == 1
+        assert mock_mcp.call_log[0]["tool"] == "calculator"
+        assert mock_mcp.call_log[0]["args"] == {"a": 5, "b": 3}
+
+        # Verify memory has tool events
+        sessions = await memory.list_sessions()
+        events = await memory.get_session_events(sessions[0])
+        event_types = [e.event_type for e in events]
+        assert "tool_call" in event_types
+        assert "tool_result" in event_types
+
+        logger.info("✓ String mode tool call works")
+
+    @pytest.mark.asyncio
+    async def test_string_mode_delegation(self):
+        """Test that string mode parses delegation JSON from content."""
+        delegation_response = ModelResponse(
+            content='I will delegate. {"agent": "worker", "task": "Process this data"}',
+            finish_reason="stop",
+        )
+        no_action_response = ModelResponse(content="{}", finish_reason="stop")
+        final_response = "The worker processed the data."
+
+        mock_model = MockModelAPI(
+            responses=[delegation_response, no_action_response, final_response]
+        )
+        memory = LocalMemory()
+
+        mock_remote = RemoteAgent(name="worker", card_url="http://localhost:9999")
+        mock_remote.agent_card = type(  # type: ignore[assignment]
+            "AgentCard",
+            (),
+            {
+                "name": "worker",
+                "description": "Worker agent",
+                "url": "http://localhost:9999",
+                "capabilities": ["task_execution"],
+            },
+        )()
+        mock_remote._active = True
+        mock_remote.process_message = AsyncMock(return_value="Data processed")  # type: ignore[method-assign]
+
+        agent = Agent(
+            name="coordinator",
+            model_api=mock_model,
+            sub_agents=[mock_remote],
+            memory=memory,
+            max_steps=5,
+            tool_call_mode="string",
+        )
+
+        result = []
+        async for chunk in agent.process_message("Process the data"):
+            result.append(chunk)
+
+        # Verify delegation occurred
+        mock_remote.process_message.assert_called_once()  # type: ignore[union-attr]
+
+        # Verify memory events
+        sessions = await memory.list_sessions()
+        events = await memory.get_session_events(sessions[0])
+        event_types = [e.event_type for e in events]
+        assert "delegation_request" in event_types
+        assert "delegation_response" in event_types
+
+        logger.info("✓ String mode delegation works")
+
+    @pytest.mark.asyncio
+    async def test_string_mode_no_action_breaks_loop(self):
+        """Test that empty JSON {} breaks the string-mode loop."""
+        no_action = ModelResponse(content="I have nothing to do. {}", finish_reason="stop")
+        final_response = "Here is my answer."
+
+        mock_model = MockModelAPI(responses=[no_action, final_response])
+        mock_mcp = MockMCPClient(tools={"echo": ("Echo", {"result": "ok"})})
+        memory = LocalMemory()
+
+        agent = Agent(
+            name="string-agent",
+            model_api=mock_model,
+            mcp_clients=[mock_mcp],
+            memory=memory,
+            max_steps=5,
+            tool_call_mode="string",
+        )
+
+        result = []
+        async for chunk in agent.process_message("Hello"):
+            result.append(chunk)
+
+        response = "".join(result)
+        assert "Here is my answer." in response
+        assert len(mock_mcp.call_log) == 0
+
+        logger.info("✓ String mode no-action breaks loop")
+
+    @pytest.mark.asyncio
+    async def test_string_mode_system_prompt_includes_tools(self):
+        """Test that string mode builds system prompt with tool descriptions."""
+        mock_model = MockModelAPI(responses=["Response"])
+        mock_mcp = MockMCPClient(tools={"search": ("Search for info", {})})
+
+        agent = Agent(
+            name="string-tools-agent",
+            model_api=mock_model,
+            mcp_clients=[mock_mcp],
+            tool_call_mode="string",
+        )
+
+        prompt = await agent._build_system_prompt()
+        assert "## Available Tools" in prompt
+        assert "search" in prompt
+        assert '{"tool": "tool_name"' in prompt
+
+        logger.info("✓ String mode system prompt includes tools")
+
+    @pytest.mark.asyncio
+    async def test_string_mode_max_steps_limit(self):
+        """Test that max_steps is respected in string mode."""
+        tool_action = ModelResponse(
+            content='{"tool": "loop_tool", "arguments": {}}',
+            finish_reason="stop",
+        )
+
+        mock_model = MockModelAPI(responses=[tool_action] * 10)
+        mock_mcp = MockMCPClient(tools={"loop_tool": ("Loops forever", {"result": "ok"})})
+        memory = LocalMemory()
+
+        agent = Agent(
+            name="loop-agent",
+            model_api=mock_model,
+            mcp_clients=[mock_mcp],
+            memory=memory,
+            max_steps=3,
+            tool_call_mode="string",
+        )
+
+        result = []
+        async for chunk in agent.process_message("Start loop"):
+            result.append(chunk)
+
+        response = "".join(result)
+        assert "maximum reasoning steps" in response.lower()
+        assert len(mock_mcp.call_log) == 3
+
+        logger.info("✓ String mode max steps limit works")
+
+
+class TestParseAction:
+    """Tests for the _parse_action method used in string mode."""
+
+    def setup_method(self):
+        mock_model = MockModelAPI(["test"])
+        self.agent = Agent(name="test", model_api=mock_model, tool_call_mode="string")
+
+    def test_parse_pure_json(self):
+        """Test parsing pure JSON content."""
+        result = self.agent._parse_action('{"tool": "echo", "arguments": {"msg": "hi"}}')
+        assert result == {"tool": "echo", "arguments": {"msg": "hi"}}
+
+    def test_parse_json_in_text(self):
+        """Test parsing JSON embedded in text."""
+        result = self.agent._parse_action(
+            'I will use the tool. {"tool": "calc", "arguments": {"a": 1}} Great.'
+        )
+        assert result["tool"] == "calc"
+
+    def test_parse_empty_json(self):
+        """Test parsing empty JSON (no-action signal)."""
+        result = self.agent._parse_action("No more actions needed. {}")
+        assert result == {}
+
+    def test_parse_no_json(self):
+        """Test parsing content with no JSON."""
+        result = self.agent._parse_action("Just a plain text response.")
+        assert result == {}
+
+    def test_parse_delegation(self):
+        """Test parsing delegation action."""
+        result = self.agent._parse_action('{"agent": "worker", "task": "do something"}')
+        assert result == {"agent": "worker", "task": "do something"}
+
+    def test_parse_nested_json(self):
+        """Test parsing JSON with nested objects."""
+        result = self.agent._parse_action(
+            '{"tool": "search", "arguments": {"query": "test", "options": {"limit": 10}}}'
+        )
+        assert result["tool"] == "search"
+        assert result["arguments"]["options"]["limit"] == 10
