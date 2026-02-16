@@ -408,8 +408,7 @@ class Agent:
 
             # Build system prompt and tools parameter
             system_prompt = await self._build_system_prompt(user_system_prompt)
-            tools_param = await self._build_tools_param() if self._supports_native_tools else None
-            has_tools = (await self._build_tools_param()) is not None
+            tools = await self._build_tools_param()
             messages = [{"role": "system", "content": system_prompt}]
 
             # Handle both string and array input formats
@@ -435,8 +434,7 @@ class Agent:
                 session_id,
                 stream,
                 seed=seed,
-                tools=tools_param,
-                has_tools=has_tools,
+                tools=tools,
             ):
                 yield chunk
 
@@ -457,7 +455,6 @@ class Agent:
         stream: bool,
         seed: Optional[int] = None,
         tools: Optional[List[Dict[str, Any]]] = None,
-        has_tools: bool = False,
     ) -> AsyncIterator[str]:
         """Execute the agentic loop with auto-detected tool calling mode.
 
@@ -466,18 +463,15 @@ class Agent:
         Phase 2: Final response — streaming/non-streaming model call for user output.
         """
         model_name = self.model_api.model if self.model_api else "unknown"
-        native = self._supports_native_tools
         tools_executed = False
 
         # Phase 1: Action Collection Loop
-        phase1_active = self.max_steps > 0 and (
-            (native and tools is not None) or (not native and has_tools)
-        )
+        phase1_active = self.max_steps > 0 and tools is not None
 
         if phase1_active:
             for step in range(self.max_steps):
                 step_context = f"[Step {step + 1}/{self.max_steps}]"
-                mode_label = "native" if native else "string"
+                mode_label = "native" if self._supports_native_tools else "string"
                 logger.debug(f"Agentic loop step {step + 1}/{self.max_steps} (mode={mode_label})")
 
                 otel.span_begin(
@@ -486,20 +480,20 @@ class Agent:
                 )
                 step_failed = False
                 try:
-                    # Call model (with or without tools param)
+                    # Call model (with tools param only in native mode)
                     response = await self._call_model(
                         messages,
                         model_name,
                         seed=seed,
-                        tools=tools if native else None,
+                        tools=tools if self._supports_native_tools else None,
                     )
 
                     # Extract tool calls from response
-                    tool_calls = self._extract_tool_calls(response, native)
+                    tool_calls = self._extract_tool_calls(response)
 
                     if not tool_calls:
                         # No actions — break to Phase 2
-                        if native and not response.content:
+                        if not response.content:
                             logger.warning(
                                 f"Model returned no tool_calls and no content at step {step + 1}"
                             )
@@ -511,25 +505,7 @@ class Agent:
                         break
 
                     # Build assistant message for conversation history
-                    if native:
-                        assistant_msg: Dict[str, Any] = {
-                            "role": "assistant",
-                            "content": response.content,
-                            "tool_calls": [
-                                {
-                                    "id": tc.id,
-                                    "type": "function",
-                                    "function": {
-                                        "name": tc.name,
-                                        "arguments": json.dumps(tc.arguments),
-                                    },
-                                }
-                                for tc in tool_calls
-                            ],
-                        }
-                        messages.append(assistant_msg)
-                    else:
-                        messages.append({"role": "assistant", "content": response.content or ""})
+                    messages.append(self._build_assistant_msg(response, tool_calls))
 
                     # Execute tool calls
                     async for chunk in self._execute_tool_calls(
@@ -538,7 +514,6 @@ class Agent:
                         session_id,
                         step,
                         step_context,
-                        native,
                     ):
                         yield chunk
 
@@ -587,9 +562,9 @@ class Agent:
             if not final_failed:
                 otel.span_success()
 
-    def _extract_tool_calls(self, response: ModelResponse, native: bool) -> List[ToolCall]:
+    def _extract_tool_calls(self, response: ModelResponse) -> List[ToolCall]:
         """Extract tool calls from model response (native or string mode)."""
-        if native:
+        if self._supports_native_tools:
             return response.tool_calls
 
         # String mode: parse JSON from content
@@ -605,6 +580,28 @@ class Agent:
             ]
         return []
 
+    def _build_assistant_msg(
+        self, response: ModelResponse, tool_calls: List[ToolCall]
+    ) -> Dict[str, Any]:
+        """Build assistant message for conversation history."""
+        if self._supports_native_tools:
+            return {
+                "role": "assistant",
+                "content": response.content,
+                "tool_calls": [
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {
+                            "name": tc.name,
+                            "arguments": json.dumps(tc.arguments),
+                        },
+                    }
+                    for tc in tool_calls
+                ],
+            }
+        return {"role": "assistant", "content": response.content or ""}
+
     async def _execute_tool_calls(
         self,
         tool_calls: List[ToolCall],
@@ -612,7 +609,6 @@ class Agent:
         session_id: str,
         step: int,
         step_context: str,
-        native: bool,
     ) -> AsyncIterator[str]:
         """Execute tool calls (regular + delegation) and append results to messages."""
         delegation_calls = [tc for tc in tool_calls if tc.name.startswith(DELEGATION_TOOL_PREFIX)]
@@ -660,7 +656,6 @@ class Agent:
                         if not is_error
                         else f"{step_context} Tool execution failed: {result_content}"
                     ),
-                    native,
                 )
 
         # Execute delegation calls sequentially
@@ -673,7 +668,6 @@ class Agent:
                     messages,
                     tc,
                     f"{step_context} Invalid delegation: missing 'task'",
-                    native,
                 )
                 continue
 
@@ -704,14 +698,12 @@ class Agent:
                     messages,
                     tc,
                     f"{step_context} Agent response: {delegation_result}",
-                    native,
                 )
             except ValueError as e:
                 self._append_tool_result(
                     messages,
                     tc,
                     f"{step_context} Delegation failed: {e}",
-                    native,
                 )
 
     async def _execute_tool_with_result(self, tc: ToolCall, step_context: str) -> tuple:
@@ -722,15 +714,14 @@ class Agent:
         except Exception as e:
             return (str(e), True)
 
-    @staticmethod
     def _append_tool_result(
+        self,
         messages: List[Dict[str, str]],
         tc: ToolCall,
         content: str,
-        native: bool,
     ) -> None:
         """Append tool result to messages in the appropriate format."""
-        if native:
+        if self._supports_native_tools:
             messages.append({"role": "tool", "tool_call_id": tc.id, "content": content})
         else:
             messages.append({"role": "user", "content": content})
