@@ -16,7 +16,6 @@ DEFAULT_NAMESPACE = "kaos-system"
 DEFAULT_RELEASE_NAME = "kaos"
 
 # Gateway API defaults
-GATEWAY_API_VERSION = "v1.4.1"
 ENVOY_GATEWAY_VERSION = "v1.4.6"
 GATEWAY_CLASS_NAME = "envoy-gateway"
 
@@ -57,42 +56,41 @@ def _run_kubectl(args: list[str], check: bool = True, **kwargs) -> subprocess.Co
 
 
 def _install_gateway_api() -> bool:
-    """Install Gateway API CRDs, Envoy Gateway controller, and GatewayClass."""
-    typer.echo(f"Installing Gateway API CRDs ({GATEWAY_API_VERSION})...")
-    result = _run_kubectl(
-        ["apply", "-f",
-         f"https://github.com/kubernetes-sigs/gateway-api/releases/download/{GATEWAY_API_VERSION}/standard-install.yaml"],
+    """Install Envoy Gateway (includes Gateway API CRDs) and create GatewayClass."""
+    typer.echo(f"Installing Envoy Gateway ({ENVOY_GATEWAY_VERSION})...")
+
+    # Pre-apply CRDs from the chart to handle field manager conflicts on re-installs
+    crds_result = run_helm_command(
+        ["show", "crds", "oci://docker.io/envoyproxy/gateway-helm",
+         "--version", ENVOY_GATEWAY_VERSION],
         check=False,
     )
-    if result.returncode != 0:
-        typer.echo(f"Error installing Gateway API CRDs: {result.stderr}", err=True)
-        return False
-
-    typer.echo("Waiting for Gateway API CRDs...")
-    for crd in ["gateways.gateway.networking.k8s.io",
-                "httproutes.gateway.networking.k8s.io",
-                "gatewayclasses.gateway.networking.k8s.io"]:
+    if crds_result.returncode == 0 and crds_result.stdout.strip():
         result = _run_kubectl(
-            ["wait", "--for", "condition=established", f"--timeout=60s", f"crd/{crd}"],
-            check=False,
+            ["apply", "--server-side", "--force-conflicts", "-f", "-"],
+            check=False, input=crds_result.stdout,
         )
         if result.returncode != 0:
-            typer.echo(f"Error waiting for CRD {crd}: {result.stderr}", err=True)
-            return False
+            typer.echo(f"Warning: CRD pre-apply failed: {result.stderr}", err=True)
 
-    typer.echo(f"Installing Envoy Gateway ({ENVOY_GATEWAY_VERSION})...")
     result = run_helm_command(
         ["upgrade", "--install", "envoy-gateway",
          "oci://docker.io/envoyproxy/gateway-helm",
          "--version", ENVOY_GATEWAY_VERSION,
          "--namespace", "envoy-gateway-system", "--create-namespace",
-         "--skip-crds", "--wait", "--timeout", "120s"],
+         "--skip-crds"],
         check=False,
     )
     if result.returncode != 0:
         typer.echo(f"Error installing Envoy Gateway: {result.stderr}", err=True)
         return False
 
+    typer.echo("✅ Envoy Gateway installed")
+    return True
+
+
+def _wait_for_gateway_class() -> bool:
+    """Create GatewayClass and wait for it to be accepted."""
     typer.echo("Creating GatewayClass...")
     gc_yaml = (
         "apiVersion: gateway.networking.k8s.io/v1\n"
@@ -107,7 +105,6 @@ def _install_gateway_api() -> bool:
         typer.echo(f"Error creating GatewayClass: {result.stderr}", err=True)
         return False
 
-    # Wait for GatewayClass to be accepted
     typer.echo("Waiting for GatewayClass to be accepted...")
     for i in range(30):
         result = _run_kubectl(
@@ -122,12 +119,12 @@ def _install_gateway_api() -> bool:
         typer.echo("Warning: GatewayClass not accepted after 60 seconds", err=True)
         return False
 
-    typer.echo("✅ Gateway API and Envoy Gateway installed successfully!")
+    typer.echo("✅ GatewayClass accepted")
     return True
 
 
 def _uninstall_gateway_api() -> bool:
-    """Uninstall Envoy Gateway and Gateway API CRDs."""
+    """Uninstall Envoy Gateway."""
     typer.echo("Uninstalling Envoy Gateway...")
     result = run_helm_command(
         ["uninstall", "envoy-gateway", "--namespace", "envoy-gateway-system"],
@@ -137,12 +134,6 @@ def _uninstall_gateway_api() -> bool:
         typer.echo(f"Warning: {result.stderr}", err=True)
 
     _run_kubectl(["delete", "gatewayclass", GATEWAY_CLASS_NAME, "--ignore-not-found"], check=False)
-    _run_kubectl(
-        ["delete", "-f",
-         f"https://github.com/kubernetes-sigs/gateway-api/releases/download/{GATEWAY_API_VERSION}/standard-install.yaml",
-         "--ignore-not-found"],
-        check=False,
-    )
     _run_kubectl(["delete", "namespace", "envoy-gateway-system", "--ignore-not-found"], check=False)
     typer.echo("✅ Gateway API uninstalled")
     return True
@@ -160,6 +151,12 @@ def _install_metallb() -> bool:
         typer.echo(f"Error installing MetalLB: {result.stderr}", err=True)
         return False
 
+    typer.echo("✅ MetalLB installed")
+    return True
+
+
+def _configure_metallb() -> bool:
+    """Wait for MetalLB to be ready and configure IP address pool."""
     typer.echo("Waiting for MetalLB pods...")
     result = _run_kubectl(
         ["wait", "--namespace", "metallb-system",
@@ -170,7 +167,6 @@ def _install_metallb() -> bool:
     if result.returncode != 0:
         typer.echo(f"Warning: MetalLB pods not ready: {result.stderr}", err=True)
 
-    # Auto-detect KIND network subnet for IP pool
     typer.echo("Configuring MetalLB IP address pool...")
     try:
         net_result = subprocess.run(
@@ -180,13 +176,11 @@ def _install_metallb() -> bool:
         )
         if net_result.returncode == 0 and net_result.stdout.strip():
             cidr = net_result.stdout.strip()
-            # Extract first 3 octets (e.g., 172.18.0 from 172.18.0.0/16)
             parts = cidr.split("/")[0].split(".")[:3]
             prefix = ".".join(parts)
             ip_start = f"{prefix}.200"
             ip_end = f"{prefix}.250"
         else:
-            # Fallback for non-KIND clusters
             ip_start = "172.18.255.200"
             ip_end = "172.18.255.250"
 
@@ -217,7 +211,6 @@ def _install_metallb() -> bool:
     except FileNotFoundError:
         typer.echo("Warning: docker not found, skipping MetalLB IP pool configuration", err=True)
 
-    typer.echo("✅ MetalLB installed")
     return True
 
 
@@ -275,7 +268,6 @@ def _install_signoz(namespace: str) -> bool:
             "--namespace",
             namespace,
             "--create-namespace",
-            "--wait",
         ],
         check=False,
     )
@@ -337,7 +329,6 @@ def _install_jaeger(namespace: str) -> bool:
             'allInOne.extraEnv=[{"name":"QUERY_UI_CONFIG","value":"/etc/jaeger/ui-config.json"}]',
             "--set-json",
             'allInOne.extraConfigmapMounts=[{"name":"jaeger-ui-config","mountPath":"/etc/jaeger","configMap":"jaeger-ui-config"}]',
-            "--wait",
         ],
         check=False,
     )
@@ -409,21 +400,27 @@ def install_command(
         typer.echo("See: https://helm.sh/docs/intro/install/", err=True)
         sys.exit(1)
 
-    # Install MetalLB first if requested (needed before Gateway)
+    # Phase 1: Kick off all infra installs (no waiting)
     if metallb_enabled:
         if not _install_metallb():
             typer.echo("Warning: MetalLB installation failed, continuing...", err=True)
 
-    # Install Gateway API if requested
     if gateway_enabled:
         if not _install_gateway_api():
             typer.echo("Warning: Gateway API installation failed, continuing...", err=True)
 
-    # Install monitoring if requested (in same namespace as operator)
     if monitoring_enabled:
         if not _install_monitoring(monitoring_enabled, namespace):
             typer.echo("Warning: Monitoring installation failed, continuing...", err=True)
 
+    # Phase 2: Wait for infra that the operator depends on
+    if gateway_enabled:
+        _wait_for_gateway_class()
+
+    if metallb_enabled:
+        _configure_metallb()
+
+    # Phase 3: Install operator chart
     typer.echo(f"Installing KAOS operator to namespace '{namespace}'...")
 
     # Determine chart reference: local path or published repo
@@ -431,7 +428,6 @@ def install_command(
         chart_ref = chart_path
         typer.echo(f"Using local chart: {chart_path}")
     else:
-        # Add the Helm repository
         typer.echo(f"Adding Helm repository '{HELM_REPO_NAME}'...")
         result = run_helm_command(
             ["repo", "add", HELM_REPO_NAME, HELM_REPO_URL, "--force-update"],
@@ -440,10 +436,23 @@ def install_command(
         if result.returncode != 0 and "already exists" not in result.stderr:
             typer.echo(f"Warning: {result.stderr}", err=True)
 
-        # Update repositories
         typer.echo("Updating Helm repositories...")
         run_helm_command(["repo", "update"], check=False)
         chart_ref = f"{HELM_REPO_NAME}/{HELM_CHART_NAME}"
+
+    # Pre-apply CRDs via kubectl for compatibility with Helm 3 and prior installs
+    if chart_path:
+        import pathlib
+
+        crds_dir = pathlib.Path(chart_path) / "crds"
+        if crds_dir.exists():
+            typer.echo("Applying CRDs...")
+            result = _run_kubectl(
+                ["apply", "--server-side", "--force-conflicts", "-f", str(crds_dir)],
+                check=False,
+            )
+            if result.returncode != 0:
+                typer.echo(f"Warning: CRD apply failed: {result.stderr}", err=True)
 
     # Build helm install command
     helm_args = [
@@ -454,7 +463,7 @@ def install_command(
         "--namespace",
         namespace,
         "--create-namespace",
-        "--force-conflicts",
+        "--skip-crds",
     ]
 
     if version:
@@ -466,13 +475,11 @@ def install_command(
     for value in set_values:
         helm_args.extend(["--set", value])
 
-    # Add telemetry settings if monitoring is enabled
     if monitoring_enabled:
         otel_endpoint = _get_otel_endpoint(monitoring_enabled, namespace)
         helm_args.extend(["--set", "telemetry.enabled=true"])
         helm_args.extend(["--set", f"telemetry.endpoint={otel_endpoint}"])
 
-    # Add Gateway API settings if gateway is enabled
     if gateway_enabled:
         helm_args.extend(["--set", "gatewayAPI.enabled=true"])
         helm_args.extend(["--set", "gatewayAPI.createGateway=true"])
