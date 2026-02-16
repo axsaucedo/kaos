@@ -494,9 +494,7 @@ class Agent:
         tools_executed = False
 
         # Phase 1: Action Collection Loop
-        phase1_active = self.max_steps > 0 and tools is not None
-
-        if phase1_active:
+        if self.max_steps > 0 and tools is not None:
             for step in range(self.max_steps):
                 step_context = f"[Step {step + 1}/{self.max_steps}]"
                 mode_label = "native" if self._supports_native_tools else "string"
