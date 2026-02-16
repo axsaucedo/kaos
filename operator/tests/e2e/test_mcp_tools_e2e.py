@@ -382,3 +382,92 @@ async def test_agent_multiple_mcp_servers(test_namespace: str, shared_modelapi: 
         skill_names = [s.get("name") for s in skills]
         assert "echo" in skill_names, f"echo not in skills: {skill_names}"
         assert "uppercase" in skill_names, f"uppercase not in skills: {skill_names}"
+
+
+@pytest.mark.asyncio
+async def test_agent_string_mode_tool_calling(
+    test_namespace: str, shared_modelapi: str
+):
+    """Test Agent with auto-detected string-mode calls MCP tools via text-based JSON.
+
+    Uses a model name that litellm recognizes as not supporting native function calling,
+    triggering string-mode tool calling with JSON action in content text.
+    """
+    task_id = f"STR_{int(time.time())}"
+    mcp_name = "mcp-str-mode"
+    agent_name = "str-mode-agent"
+
+    # Deploy MCPServer
+    mcp_spec = create_echo_mcp_server(test_namespace, mcp_name)
+    create_custom_resource(mcp_spec, test_namespace)
+    wait_for_deployment(test_namespace, f"mcpserver-{mcp_name}", timeout=120)
+
+    mcp_url = gateway_url(test_namespace, "mcp", mcp_name)
+    await wait_for_mcp_server_ready(mcp_url)
+
+    # String-mode mock responses: tool call JSON, no-action text, final response
+    mock_responses = [
+        json.dumps({"tool": "echo", "arguments": {"message": f"Task {task_id}"}}),
+        "No more actions needed.",
+        f"The echo tool returned result for task {task_id}.",
+    ]
+
+    agent_spec = {
+        "apiVersion": "kaos.tools/v1alpha1",
+        "kind": "Agent",
+        "metadata": {"name": agent_name, "namespace": test_namespace},
+        "spec": {
+            "modelAPI": shared_modelapi,
+            "model": "ollama/smollm2:135m",
+            "mcpServers": [mcp_name],
+            "config": {
+                "description": "String mode tool agent",
+                "instructions": "You have access to echo tool.",
+                "reasoningLoopMaxSteps": 5,
+            },
+            "container": {
+                "env": [
+                    {"name": "AGENT_LOG_LEVEL", "value": "DEBUG"},
+                    {
+                        "name": "DEBUG_MOCK_RESPONSES",
+                        "value": json.dumps(mock_responses),
+                    },
+                ],
+            },
+            "agentNetwork": {"access": []},
+        },
+    }
+    create_custom_resource(agent_spec, test_namespace)
+    wait_for_deployment(test_namespace, f"agent-{agent_name}", timeout=120)
+
+    agent_url = gateway_url(test_namespace, "agent", agent_name)
+    wait_for_resource_ready(agent_url)
+    await async_wait_for_healthy(agent_url)
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        # Send user message - string-mode mock will trigger tool call via JSON in content
+        response = await client.post(
+            f"{agent_url}/v1/chat/completions",
+            json={
+                "model": agent_name,
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": f"Use echo tool for task {task_id}",
+                    }
+                ],
+            },
+        )
+
+        assert response.status_code == 200, f"Request failed: {response.text}"
+        data = response.json()
+        assert "choices" in data
+        assert len(data["choices"][0]["message"]["content"]) > 0
+
+        # Verify memory has tool-related events
+        response = await client.get(f"{agent_url}/memory/events")
+        memory = response.json()
+        event_types = [e["event_type"] for e in memory["events"]]
+
+        assert "tool_call" in event_types, f"Missing tool_call in {event_types}"
+        assert "tool_result" in event_types, f"Missing tool_result in {event_types}"

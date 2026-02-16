@@ -193,6 +193,23 @@ config:
 
 The reasoning loop runs tool calls and delegations until the model produces a final response or max steps is reached.
 
+#### config.toolCallMode
+
+Controls how the agent invokes tools:
+
+```yaml
+config:
+  toolCallMode: auto  # Default: auto, Options: auto, native, string
+```
+
+| Mode | Description |
+|------|-------------|
+| `auto` | Auto-detect via `litellm.supports_function_calling(model)` at startup (default) |
+| `native` | Force native OpenAI function calling (`tools` API parameter) |
+| `string` | Force text-based JSON tool calling (tool descriptions in system prompt) |
+
+Use `native` or `string` to override auto-detection when the model registry is inaccurate or when you need a specific behavior.
+
 #### config.memory
 
 Memory system configuration:

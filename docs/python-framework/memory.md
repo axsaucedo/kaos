@@ -127,7 +127,7 @@ class MemoryEvent:
 | `agent_response` | Final agent output | `"The answer is 4"` |
 | `tool_call` | Tool invocation request | `{"tool": "calc", "arguments": {...}}` |
 | `tool_result` | Tool execution result | `{"tool": "calc", "result": 4}` |
-| `delegation_request` | Sub-agent delegation | `{"agent": "worker", "task": "..."}` |
+| `delegation_request` | Sub-agent delegation | `{"tool": "delegate_to_worker", "arguments": {"task": "..."}}` |
 | `delegation_response` | Sub-agent response | `{"agent": "worker", "response": "..."}` |
 | `error` | Error occurred | `"Connection failed"` |
 

@@ -106,12 +106,13 @@ spec:
 
 ### Mock Response Patterns (DEBUG_MOCK_RESPONSES)
 
-E2E tests use `DEBUG_MOCK_RESPONSES` env var with native function calling format:
+E2E tests use `DEBUG_MOCK_RESPONSES` env var. The `tool_calls` format works for both native and string mode (the agent checks `response.tool_calls` first regardless of mode). Delegation uses the same `delegate_to_` prefix as regular tools.
 
 **Tool call (MCP tool):**
 ```json
 [
   "{\"tool_calls\": [{\"id\": \"call_1\", \"name\": \"echo\", \"arguments\": {\"message\": \"hello\"}}]}",
+  "No more actions needed.",
   "The echo tool returned the result."
 ]
 ```
@@ -120,6 +121,7 @@ E2E tests use `DEBUG_MOCK_RESPONSES` env var with native function calling format
 ```json
 [
   "{\"tool_calls\": [{\"id\": \"call_1\", \"name\": \"delegate_to_worker-name\", \"arguments\": {\"task\": \"Process this\"}}]}",
+  "No more actions needed.",
   "The worker completed the task."
 ]
 ```
@@ -129,7 +131,7 @@ E2E tests use `DEBUG_MOCK_RESPONSES` env var with native function calling format
 ["Task completed by worker."]
 ```
 
-Note: No `{}` no-action signal needed. Responses without `tool_calls` key signal completion.
+Note: Absence of `tool_calls` in a response signals loop completion. No `{}` no-action signal is needed.
 
 ### Key Patterns
 - Tests create unique namespaces per session
