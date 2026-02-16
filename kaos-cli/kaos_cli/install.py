@@ -176,20 +176,22 @@ def _configure_metallb() -> bool:
 
     typer.echo("Configuring MetalLB IP address pool...")
     try:
+        # Get all IPAM subnets and find the IPv4 one
         net_result = subprocess.run(
             ["docker", "network", "inspect", "kind", "--format",
-             "{{(index .IPAM.Config 0).Subnet}}"],
+             "{{range .IPAM.Config}}{{.Subnet}} {{end}}"],
             capture_output=True, text=True, check=False,
         )
+        ip_start = "172.18.255.200"
+        ip_end = "172.18.255.250"
         if net_result.returncode == 0 and net_result.stdout.strip():
-            cidr = net_result.stdout.strip()
-            parts = cidr.split("/")[0].split(".")[:3]
-            prefix = ".".join(parts)
-            ip_start = f"{prefix}.200"
-            ip_end = f"{prefix}.250"
-        else:
-            ip_start = "172.18.255.200"
-            ip_end = "172.18.255.250"
+            for subnet in net_result.stdout.strip().split():
+                if "." in subnet and ":" not in subnet:  # IPv4 only
+                    parts = subnet.split("/")[0].split(".")[:3]
+                    prefix = ".".join(parts)
+                    ip_start = f"{prefix}.200"
+                    ip_end = f"{prefix}.250"
+                    break
 
         pool_yaml = (
             "apiVersion: metallb.io/v1beta1\n"
@@ -460,8 +462,14 @@ def install_command(
         )
         if result.returncode != 0:
             typer.echo(f"Warning: CRD apply failed: {result.stderr}", err=True)
+        elif result.stdout.strip():
+            typer.echo(f"  {result.stdout.strip()}")
     else:
-        typer.echo(f"Warning: Could not extract CRDs: {crds_result.stderr}", err=True)
+        typer.echo(
+            f"Warning: Could not extract CRDs (rc={crds_result.returncode}): "
+            f"{crds_result.stderr}",
+            err=True,
+        )
 
     # Build helm install command
     helm_args = [
