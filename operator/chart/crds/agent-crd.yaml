@@ -112,13 +112,19 @@ spec:
                         maximum: 100000
                         minimum: 1
                         type: integer
+                      redisURL:
+                        description: |-
+                          RedisURL is the Redis connection URL (required when type is "redis")
+                          Example: "redis://redis.default.svc.cluster.local:6379/0"
+                        type: string
                       type:
                         default: local
                         description: |-
                           Type specifies the memory implementation (default: "local")
-                          Currently only "local" is supported
+                          "local" for in-process memory, "redis" for distributed Redis-backed memory
                         enum:
                         - local
+                        - redis
                         type: string
                     type: object
                   reasoningLoopMaxSteps:

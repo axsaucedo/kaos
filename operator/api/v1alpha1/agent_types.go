@@ -56,10 +56,15 @@ type MemoryConfig struct {
 	Enabled *bool `json:"enabled,omitempty"`
 
 	// Type specifies the memory implementation (default: "local")
-	// Currently only "local" is supported
+	// "local" for in-process memory, "redis" for distributed Redis-backed memory
 	// +kubebuilder:default="local"
-	// +kubebuilder:validation:Enum=local
+	// +kubebuilder:validation:Enum=local;redis
 	Type string `json:"type,omitempty"`
+
+	// RedisURL is the Redis connection URL (required when type is "redis")
+	// Example: "redis://redis.default.svc.cluster.local:6379/0"
+	// +kubebuilder:validation:Optional
+	RedisURL string `json:"redisURL,omitempty"`
 
 	// ContextLimit is the number of messages to include in delegation context (default: 6)
 	// +kubebuilder:validation:Minimum=1

@@ -1,0 +1,32 @@
+# Redis Distributed Memory Example
+#
+# This example shows how to configure an agent with Redis-backed distributed
+# memory so that multiple replicas share conversation state.
+#
+# Prerequisites:
+#   1. KAOS operator installed with Redis:
+#        kaos system install --redis-enabled
+#   2. A ModelAPI deployed:
+#        kaos modelapi deploy my-api --mode Proxy --wait
+#
+# Apply this file:
+#   kubectl apply -f redis-memory-agent.yaml
+
+---
+apiVersion: kaos.tools/v1alpha1
+kind: Agent
+metadata:
+  name: redis-memory-agent
+spec:
+  modelAPI: my-api
+  model: "openai/gpt-4"
+  config:
+    description: "Agent with Redis-backed distributed memory"
+    instructions: "You are a helpful assistant. Remember what users tell you."
+    memory:
+      enabled: true
+      type: redis
+      redisURL: "redis://kaos-redis.kaos-system.svc.cluster.local:6379/0"
+      contextLimit: 10
+      maxSessions: 5000
+      maxSessionEvents: 1000

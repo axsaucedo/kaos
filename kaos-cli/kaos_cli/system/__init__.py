@@ -65,6 +65,11 @@ def install(
         "--chart-path",
         help="Path to local Helm chart directory (for development). Uses published chart if not set.",
     ),
+    redis_enabled: bool = typer.Option(
+        False,
+        "--redis-enabled",
+        help="Deploy Redis for distributed agent memory.",
+    ),
 ) -> None:
     """Install the KAOS operator using Helm."""
     # Default to signoz if flag provided without value
@@ -83,6 +88,7 @@ def install(
         monitoring_enabled=monitoring_enabled,
         gateway_enabled=gateway_enabled,
         metallb_enabled=metallb_enabled,
+        redis_enabled=redis_enabled,
         chart_path=chart_path,
     )
 

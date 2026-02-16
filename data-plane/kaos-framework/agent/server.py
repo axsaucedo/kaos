@@ -141,10 +141,11 @@ class AgentServerSettings(BaseSettings):
 
     # Memory configuration
     memory_enabled: bool = True  # Enable/disable memory (NullMemory when disabled)
-    memory_type: str = "local"  # Memory type (only "local" supported currently)
+    memory_type: str = "local"  # Memory type: "local" or "redis"
     memory_context_limit: int = 6  # Messages to include in delegation context
     memory_max_sessions: int = 1000  # Maximum sessions to keep
     memory_max_session_events: int = 500  # Maximum events per session
+    redis_url: str = "redis://localhost:6379/0"  # Redis URL (used when memory_type=redis)
 
     # Logging settings
     agent_access_log: bool = False  # Mute uvicorn access logs by default
@@ -642,13 +643,20 @@ def create_agent_server(
 
     # Create agent with MCP clients and sub-agents
     # Use NullMemory when memory is disabled
-    from agent.memory import LocalMemory, NullMemory
+    from agent.memory import LocalMemory, RedisMemory, NullMemory
 
     if settings.memory_enabled:
-        memory = LocalMemory(
-            max_sessions=settings.memory_max_sessions,
-            max_events_per_session=settings.memory_max_session_events,
-        )
+        if settings.memory_type == "redis":
+            memory = RedisMemory(
+                redis_url=settings.redis_url,
+                max_sessions=settings.memory_max_sessions,
+                max_events_per_session=settings.memory_max_session_events,
+            )
+        else:
+            memory = LocalMemory(
+                max_sessions=settings.memory_max_sessions,
+                max_events_per_session=settings.memory_max_session_events,
+            )
     else:
         memory = NullMemory()
 

@@ -89,3 +89,8 @@ telemetry:
 # - ModelAPI (LiteLLM): Maps to LITELLM_LOG
 # - ModelAPI (Ollama): Maps to OLLAMA_DEBUG
 logLevel: INFO
+
+# Redis configuration for distributed agent memory
+# When enabled, deploys a Redis instance that agents can use for shared memory
+redis:
+  enabled: false

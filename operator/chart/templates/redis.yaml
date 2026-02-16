@@ -1,0 +1,47 @@
+{{- if .Values.redis.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kaos-redis
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: kaos-redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kaos-redis
+  template:
+    metadata:
+      labels:
+        app: kaos-redis
+    spec:
+      containers:
+      - name: redis
+        image: redis:7-alpine
+        ports:
+        - containerPort: 6379
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kaos-redis
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: kaos-redis
+spec:
+  type: ClusterIP
+  ports:
+  - port: 6379
+    targetPort: 6379
+    protocol: TCP
+  selector:
+    app: kaos-redis
+{{- end }}

@@ -501,6 +501,12 @@ func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *
 				Value: mem.Type,
 			})
 		}
+		if mem.RedisURL != "" {
+			env = append(env, corev1.EnvVar{
+				Name:  "REDIS_URL",
+				Value: mem.RedisURL,
+			})
+		}
 		if mem.ContextLimit != nil {
 			env = append(env, corev1.EnvVar{
 				Name:  "MEMORY_CONTEXT_LIMIT",
