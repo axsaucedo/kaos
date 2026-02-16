@@ -478,14 +478,6 @@ func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *
 		})
 	}
 
-	// Tool call mode configuration
-	if agent.Spec.Config != nil && agent.Spec.Config.ToolCallMode != "" {
-		env = append(env, corev1.EnvVar{
-			Name:  "TOOL_CALL_MODE",
-			Value: agent.Spec.Config.ToolCallMode,
-		})
-	}
-
 	// Memory configuration
 	if agent.Spec.Config != nil && agent.Spec.Config.Memory != nil {
 		mem := agent.Spec.Config.Memory
