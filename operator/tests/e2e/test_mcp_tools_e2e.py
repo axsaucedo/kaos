@@ -388,10 +388,10 @@ async def test_agent_multiple_mcp_servers(test_namespace: str, shared_modelapi: 
 async def test_agent_string_mode_tool_calling(
     test_namespace: str, shared_modelapi: str
 ):
-    """Test Agent with toolCallMode=string calls MCP tools via text-based JSON.
+    """Test Agent with auto-detected string-mode calls MCP tools via text-based JSON.
 
-    Uses string-mode mock responses with JSON action in content text.
-    Verifies tool execution and memory tracking work in string mode.
+    Uses a model name that litellm recognizes as not supporting native function calling,
+    triggering string-mode tool calling with JSON action in content text.
     """
     task_id = f"STR_{int(time.time())}"
     mcp_name = "mcp-str-mode"
@@ -405,10 +405,10 @@ async def test_agent_string_mode_tool_calling(
     mcp_url = gateway_url(test_namespace, "mcp", mcp_name)
     await wait_for_mcp_server_ready(mcp_url)
 
-    # String-mode mock responses: tool call JSON, no-action, final response
+    # String-mode mock responses: tool call JSON, no-action text, final response
     mock_responses = [
         json.dumps({"tool": "echo", "arguments": {"message": f"Task {task_id}"}}),
-        "{}",
+        "No more actions needed.",
         f"The echo tool returned result for task {task_id}.",
     ]
 
@@ -418,12 +418,11 @@ async def test_agent_string_mode_tool_calling(
         "metadata": {"name": agent_name, "namespace": test_namespace},
         "spec": {
             "modelAPI": shared_modelapi,
-            "model": "gpt-3.5-turbo",
+            "model": "ollama/smollm2:135m",
             "mcpServers": [mcp_name],
             "config": {
                 "description": "String mode tool agent",
                 "instructions": "You have access to echo tool.",
-                "toolCallMode": "string",
                 "reasoningLoopMaxSteps": 5,
             },
             "container": {
