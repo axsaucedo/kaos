@@ -563,21 +563,29 @@ class Agent:
                 otel.span_success()
 
     def _extract_tool_calls(self, response: ModelResponse) -> List[ToolCall]:
-        """Extract tool calls from model response (native or string mode)."""
-        if self._supports_native_tools:
+        """Extract tool calls from model response.
+
+        Checks response.tool_calls first (populated by native API or mock responses),
+        then falls back to content JSON parsing for string mode.
+        """
+        # Use structured tool_calls if present (native mode or mock responses)
+        if response.tool_calls:
             return response.tool_calls
 
-        # String mode: parse JSON from content
-        content = response.content or ""
-        action = self._parse_action(content)
-        if action and action.get("tool"):
-            tool_name = action["tool"]
-            tool_args = action.get("arguments", {})
-            return [
-                ToolCall(
-                    id=f"str_call_{hash(content) % 10000}", name=tool_name, arguments=tool_args
-                )
-            ]
+        # String mode fallback: parse JSON from content
+        if not self._supports_native_tools:
+            content = response.content or ""
+            action = self._parse_action(content)
+            if action and action.get("tool"):
+                tool_name = action["tool"]
+                tool_args = action.get("arguments", {})
+                return [
+                    ToolCall(
+                        id=f"str_call_{hash(content) % 10000}",
+                        name=tool_name,
+                        arguments=tool_args,
+                    )
+                ]
         return []
 
     def _build_assistant_msg(

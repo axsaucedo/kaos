@@ -1265,6 +1265,100 @@ class TestStringModeToolCalling:
 
         logger.info("✓ String mode max steps limit works")
 
+    @pytest.mark.asyncio
+    async def test_string_mode_handles_structured_tool_calls(self):
+        """Test that string mode handles tool_calls from ModelResponse (e.g. mock responses)."""
+        # ModelResponse has tool_calls populated (as from mock response parsing)
+        tool_call_response = ModelResponse(
+            tool_calls=[ToolCall(id="call_1", name="calculator", arguments={"a": 5, "b": 3})],
+            finish_reason="tool_calls",
+        )
+        loop_break = ModelResponse(content="No more actions.", finish_reason="stop")
+        final_response = "The result is 8."
+
+        mock_model = MockModelAPI(responses=[tool_call_response, loop_break, final_response])
+        mock_mcp = MockMCPClient(tools={"calculator": ("Add two numbers", {"sum": 8})})
+        memory = LocalMemory()
+
+        agent = Agent(
+            name="string-structured-agent",
+            model_api=mock_model,
+            mcp_clients=[mock_mcp],
+            memory=memory,
+            max_steps=5,
+        )
+        agent._supports_native_tools = False
+
+        result = []
+        async for chunk in agent.process_message("What is 5 + 3?"):
+            result.append(chunk)
+
+        # Tool should have been called even in string mode
+        assert len(mock_mcp.call_log) == 1
+        assert mock_mcp.call_log[0]["tool"] == "calculator"
+
+        # Memory should have delegation events
+        sessions = await memory.list_sessions()
+        events = await memory.get_session_events(sessions[0])
+        event_types = [e.event_type for e in events]
+        assert "tool_call" in event_types
+        assert "tool_result" in event_types
+
+        logger.info("✓ String mode handles structured tool_calls")
+
+    @pytest.mark.asyncio
+    async def test_string_mode_structured_delegation(self):
+        """Test string mode handles structured delegation tool_calls (E2E mock scenario)."""
+        delegation_response = ModelResponse(
+            tool_calls=[
+                ToolCall(id="call_1", name="delegate_to_worker", arguments={"task": "Process data"})
+            ],
+            finish_reason="tool_calls",
+        )
+        loop_break = ModelResponse(content="No more actions.", finish_reason="stop")
+        final_response = "The worker completed the task."
+
+        mock_model = MockModelAPI(responses=[delegation_response, loop_break, final_response])
+        memory = LocalMemory()
+
+        mock_remote = RemoteAgent(name="worker", card_url="http://localhost:9999")
+        mock_remote.agent_card = type(  # type: ignore[assignment]
+            "AgentCard",
+            (),
+            {
+                "name": "worker",
+                "description": "Worker",
+                "url": "http://localhost:9999",
+                "capabilities": ["task_execution"],
+            },
+        )()
+        mock_remote._active = True
+        mock_remote.process_message = AsyncMock(return_value="Data processed")  # type: ignore[method-assign]
+
+        agent = Agent(
+            name="coordinator",
+            model_api=mock_model,
+            sub_agents=[mock_remote],
+            memory=memory,
+            max_steps=5,
+        )
+        agent._supports_native_tools = False
+
+        result = []
+        async for chunk in agent.process_message("Process the data"):
+            result.append(chunk)
+
+        # Delegation should work even in string mode with structured tool_calls
+        mock_remote.process_message.assert_called_once()  # type: ignore[union-attr]
+
+        sessions = await memory.list_sessions()
+        events = await memory.get_session_events(sessions[0])
+        event_types = [e.event_type for e in events]
+        assert "delegation_request" in event_types
+        assert "delegation_response" in event_types
+
+        logger.info("✓ String mode handles structured delegation")
+
 
 class TestParseAction:
     """Tests for the _parse_action method used in string mode."""
