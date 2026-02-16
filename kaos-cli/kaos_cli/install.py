@@ -22,6 +22,13 @@ GATEWAY_CLASS_NAME = "envoy-gateway"
 # MetalLB defaults
 METALLB_VERSION = "v0.14.9"
 
+# KAOS CRD names (for explicit install/uninstall)
+KAOS_CRDS = [
+    "agents.kaos.tools",
+    "mcpservers.kaos.tools",
+    "modelapis.kaos.tools",
+]
+
 
 def check_helm_installed() -> bool:
     """Check if helm is installed and available."""
@@ -440,19 +447,21 @@ def install_command(
         run_helm_command(["repo", "update"], check=False)
         chart_ref = f"{HELM_REPO_NAME}/{HELM_CHART_NAME}"
 
-    # Pre-apply CRDs via kubectl for compatibility with Helm 3 and prior installs
-    if chart_path:
-        import pathlib
-
-        crds_dir = pathlib.Path(chart_path) / "crds"
-        if crds_dir.exists():
-            typer.echo("Applying CRDs...")
-            result = _run_kubectl(
-                ["apply", "--server-side", "--force-conflicts", "-f", str(crds_dir)],
-                check=False,
-            )
-            if result.returncode != 0:
-                typer.echo(f"Warning: CRD apply failed: {result.stderr}", err=True)
+    # Pre-apply CRDs via kubectl to handle field manager conflicts on re-installs
+    typer.echo("Applying CRDs...")
+    show_args = ["show", "crds", chart_ref]
+    if version:
+        show_args.extend(["--version", version])
+    crds_result = run_helm_command(show_args, check=False)
+    if crds_result.returncode == 0 and crds_result.stdout.strip():
+        result = _run_kubectl(
+            ["apply", "--server-side", "--force-conflicts", "-f", "-"],
+            check=False, input=crds_result.stdout,
+        )
+        if result.returncode != 0:
+            typer.echo(f"Warning: CRD apply failed: {result.stderr}", err=True)
+    else:
+        typer.echo(f"Warning: Could not extract CRDs: {crds_result.stderr}", err=True)
 
     # Build helm install command
     helm_args = [
@@ -531,6 +540,13 @@ def uninstall_command(
     else:
         typer.echo(f"Error: {result.stderr}", err=True)
         sys.exit(1)
+
+    # Delete KAOS CRDs (helm doesn't delete CRDs on uninstall)
+    typer.echo("Deleting KAOS CRDs...")
+    _run_kubectl(
+        ["delete", "crd", "--ignore-not-found"] + KAOS_CRDS,
+        check=False,
+    )
 
     # Uninstall Gateway API if requested
     if gateway_enabled:
