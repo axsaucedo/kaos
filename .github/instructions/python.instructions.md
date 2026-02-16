@@ -28,19 +28,15 @@ make format                     # Auto-format code
 | `MODEL_API_URL` | LLM API base URL (required) |
 | `MODEL_NAME` | Model name (required) |
 | `AGENT_SUB_AGENTS` | Direct format: `"name:url,name:url"` |
-| `TOOL_CALL_MODE` | Tool calling mode: `auto` (default), `native`, `string` |
 | `DEBUG_MOCK_RESPONSES` | JSON array of mock responses (tool_calls JSON or plain text) |
 | `OTEL_ENABLED` | Enable OpenTelemetry instrumentation |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP exporter endpoint |
 
 ## Native Function Calling (Agentic Loop)
 
-The agent supports three tool calling modes controlled by `TOOL_CALL_MODE`:
-
-### Modes
-- **native**: Uses OpenAI `tools` API parameter. Model returns structured `tool_calls` array.
-- **string**: Uses text-based prompts + JSON parsing. Tool descriptions in system prompt, model outputs `{"tool": "name", "arguments": {...}}`.
-- **auto** (default): Tries native first. On HTTP 400/422 "tools not supported" error, falls back to string mode. Fallback persists per-process.
+The agent auto-detects native tool calling support using `litellm.supports_function_calling(model)`:
+- **Native mode**: Models with function calling support use the OpenAI `tools` API parameter
+- **String mode**: Models without support use text-based JSON parsing from model content
 
 ### Native Mode (Phase 1)
 1. Non-streaming model calls with `tools` parameter
@@ -48,20 +44,19 @@ The agent supports three tool calling modes controlled by `TOOL_CALL_MODE`:
 3. Loops until model responds with content only (no tool_calls)
 
 ### String Mode (Phase 1)
-1. Tool/agent descriptions injected into system prompt via `TOOLS_INSTRUCTIONS`/`AGENT_INSTRUCTIONS` templates
-2. Model outputs JSON in content: `{"tool": "name", "arguments": {...}}` or `{"agent": "name", "task": "..."}`
-3. No-action signal: `{}` empty JSON breaks the loop
-4. Tool results use `{"role": "user", "content": "[Step X/Y] Tool result: ..."}` (not `role: tool`)
+1. Tool/agent descriptions injected into system prompt
+2. Model outputs JSON in content: `{"tool": "name", "arguments": {...}}`
+3. No tool JSON in content breaks the loop
+4. Sub-agents use same `delegate_to_` format: `{"tool": "delegate_to_worker", "arguments": {"task": "..."}}`
+5. Tool results use `{"role": "user", "content": "[Step X/Y] Tool result: ..."}` (not `role: tool`)
 
 ### Phase 2 (Final Response)
 - Streaming model call for final user-visible response
 
 ### Tool/Delegation Format
 - MCP tools are converted to OpenAI `tools` format via `_build_tools_param()`
-- Sub-agents are exposed as `delegate_to_{agent_name}` tool functions (native) or `{"agent": "name", "task": "..."}` JSON (string)
+- Sub-agents are exposed as `delegate_to_{agent_name}` tool functions (both modes)
 - Unavailable sub-agents (failed init) are automatically excluded from tool registration
-- Native: model returns structured `tool_calls` array
-- String: model outputs JSON in content text, parsed by `_parse_action()`
 - Multiple tool calls in native mode are executed in parallel via `asyncio.gather()`
 
 ### Key Classes
@@ -90,8 +85,8 @@ export DEBUG_MOCK_RESPONSES='["Hello, world!"]'
 # Native mode with tools: tool call → loop break → Phase 2 final (3 entries)
 export DEBUG_MOCK_RESPONSES='["{\"tool_calls\": [{\"id\": \"call_1\", \"name\": \"echo\", \"arguments\": {\"message\": \"hi\"}}]}", "No more actions.", "Done."]'
 
-# String mode with tools: JSON action → no-action ({}) → Phase 2 final (3 entries)
-export DEBUG_MOCK_RESPONSES='["{\"tool\": \"echo\", \"arguments\": {\"message\": \"hi\"}}", "{}", "Done."]'
+# String mode with tools: JSON action → no action text → Phase 2 final (3 entries)
+export DEBUG_MOCK_RESPONSES='["{\"tool\": \"echo\", \"arguments\": {\"message\": \"hi\"}}", "No more actions needed.", "Done."]'
 ```
 
 ## Testing Patterns
@@ -100,9 +95,11 @@ export DEBUG_MOCK_RESPONSES='["{\"tool\": \"echo\", \"arguments\": {\"message\":
 - Use `@pytest.mark.parametrize` for testing multiple cases
 - Tool call mocks use `tool_calls` key (native) or `{"tool": "name", "arguments": {...}}` (string), plain text mocks are just strings
 - Native mode: absence of `tool_calls` signals completion
-- String mode: `{}` empty JSON in content signals completion
+- String mode: absence of `{"tool": ...}` JSON in content signals completion
 - Agents with tools: N+1 mock responses (N for Phase 1 steps + 1 for Phase 2 final)
 - Agents without tools: 1 mock response (Phase 2 only)
+- Native tests use `_make_native_agent()` helper to set `_supports_native_tools=True`
+- String tests set `agent._supports_native_tools = False` after construction
 
 ## Code Style
 - Use `black` for formatting

@@ -38,12 +38,6 @@ spec:
     # Max reasoning loop iterations (1-20, default: 5)
     reasoningLoopMaxSteps: 5
     
-    # Tool calling mode (auto/native/string, default: auto)
-    # auto: tries native first, falls back to string if unsupported
-    # native: uses OpenAI tools API for structured function calling
-    # string: uses text-based JSON parsing from model content
-    toolCallMode: auto
-    
     # Memory system configuration
     memory:
       enabled: true           # Enable/disable memory (default: true)
@@ -199,25 +193,7 @@ config:
 
 The reasoning loop runs tool calls and delegations until the model produces a final response or max steps is reached.
 
-#### config.toolCallMode
-
-Controls how the agent invokes tools and sub-agents:
-
-```yaml
-config:
-  toolCallMode: auto  # Default: auto, Options: auto, native, string
-```
-
-| Value | Behavior |
-|-------|----------|
-| `auto` (default) | Tries native tool calling first. If the model returns an error indicating tools are not supported (HTTP 400/422), automatically falls back to string mode. The fallback is remembered for subsequent requests. |
-| `native` | Uses the OpenAI `tools` API parameter for structured function calling. Model returns `tool_calls` in the response. Requires model support for function calling. |
-| `string` | Uses text-based prompts and JSON parsing from model content. Tool/agent descriptions are included in the system prompt, and the model outputs JSON like `{"tool": "name", "arguments": {...}}` in its response text. Works with any model. |
-
-**When to use each mode:**
-- **auto**: Best default for most deployments. Handles model capabilities automatically.
-- **native**: When you know your model supports function calling and want the best structured output.
-- **string**: When using models that don't support function calling (e.g., small Ollama models like `smollm2`).
+Tool calling mode is auto-detected at agent startup using the model's capabilities. Models that support native function calling (e.g., GPT-4, Claude) use the OpenAI `tools` API. Models without native support automatically fall back to text-based JSON parsing from model content.
 
 #### config.memory
 
