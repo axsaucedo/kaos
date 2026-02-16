@@ -72,20 +72,42 @@ def _install_gateway_api() -> bool:
          "--version", ENVOY_GATEWAY_VERSION],
         check=False,
     )
+    crd_pre_applied = False
     if crds_result.returncode == 0 and crds_result.stdout.strip():
         result = _run_kubectl(
             ["apply", "--server-side", "--force-conflicts", "-f", "-"],
             check=False, input=crds_result.stdout,
         )
-        if result.returncode != 0:
-            typer.echo(f"Warning: CRD pre-apply failed: {result.stderr}", err=True)
+        if result.returncode == 0:
+            crd_pre_applied = True
+        else:
+            # Stale CRDs with incompatible storedVersions — delete and let helm recreate
+            typer.echo("  Cleaning up stale Gateway API CRDs...")
+            _run_kubectl(
+                ["delete", "crd", "--ignore-not-found",
+                 "-l", "gateway.networking.k8s.io/policy"],
+                check=False,
+            )
+            _run_kubectl(
+                ["delete", "crd", "--ignore-not-found",
+                 "gatewayclasses.gateway.networking.k8s.io",
+                 "gateways.gateway.networking.k8s.io",
+                 "httproutes.gateway.networking.k8s.io",
+                 "grpcroutes.gateway.networking.k8s.io",
+                 "referencegrants.gateway.networking.k8s.io",
+                 "tcproutes.gateway.networking.k8s.io",
+                 "tlsroutes.gateway.networking.k8s.io",
+                 "udproutes.gateway.networking.k8s.io",
+                 "backendtlspolicies.gateway.networking.k8s.io"],
+                check=False,
+            )
 
     result = run_helm_command(
         ["upgrade", "--install", "envoy-gateway",
          "oci://docker.io/envoyproxy/gateway-helm",
          "--version", ENVOY_GATEWAY_VERSION,
-         "--namespace", "envoy-gateway-system", "--create-namespace",
-         "--skip-crds"],
+         "--namespace", "envoy-gateway-system", "--create-namespace"]
+        + (["--skip-crds"] if crd_pre_applied else []),
         check=False,
     )
     if result.returncode != 0:
