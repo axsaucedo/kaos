@@ -550,6 +550,14 @@ def uninstall_command(
     if monitoring_enabled:
         _uninstall_monitoring(monitoring_enabled, namespace)
 
+    # Delete all KAOS custom resources so operator can process finalizers
+    typer.echo("Deleting KAOS custom resources...")
+    for resource_type in ["agents", "mcpservers", "modelapis"]:
+        _run_kubectl(
+            ["delete", resource_type, "--all-namespaces", "--all", "--timeout=60s"],
+            check=False,
+        )
+
     typer.echo(f"Uninstalling KAOS operator from namespace '{namespace}'...")
 
     result = run_helm_command(
