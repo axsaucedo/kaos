@@ -11,7 +11,6 @@ Tests the agentic loop functionality including:
 import pytest
 import logging
 import time
-import httpx
 from multiprocessing import Process
 from typing import Optional, List, Dict, Any
 from unittest.mock import AsyncMock
@@ -23,6 +22,13 @@ from modelapi.client import ModelAPI, ModelResponse, ToolCall
 from mcptools.client import MCPClient, Tool
 
 logger = logging.getLogger(__name__)
+
+
+def _make_native_agent(**kwargs) -> Agent:
+    """Create an Agent with native tool calling enabled (for testing)."""
+    agent = Agent(**kwargs)
+    agent._supports_native_tools = True
+    return agent
 
 
 class MockModelAPI(ModelAPI):
@@ -156,7 +162,7 @@ class TestAgenticLoopToolCalling:
         mock_mcp = MockMCPClient(tools={"calculator": ("Add two numbers", {"sum": 8})})
         memory = LocalMemory()
 
-        agent = Agent(
+        agent = _make_native_agent(
             name="tool-agent",
             model_api=mock_model,
             mcp_clients=[mock_mcp],
@@ -204,7 +210,7 @@ class TestAgenticLoopToolCalling:
         mock_mcp = MockMCPClient(tools={"calculator": ("Add two numbers", {"sum": 8})})
         memory = LocalMemory()
 
-        agent = Agent(
+        agent = _make_native_agent(
             name="tool-agent",
             model_api=mock_model,
             mcp_clients=[mock_mcp],
@@ -245,7 +251,7 @@ class TestAgenticLoopToolCalling:
         )
         memory = LocalMemory()
 
-        agent = Agent(
+        agent = _make_native_agent(
             name="multi-tool",
             model_api=mock_model,
             mcp_clients=[mock_mcp],
@@ -314,7 +320,7 @@ class TestAgenticLoopDelegation:
         mock_remote._active = True
         mock_remote.process_message = AsyncMock(return_value="Data processed")  # type: ignore[method-assign]
 
-        agent = Agent(
+        agent = _make_native_agent(
             name="coordinator",
             model_api=mock_model,
             sub_agents=[mock_remote],
@@ -374,7 +380,7 @@ class TestAgenticLoopMaxSteps:
         mock_mcp = MockMCPClient(tools={"loop_tool": ("Loops forever", {"result": "ok"})})
         memory = LocalMemory()
 
-        agent = Agent(
+        agent = _make_native_agent(
             name="loop-agent",
             model_api=mock_model,
             mcp_clients=[mock_mcp],
@@ -501,12 +507,12 @@ class TestMemoryContextLimit:
         mock_remote.process_message = AsyncMock(return_value="Work done")  # type: ignore[method-assign]
 
         # Create agent with custom memory context limit of 2
-        agent = Agent(
+        agent = _make_native_agent(
             name="coordinator",
             model_api=mock_model,
             sub_agents=[mock_remote],
             memory=memory,
-            memory_context_limit=2,  # Only include last 2 messages
+            memory_context_limit=2,
         )
 
         # Process message
@@ -754,7 +760,7 @@ class TestMockResponseEnvVar:
             # Use real ModelAPI - it reads env var in __init__
             model_api = ModelAPI(model="test", api_base="http://localhost:9999")
 
-            agent = Agent(
+            agent = _make_native_agent(
                 name="mock-test",
                 model_api=model_api,
                 mcp_clients=[mock_mcp],
@@ -836,7 +842,7 @@ class TestMemoryEventTracking:
 
         memory = LocalMemory()
 
-        agent = Agent(
+        agent = _make_native_agent(
             name="workflow-agent",
             model_api=mock_model,
             mcp_clients=[mock_mcp],
@@ -887,7 +893,7 @@ class TestFormatWarnings:
         mock_mcp = MockMCPClient(tools={"echo": ("Echo tool", {"result": "ok"})})
         memory = LocalMemory()
 
-        agent = Agent(
+        agent = _make_native_agent(
             name="warn-agent",
             model_api=mock_model,
             mcp_clients=[mock_mcp],
@@ -920,7 +926,7 @@ class TestFormatWarnings:
         mock_mcp = MockMCPClient(tools={"echo": ("Echo tool", {"result": "ok"})})
         memory = LocalMemory()
 
-        agent = Agent(
+        agent = _make_native_agent(
             name="warn-agent",
             model_api=mock_model,
             mcp_clients=[mock_mcp],
@@ -953,7 +959,7 @@ class TestPhase2FinalResponse:
         mock_mcp = MockMCPClient(tools={"echo": ("Echo tool", {"result": "ok"})})
         memory = LocalMemory()
 
-        agent = Agent(
+        agent = _make_native_agent(
             name="phase2-agent",
             model_api=mock_model,
             mcp_clients=[mock_mcp],
@@ -983,7 +989,7 @@ class TestPhase2FinalResponse:
         mock_mcp = MockMCPClient(tools={"echo": ("Echo tool", {"result": "ok"})})
         memory = LocalMemory()
 
-        agent = Agent(
+        agent = _make_native_agent(
             name="stream-agent",
             model_api=mock_model,
             mcp_clients=[mock_mcp],
@@ -1015,7 +1021,7 @@ class TestPhase2FinalResponse:
         mock_mcp = MockMCPClient(tools={"echo": ("Echo", {"echo": "hi"})})
         memory = LocalMemory()
 
-        agent = Agent(
+        agent = _make_native_agent(
             name="tool-agent",
             model_api=mock_model,
             mcp_clients=[mock_mcp],
@@ -1091,7 +1097,7 @@ class TestStringModeToolCalling:
             content='I will use the calculator. {"tool": "calculator", "arguments": {"a": 5, "b": 3}}',
             finish_reason="stop",
         )
-        no_action_response = ModelResponse(content="{}", finish_reason="stop")
+        no_action_response = ModelResponse(content="No more actions needed.", finish_reason="stop")
         final_response = "The result is 8."
 
         mock_model = MockModelAPI(responses=[tool_response, no_action_response, final_response])
@@ -1104,8 +1110,8 @@ class TestStringModeToolCalling:
             mcp_clients=[mock_mcp],
             memory=memory,
             max_steps=5,
-            tool_call_mode="string",
         )
+        agent._supports_native_tools = False
 
         result = []
         async for chunk in agent.process_message("What is 5 + 3?"):
@@ -1129,10 +1135,10 @@ class TestStringModeToolCalling:
     async def test_string_mode_delegation(self):
         """Test that string mode parses delegation JSON from content."""
         delegation_response = ModelResponse(
-            content='I will delegate. {"agent": "worker", "task": "Process this data"}',
+            content='I will delegate. {"tool": "delegate_to_worker", "arguments": {"task": "Process this data"}}',
             finish_reason="stop",
         )
-        no_action_response = ModelResponse(content="{}", finish_reason="stop")
+        no_action_response = ModelResponse(content="No more actions.", finish_reason="stop")
         final_response = "The worker processed the data."
 
         mock_model = MockModelAPI(
@@ -1160,8 +1166,8 @@ class TestStringModeToolCalling:
             sub_agents=[mock_remote],
             memory=memory,
             max_steps=5,
-            tool_call_mode="string",
         )
+        agent._supports_native_tools = False
 
         result = []
         async for chunk in agent.process_message("Process the data"):
@@ -1181,8 +1187,8 @@ class TestStringModeToolCalling:
 
     @pytest.mark.asyncio
     async def test_string_mode_no_action_breaks_loop(self):
-        """Test that empty JSON {} breaks the string-mode loop."""
-        no_action = ModelResponse(content="I have nothing to do. {}", finish_reason="stop")
+        """Test that content without tool JSON breaks the string-mode loop."""
+        no_action = ModelResponse(content="I have nothing to do.", finish_reason="stop")
         final_response = "Here is my answer."
 
         mock_model = MockModelAPI(responses=[no_action, final_response])
@@ -1195,8 +1201,8 @@ class TestStringModeToolCalling:
             mcp_clients=[mock_mcp],
             memory=memory,
             max_steps=5,
-            tool_call_mode="string",
         )
+        agent._supports_native_tools = False
 
         result = []
         async for chunk in agent.process_message("Hello"):
@@ -1218,8 +1224,8 @@ class TestStringModeToolCalling:
             name="string-tools-agent",
             model_api=mock_model,
             mcp_clients=[mock_mcp],
-            tool_call_mode="string",
         )
+        agent._supports_native_tools = False
 
         prompt = await agent._build_system_prompt()
         assert "## Available Tools" in prompt
@@ -1246,8 +1252,8 @@ class TestStringModeToolCalling:
             mcp_clients=[mock_mcp],
             memory=memory,
             max_steps=3,
-            tool_call_mode="string",
         )
+        agent._supports_native_tools = False
 
         result = []
         async for chunk in agent.process_message("Start loop"):
@@ -1265,7 +1271,7 @@ class TestParseAction:
 
     def setup_method(self):
         mock_model = MockModelAPI(["test"])
-        self.agent = Agent(name="test", model_api=mock_model, tool_call_mode="string")
+        self.agent = Agent(name="test", model_api=mock_model)
 
     def test_parse_pure_json(self):
         """Test parsing pure JSON content."""
@@ -1277,235 +1283,33 @@ class TestParseAction:
         result = self.agent._parse_action(
             'I will use the tool. {"tool": "calc", "arguments": {"a": 1}} Great.'
         )
+        assert result is not None
         assert result["tool"] == "calc"
 
-    def test_parse_empty_json(self):
-        """Test parsing empty JSON (no-action signal)."""
+    def test_parse_no_tool_key(self):
+        """Test parsing JSON without tool key returns None."""
         result = self.agent._parse_action("No more actions needed. {}")
-        assert result == {}
+        assert result is None
 
     def test_parse_no_json(self):
-        """Test parsing content with no JSON."""
+        """Test parsing content with no JSON returns None."""
         result = self.agent._parse_action("Just a plain text response.")
-        assert result == {}
+        assert result is None
 
     def test_parse_delegation(self):
-        """Test parsing delegation action."""
-        result = self.agent._parse_action('{"agent": "worker", "task": "do something"}')
-        assert result == {"agent": "worker", "task": "do something"}
+        """Test parsing delegation action uses delegate_to_ format."""
+        result = self.agent._parse_action(
+            '{"tool": "delegate_to_worker", "arguments": {"task": "do something"}}'
+        )
+        assert result is not None
+        assert result["tool"] == "delegate_to_worker"
+        assert result["arguments"]["task"] == "do something"
 
     def test_parse_nested_json(self):
         """Test parsing JSON with nested objects."""
         result = self.agent._parse_action(
             '{"tool": "search", "arguments": {"query": "test", "options": {"limit": 10}}}'
         )
+        assert result is not None
         assert result["tool"] == "search"
         assert result["arguments"]["options"]["limit"] == 10
-
-
-class FailThenSucceedMockModelAPI(MockModelAPI):
-    """MockModelAPI that raises an HTTP error on the first call when tools are passed,
-    then succeeds on subsequent calls (simulating native tools not supported)."""
-
-    def __init__(self, responses, fail_message="tools are not supported by this model"):
-        super().__init__(responses)
-        self._fail_message = fail_message
-        self._failed = False
-
-    async def process_message(self, messages, stream=False, seed=None, tools=None):
-        if tools is not None and not self._failed:
-            self._failed = True
-            request = httpx.Request("POST", "http://mock/v1/chat/completions")
-            response = httpx.Response(
-                400,
-                request=request,
-                content=self._fail_message.encode(),
-            )
-            raise httpx.HTTPStatusError(
-                self._fail_message,
-                request=request,
-                response=response,
-            )
-        return await super().process_message(messages, stream=stream, seed=seed, tools=tools)
-
-
-@pytest.mark.asyncio(loop_scope="session")
-class TestAutoModeFallback:
-    """Test auto-mode fallback from native to string tool calling."""
-
-    @pytest.mark.asyncio
-    async def test_auto_mode_native_success(self):
-        """Auto mode uses native when model supports tools."""
-        mock_model = MockModelAPI(
-            [
-                ModelResponse(
-                    content=None,
-                    tool_calls=[ToolCall(id="call_1", name="echo", arguments={"message": "hi"})],
-                    finish_reason="tool_calls",
-                ),
-                ModelResponse(content="No more actions.", finish_reason="stop"),
-                "Final answer.",
-            ]
-        )
-        mock_mcp = MockMCPClient(tools={"echo": ("Echo tool", "echo: hi")})
-        memory = LocalMemory()
-
-        agent = Agent(
-            name="auto-native-test",
-            model_api=mock_model,
-            mcp_clients=[mock_mcp],
-            memory=memory,
-            max_steps=5,
-            tool_call_mode="auto",
-        )
-
-        result = []
-        async for chunk in agent.process_message("Say hi"):
-            result.append(chunk)
-
-        # Should have used native mode (no fallback)
-        assert agent._resolved_tool_call_mode is None
-        assert agent._get_effective_mode() == "native"
-        # Final response should be present
-        full = " ".join(result)
-        assert "Final" in full or "answer" in full
-
-    @pytest.mark.asyncio
-    async def test_auto_mode_fallback_to_string(self):
-        """Auto mode falls back to string when model rejects tools."""
-        mock_model = FailThenSucceedMockModelAPI(
-            responses=[
-                # After fallback, string-mode Phase 1 responses
-                '{"tool": "echo", "arguments": {"message": "hello"}}',
-                "{}",
-                # Phase 2 final response
-                "Task completed via string mode.",
-            ],
-            fail_message="tools are not supported by this model",
-        )
-        mock_mcp = MockMCPClient(tools={"echo": ("Echo tool", "echo: hello")})
-        memory = LocalMemory()
-
-        agent = Agent(
-            name="auto-fallback-test",
-            model_api=mock_model,
-            mcp_clients=[mock_mcp],
-            memory=memory,
-            max_steps=5,
-            tool_call_mode="auto",
-        )
-
-        result = []
-        async for chunk in agent.process_message("Say hello"):
-            result.append(chunk)
-
-        # Should have fallen back to string mode
-        assert agent._resolved_tool_call_mode == "string"
-        assert agent._get_effective_mode() == "string"
-        full = " ".join(result)
-        assert "Task completed" in full or "string mode" in full
-
-    @pytest.mark.asyncio
-    async def test_auto_mode_remembers_fallback(self):
-        """After falling back, subsequent calls use string mode directly."""
-        mock_model = FailThenSucceedMockModelAPI(
-            responses=[
-                # First request: fallback to string mode
-                '{"tool": "echo", "arguments": {"message": "first"}}',
-                "{}",
-                "First done via string.",
-                # Second request: already string mode (3 responses: tool call, no-action, final)
-                '{"tool": "echo", "arguments": {"message": "second"}}',
-                "{}",
-                "Second done via string.",
-            ],
-        )
-        mock_mcp = MockMCPClient(tools={"echo": ("Echo tool", "echo result")})
-        memory = LocalMemory()
-
-        agent = Agent(
-            name="auto-persist-test",
-            model_api=mock_model,
-            mcp_clients=[mock_mcp],
-            memory=memory,
-            max_steps=5,
-            tool_call_mode="auto",
-        )
-
-        # First call - triggers fallback
-        result1 = []
-        async for chunk in agent.process_message("First call"):
-            result1.append(chunk)
-        assert agent._resolved_tool_call_mode == "string"
-
-        # Second call - should use string directly (no native retry)
-        result2 = []
-        async for chunk in agent.process_message("Second call"):
-            result2.append(chunk)
-        assert agent._resolved_tool_call_mode == "string"
-        # Model should NOT have received a tools param on second call
-        # (FailThenSucceedMockModelAPI would only fail once, but since resolved
-        # mode is string, tools param is never passed on second call)
-
-    @pytest.mark.asyncio
-    async def test_auto_mode_non_tools_error_propagates(self):
-        """Non-tools errors in auto mode are not caught as fallback."""
-
-        class FailWithOtherError(MockModelAPI):
-            async def process_message(self, messages, stream=False, seed=None, tools=None):
-                if self.call_count == 0:
-                    self.call_count += 1
-                    raise ValueError("Some other error")
-                return await super().process_message(messages, stream, seed, tools)
-
-        mock_model = FailWithOtherError(responses=["Response"])
-        mock_mcp = MockMCPClient(tools={"echo": ("Echo tool", "result")})
-        memory = LocalMemory()
-
-        agent = Agent(
-            name="auto-other-error",
-            model_api=mock_model,
-            mcp_clients=[mock_mcp],
-            memory=memory,
-            max_steps=5,
-            tool_call_mode="auto",
-        )
-
-        result = []
-        async for chunk in agent.process_message("Test"):
-            result.append(chunk)
-
-        # Should NOT have fallen back to string mode
-        assert agent._resolved_tool_call_mode is None
-        # Error should have been caught by process_message's outer handler
-        full = " ".join(result)
-        assert "error" in full.lower()
-
-    @pytest.mark.asyncio
-    async def test_is_tools_not_supported_error(self):
-        """Test the error detection helper."""
-        agent = Agent(name="helper-test", model_api=MockModelAPI(), tool_call_mode="auto")
-
-        # HTTP 400 with tools message -> True
-        request = httpx.Request("POST", "http://test")
-        response = httpx.Response(400, request=request, content=b"tools not supported")
-        exc = httpx.HTTPStatusError("tools not supported", request=request, response=response)
-        assert Agent._is_tools_not_supported_error(exc) is True
-
-        # HTTP 422 with function_call message -> True
-        response = httpx.Response(422, request=request, content=b"function_call not allowed")
-        exc = httpx.HTTPStatusError("function_call not allowed", request=request, response=response)
-        assert Agent._is_tools_not_supported_error(exc) is True
-
-        # HTTP 500 (not 400/422) -> False
-        response = httpx.Response(500, request=request, content=b"tools error")
-        exc = httpx.HTTPStatusError("tools error", request=request, response=response)
-        assert Agent._is_tools_not_supported_error(exc) is False
-
-        # HTTP 400 without tools keyword -> False
-        response = httpx.Response(400, request=request, content=b"invalid request")
-        exc = httpx.HTTPStatusError("invalid request", request=request, response=response)
-        assert Agent._is_tools_not_supported_error(exc) is False
-
-        # Non-HTTP error -> False
-        assert Agent._is_tools_not_supported_error(ValueError("tools error")) is False
