@@ -17,8 +17,8 @@ make kind-e2e-run-tests # Also runs kind-load-images kind-e2e-install-kaos targe
 
 Or use kaos CLI directly:
 ```bash
-# After creating KIND cluster
-kaos system install --gateway-enabled --metallb-enabled --wait
+# After creating KIND cluster and loading images
+kaos system install --gateway-enabled --metallb-enabled --chart-path chart/ --wait
 ```
 
 ### Quick Reference

@@ -39,6 +39,7 @@ kaos system install [OPTIONS]
 | `--monitoring-enabled` | | | Install monitoring stack (`signoz` or `jaeger`) |
 | `--gateway-enabled` | | false | Install Gateway API (Envoy Gateway) and configure routing |
 | `--metallb-enabled` | | false | Install MetalLB for LoadBalancer support (KIND/bare-metal) |
+| `--chart-path` | | | Path to local Helm chart directory (for development) |
 
 ### kaos system uninstall
 

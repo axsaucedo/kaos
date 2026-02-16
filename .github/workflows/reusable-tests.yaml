@@ -107,14 +107,6 @@ jobs:
       - name: Install kaos-cli
         run: pip install -e ./kaos-cli
 
-      - name: Install Gateway API and MetalLB
-        run: |
-          python -c "
-          from kaos_cli.install import _install_gateway_api, _install_metallb
-          _install_metallb()
-          _install_gateway_api()
-          "
-
       - name: Set image tags from VERSION
         run: |
           VERSION=$(cat VERSION)
@@ -193,16 +185,7 @@ jobs:
           wait
 
       - name: Install KAOS operator
-        run: |
-          kaos system install \
-            --gateway-enabled \
-            --set controllerManager.manager.image.repository=${{ env.REGISTRY }}/kaos-operator \
-            --set controllerManager.manager.image.tag=${{ env.AGENT_TAG }} \
-            --set defaultImages.agentRuntime=${{ env.REGISTRY }}/kaos-agent:${{ env.AGENT_TAG }} \
-            --set defaultImages.mcpServer=${{ env.REGISTRY }}/kaos-mcp-server:${{ env.AGENT_TAG }} \
-            --set defaultImages.mcpPythonString=${{ env.REGISTRY }}/kaos-mcp-python-string:${{ env.AGENT_TAG }} \
-            --set defaultImages.mcpPctx=${{ env.REGISTRY }}/kaos-mcp-pctx:${{ env.AGENT_TAG }} \
-            --wait
+        run: make -C operator kind-e2e-install-kaos IMAGE_TAG=${{ env.OPERATOR_TAG }} REGISTRY=${{ env.REGISTRY }}
 
       - name: Run E2E tests (${{ matrix.shard.name }})
         run: |

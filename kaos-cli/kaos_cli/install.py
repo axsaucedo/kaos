@@ -401,6 +401,7 @@ def install_command(
     monitoring_enabled: str | None = None,
     gateway_enabled: bool = False,
     metallb_enabled: bool = False,
+    chart_path: str | None = None,
 ) -> None:
     """Install the KAOS operator using Helm."""
     if not check_helm_installed():
@@ -425,25 +426,31 @@ def install_command(
 
     typer.echo(f"Installing KAOS operator to namespace '{namespace}'...")
 
-    # Add the Helm repository
-    typer.echo(f"Adding Helm repository '{HELM_REPO_NAME}'...")
-    result = run_helm_command(
-        ["repo", "add", HELM_REPO_NAME, HELM_REPO_URL, "--force-update"],
-        check=False,
-    )
-    if result.returncode != 0 and "already exists" not in result.stderr:
-        typer.echo(f"Warning: {result.stderr}", err=True)
+    # Determine chart reference: local path or published repo
+    if chart_path:
+        chart_ref = chart_path
+        typer.echo(f"Using local chart: {chart_path}")
+    else:
+        # Add the Helm repository
+        typer.echo(f"Adding Helm repository '{HELM_REPO_NAME}'...")
+        result = run_helm_command(
+            ["repo", "add", HELM_REPO_NAME, HELM_REPO_URL, "--force-update"],
+            check=False,
+        )
+        if result.returncode != 0 and "already exists" not in result.stderr:
+            typer.echo(f"Warning: {result.stderr}", err=True)
 
-    # Update repositories
-    typer.echo("Updating Helm repositories...")
-    run_helm_command(["repo", "update"], check=False)
+        # Update repositories
+        typer.echo("Updating Helm repositories...")
+        run_helm_command(["repo", "update"], check=False)
+        chart_ref = f"{HELM_REPO_NAME}/{HELM_CHART_NAME}"
 
     # Build helm install command
     helm_args = [
         "upgrade",
         "--install",
         release_name,
-        f"{HELM_REPO_NAME}/{HELM_CHART_NAME}",
+        chart_ref,
         "--namespace",
         namespace,
         "--create-namespace",

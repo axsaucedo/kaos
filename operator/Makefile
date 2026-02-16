@@ -96,11 +96,9 @@ AGENT_TAG ?= $(VERSION)
 LITELLM_IMAGE ?= ghcr.io/berriai/litellm:main-stable
 OLLAMA_IMAGE ?= alpine/ollama:latest
 
-# Create KIND cluster with registry, Gateway, MetalLB
+# Create KIND cluster with registry
 kind-create:
 	@./hack/kind-with-registry.sh
-	@pip install -e ../kaos-cli -q 2>/dev/null || true
-	@python -c "from kaos_cli.install import _install_gateway_api, _install_metallb; _install_metallb(); _install_gateway_api()"
 
 # Delete KIND cluster
 kind-delete:
@@ -123,6 +121,8 @@ kind-e2e-install-kaos:
 	@pip install -e ../kaos-cli -q 2>/dev/null || true
 	@kaos system install \
 		--gateway-enabled \
+		--metallb-enabled \
+		--chart-path chart/ \
 		--set controllerManager.manager.image.repository=$(REGISTRY)/kaos-operator \
 		--set controllerManager.manager.image.tag=$(IMAGE_TAG) \
 		--set defaultImages.agentRuntime=$(REGISTRY)/kaos-agent:$(IMAGE_TAG) \
