@@ -38,9 +38,12 @@ make test-unit                  # Unit tests
 
 # E2E (KIND cluster)
 cd operator
-make kind-create                # Create cluster with Gateway API
+make kind-create                # Create cluster with Gateway API + MetalLB (uses kaos CLI)
 make kind-e2e-run-tests         # Full E2E suite
 make kind-delete                # Cleanup
+
+# Or use kaos CLI directly
+kaos system install --gateway-enabled --metallb-enabled --wait
 ```
 
 ## Project Structure

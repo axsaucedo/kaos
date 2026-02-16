@@ -491,6 +491,30 @@ class TestMonitoringValidation:
         assert "Invalid monitoring backend" in result.output
 
 
+# ─── System install flags ───────────────────────────────────────────────
+
+
+class TestSystemInstallFlags:
+    def test_install_help_shows_gateway_flag(self):
+        result = runner.invoke(app, ["system", "install", "--help"])
+        assert result.exit_code == 0
+        assert "--gateway-enabled" in result.output
+        assert "--metallb-enabled" in result.output
+
+    def test_uninstall_help_shows_gateway_flag(self):
+        result = runner.invoke(app, ["system", "uninstall", "--help"])
+        assert result.exit_code == 0
+        assert "--gateway-enabled" in result.output
+        assert "--metallb-enabled" in result.output
+
+    def test_install_invalid_monitoring_backend(self):
+        result = runner.invoke(
+            app, ["system", "install", "--monitoring-enabled", "invalid"]
+        )
+        assert result.exit_code != 0
+        assert "Invalid monitoring backend" in result.output
+
+
 # ─── Version command ────────────────────────────────────────────────────
 
 

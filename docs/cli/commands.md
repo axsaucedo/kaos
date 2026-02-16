@@ -37,6 +37,8 @@ kaos system install [OPTIONS]
 | `--set` | | | Helm values |
 | `--wait` | | false | Wait for ready |
 | `--monitoring-enabled` | | | Install monitoring stack (`signoz` or `jaeger`) |
+| `--gateway-enabled` | | false | Install Gateway API (Envoy Gateway) and configure routing |
+| `--metallb-enabled` | | false | Install MetalLB for LoadBalancer support (KIND/bare-metal) |
 
 ### kaos system uninstall
 
@@ -51,6 +53,8 @@ kaos system uninstall [OPTIONS]
 | `--namespace` | `kaos-system` | Namespace to uninstall from |
 | `--release-name` | `kaos` | Helm release name |
 | `--monitoring-enabled` | | Also uninstall monitoring (`signoz` or `jaeger`) |
+| `--gateway-enabled` | false | Also uninstall Gateway API (Envoy Gateway) |
+| `--metallb-enabled` | false | Also uninstall MetalLB |
 
 ### kaos system status
 

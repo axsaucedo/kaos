@@ -50,6 +50,16 @@ def install(
         "--monitoring-enabled",
         help=f"Install monitoring stack and enable telemetry. Options: {', '.join(MONITORING_BACKENDS)}.",
     ),
+    gateway_enabled: bool = typer.Option(
+        False,
+        "--gateway-enabled",
+        help="Install Gateway API (Envoy Gateway) and configure routing.",
+    ),
+    metallb_enabled: bool = typer.Option(
+        False,
+        "--metallb-enabled",
+        help="Install MetalLB for LoadBalancer support (KIND/bare-metal clusters).",
+    ),
 ) -> None:
     """Install the KAOS operator using Helm."""
     # Default to signoz if flag provided without value
@@ -66,6 +76,8 @@ def install(
         set_values=list(set_values),
         wait=wait,
         monitoring_enabled=monitoring_enabled,
+        gateway_enabled=gateway_enabled,
+        metallb_enabled=metallb_enabled,
     )
 
 
@@ -86,6 +98,16 @@ def uninstall(
         "--monitoring-enabled",
         help=f"Also uninstall monitoring stack. Options: {', '.join(MONITORING_BACKENDS)}.",
     ),
+    gateway_enabled: bool = typer.Option(
+        False,
+        "--gateway-enabled",
+        help="Also uninstall Gateway API (Envoy Gateway).",
+    ),
+    metallb_enabled: bool = typer.Option(
+        False,
+        "--metallb-enabled",
+        help="Also uninstall MetalLB.",
+    ),
 ) -> None:
     """Uninstall the KAOS operator."""
     if monitoring_enabled is not None and monitoring_enabled not in MONITORING_BACKENDS:
@@ -98,6 +120,8 @@ def uninstall(
         namespace=namespace,
         release_name=release_name,
         monitoring_enabled=monitoring_enabled,
+        gateway_enabled=gateway_enabled,
+        metallb_enabled=metallb_enabled,
     )
 
 

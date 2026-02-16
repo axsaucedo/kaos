@@ -112,7 +112,7 @@ cleanup() {
     kill $PORT_FORWARD_PID 2>/dev/null || true
     
     echo "Uninstalling operator..."
-    helm uninstall kaos -n kaos-system 2>/dev/null || true
+    kaos system uninstall --gateway-enabled 2>/dev/null || helm uninstall kaos -n kaos-system 2>/dev/null || true
     kubectl delete namespace kaos-system --wait=false 2>/dev/null || true
     
     # Clean up leftover test namespaces

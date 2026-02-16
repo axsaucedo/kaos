@@ -99,8 +99,8 @@ OLLAMA_IMAGE ?= alpine/ollama:latest
 # Create KIND cluster with registry, Gateway, MetalLB
 kind-create:
 	@./hack/kind-with-registry.sh
-	@./hack/install-gateway.sh
-	@./hack/install-metallb.sh
+	@pip install -e ../kaos-cli -q 2>/dev/null || true
+	@python -c "from kaos_cli.install import _install_gateway_api, _install_metallb; _install_metallb(); _install_gateway_api()"
 
 # Delete KIND cluster
 kind-delete:
@@ -117,22 +117,19 @@ kind-load-images:
 IMAGE_TAG ?= $(shell cat ../VERSION 2>/dev/null || echo "v0.1.4-dev")
 REGISTRY ?= axsauze
 
-# Install KAOS operator in KIND (uses chart defaults, no special values file needed)
+# Install KAOS operator in KIND using kaos CLI
 kind-e2e-install-kaos:
-	@echo "=== Installing KAOS operator ==="
-	@kubectl create namespace kaos-system 2>/dev/null || true
-	@helm upgrade --install kaos chart/ \
-		--namespace kaos-system \
-		--set gatewayAPI.enabled=true \
-		--set gatewayAPI.createGateway=true \
-		--set gatewayAPI.gatewayClassName=envoy-gateway \
+	@echo "=== Installing KAOS operator via kaos CLI ==="
+	@pip install -e ../kaos-cli -q 2>/dev/null || true
+	@kaos system install \
+		--gateway-enabled \
 		--set controllerManager.manager.image.repository=$(REGISTRY)/kaos-operator \
 		--set controllerManager.manager.image.tag=$(IMAGE_TAG) \
 		--set defaultImages.agentRuntime=$(REGISTRY)/kaos-agent:$(IMAGE_TAG) \
 		--set defaultImages.mcpServer=$(REGISTRY)/kaos-mcp-server:$(IMAGE_TAG) \
 		--set defaultImages.mcpPythonString=$(REGISTRY)/kaos-mcp-python-string:$(IMAGE_TAG) \
 		--set defaultImages.mcpPctx=$(REGISTRY)/kaos-mcp-pctx:$(IMAGE_TAG) \
-		--wait --timeout 120s
+		--wait
 	@echo "=== KAOS operator installed ==="
 
 # Run E2E tests in KIND (requires kind-load-images and kind-e2e-install-kaos)
@@ -154,7 +151,7 @@ e2e-test-seq:
 # Clean up E2E test resources
 e2e-clean:
 	@echo "Cleaning up E2E test resources..."
-	-helm uninstall kaos -n kaos-system 2>/dev/null || true
+	-kaos system uninstall --gateway-enabled --metallb-enabled 2>/dev/null || helm uninstall kaos -n kaos-system 2>/dev/null || true
 	-kubectl delete namespace kaos-system --wait=false 2>/dev/null || true
 	-kubectl get ns -o name | grep e2e | xargs -I{} kubectl delete {} --wait=false 2>/dev/null || true
 	@sleep 3
