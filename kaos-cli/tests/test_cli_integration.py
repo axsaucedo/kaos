@@ -1,10 +1,15 @@
 """CLI integration tests using --dry-run to validate YAML generation."""
 
+import re
 import yaml
 import pytest
 from typer.testing import CliRunner
 
 from kaos_cli.main import app
+
+
+def strip_ansi(text: str) -> str:
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
 
 runner = CliRunner()
 
@@ -498,14 +503,16 @@ class TestSystemInstallFlags:
     def test_install_help_shows_gateway_flag(self):
         result = runner.invoke(app, ["system", "install", "--help"])
         assert result.exit_code == 0
-        assert "--gateway-enabled" in result.output
-        assert "--metallb-enabled" in result.output
+        output = strip_ansi(result.output)
+        assert "--gateway-enabled" in output
+        assert "--metallb-enabled" in output
 
     def test_uninstall_help_shows_gateway_flag(self):
         result = runner.invoke(app, ["system", "uninstall", "--help"])
         assert result.exit_code == 0
-        assert "--gateway-enabled" in result.output
-        assert "--metallb-enabled" in result.output
+        output = strip_ansi(result.output)
+        assert "--gateway-enabled" in output
+        assert "--metallb-enabled" in output
 
     def test_install_invalid_monitoring_backend(self):
         result = runner.invoke(
