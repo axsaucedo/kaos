@@ -363,37 +363,57 @@ spec:
 
 [SigNoz](https://signoz.io/) is an open-source APM that works well with KAOS:
 
-1. Deploy SigNoz in your cluster:
+1. Install KAOS with SigNoz monitoring:
 ```bash
-helm repo add signoz https://charts.signoz.io
-helm install signoz signoz/signoz -n monitoring --create-namespace
+kaos system install --monitoring-enabled signoz
 ```
 
-2. Install KAOS with telemetry pointing to SigNoz:
+2. Or install manually and configure telemetry:
 ```bash
-kaos install --set telemetry.enabled=true \
-  --set telemetry.endpoint=http://signoz-otel-collector.monitoring:4317
+kaos system install --set telemetry.enabled=true \
+  --set telemetry.endpoint=http://signoz-otel-collector.kaos-system:4317
 ```
 
 3. Access the SigNoz UI via the KAOS CLI:
 ```bash
-kaos ui --monitoring-enabled
+kaos ui --monitoring-enabled signoz
 ```
 
 This will:
 - Start the KAOS UI proxy on port 8010
 - Port-forward SigNoz UI (signoz:8080) to http://localhost:8011
 
+## Using with Jaeger
+
+[Jaeger](https://www.jaegertracing.io/) is a distributed tracing platform:
+
+1. Install KAOS with Jaeger monitoring:
+```bash
+kaos system install --monitoring-enabled jaeger
+```
+
+2. Access the Jaeger UI via the KAOS CLI:
+```bash
+kaos ui --monitoring-enabled jaeger
+```
+
+This will:
+- Start the KAOS UI proxy on port 8010
+- Port-forward Jaeger UI (jaeger-query:16686) to http://localhost:8011
+
+Jaeger is installed with dark mode theme support enabled by default.
+
 ### CLI Monitoring Options
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--monitoring-enabled` | `false` | Enable SigNoz UI port-forward |
-| `--monitoring-namespace` | `monitoring` | Namespace where SigNoz is installed |
+| `--monitoring-enabled` | none | Enable monitoring. Options: `signoz`, `jaeger` |
 
-Example with custom namespace:
+Monitoring is installed in the same namespace as the KAOS operator (default: `kaos-system`).
+
+To uninstall monitoring along with the operator:
 ```bash
-kaos ui --monitoring-enabled --monitoring-namespace observability
+kaos system uninstall --monitoring-enabled signoz
 ```
 
 ## Using with Uptrace

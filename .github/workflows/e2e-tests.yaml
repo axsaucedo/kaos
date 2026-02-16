@@ -6,6 +6,7 @@ on:
     paths:
       - 'operator/**'
       - 'data-plane/kaos-framework/**'
+      - 'kaos-cli/**'
       - 'docs/examples/**'
       - '.github/workflows/e2e-tests.yaml'
       - '.github/workflows/reusable-tests.yaml'
@@ -14,6 +15,7 @@ on:
     paths:
       - 'operator/**'
       - 'data-plane/kaos-framework/**'
+      - 'kaos-cli/**'
       - 'docs/examples/**'
       - '.github/workflows/e2e-tests.yaml'
       - '.github/workflows/reusable-tests.yaml'

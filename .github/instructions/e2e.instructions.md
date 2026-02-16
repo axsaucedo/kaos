@@ -15,6 +15,12 @@ make kind-create
 make kind-e2e-run-tests # Also runs kind-load-images kind-e2e-install-kaos targets
 ```
 
+Or use kaos CLI directly:
+```bash
+# After creating KIND cluster and loading images
+kaos system install --gateway-enabled --metallb-enabled --chart-path chart/ --wait
+```
+
 ### Quick Reference
 
 Run `source .venv/bin/activate && <command>` for any relevant command.
@@ -68,9 +74,9 @@ export OPERATOR_MANAGED_EXTERNALLY=1
 ### KIND Cluster Setup
 ```bash
 cd operator
-make kind-create                  # Creates cluster with Gateway API + MetalLB
+make kind-create                  # Creates cluster with Gateway API + MetalLB (uses kaos CLI)
 make kind-load-images             # Build and load images
-make kind-e2e-install-kaos        # Install operator via Helm
+make kind-e2e-install-kaos        # Install operator via kaos CLI with Gateway API enabled
 make e2e-test                     # Run E2E tests
 ```
 

@@ -135,9 +135,10 @@ spec:
                 yaml_content.rstrip()
                 + f"""
     apiKey:
-      secretKeyRef:
-        name: {secret_name}
-        key: {key_name}
+      valueFrom:
+        secretKeyRef:
+          name: {secret_name}
+          key: {key_name}
 """
             )
 

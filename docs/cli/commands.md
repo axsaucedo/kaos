@@ -36,6 +36,10 @@ kaos system install [OPTIONS]
 | `--version` | | latest | Chart version |
 | `--set` | | | Helm values |
 | `--wait` | | false | Wait for ready |
+| `--monitoring-enabled` | | | Install monitoring stack (`signoz` or `jaeger`) |
+| `--gateway-enabled` | | false | Install Gateway API (Envoy Gateway) and configure routing |
+| `--metallb-enabled` | | false | Install MetalLB for LoadBalancer support (KIND/bare-metal) |
+| `--chart-path` | | | Path to local Helm chart directory (for development) |
 
 ### kaos system uninstall
 
@@ -44,6 +48,14 @@ Uninstall the KAOS operator.
 ```bash
 kaos system uninstall [OPTIONS]
 ```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--namespace` | `kaos-system` | Namespace to uninstall from |
+| `--release-name` | `kaos` | Helm release name |
+| `--monitoring-enabled` | | Also uninstall monitoring (`signoz` or `jaeger`) |
+| `--gateway-enabled` | false | Also uninstall Gateway API (Envoy Gateway) |
+| `--metallb-enabled` | false | Also uninstall MetalLB |
 
 ### kaos system status
 
@@ -400,8 +412,63 @@ kaos ui [OPTIONS]
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--k8s-url` | auto | Kubernetes API URL |
-| `--expose-port` | `8080` | Local proxy port |
+| `--expose-port` | `8010` | Local proxy port |
 | `--no-browser` | false | Don't open browser |
+| `--monitoring-enabled` | | Enable monitoring UI (`signoz` or `jaeger`) |
+| `--system-namespace` | `kaos-system` | Namespace where KAOS system and monitoring are installed |
+
+---
+
+## kaos samples
+
+Deploy and manage example configurations from `operator/config/samples/`.
+
+### kaos samples list
+
+List available sample configurations.
+
+```bash
+kaos samples list
+```
+
+### kaos samples deploy
+
+Deploy a sample configuration with optional overrides.
+
+```bash
+kaos samples deploy NAME [OPTIONS]
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--namespace` | `-n` | Override namespace for all resources |
+| `--wait` | | Wait for deployments to be available |
+| `--wait-timeout` | | Timeout in seconds (default: 120) |
+| `--dry-run` | | Print YAML instead of deploying |
+| `--modelapi` | | Override ModelAPI name reference |
+| `--mode` | | Override ModelAPI mode (Proxy/Hosted) |
+| `--model` | `-m` | Override model name |
+| `--api-secret` | | Override API secret (secretname:key) |
+
+**Examples:**
+```bash
+kaos samples deploy 1-simple-echo-agent
+kaos samples deploy 3-hierarchical-agents --namespace my-ns
+kaos samples deploy 1-simple-echo-agent --model "llama3:8b" --dry-run
+kaos samples deploy 1-simple-echo-agent --api-secret nebius-secrets:api-key
+```
+
+### kaos samples delete
+
+Delete a sample's resources.
+
+```bash
+kaos samples delete NAME [OPTIONS]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--namespace` | | Namespace override (must match namespace used during deploy) |
 
 ---
 

@@ -27,10 +27,16 @@ pip install kaos-cli
 ### Step 2: Install the Operator
 
 ```bash
-kaos install
+kaos system install
 ```
 
 This installs the KAOS operator to your cluster using the published Helm chart.
+
+For KIND or bare-metal clusters, install with Gateway API and LoadBalancer support:
+
+```bash
+kaos system install --gateway-enabled --metallb-enabled --wait
+```
 
 ### Step 3: Open the UI
 

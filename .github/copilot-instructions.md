@@ -27,6 +27,10 @@ cd data-plane/kaos-framework && source .venv/bin/activate
 python -m pytest tests/ -v      # Tests
 make lint                       # Linting (required for CI)
 
+# CLI (kaos-cli)
+cd kaos-cli && source .venv/bin/activate
+python -m pytest tests/ -v      # CLI integration tests
+
 # Go (operator)
 cd operator
 make generate manifests         # After changing CRD types
@@ -34,9 +38,12 @@ make test-unit                  # Unit tests
 
 # E2E (KIND cluster)
 cd operator
-make kind-create                # Create cluster with Gateway API
+make kind-create                # Create cluster with Gateway API + MetalLB (uses kaos CLI)
 make kind-e2e-run-tests         # Full E2E suite
 make kind-delete                # Cleanup
+
+# Or use kaos CLI directly
+kaos system install --gateway-enabled --metallb-enabled --wait
 ```
 
 ## Project Structure
@@ -53,7 +60,9 @@ kaos-cli/                  # CLI tool
 ├── kaos_cli/system/       # System commands (install, create-rbac)
 ├── kaos_cli/mcp/          # MCP commands (init, build, deploy)
 ├── kaos_cli/agent/        # Agent commands
-└── kaos_cli/modelapi/     # ModelAPI commands
+├── kaos_cli/modelapi/     # ModelAPI commands
+├── kaos_cli/samples/      # Samples commands (list, deploy, delete)
+└── tests/                 # CLI integration tests (dry-run YAML validation)
 
 operator/                  # K8s operator (Go, kubebuilder)
 ├── api/v1alpha1/          # CRD definitions

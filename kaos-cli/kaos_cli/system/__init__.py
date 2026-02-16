@@ -8,6 +8,7 @@ import typer
 from kaos_cli.system.install import install_command, uninstall_command
 from kaos_cli.system.create_rbac import create_rbac_command
 from kaos_cli.system.status import status_command
+from kaos_cli.install import DEFAULT_RELEASE_NAME, MONITORING_BACKENDS
 from kaos_cli.system.runtimes import runtimes_command
 
 app = typer.Typer(
@@ -25,7 +26,7 @@ def install(
         help="Kubernetes namespace to install into.",
     ),
     release_name: str = typer.Option(
-        "kaos-operator",
+        DEFAULT_RELEASE_NAME,
         "--release-name",
         help="Helm release name.",
     ),
@@ -44,13 +45,35 @@ def install(
         "--wait",
         help="Wait for pods to be ready before returning.",
     ),
-    monitoring_enabled: bool = typer.Option(
-        False,
+    monitoring_enabled: str | None = typer.Option(
+        None,
         "--monitoring-enabled",
-        help="Install SigNoz monitoring stack and enable telemetry.",
+        help=f"Install monitoring stack and enable telemetry. Options: {', '.join(MONITORING_BACKENDS)}.",
+    ),
+    gateway_enabled: bool = typer.Option(
+        False,
+        "--gateway-enabled",
+        help="Install Gateway API (Envoy Gateway) and configure routing.",
+    ),
+    metallb_enabled: bool = typer.Option(
+        False,
+        "--metallb-enabled",
+        help="Install MetalLB for LoadBalancer support (KIND/bare-metal clusters).",
+    ),
+    chart_path: str | None = typer.Option(
+        None,
+        "--chart-path",
+        help="Path to local Helm chart directory (for development). Uses published chart if not set.",
     ),
 ) -> None:
     """Install the KAOS operator using Helm."""
+    # Default to signoz if flag provided without value
+    if monitoring_enabled is not None and monitoring_enabled not in MONITORING_BACKENDS:
+        typer.echo(
+            f"Error: Invalid monitoring backend '{monitoring_enabled}'. Options: {', '.join(MONITORING_BACKENDS)}",
+            err=True,
+        )
+        raise typer.Exit(1)
     install_command(
         namespace=namespace,
         release_name=release_name,
@@ -58,6 +81,9 @@ def install(
         set_values=list(set_values),
         wait=wait,
         monitoring_enabled=monitoring_enabled,
+        gateway_enabled=gateway_enabled,
+        metallb_enabled=metallb_enabled,
+        chart_path=chart_path,
     )
 
 
@@ -70,13 +96,39 @@ def uninstall(
         help="Kubernetes namespace to uninstall from.",
     ),
     release_name: str = typer.Option(
-        "kaos-operator",
+        DEFAULT_RELEASE_NAME,
         "--release-name",
         help="Helm release name.",
+    ),    monitoring_enabled: str | None = typer.Option(
+        None,
+        "--monitoring-enabled",
+        help=f"Also uninstall monitoring stack. Options: {', '.join(MONITORING_BACKENDS)}.",
+    ),
+    gateway_enabled: bool = typer.Option(
+        False,
+        "--gateway-enabled",
+        help="Also uninstall Gateway API (Envoy Gateway).",
+    ),
+    metallb_enabled: bool = typer.Option(
+        False,
+        "--metallb-enabled",
+        help="Also uninstall MetalLB.",
     ),
 ) -> None:
     """Uninstall the KAOS operator."""
-    uninstall_command(namespace=namespace, release_name=release_name)
+    if monitoring_enabled is not None and monitoring_enabled not in MONITORING_BACKENDS:
+        typer.echo(
+            f"Error: Invalid monitoring backend '{monitoring_enabled}'. Options: {', '.join(MONITORING_BACKENDS)}",
+            err=True,
+        )
+        raise typer.Exit(1)
+    uninstall_command(
+        namespace=namespace,
+        release_name=release_name,
+        monitoring_enabled=monitoring_enabled,
+        gateway_enabled=gateway_enabled,
+        metallb_enabled=metallb_enabled,
+    )
 
 
 @app.command(name="create-rbac")

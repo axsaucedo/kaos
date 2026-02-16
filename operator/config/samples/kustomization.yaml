@@ -13,3 +13,4 @@ resources:
 - 2-multi-agent-mcp.yaml
 - 3-hierarchical-agents.yaml
 - 4-dev-ollama-proxy-agent.yaml
+- 5-proxy-external-api.yaml

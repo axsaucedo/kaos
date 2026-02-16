@@ -45,7 +45,7 @@ def status_command(namespace: str) -> None:
     )
     crds = ["agents.kaos.tools", "mcpservers.kaos.tools", "modelapis.kaos.tools"]
     for crd in crds:
-        if f"customresourcedefinitions.apiextensions.k8s.io/{crd}" in result.stdout:
+        if f"customresourcedefinition.apiextensions.k8s.io/{crd}" in result.stdout:
             typer.echo(f"  ✅ {crd}")
         else:
             typer.echo(f"  ❌ {crd} (not installed)")

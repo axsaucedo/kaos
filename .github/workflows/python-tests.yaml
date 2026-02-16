@@ -5,11 +5,15 @@ on:
     branches: [main]
     paths:
       - 'data-plane/kaos-framework/**'
+      - 'kaos-cli/**'
+      - 'operator/config/samples/**'
       - '.github/workflows/python-tests.yaml'
   push:
     branches: [main]
     paths:
       - 'data-plane/kaos-framework/**'
+      - 'kaos-cli/**'
+      - 'operator/config/samples/**'
       - '.github/workflows/python-tests.yaml'
   workflow_dispatch:
 
@@ -75,3 +79,27 @@ jobs:
           files: data-plane/kaos-framework/coverage.xml
           flags: python
           fail_ci_if_error: false
+
+  cli-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Run CLI tests
+        working-directory: kaos-cli
+        run: |
+          uv venv
+          source .venv/bin/activate
+          uv pip install -e .
+          uv pip install pytest pyyaml
+          python -m pytest tests/ -v

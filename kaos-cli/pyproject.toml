@@ -10,6 +10,7 @@ dependencies = [
     "uvicorn>=0.30.0",
     "starlette>=0.37.0",
     "kubernetes>=29.0.0",
+    "pyyaml>=6.0.0",
 ]
 
 [project.scripts]
@@ -20,3 +21,6 @@ package = true
 dev-dependencies = [
     "pytest>=8.0.0",
 ]
+
+[tool.setuptools.package-data]
+"kaos_cli.samples" = ["data/*.yaml"]
