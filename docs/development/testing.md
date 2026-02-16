@@ -141,23 +141,19 @@ async def test_with_mock():
 
 ### Using mock_response
 
-For simpler tests, use the `mock_response` parameter:
+For simpler tests, use `DEBUG_MOCK_RESPONSES` environment variable:
 
 ```python
 async def test_tool_call():
     agent = Agent(name="test", model_api=model_api)
     
-    # Mock responses for two-phase loop: action -> no-action -> final
+    # Mock responses: tool call -> no-action -> final
     mocks = [
-        '{"tool": "add", "arguments": {"a": 1, "b": 2}}',
-        '{}',  # Signal end of action phase
+        '{"tool_calls": [{"id": "call_1", "name": "add", "arguments": {"a": 1, "b": 2}}]}',
         'The result is 3.'
     ]
     
-    async for response in agent.process_message(
-        "Add 1+2",
-        mock_response=mocks
-    ):
+    async for response in agent.process_message("Add 1+2"):
         print(response)
 ```
 
@@ -165,7 +161,7 @@ async def test_tool_call():
 
 ```python
 import pytest
-from agent.client import Agent, AgenticLoopConfig
+from agent.client import Agent
 from modelapi.client import ModelAPI
 
 @pytest.fixture
@@ -177,15 +173,15 @@ def agent():
     return Agent(
         name="test-agent",
         model_api=model_api,
-        loop_config=AgenticLoopConfig(max_steps=3)
+        max_steps=3,
     )
 
 async def test_max_steps_reached(agent):
     # Mock that always returns tool call (infinite loop)
-    mock = '{"tool": "echo", "arguments": {"text": "test"}}'
+    mock = '{"tool_calls": [{"name": "echo", "arguments": {"text": "test"}}]}'
     
     responses = []
-    async for chunk in agent.process_message("test", mock_response=mock):
+    async for chunk in agent.process_message("test"):
         responses.append(chunk)
     
     # Should hit max steps

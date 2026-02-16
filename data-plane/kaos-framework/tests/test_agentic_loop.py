@@ -1230,7 +1230,7 @@ class TestStringModeToolCalling:
         prompt = await agent._build_system_prompt()
         assert "## Available Tools" in prompt
         assert "search" in prompt
-        assert '{"tool": "tool_name"' in prompt
+        assert '{"tool_calls": [{"name": "tool_name"' in prompt
 
         logger.info("✓ String mode system prompt includes tools")
 
@@ -1359,6 +1359,48 @@ class TestStringModeToolCalling:
 
         logger.info("✓ String mode handles structured delegation")
 
+    @pytest.mark.asyncio
+    async def test_string_mode_multiple_tool_calls_in_content(self):
+        """Test that string mode parses tool_calls array from content for parallel calls."""
+        multi_tool_response = ModelResponse(
+            content='{"tool_calls": [{"name": "calculator", "arguments": {"a": 5, "b": 3}}, {"name": "echo", "arguments": {"message": "hi"}}]}',
+            finish_reason="stop",
+        )
+        no_action_response = ModelResponse(content="No more actions.", finish_reason="stop")
+        final_response = "Results: 8 and hi."
+
+        mock_model = MockModelAPI(
+            responses=[multi_tool_response, no_action_response, final_response]
+        )
+        mock_mcp = MockMCPClient(
+            tools={
+                "calculator": ("Add numbers", {"sum": 8}),
+                "echo": ("Echo message", {"result": "hi"}),
+            }
+        )
+        memory = LocalMemory()
+
+        agent = Agent(
+            name="multi-tool-agent",
+            model_api=mock_model,
+            mcp_clients=[mock_mcp],
+            memory=memory,
+            max_steps=5,
+        )
+        agent._supports_native_tools = False
+
+        result = []
+        async for chunk in agent.process_message("Calculate and echo"):
+            result.append(chunk)
+
+        # Both tools should have been called
+        assert len(mock_mcp.call_log) == 2
+        tool_names = [c["tool"] for c in mock_mcp.call_log]
+        assert "calculator" in tool_names
+        assert "echo" in tool_names
+
+        logger.info("✓ String mode multiple tool calls in content works")
+
 
 class TestParseAction:
     """Tests for the _parse_action method used in string mode."""
@@ -1368,42 +1410,69 @@ class TestParseAction:
         self.agent = Agent(name="test", model_api=mock_model)
 
     def test_parse_pure_json(self):
-        """Test parsing pure JSON content."""
+        """Test parsing pure JSON content (single tool fallback format)."""
         result = self.agent._parse_action('{"tool": "echo", "arguments": {"msg": "hi"}}')
-        assert result == {"tool": "echo", "arguments": {"msg": "hi"}}
+        assert len(result) == 1
+        assert result[0] == {"tool": "echo", "arguments": {"msg": "hi"}}
 
     def test_parse_json_in_text(self):
         """Test parsing JSON embedded in text."""
         result = self.agent._parse_action(
             'I will use the tool. {"tool": "calc", "arguments": {"a": 1}} Great.'
         )
-        assert result is not None
-        assert result["tool"] == "calc"
+        assert len(result) == 1
+        assert result[0]["tool"] == "calc"
 
     def test_parse_no_tool_key(self):
-        """Test parsing JSON without tool key returns None."""
+        """Test parsing JSON without tool key returns empty list."""
         result = self.agent._parse_action("No more actions needed. {}")
-        assert result is None
+        assert result == []
 
     def test_parse_no_json(self):
-        """Test parsing content with no JSON returns None."""
+        """Test parsing content with no JSON returns empty list."""
         result = self.agent._parse_action("Just a plain text response.")
-        assert result is None
+        assert result == []
 
     def test_parse_delegation(self):
         """Test parsing delegation action uses delegate_to_ format."""
         result = self.agent._parse_action(
             '{"tool": "delegate_to_worker", "arguments": {"task": "do something"}}'
         )
-        assert result is not None
-        assert result["tool"] == "delegate_to_worker"
-        assert result["arguments"]["task"] == "do something"
+        assert len(result) == 1
+        assert result[0]["tool"] == "delegate_to_worker"
+        assert result[0]["arguments"]["task"] == "do something"
 
     def test_parse_nested_json(self):
         """Test parsing JSON with nested objects."""
         result = self.agent._parse_action(
             '{"tool": "search", "arguments": {"query": "test", "options": {"limit": 10}}}'
         )
-        assert result is not None
-        assert result["tool"] == "search"
-        assert result["arguments"]["options"]["limit"] == 10
+        assert len(result) == 1
+        assert result[0]["tool"] == "search"
+        assert result[0]["arguments"]["options"]["limit"] == 10
+
+    def test_parse_tool_calls_array(self):
+        """Test parsing tool_calls array format (matches native format)."""
+        result = self.agent._parse_action(
+            '{"tool_calls": [{"name": "echo", "arguments": {"msg": "hi"}}, '
+            '{"name": "calc", "arguments": {"a": 1}}]}'
+        )
+        assert len(result) == 2
+        assert result[0]["name"] == "echo"
+        assert result[1]["name"] == "calc"
+
+    def test_parse_tool_calls_single(self):
+        """Test parsing tool_calls array with single call."""
+        result = self.agent._parse_action(
+            '{"tool_calls": [{"name": "search", "arguments": {"q": "test"}}]}'
+        )
+        assert len(result) == 1
+        assert result[0]["name"] == "search"
+
+    def test_parse_tool_calls_in_text(self):
+        """Test parsing tool_calls array embedded in text."""
+        result = self.agent._parse_action(
+            'I will call tools. {"tool_calls": [{"name": "echo", "arguments": {}}]} Done.'
+        )
+        assert len(result) == 1
+        assert result[0]["name"] == "echo"

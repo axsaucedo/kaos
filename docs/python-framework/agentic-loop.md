@@ -75,18 +75,24 @@ Prevents infinite loops in Phase 1. When reached, returns message:
 
 ## Unified Tool Call Format
 
-Both MCP tools and sub-agent delegation use the same format. Delegation tools are registered with a `delegate_to_` prefix.
+Both native and string modes use the same `tool_calls` array format. Delegation tools are registered with a `delegate_to_` prefix.
 
 ### Tool Call
 
 ```json
-{"tool": "calculator", "arguments": {"expression": "2 + 2"}}
+{"tool_calls": [{"name": "calculator", "arguments": {"expression": "2 + 2"}}]}
+```
+
+### Multiple Tool Calls (Parallel)
+
+```json
+{"tool_calls": [{"name": "search", "arguments": {"q": "test"}}, {"name": "echo", "arguments": {"msg": "hi"}}]}
 ```
 
 ### Delegation
 
 ```json
-{"tool": "delegate_to_researcher", "arguments": {"task": "Find information about quantum computing"}}
+{"tool_calls": [{"name": "delegate_to_researcher", "arguments": {"task": "Find information about quantum computing"}}]}
 ```
 
 ## Tool Call Extraction
@@ -98,11 +104,10 @@ def _extract_tool_calls(self, response):
     # Structured tool_calls take priority (native API or mock responses)
     if response.tool_calls:
         return response.tool_calls
-    # String mode fallback: parse JSON from content
+    # String mode fallback: parse tool_calls array or single tool from content
     if not self._supports_native_tools:
-        action = self._parse_action(response.content or "")
-        if action and action.get("tool"):
-            return [ToolCall(...)]
+        actions = self._parse_action(response.content or "")
+        return [ToolCall(...) for action in actions]
     return []
 ```
 

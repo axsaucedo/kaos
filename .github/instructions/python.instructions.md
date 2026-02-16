@@ -36,15 +36,16 @@ make format                     # Auto-format code
 
 The agent auto-detects native tool calling support using `litellm.supports_function_calling(model)`:
 - **Native**: Models with function calling use the OpenAI `tools` API parameter
-- **String fallback**: Models without support get tool descriptions in the system prompt and output `{"tool": "name", "arguments": {...}}` in content
+- **String fallback**: Models without support get tool descriptions in the system prompt and output `{"tool_calls": [{"name": "x", "arguments": {...}}]}` in content
 
-Both modes use the same unified format — delegation uses `delegate_to_` prefix: `{"tool": "delegate_to_worker", "arguments": {"task": "..."}}`.
+Both modes use the same `tool_calls` array format — delegation uses `delegate_to_` prefix.
 
 ### Phase 1 (Tool Calling)
 1. Non-streaming model calls (with `tools` param for native, or tools in system prompt for string)
 2. Tool calls extracted from `response.tool_calls` first (both modes), then content JSON parsing as fallback
-3. Both MCP tools and sub-agent delegation use identical `{"tool": "name", "arguments": {...}}` format
-4. Loops until no tool calls detected in response
+3. Both MCP tools and sub-agent delegation use `tool_calls` array: `{"tool_calls": [{"name": "x", "arguments": {...}}]}`
+4. Multiple tool calls supported in a single response (parallel execution)
+5. Loops until no tool calls detected in response
 
 ### Phase 2 (Final Response)
 - Streaming model call for final user-visible response
@@ -88,8 +89,8 @@ export DEBUG_MOCK_RESPONSES='["Hello, world!"]'
 # With tools (both modes): tool call → loop break → Phase 2 final (3 entries)
 export DEBUG_MOCK_RESPONSES='["{\"tool_calls\": [{\"id\": \"call_1\", \"name\": \"echo\", \"arguments\": {\"message\": \"hi\"}}]}", "No more actions.", "Done."]'
 
-# String mode alternative: JSON action in content → no action text → Phase 2 final (3 entries)
-export DEBUG_MOCK_RESPONSES='["{\"tool\": \"echo\", \"arguments\": {\"message\": \"hi\"}}", "No more actions needed.", "Done."]'
+# String mode alternative: tool_calls array in content → no action text → Phase 2 final (3 entries)
+export DEBUG_MOCK_RESPONSES='["{\"tool_calls\": [{\"name\": \"echo\", \"arguments\": {\"message\": \"hi\"}}]}", "No more actions needed.", "Done."]'
 ```
 
 ## Testing Patterns
@@ -97,7 +98,8 @@ export DEBUG_MOCK_RESPONSES='["{\"tool\": \"echo\", \"arguments\": {\"message\":
 - Tests use `pytest-asyncio` for async test functions
 - Use `@pytest.mark.parametrize` for testing multiple cases
 - Mock responses with `tool_calls` key work in both native and string mode
-- String mode also supports `{"tool": "name", "arguments": {...}}` content format as fallback
+- String mode also supports single `{"tool": "name", "arguments": {...}}` content format as fallback
+- String mode supports multiple parallel calls: `{"tool_calls": [{"name": "x", ...}, {"name": "y", ...}]}`
 - Absence of tool_calls signals loop completion (both modes)
 - Agents with tools: N+1 mock responses (N for Phase 1 steps + 1 for Phase 2 final)
 - Agents without tools: 1 mock response (Phase 2 only)

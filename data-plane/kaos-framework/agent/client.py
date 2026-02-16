@@ -45,8 +45,11 @@ DELEGATION_TOOL_PREFIX = "delegate_to_"
 
 # System prompt template for string-mode tool calling
 STRING_MODE_TOOLS_PROMPT = """
-To use a tool, respond with ONLY a JSON object in this format:
-{"tool": "tool_name", "arguments": {"arg1": "value1"}}
+To use tools, respond with ONLY a JSON object in this format:
+{"tool_calls": [{"name": "tool_name", "arguments": {"arg1": "value1"}}]}
+
+You can call multiple tools at once:
+{"tool_calls": [{"name": "tool1", "arguments": {...}}, {"name": "tool2", "arguments": {...}}]}
 
 When you have all the information needed, respond WITHOUT any JSON tool call.
 """
@@ -316,11 +319,14 @@ class Agent:
         return "\n## Available Tools\n" + "\n".join(tools_desc) + "\n" + STRING_MODE_TOOLS_PROMPT
 
     @staticmethod
-    def _parse_action(content: str) -> Optional[Dict[str, Any]]:
-        """Parse a tool call JSON from model response content (string mode).
+    def _parse_action(content: str) -> List[Dict[str, Any]]:
+        """Parse tool call JSON from model response content (string mode).
 
-        Finds first JSON object containing a "tool" key.
-        Returns the parsed dict, or None if no valid tool action found.
+        Supports two formats:
+        - Array: {"tool_calls": [{"name": "x", "arguments": {...}}]}
+        - Single (fallback): {"tool": "x", "arguments": {...}}
+
+        Returns list of parsed tool call dicts, or empty list if none found.
         """
         decoder = json.JSONDecoder()
         idx = 0
@@ -330,12 +336,19 @@ class Agent:
                 break
             try:
                 parsed, end = decoder.raw_decode(content, pos)
-                if isinstance(parsed, dict) and "tool" in parsed:
-                    return parsed
+                if isinstance(parsed, dict):
+                    if "tool_calls" in parsed and isinstance(parsed["tool_calls"], list):
+                        return [
+                            tc
+                            for tc in parsed["tool_calls"]
+                            if isinstance(tc, dict) and tc.get("name")
+                        ]
+                    if "tool" in parsed:
+                        return [parsed]
                 idx = pos + end
             except json.JSONDecodeError:
                 idx = pos + 1
-        return None
+        return []
 
     async def _build_system_prompt(self, user_system_prompt: Optional[str] = None) -> str:
         """Build system prompt for the agent.
@@ -575,17 +588,21 @@ class Agent:
         # String mode fallback: parse JSON from content
         if not self._supports_native_tools:
             content = response.content or ""
-            action = self._parse_action(content)
-            if action and action.get("tool"):
-                tool_name = action["tool"]
+            actions = self._parse_action(content)
+            tool_calls = []
+            for i, action in enumerate(actions):
+                # Support both {"name": ..} (tool_calls format) and {"tool": ..} (single format)
+                tool_name = action.get("name") or action.get("tool", "")
                 tool_args = action.get("arguments", {})
-                return [
-                    ToolCall(
-                        id=f"str_call_{hash(content) % 10000}",
-                        name=tool_name,
-                        arguments=tool_args,
+                if tool_name:
+                    tool_calls.append(
+                        ToolCall(
+                            id=f"str_call_{hash(content) % 10000}_{i}",
+                            name=tool_name,
+                            arguments=tool_args,
+                        )
                     )
-                ]
+            return tool_calls
         return []
 
     def _build_assistant_msg(
