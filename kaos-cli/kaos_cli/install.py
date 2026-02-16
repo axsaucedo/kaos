@@ -451,25 +451,41 @@ def install_command(
 
     # Pre-apply CRDs via kubectl to handle field manager conflicts on re-installs
     typer.echo("Applying CRDs...")
-    show_args = ["show", "crds", chart_ref]
-    if version:
-        show_args.extend(["--version", version])
-    crds_result = run_helm_command(show_args, check=False)
-    if crds_result.returncode == 0 and crds_result.stdout.strip():
-        result = _run_kubectl(
-            ["apply", "--server-side", "--force-conflicts", "-f", "-"],
-            check=False, input=crds_result.stdout,
-        )
-        if result.returncode != 0:
-            typer.echo(f"Warning: CRD apply failed: {result.stderr}", err=True)
-        elif result.stdout.strip():
-            typer.echo(f"  {result.stdout.strip()}")
+    if chart_path:
+        import pathlib
+
+        crds_dir = pathlib.Path(chart_path) / "crds"
+        if crds_dir.exists():
+            result = _run_kubectl(
+                ["apply", "--server-side", "--force-conflicts", "-f", str(crds_dir)],
+                check=False,
+            )
+            if result.returncode != 0:
+                typer.echo(f"Warning: CRD apply failed: {result.stderr}", err=True)
+            elif result.stdout.strip():
+                typer.echo(f"  {result.stdout.strip()}")
+        else:
+            typer.echo(f"Warning: CRDs directory not found: {crds_dir}", err=True)
     else:
-        typer.echo(
-            f"Warning: Could not extract CRDs (rc={crds_result.returncode}): "
-            f"{crds_result.stderr}",
-            err=True,
-        )
+        show_args = ["show", "crds", chart_ref]
+        if version:
+            show_args.extend(["--version", version])
+        crds_result = run_helm_command(show_args, check=False)
+        if crds_result.returncode == 0 and crds_result.stdout.strip():
+            result = _run_kubectl(
+                ["apply", "--server-side", "--force-conflicts", "-f", "-"],
+                check=False, input=crds_result.stdout,
+            )
+            if result.returncode != 0:
+                typer.echo(f"Warning: CRD apply failed: {result.stderr}", err=True)
+            elif result.stdout.strip():
+                typer.echo(f"  {result.stdout.strip()}")
+        else:
+            typer.echo(
+                f"Warning: Could not extract CRDs (rc={crds_result.returncode}): "
+                f"{crds_result.stderr}",
+                err=True,
+            )
 
     # Build helm install command
     helm_args = [
