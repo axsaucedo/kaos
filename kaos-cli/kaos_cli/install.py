@@ -454,6 +454,7 @@ def install_command(
         "--namespace",
         namespace,
         "--create-namespace",
+        "--force-conflicts",
     ]
 
     if version:
