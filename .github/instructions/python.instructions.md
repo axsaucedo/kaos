@@ -58,6 +58,11 @@ The agent auto-detects native tool calling support using `litellm.supports_funct
 - Sub-agents are exposed as `delegate_to_{agent_name}` tool functions (both modes)
 - Unavailable sub-agents (failed init) are automatically excluded from tool registration
 - Multiple tool calls in native mode are executed in parallel via `asyncio.gather()`
+- Mode-specific behavior is encapsulated in 4 self-contained methods:
+  - `_extract_tool_calls()`: reads `self._supports_native_tools` to pick native vs string extraction
+  - `_build_assistant_msg()`: formats assistant message with or without `tool_calls` array
+  - `_append_tool_result()`: uses `role: tool` (native) or `role: user` (string)
+  - `_build_system_prompt()`: injects text-based tool descriptions only in string mode
 
 ### Key Classes
 - `ToolCall(id, name, arguments)`: Represents a single tool call. Arguments auto-normalize from JSON string or dict via `__post_init__`
