@@ -58,8 +58,9 @@ The agent auto-detects native tool calling support using `litellm.supports_funct
 - Sub-agents are exposed as `delegate_to_{agent_name}` tool functions (both modes)
 - Unavailable sub-agents (failed init) are automatically excluded from tool registration
 - Multiple tool calls in native mode are executed in parallel via `asyncio.gather()`
+- `_extract_tool_calls()` checks `response.tool_calls` first (works for both modes + mocks), then falls back to content JSON parsing in string mode
 - Mode-specific behavior is encapsulated in 4 self-contained methods:
-  - `_extract_tool_calls()`: reads `self._supports_native_tools` to pick native vs string extraction
+  - `_extract_tool_calls()`: prefers structured `response.tool_calls`, falls back to `_parse_action()` in string mode
   - `_build_assistant_msg()`: formats assistant message with or without `tool_calls` array
   - `_append_tool_result()`: uses `role: tool` (native) or `role: user` (string)
   - `_build_system_prompt()`: injects text-based tool descriptions only in string mode
@@ -82,15 +83,16 @@ The agent auto-detects native tool calling support using `litellm.supports_funct
 
 ### Mock Response Pattern
 For testing, use `DEBUG_MOCK_RESPONSES` with tool_calls JSON or plain text.
+The `tool_calls` format works in both native and string mode (structured tool_calls are checked first regardless of mode).
 Response count depends on whether Phase 1 runs:
 ```bash
 # No tools/agents: Phase 1 skipped, only Phase 2 (1 entry)
 export DEBUG_MOCK_RESPONSES='["Hello, world!"]'
 
-# Native mode with tools: tool call → loop break → Phase 2 final (3 entries)
+# With tools (both modes): tool call → loop break → Phase 2 final (3 entries)
 export DEBUG_MOCK_RESPONSES='["{\"tool_calls\": [{\"id\": \"call_1\", \"name\": \"echo\", \"arguments\": {\"message\": \"hi\"}}]}", "No more actions.", "Done."]'
 
-# String mode with tools: JSON action → no action text → Phase 2 final (3 entries)
+# String mode alternative: JSON action in content → no action text → Phase 2 final (3 entries)
 export DEBUG_MOCK_RESPONSES='["{\"tool\": \"echo\", \"arguments\": {\"message\": \"hi\"}}", "No more actions needed.", "Done."]'
 ```
 
@@ -98,9 +100,9 @@ export DEBUG_MOCK_RESPONSES='["{\"tool\": \"echo\", \"arguments\": {\"message\":
 - Use `DEBUG_MOCK_RESPONSES` for deterministic tests
 - Tests use `pytest-asyncio` for async test functions
 - Use `@pytest.mark.parametrize` for testing multiple cases
-- Tool call mocks use `tool_calls` key (native) or `{"tool": "name", "arguments": {...}}` (string), plain text mocks are just strings
-- Native mode: absence of `tool_calls` signals completion
-- String mode: absence of `{"tool": ...}` JSON in content signals completion
+- Mock responses with `tool_calls` key work in both native and string mode
+- String mode also supports `{"tool": "name", "arguments": {...}}` content format as fallback
+- Absence of tool_calls signals loop completion (both modes)
 - Agents with tools: N+1 mock responses (N for Phase 1 steps + 1 for Phase 2 final)
 - Agents without tools: 1 mock response (Phase 2 only)
 - Native tests use `_make_native_agent()` helper to set `_supports_native_tools=True`
