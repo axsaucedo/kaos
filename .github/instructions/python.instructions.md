@@ -32,23 +32,19 @@ make format                     # Auto-format code
 | `OTEL_ENABLED` | Enable OpenTelemetry instrumentation |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP exporter endpoint |
 
-## Native Function Calling (Agentic Loop)
+## Agentic Loop (Two-Phase)
 
 The agent auto-detects native tool calling support using `litellm.supports_function_calling(model)`:
-- **Native mode**: Models with function calling support use the OpenAI `tools` API parameter
-- **String mode**: Models without support use text-based JSON parsing from model content
+- **Native**: Models with function calling use the OpenAI `tools` API parameter
+- **String fallback**: Models without support get tool descriptions in the system prompt and output `{"tool": "name", "arguments": {...}}` in content
 
-### Native Mode (Phase 1)
-1. Non-streaming model calls with `tools` parameter
-2. Model returns `tool_calls` in response to invoke MCP tools or delegate to sub-agents
-3. Loops until model responds with content only (no tool_calls)
+Both modes use the same unified format — delegation uses `delegate_to_` prefix: `{"tool": "delegate_to_worker", "arguments": {"task": "..."}}`.
 
-### String Mode (Phase 1)
-1. Tool/agent descriptions injected into system prompt
-2. Model outputs JSON in content: `{"tool": "name", "arguments": {...}}`
-3. No tool JSON in content breaks the loop
-4. Sub-agents use same `delegate_to_` format: `{"tool": "delegate_to_worker", "arguments": {"task": "..."}}`
-5. Tool results use `{"role": "user", "content": "[Step X/Y] Tool result: ..."}` (not `role: tool`)
+### Phase 1 (Tool Calling)
+1. Non-streaming model calls (with `tools` param for native, or tools in system prompt for string)
+2. Tool calls extracted from `response.tool_calls` first (both modes), then content JSON parsing as fallback
+3. Both MCP tools and sub-agent delegation use identical `{"tool": "name", "arguments": {...}}` format
+4. Loops until no tool calls detected in response
 
 ### Phase 2 (Final Response)
 - Streaming model call for final user-visible response

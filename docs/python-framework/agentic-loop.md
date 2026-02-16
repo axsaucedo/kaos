@@ -6,22 +6,18 @@ The agentic loop is the two-phase reasoning mechanism that enables agents to col
 
 ```mermaid
 flowchart TB
-    subgraph phase1["Phase 1: Action Collection"]
-        start["1. Build System Prompt<br/>• Base instructions<br/>• Available tools<br/>• Available agents"]
+    subgraph phase1["Phase 1: Tool Calling"]
+        start["1. Build System Prompt<br/>• Base instructions<br/>• Available tools (native or string)"]
         
         llm["2. Send to LLM (non-streaming)"]
         
-        parse["3. Parse JSON Action"]
+        extract["3. Extract Tool Calls"]
         
-        tool{"Tool Action?<br/>{\"tool\": ...}"}
-        delegate{"Delegate Action?<br/>{\"agent\": ...}"}
+        tool_calls{"Tool calls<br/>found?"}
         
-        exec_tool["Execute tool"]
-        exec_delegate["Invoke agent"]
+        exec["Execute tool calls<br/>(MCP tools or delegation)"]
         
-        add["4. Add Result to Conversation"]
-        
-        noaction{"Empty JSON {}?"}
+        add["4. Add Results to Conversation"]
     end
     
     subgraph phase2["Phase 2: Final Response"]
@@ -29,18 +25,29 @@ flowchart TB
     end
     
     start --> llm
-    llm --> parse
-    parse --> tool
-    tool -->|Yes| exec_tool
-    tool -->|No| delegate
-    delegate -->|Yes| exec_delegate
-    delegate -->|No| noaction
-    exec_tool --> add
-    exec_delegate --> add
+    llm --> extract
+    extract --> tool_calls
+    tool_calls -->|Yes| exec
+    tool_calls -->|No| final
+    exec --> add
     add --> llm
-    noaction -->|Yes| final
-    noaction -->|No| llm
 ```
+
+## Auto-Detection
+
+The agent automatically detects tool calling support at initialization:
+
+```python
+# Uses litellm's model registry (no HTTP calls needed)
+import litellm
+supports_native = litellm.supports_function_calling(model="gpt-4o")  # True
+supports_native = litellm.supports_function_calling(model="ollama/smollm2:135m")  # False
+```
+
+- **Native**: OpenAI `tools` API parameter, structured `tool_calls` in response
+- **String fallback**: Tool descriptions in system prompt, JSON parsed from content text
+
+Both modes use the same unified tool call format.
 
 ## Configuration
 
@@ -50,7 +57,7 @@ The agentic loop is controlled by the `max_steps` parameter passed to the Agent:
 agent = Agent(
     name="my-agent",
     model_api=model_api,
-    max_steps=5  # Maximum action collection iterations
+    max_steps=5  # Maximum tool calling iterations
 )
 ```
 
@@ -66,9 +73,9 @@ Prevents infinite loops in Phase 1. When reached, returns message:
 - Tool-using tasks: 5 steps (default)
 - Complex multi-step tasks: 10+ steps
 
-## Action Format (JSON)
+## Unified Tool Call Format
 
-Actions are simple JSON objects. The agent recognizes three action types:
+Both MCP tools and sub-agent delegation use the same format. Delegation tools are registered with a `delegate_to_` prefix.
 
 ### Tool Call
 
@@ -79,91 +86,24 @@ Actions are simple JSON objects. The agent recognizes three action types:
 ### Delegation
 
 ```json
-{"agent": "researcher", "task": "Find information about quantum computing"}
+{"tool": "delegate_to_researcher", "arguments": {"task": "Find information about quantum computing"}}
 ```
 
-### No Action (Proceed to Final Response)
+## Tool Call Extraction
 
-```json
-{}
-```
-
-## System Prompt Construction
-
-The agent builds an enhanced system prompt with action instructions:
+`_extract_tool_calls()` checks `response.tool_calls` first (works for both native mode and mock responses), then falls back to content JSON parsing for string mode:
 
 ```python
-async def _build_system_prompt(self) -> str:
-    parts = [self.instructions]
-    
-    if self.mcp_clients:
-        tools_info = await self._get_tools_description()
-        parts.append("\n## Available Tools\n" + tools_info)
-        parts.append(TOOLS_INSTRUCTIONS)
-    
-    if self.sub_agents:
-        agents_info = await self._get_agents_description()
-        parts.append("\n## Available Agents for Delegation\n" + agents_info)
-        parts.append(AGENT_INSTRUCTIONS)
-    
-    if self.mcp_clients or self.sub_agents:
-        parts.append(NO_ACTION_INSTRUCTIONS)
-    
-    return "\n".join(parts)
-```
-
-### Tool Instructions Template
-
-```
-To use a tool, respond with ONLY this JSON (no other text):
-{"tool": "tool_name", "arguments": {"arg1": "value1"}}
-
-Wait for the tool result before providing your final answer.
-```
-
-### Delegation Instructions Template
-
-```
-To delegate a task to another agent, respond with ONLY this JSON (no other text):
-{"agent": "agent_name", "task": "task description"}
-
-Wait for the agent's response before providing your final answer.
-```
-
-### No Action Instructions Template
-
-```
-When you have all the information needed to provide a final answer, respond with ONLY:
-{}
-
-Then the system will ask you to provide your final response.
-```
-
-## Response Parsing
-
-```python
-def _parse_action(self, content: str) -> Dict[str, Any]:
-    """Parse JSON action from model response."""
-    content = content.strip()
-    
-    # Try parsing entire content as JSON
-    try:
-        parsed = json.loads(content)
-        if isinstance(parsed, dict):
-            return parsed
-    except json.JSONDecodeError:
-        pass
-    
-    # Look for JSON on a line by itself
-    for line in content.split("\n"):
-        line = line.strip()
-        if line.startswith("{") and line.endswith("}"):
-            try:
-                return json.loads(line)
-            except json.JSONDecodeError:
-                continue
-    
-    return {}  # No action found
+def _extract_tool_calls(self, response):
+    # Structured tool_calls take priority (native API or mock responses)
+    if response.tool_calls:
+        return response.tool_calls
+    # String mode fallback: parse JSON from content
+    if not self._supports_native_tools:
+        action = self._parse_action(response.content or "")
+        if action and action.get("tool"):
+            return [ToolCall(...)]
+    return []
 ```
 
 ## Progress Blocks
@@ -179,27 +119,27 @@ During Phase 1, the agent emits progress blocks when starting tool/delegation ex
 
 ### Tool Execution
 
-1. Parse `tool` and `arguments` from JSON action
+1. Extract tool calls from response
 2. Emit progress block
 3. Log `tool_call` event to memory
 4. Execute tool via MCP client
 5. Log `tool_result` event to memory
 6. Add result to conversation
-7. Continue to next action loop iteration
+7. Continue to next loop iteration
 
 ### Delegation Execution
 
-1. Parse `agent` and `task` from JSON action
+1. Extract `delegate_to_{name}` tool call from response
 2. Emit progress block
 3. Log `delegation_request` event to memory
 4. Invoke remote agent via A2A protocol
 5. Log `delegation_response` event to memory
 6. Add response to conversation
-7. Continue to next action loop iteration
+7. Continue to next loop iteration
 
 ### Final Response (Phase 2)
 
-1. When `{}` or no action detected, exit action loop
+1. When no tool calls detected, exit Phase 1
 2. Add "provide your final response" prompt
 3. Call model with streaming enabled
 4. Stream tokens directly to client
@@ -223,19 +163,17 @@ events = await agent.memory.get_session_events(session_id)
 
 Set `DEBUG_MOCK_RESPONSES` environment variable to test loop behavior deterministically.
 
-The two-phase pattern requires:
-1. Action responses (tool/delegate JSON or `{}` for no action)
-2. Final response text
+The `tool_calls` format works for both native and string mode:
 
 ```bash
-# Test tool calling (action -> no-action -> final)
-export DEBUG_MOCK_RESPONSES='["{\"tool\": \"echo\", \"arguments\": {\"text\": \"hello\"}}", "{}", "The echo returned: hello"]'
+# Test tool calling (tool call → no action → final)
+export DEBUG_MOCK_RESPONSES='["{\"tool_calls\": [{\"id\": \"call_1\", \"name\": \"echo\", \"arguments\": {\"text\": \"hello\"}}]}", "No more actions.", "The echo returned: hello"]'
 
-# Test delegation (action -> no-action -> final)
-export DEBUG_MOCK_RESPONSES='["{\"agent\": \"researcher\", \"task\": \"Find quantum info\"}", "{}", "Based on the research, quantum computing uses qubits."]'
+# Test delegation (delegation → no action → final)
+export DEBUG_MOCK_RESPONSES='["{\"tool_calls\": [{\"id\": \"call_1\", \"name\": \"delegate_to_researcher\", \"arguments\": {\"task\": \"Find quantum info\"}}]}", "No more actions.", "Based on the research, quantum computing uses qubits."]'
 
-# Simple response (no-action -> final)
-export DEBUG_MOCK_RESPONSES='["{}", "Hello! How can I help you?"]'
+# Simple response (no tools → Phase 2 only)
+export DEBUG_MOCK_RESPONSES='["Hello! How can I help you?"]'
 ```
 
 For Kubernetes E2E tests, configure via the Agent CRD:
@@ -244,13 +182,13 @@ spec:
   container:
     env:
     - name: DEBUG_MOCK_RESPONSES
-      value: '["{\"agent\": \"worker\", \"task\": \"process data\"}", "{}", "Done."]'
+      value: '["{\"tool_calls\": [{\"id\": \"call_1\", \"name\": \"delegate_to_worker\", \"arguments\": {\"task\": \"process data\"}}]}", "No more actions.", "Done."]'
 ```
 
 ## Best Practices
 
 1. **Set appropriate max_steps** - Too low may truncate reasoning, too high wastes resources
 2. **Clear instructions** - Tell the LLM when to use tools vs. respond directly
-3. **Test with mocks** - Include `{}` to signal end of action phase
+3. **Test with mocks** - Use `DEBUG_MOCK_RESPONSES` with `tool_calls` format
 4. **Monitor events** - Use memory endpoints to debug complex flows
 5. **Handle errors gracefully** - Tool failures are fed back to the loop for recovery

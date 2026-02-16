@@ -106,38 +106,22 @@ spec:
 
 ### Mock Response Patterns (DEBUG_MOCK_RESPONSES)
 
-E2E tests use `DEBUG_MOCK_RESPONSES` env var with native function calling format:
+E2E tests use `DEBUG_MOCK_RESPONSES` env var. The `tool_calls` format works for both native and string mode (the agent checks `response.tool_calls` first regardless of mode). Delegation uses the same `delegate_to_` prefix as regular tools.
 
-**Native mode - Tool call (MCP tool):**
+**Tool call (MCP tool):**
 ```json
 [
   "{\"tool_calls\": [{\"id\": \"call_1\", \"name\": \"echo\", \"arguments\": {\"message\": \"hello\"}}]}",
+  "No more actions needed.",
   "The echo tool returned the result."
 ]
 ```
 
-**Native mode - Delegation (sub-agent):**
+**Delegation (sub-agent):**
 ```json
 [
   "{\"tool_calls\": [{\"id\": \"call_1\", \"name\": \"delegate_to_worker-name\", \"arguments\": {\"task\": \"Process this\"}}]}",
-  "The worker completed the task."
-]
-```
-
-**String mode - Tool call (MCP tool):**
-```json
-[
-  "{\"tool\": \"echo\", \"arguments\": {\"message\": \"hello\"}}",
-  "{}",
-  "The echo tool returned the result."
-]
-```
-
-**String mode - Delegation (sub-agent):**
-```json
-[
-  "{\"agent\": \"worker-name\", \"task\": \"Process this\"}",
-  "{}",
+  "No more actions needed.",
   "The worker completed the task."
 ]
 ```
@@ -147,7 +131,7 @@ E2E tests use `DEBUG_MOCK_RESPONSES` env var with native function calling format
 ["Task completed by worker."]
 ```
 
-Note: Native mode — absence of `tool_calls` signals completion. String mode — `{}` signals no more actions.
+Note: Absence of `tool_calls` in a response signals loop completion. No `{}` no-action signal is needed.
 
 ### Key Patterns
 - Tests create unique namespaces per session

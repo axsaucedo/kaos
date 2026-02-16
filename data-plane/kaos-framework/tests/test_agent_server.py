@@ -346,8 +346,7 @@ class TestMultiAgentCluster:
     def test_delegation_via_agent_decision(self, multi_agent_cluster):
         """Test delegation happens when model decides to delegate.
 
-        With the new design, delegation occurs when the model's response
-        contains a JSON delegation action like {"agent": "name", "task": "..."}.
+        Delegation occurs when the model triggers a delegate_to_ tool call.
         This test verifies basic invocation works - delegation testing
         is better done via DEBUG_MOCK_RESPONSES in E2E tests.
         """
