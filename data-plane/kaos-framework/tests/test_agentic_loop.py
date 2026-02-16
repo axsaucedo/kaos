@@ -144,6 +144,44 @@ class TestMaxStepsConfig:
         assert agent.max_steps == -5
 
 
+class TestToolCallMode:
+    """Tests for tool_call_mode configuration."""
+
+    def test_default_tool_call_mode_is_auto(self):
+        """Test default tool_call_mode is auto (uses litellm detection)."""
+        model_api = MockModelAPI(["test"])
+        agent = Agent(name="test", model_api=model_api)
+        # mock model is not in litellm registry, so auto defaults to False
+        assert agent._supports_native_tools is False
+
+    def test_tool_call_mode_native_forces_native(self):
+        """Test tool_call_mode='native' forces native tool calling."""
+        model_api = MockModelAPI(["test"])
+        agent = Agent(name="test", model_api=model_api, tool_call_mode="native")
+        assert agent._supports_native_tools is True
+
+    def test_tool_call_mode_string_forces_string(self):
+        """Test tool_call_mode='string' forces string-based tool calling."""
+        model_api = MockModelAPI(["test"])
+        # Even with a model that might support native, string mode forces False
+        agent = Agent(name="test", model_api=model_api, tool_call_mode="string")
+        assert agent._supports_native_tools is False
+
+    def test_tool_call_mode_auto_detects_support(self):
+        """Test tool_call_mode='auto' uses litellm for detection."""
+        model_api = MockModelAPI(["test"])
+        model_api.model = "gpt-3.5-turbo"
+        agent = Agent(name="test", model_api=model_api, tool_call_mode="auto")
+        assert agent._supports_native_tools is True
+
+    def test_tool_call_mode_auto_detects_no_support(self):
+        """Test tool_call_mode='auto' detects lack of support."""
+        model_api = MockModelAPI(["test"])
+        model_api.model = "unknown-model"
+        agent = Agent(name="test", model_api=model_api, tool_call_mode="auto")
+        assert agent._supports_native_tools is False
+
+
 class TestAgenticLoopToolCalling:
     """Tests for tool calling in the agentic loop."""
 

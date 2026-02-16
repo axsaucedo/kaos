@@ -193,7 +193,22 @@ config:
 
 The reasoning loop runs tool calls and delegations until the model produces a final response or max steps is reached.
 
-Tool calling mode is auto-detected at agent startup using the model's capabilities. Models that support native function calling (e.g., GPT-4, Claude) use the OpenAI `tools` API. Models without native support automatically fall back to text-based JSON parsing from model content.
+#### config.toolCallMode
+
+Controls how the agent invokes tools:
+
+```yaml
+config:
+  toolCallMode: auto  # Default: auto, Options: auto, native, string
+```
+
+| Mode | Description |
+|------|-------------|
+| `auto` | Auto-detect via `litellm.supports_function_calling(model)` at startup (default) |
+| `native` | Force native OpenAI function calling (`tools` API parameter) |
+| `string` | Force text-based JSON tool calling (tool descriptions in system prompt) |
+
+Use `native` or `string` to override auto-detection when the model registry is inaccurate or when you need a specific behavior.
 
 #### config.memory
 

@@ -188,6 +188,7 @@ class Agent:
         max_steps: int = 5,
         memory_context_limit: int = 6,
         memory_enabled: bool = True,
+        tool_call_mode: str = "auto",
     ):
         self.name = name
         self.instructions = instructions
@@ -202,13 +203,27 @@ class Agent:
         self.memory_context_limit = memory_context_limit
         self.memory_enabled = memory_enabled
 
-        # Auto-detect native tool calling support via litellm model registry
-        self._supports_native_tools = self._check_native_tool_support(model_api.model)
-        logger.info(f"Agent initialized: {name} (native_tools={self._supports_native_tools})")
+        # Determine native tool calling support based on mode
+        self._supports_native_tools = self._check_native_tool_support(
+            model_api.model, tool_call_mode
+        )
+        logger.info(
+            f"Agent initialized: {name} (tool_call_mode={tool_call_mode}, "
+            f"native_tools={self._supports_native_tools})"
+        )
 
     @staticmethod
-    def _check_native_tool_support(model: str) -> bool:
-        """Check if the model supports native function calling via litellm registry."""
+    def _check_native_tool_support(model: str, tool_call_mode: str = "auto") -> bool:
+        """Determine native tool calling support based on mode.
+
+        - "auto": auto-detect via litellm model registry
+        - "native": force native tool calling
+        - "string": force string-based tool calling
+        """
+        if tool_call_mode == "native":
+            return True
+        if tool_call_mode == "string":
+            return False
         try:
             return litellm.supports_function_calling(model=model)
         except Exception:

@@ -28,15 +28,17 @@ make format                     # Auto-format code
 | `MODEL_API_URL` | LLM API base URL (required) |
 | `MODEL_NAME` | Model name (required) |
 | `AGENT_SUB_AGENTS` | Direct format: `"name:url,name:url"` |
+| `TOOL_CALL_MODE` | Tool calling mode: `auto` (default), `native`, `string` |
 | `DEBUG_MOCK_RESPONSES` | JSON array of mock responses (tool_calls JSON or plain text) |
 | `OTEL_ENABLED` | Enable OpenTelemetry instrumentation |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP exporter endpoint |
 
 ## Agentic Loop (Two-Phase)
 
-The agent auto-detects native tool calling support using `litellm.supports_function_calling(model)`:
-- **Native**: Models with function calling use the OpenAI `tools` API parameter
-- **String fallback**: Models without support get tool descriptions in the system prompt and output `{"tool_calls": [{"name": "x", "arguments": {...}}]}` in content
+Tool calling mode is controlled by `TOOL_CALL_MODE` (default `auto`):
+- **auto**: Auto-detect via `litellm.supports_function_calling(model)` at startup
+- **native**: Force native OpenAI function calling (`tools` API parameter)
+- **string**: Force text-based JSON tool calling (tool descriptions in system prompt)
 
 Both modes use the same `tool_calls` array format — delegation uses `delegate_to_` prefix.
 
