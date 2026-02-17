@@ -460,7 +460,7 @@ class RedisMemory:
         except ImportError:
             raise ImportError("redis package required for RedisMemory: pip install redis")
 
-        self._redis = aioredis.from_url(redis_url, decode_responses=True)
+        self._redis: aioredis.Redis = aioredis.from_url(redis_url, decode_responses=True)
         self.max_sessions = max_sessions
         self.max_events_per_session = max_events_per_session
         self._prefix = key_prefix
@@ -505,7 +505,7 @@ class RedisMemory:
         return session_id
 
     async def get_session(self, session_id: str) -> Optional[SessionMemory]:
-        data = await self._redis.hgetall(self._session_key(session_id))
+        data = await self._redis.hgetall(self._session_key(session_id))  # ty: ignore[invalid-await]
         if not data:
             return None
 
@@ -625,7 +625,9 @@ class RedisMemory:
 
         filtered = []
         for sid in session_ids:
-            stored_uid = await self._redis.hget(self._session_key(sid), "user_id")
+            stored_uid = await self._redis.hget(
+                self._session_key(sid), "user_id"
+            )  # ty: ignore[invalid-await]
             if stored_uid == user_id:
                 filtered.append(sid)
         return filtered
