@@ -11,7 +11,7 @@ from unittest.mock import Mock, AsyncMock
 from typing import List, Dict, Optional
 
 from agent.client import Agent, RemoteAgent, AgentCard
-from agent.memory import LocalMemory, NullMemory
+from agent.memory import LocalMemory, NullMemory, RedisMemory
 from agent.server import AgentServer
 from modelapi.client import ModelAPI, ModelResponse, LiteLLM
 
@@ -284,6 +284,84 @@ class TestNullMemory:
         assert sessions == []
 
         logger.info("✓ Agent with NullMemory processes messages correctly")
+
+
+class TestRedisMemory:
+    """Tests for RedisMemory with mocked Redis client."""
+
+    @pytest.mark.asyncio
+    async def test_redis_memory_create_and_get_session(self):
+        """Test RedisMemory session creation and retrieval."""
+        from unittest.mock import patch, AsyncMock, MagicMock
+
+        mock_redis = AsyncMock()
+        mock_pipe = MagicMock()
+        mock_pipe.execute = AsyncMock(return_value=[])
+        mock_redis.pipeline = MagicMock(return_value=mock_pipe)
+        mock_redis.zcard = AsyncMock(return_value=0)
+
+        with patch("redis.asyncio.from_url", return_value=mock_redis):
+            memory = RedisMemory(redis_url="redis://localhost:6379")
+
+        session_id = await memory.create_session("test_app", "test_user", "test-session-1")
+        assert session_id == "test-session-1"
+
+        # Verify pipeline was used to write session data
+        mock_pipe.hset.assert_called_once()
+        mock_pipe.zadd.assert_called_once()
+        mock_pipe.execute.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_redis_memory_add_and_get_events(self):
+        """Test RedisMemory event storage and retrieval."""
+        import json
+        from unittest.mock import patch, AsyncMock, MagicMock
+
+        mock_redis = AsyncMock()
+        mock_pipe = MagicMock()
+        mock_pipe.execute = AsyncMock(return_value=[])
+        mock_redis.pipeline = MagicMock(return_value=mock_pipe)
+        mock_redis.exists = AsyncMock(return_value=True)
+        mock_redis.zcard = AsyncMock(return_value=1)
+
+        with patch("redis.asyncio.from_url", return_value=mock_redis):
+            memory = RedisMemory(redis_url="redis://localhost:6379")
+
+        event = memory.create_event("user_message", "Hello!")
+        result = await memory.add_event("session-1", event)
+        assert result is True
+
+        # Verify event was added via pipeline
+        assert mock_pipe.zadd.called
+        assert mock_pipe.hset.called
+
+    @pytest.mark.asyncio
+    async def test_redis_memory_returns_false_for_missing_session(self):
+        """Test RedisMemory rejects events for non-existent sessions."""
+        from unittest.mock import patch, AsyncMock
+
+        mock_redis = AsyncMock()
+        mock_redis.exists = AsyncMock(return_value=False)
+
+        with patch("redis.asyncio.from_url", return_value=mock_redis):
+            memory = RedisMemory(redis_url="redis://localhost:6379")
+
+        result = await memory.add_event("nonexistent", "user_message", "Hello")
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_redis_memory_create_event_has_otel_support(self):
+        """Test that RedisMemory.create_event includes OTel trace context."""
+        from unittest.mock import patch, AsyncMock
+
+        mock_redis = AsyncMock()
+        with patch("redis.asyncio.from_url", return_value=mock_redis):
+            memory = RedisMemory(redis_url="redis://localhost:6379")
+
+        event = memory.create_event("user_message", "Hello", {"custom": "meta"})
+        assert event.event_type == "user_message"
+        assert event.content == "Hello"
+        assert "custom" in event.metadata
 
 
 class TestMessageProcessing:

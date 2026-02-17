@@ -4,11 +4,13 @@ Agent memory and session management.
 Simple, clean implementation similar to Google ADK's InMemorySessionService.
 Provides session management, event logging, and context building for agents.
 
-Two implementations:
+Three implementations:
 - LocalMemory: Full in-memory storage with session/event limits
+- RedisMemory: Distributed storage backed by Redis
 - NullMemory: No-op implementation when memory is disabled
 """
 
+import json
 import uuid
 import logging
 from abc import ABC, abstractmethod
@@ -437,6 +439,245 @@ class NullMemory:
     async def cleanup_old_sessions(self, max_age_hours: int = 24) -> int:
         """No-op cleanup."""
         return 0
+
+
+class RedisMemory:
+    """Distributed memory backed by Redis.
+
+    Uses Redis hashes for session metadata and sorted sets for events.
+    Provides the same interface as LocalMemory but with distributed storage.
+    """
+
+    def __init__(
+        self,
+        redis_url: str = "redis://localhost:6379",
+        max_sessions: int = 1000,
+        max_events_per_session: int = 500,
+        key_prefix: str = "kaos:memory",
+    ):
+        try:
+            import redis.asyncio as aioredis
+        except ImportError:
+            raise ImportError("redis package required for RedisMemory: pip install redis")
+
+        self._redis = aioredis.from_url(redis_url, decode_responses=True)
+        self.max_sessions = max_sessions
+        self.max_events_per_session = max_events_per_session
+        self._prefix = key_prefix
+
+        logger.info(
+            f"RedisMemory initialized: url={redis_url}, max_sessions={max_sessions}, "
+            f"max_events_per_session={max_events_per_session}"
+        )
+
+    def _session_key(self, session_id: str) -> str:
+        return f"{self._prefix}:session:{session_id}"
+
+    def _events_key(self, session_id: str) -> str:
+        return f"{self._prefix}:events:{session_id}"
+
+    def _sessions_index_key(self) -> str:
+        return f"{self._prefix}:sessions"
+
+    async def create_session(
+        self, app_name: str, user_id: str, session_id: Optional[str] = None
+    ) -> str:
+        if not session_id:
+            session_id = f"session_{uuid.uuid4().hex[:12]}"
+
+        now = datetime.now(timezone.utc)
+        session_data = {
+            "session_id": session_id,
+            "user_id": user_id,
+            "app_name": app_name,
+            "created_at": now.isoformat(),
+            "updated_at": now.isoformat(),
+        }
+
+        await self._cleanup_sessions_if_needed()
+
+        pipe = self._redis.pipeline()
+        pipe.hset(self._session_key(session_id), mapping=session_data)
+        pipe.zadd(self._sessions_index_key(), {session_id: now.timestamp()})
+        await pipe.execute()
+
+        logger.debug(f"Created session: {session_id} for user: {user_id}")
+        return session_id
+
+    async def get_session(self, session_id: str) -> Optional[SessionMemory]:
+        data = await self._redis.hgetall(self._session_key(session_id))
+        if not data:
+            return None
+
+        events = await self._get_raw_events(session_id)
+        return SessionMemory(
+            session_id=data["session_id"],
+            user_id=data["user_id"],
+            app_name=data["app_name"],
+            events=deque(events, maxlen=self.max_events_per_session),
+            created_at=datetime.fromisoformat(data["created_at"]),
+            updated_at=datetime.fromisoformat(data["updated_at"]),
+        )
+
+    async def get_or_create_session(
+        self, session_id: str, app_name: str = "agent", user_id: str = "user"
+    ) -> str:
+        exists = await self._redis.exists(self._session_key(session_id))
+        if not exists:
+            await self.create_session(app_name, user_id, session_id)
+            logger.debug(f"Created new session for provided ID: {session_id}")
+        return session_id
+
+    async def add_event(
+        self,
+        session_id: str,
+        event_or_type: Union[MemoryEvent, str],
+        content: Any = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        exists = await self._redis.exists(self._session_key(session_id))
+        if not exists:
+            logger.warning(f"Session {session_id} not found, event not added")
+            return False
+
+        if isinstance(event_or_type, MemoryEvent):
+            event = event_or_type
+        else:
+            event = self.create_event(event_or_type, content, metadata)
+
+        now = datetime.now(timezone.utc)
+        event_json = json.dumps(event.to_dict())
+
+        pipe = self._redis.pipeline()
+        pipe.zadd(self._events_key(session_id), {event_json: now.timestamp()})
+        pipe.hset(self._session_key(session_id), "updated_at", now.isoformat())
+        pipe.zadd(self._sessions_index_key(), {session_id: now.timestamp()})
+        await pipe.execute()
+
+        # Trim to max events
+        count = await self._redis.zcard(self._events_key(session_id))
+        if count > self.max_events_per_session:
+            await self._redis.zremrangebyrank(
+                self._events_key(session_id), 0, count - self.max_events_per_session - 1
+            )
+
+        logger.debug(f"Added {event.event_type} event to session {session_id}")
+        return True
+
+    async def get_session_events(
+        self, session_id: str, event_types: Optional[List[str]] = None
+    ) -> List[MemoryEvent]:
+        events = await self._get_raw_events(session_id)
+        if event_types:
+            events = [e for e in events if e.event_type in event_types]
+        return events
+
+    async def _get_raw_events(self, session_id: str) -> List[MemoryEvent]:
+        raw = await self._redis.zrange(self._events_key(session_id), 0, -1)
+        events = []
+        for item in raw:
+            try:
+                events.append(MemoryEvent.from_dict(json.loads(item)))
+            except (json.JSONDecodeError, KeyError):
+                logger.warning(f"Skipping malformed event in session {session_id}")
+        return events
+
+    async def build_conversation_context(self, session_id: str, max_events: int = 20) -> str:
+        events = await self.get_session_events(session_id, ["user_message", "agent_response"])
+        recent_events = events[-max_events:] if len(events) > max_events else events
+
+        if not recent_events:
+            return ""
+
+        context_lines = []
+        for event in recent_events:
+            if event.event_type == "user_message":
+                context_lines.append(f"User: {event.content}")
+            elif event.event_type == "agent_response":
+                context_lines.append(f"Assistant: {event.content}")
+
+        return "\n".join(context_lines)
+
+    def create_event(
+        self, event_type: str, content: Any, metadata: Optional[Dict[str, Any]] = None
+    ) -> MemoryEvent:
+        from telemetry.manager import is_otel_enabled, get_current_trace_context
+
+        event_metadata = metadata.copy() if metadata else {}
+
+        if is_otel_enabled():
+            trace_ctx = get_current_trace_context()
+            if trace_ctx:
+                event_metadata.update(trace_ctx)
+
+        return MemoryEvent(
+            event_id=f"event_{uuid.uuid4().hex[:8]}",
+            timestamp=datetime.now(timezone.utc),
+            event_type=event_type,
+            content=content,
+            metadata=event_metadata,
+        )
+
+    async def list_sessions(self, user_id: Optional[str] = None) -> List[str]:
+        session_ids = await self._redis.zrange(self._sessions_index_key(), 0, -1)
+        if not user_id:
+            return session_ids
+
+        filtered = []
+        for sid in session_ids:
+            stored_uid = await self._redis.hget(self._session_key(sid), "user_id")
+            if stored_uid == user_id:
+                filtered.append(sid)
+        return filtered
+
+    async def delete_session(self, session_id: str) -> bool:
+        exists = await self._redis.exists(self._session_key(session_id))
+        if not exists:
+            return False
+
+        pipe = self._redis.pipeline()
+        pipe.delete(self._session_key(session_id))
+        pipe.delete(self._events_key(session_id))
+        pipe.zrem(self._sessions_index_key(), session_id)
+        await pipe.execute()
+
+        logger.debug(f"Deleted session: {session_id}")
+        return True
+
+    async def get_memory_stats(self) -> Dict[str, int]:
+        total_sessions = await self._redis.zcard(self._sessions_index_key())
+        total_events = 0
+        session_ids = await self._redis.zrange(self._sessions_index_key(), 0, -1)
+        for sid in session_ids:
+            total_events += await self._redis.zcard(self._events_key(sid))
+
+        return {
+            "total_sessions": total_sessions,
+            "total_events": total_events,
+            "avg_events_per_session": (int(total_events / total_sessions) if total_sessions else 0),
+        }
+
+    async def cleanup_old_sessions(self, max_age_hours: int = 24) -> int:
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
+        old_sessions = await self._redis.zrangebyscore(
+            self._sessions_index_key(), "-inf", cutoff.timestamp()
+        )
+
+        for sid in old_sessions:
+            await self.delete_session(sid)
+
+        if old_sessions:
+            logger.info(f"Cleaned up {len(old_sessions)} old sessions")
+        return len(old_sessions)
+
+    async def _cleanup_sessions_if_needed(self):
+        count = await self._redis.zcard(self._sessions_index_key())
+        if count >= self.max_sessions:
+            sessions_to_remove = max(1, self.max_sessions // 10)
+            oldest = await self._redis.zrange(self._sessions_index_key(), 0, sessions_to_remove - 1)
+            for sid in oldest:
+                await self.delete_session(sid)
+            logger.info(f"Cleaned up {len(oldest)} oldest sessions to stay under limit")
 
 
 # Backwards compatibility - this is the main class to use

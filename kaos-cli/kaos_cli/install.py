@@ -423,6 +423,7 @@ def install_command(
     monitoring_enabled: str | None = None,
     gateway_enabled: bool = False,
     metallb_enabled: bool = False,
+    redis_enabled: bool = False,
     chart_path: str | None = None,
 ) -> None:
     """Install the KAOS operator using Helm."""
@@ -539,6 +540,11 @@ def install_command(
         helm_args.extend(["--set", "gatewayAPI.enabled=true"])
         helm_args.extend(["--set", "gatewayAPI.createGateway=true"])
         helm_args.extend(["--set", f"gatewayAPI.gatewayClassName={GATEWAY_CLASS_NAME}"])
+
+    if redis_enabled:
+        helm_args.extend(["--set", "redis.enabled=true"])
+        redis_url = f"redis://redis.{namespace}:6379"
+        helm_args.extend(["--set", f"redis.url={redis_url}"])
 
     typer.echo(f"Installing chart {HELM_CHART_NAME}...")
     result = run_helm_command(helm_args)

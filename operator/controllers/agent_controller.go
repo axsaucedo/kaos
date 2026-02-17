@@ -500,6 +500,15 @@ func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *
 				Name:  "MEMORY_TYPE",
 				Value: mem.Type,
 			})
+			// Pass Redis URL from operator config when memory type is redis
+			if mem.Type == "redis" {
+				if redisURL := os.Getenv("DEFAULT_REDIS_URL"); redisURL != "" {
+					env = append(env, corev1.EnvVar{
+						Name:  "MEMORY_REDIS_URL",
+						Value: redisURL,
+					})
+				}
+			}
 		}
 		if mem.ContextLimit != nil {
 			env = append(env, corev1.EnvVar{

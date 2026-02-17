@@ -89,3 +89,11 @@ telemetry:
 # - ModelAPI (LiteLLM): Maps to LITELLM_LOG
 # - ModelAPI (Ollama): Maps to OLLAMA_DEBUG
 logLevel: INFO
+
+# Redis configuration for distributed agent memory
+redis:
+  # enabled controls whether Redis-backed memory is available
+  enabled: false
+  # url is the Redis connection URL (required when enabled)
+  # Example: "redis://redis.kaos-system:6379"
+  url: ""

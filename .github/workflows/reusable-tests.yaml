@@ -148,6 +148,9 @@ jobs:
       - name: Pull Ollama image
         run: docker pull alpine/ollama:latest
 
+      - name: Pull Redis image
+        run: docker pull redis:7-alpine
+
       - name: Tag MCP server image
         run: |
           docker tag ${{ env.REGISTRY }}/kaos-agent:${{ env.AGENT_TAG }} ${{ env.REGISTRY }}/kaos-mcp-server:${{ env.AGENT_TAG }}
@@ -182,6 +185,7 @@ jobs:
           kind load docker-image ${{ env.REGISTRY }}/kaos-mcp-pctx:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }} &
           kind load docker-image ghcr.io/berriai/litellm:main-stable --name ${{ env.KIND_CLUSTER_NAME }} &
           kind load docker-image alpine/ollama:latest --name ${{ env.KIND_CLUSTER_NAME }} &
+          kind load docker-image redis:7-alpine --name ${{ env.KIND_CLUSTER_NAME }} &
           wait
 
       - name: Install KAOS operator

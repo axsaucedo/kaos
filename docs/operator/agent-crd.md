@@ -41,7 +41,7 @@ spec:
     # Memory system configuration
     memory:
       enabled: true           # Enable/disable memory (default: true)
-      type: local             # Memory type (only "local" supported)
+      type: local             # Memory type: "local" or "redis"
       contextLimit: 6         # Messages for delegation context
       maxSessions: 1000       # Max sessions to keep
       maxSessionEvents: 500   # Max events per session
@@ -218,7 +218,7 @@ Memory system configuration:
 config:
   memory:
     enabled: true           # Enable/disable memory (default: true)
-    type: local             # Memory type (default: local, only option)
+    type: local             # Memory type (default: local, options: local, redis)
     contextLimit: 6         # Messages for delegation context (default: 6)
     maxSessions: 1000       # Max sessions to keep (default: 1000)
     maxSessionEvents: 500   # Max events per session (default: 500)
@@ -227,10 +227,15 @@ config:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `enabled` | bool | `true` | Enable memory; when `false`, uses NullMemory (no-op) |
-| `type` | string | `local` | Memory implementation type (only `local` supported) |
+| `type` | string | `local` | Memory implementation: `local` (in-memory) or `redis` (distributed) |
 | `contextLimit` | int | `6` | Messages to include when delegating to sub-agents |
 | `maxSessions` | int | `1000` | Maximum sessions before oldest are evicted |
 | `maxSessionEvents` | int | `500` | Maximum events per session before eviction |
+
+**Redis memory:**
+- Set `type: redis` and ensure Redis is configured globally via `redis.enabled=true` and `redis.url` in Helm values
+- Or set `MEMORY_REDIS_URL` env var directly on the agent container
+- Provides distributed session storage shared across agent replicas
 
 **When to disable memory:**
 - Stateless agents that don't need conversation history

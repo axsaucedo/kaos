@@ -116,11 +116,11 @@ spec:
                         type: integer
                       type:
                         default: local
-                        description: |-
-                          Type specifies the memory implementation (default: "local")
-                          Currently only "local" is supported
+                        description: 'Type specifies the memory implementation (default:
+                          "local")'
                         enum:
                         - local
+                        - redis
                         type: string
                     type: object
                   reasoningLoopMaxSteps:

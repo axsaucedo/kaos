@@ -137,3 +137,93 @@ async def test_agent_chat_completions(test_namespace: str, shared_modelapi: str)
         assert len(data["choices"]) > 0
         assert data["choices"][0]["message"]["role"] == "assistant"
         assert len(data["choices"][0]["message"]["content"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_agent_redis_memory(test_namespace: str, shared_modelapi: str):
+    """Test agent with Redis-backed distributed memory."""
+    agent_name = "redis-mem-agent"
+
+    # Deploy Redis in the test namespace
+    redis_spec = {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": {"name": "redis", "namespace": test_namespace},
+        "spec": {
+            "replicas": 1,
+            "selector": {"matchLabels": {"app": "redis"}},
+            "template": {
+                "metadata": {"labels": {"app": "redis"}},
+                "spec": {
+                    "containers": [
+                        {
+                            "name": "redis",
+                            "image": "redis:7-alpine",
+                            "ports": [{"containerPort": 6379}],
+                        }
+                    ]
+                },
+            },
+        },
+    }
+    redis_svc = {
+        "apiVersion": "v1",
+        "kind": "Service",
+        "metadata": {"name": "redis", "namespace": test_namespace},
+        "spec": {
+            "selector": {"app": "redis"},
+            "ports": [{"port": 6379, "targetPort": 6379}],
+        },
+    }
+    create_custom_resource(redis_spec, test_namespace)
+    create_custom_resource(redis_svc, test_namespace)
+    wait_for_deployment(test_namespace, "redis", timeout=120)
+
+    redis_url = f"redis://redis.{test_namespace}.svc.cluster.local:6379"
+
+    # Create agent with redis memory type
+    agent_spec = create_agent_resource(
+        namespace=test_namespace,
+        modelapi_name=shared_modelapi,
+        mcpserver_names=[],
+        agent_name=agent_name,
+    )
+    agent_spec["spec"]["config"]["memory"] = {
+        "enabled": True,
+        "type": "redis",
+    }
+    agent_spec["spec"]["container"]["env"].append(
+        {"name": "MEMORY_REDIS_URL", "value": redis_url}
+    )
+    create_custom_resource(agent_spec, test_namespace)
+
+    wait_for_deployment(test_namespace, f"agent-{agent_name}", timeout=120)
+
+    agent_base = gateway_url(test_namespace, "agent", agent_name)
+    wait_for_resource_ready(agent_base)
+    await async_wait_for_healthy(agent_base)
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        # Send a chat message
+        response = await client.post(
+            f"{agent_base}/v1/chat/completions",
+            json={
+                "model": agent_name,
+                "messages": [{"role": "user", "content": "Say hello"}],
+                "stream": False,
+            },
+        )
+        assert response.status_code == 200
+        result = response.json()
+        assert result["object"] == "chat.completion"
+        assert len(result["choices"][0]["message"]["content"]) > 0
+
+        # Verify memory events are stored (via Redis)
+        response = await client.get(f"{agent_base}/memory/events")
+        assert response.status_code == 200
+        memory = response.json()
+        assert memory["total"] >= 2
+
+        event_types = [e["event_type"] for e in memory["events"]]
+        assert "user_message" in event_types
+        assert "agent_response" in event_types
