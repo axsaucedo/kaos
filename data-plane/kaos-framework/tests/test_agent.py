@@ -287,12 +287,19 @@ class TestNullMemory:
 
 
 class TestRedisMemory:
-    """Tests for RedisMemory with mocked Redis client."""
+    """Tests for RedisMemory verifying actual Redis commands issued."""
+
+    def _make_redis_memory(self, mock_redis):
+        """Create a RedisMemory with a mocked Redis client."""
+        from unittest.mock import patch
+
+        with patch("redis.asyncio.from_url", return_value=mock_redis):
+            return RedisMemory(redis_url="redis://localhost:6379", max_events_per_session=10)
 
     @pytest.mark.asyncio
-    async def test_redis_memory_create_and_get_session(self):
-        """Test RedisMemory session creation and retrieval."""
-        from unittest.mock import patch, AsyncMock, MagicMock
+    async def test_create_session_issues_hset_and_zadd(self):
+        """Verify create_session pipelines HSET (session data) + EXPIRE + ZADD (index)."""
+        from unittest.mock import AsyncMock, MagicMock
 
         mock_redis = AsyncMock()
         mock_pipe = MagicMock()
@@ -300,68 +307,138 @@ class TestRedisMemory:
         mock_redis.pipeline = MagicMock(return_value=mock_pipe)
         mock_redis.zcard = AsyncMock(return_value=0)
 
-        with patch("redis.asyncio.from_url", return_value=mock_redis):
-            memory = RedisMemory(redis_url="redis://localhost:6379")
+        memory = self._make_redis_memory(mock_redis)
+        sid = await memory.create_session("app", "user1", "s1")
+        assert sid == "s1"
 
-        session_id = await memory.create_session("test_app", "test_user", "test-session-1")
-        assert session_id == "test-session-1"
-
-        # Verify pipeline was used to write session data
+        # Pipeline must contain: hset, expire, zadd
         mock_pipe.hset.assert_called_once()
+        call_args = mock_pipe.hset.call_args
+        assert call_args[0][0] == "kaos:memory:session:s1"
+        mapping = call_args[1]["mapping"]
+        assert mapping["session_id"] == "s1"
+        assert mapping["user_id"] == "user1"
+
+        mock_pipe.expire.assert_called_once()
         mock_pipe.zadd.assert_called_once()
         mock_pipe.execute.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_redis_memory_add_and_get_events(self):
-        """Test RedisMemory event storage and retrieval."""
+    async def test_add_event_uses_rpush_and_ltrim(self):
+        """Verify add_event uses RPUSH + LTRIM (list-based) in a single pipeline."""
         import json
-        from unittest.mock import patch, AsyncMock, MagicMock
+        from unittest.mock import AsyncMock, MagicMock
 
         mock_redis = AsyncMock()
         mock_pipe = MagicMock()
         mock_pipe.execute = AsyncMock(return_value=[])
         mock_redis.pipeline = MagicMock(return_value=mock_pipe)
         mock_redis.exists = AsyncMock(return_value=True)
-        mock_redis.zcard = AsyncMock(return_value=1)
 
-        with patch("redis.asyncio.from_url", return_value=mock_redis):
-            memory = RedisMemory(redis_url="redis://localhost:6379")
-
-        event = memory.create_event("user_message", "Hello!")
-        result = await memory.add_event("session-1", event)
+        memory = self._make_redis_memory(mock_redis)
+        result = await memory.add_event("s1", "user_message", "Hello!")
         assert result is True
 
-        # Verify event was added via pipeline
-        assert mock_pipe.zadd.called
-        assert mock_pipe.hset.called
+        # Verify RPUSH with JSON event data
+        mock_pipe.rpush.assert_called_once()
+        rpush_args = mock_pipe.rpush.call_args[0]
+        assert rpush_args[0] == "kaos:memory:events:s1"
+        event_data = json.loads(rpush_args[1])
+        assert event_data["event_type"] == "user_message"
+        assert event_data["content"] == "Hello!"
+        assert "event_id" in event_data
+
+        # Verify LTRIM for cap enforcement (keep last N)
+        mock_pipe.ltrim.assert_called_once_with("kaos:memory:events:s1", -10, -1)
+
+        # Verify session update + index + TTL refresh
+        mock_pipe.hset.assert_called_once()
+        mock_pipe.zadd.assert_called_once()
+        assert mock_pipe.expire.call_count == 2  # session key + events key
 
     @pytest.mark.asyncio
-    async def test_redis_memory_returns_false_for_missing_session(self):
-        """Test RedisMemory rejects events for non-existent sessions."""
-        from unittest.mock import patch, AsyncMock
+    async def test_get_events_uses_lrange_and_skips_malformed(self):
+        """Verify _get_raw_events uses LRANGE and skips malformed entries."""
+        import json
+        from unittest.mock import AsyncMock
+
+        valid_event = json.dumps(
+            {
+                "event_id": "e1",
+                "timestamp": "2026-01-01T00:00:00+00:00",
+                "event_type": "user_message",
+                "content": "hi",
+                "metadata": {},
+            }
+        )
+        mock_redis = AsyncMock()
+        mock_redis.lrange = AsyncMock(return_value=[valid_event, "not-json", "{}"])
+
+        memory = self._make_redis_memory(mock_redis)
+        events = await memory._get_raw_events("s1")
+
+        mock_redis.lrange.assert_called_once_with("kaos:memory:events:s1", 0, -1)
+        assert len(events) == 1
+        assert events[0].event_type == "user_message"
+
+    @pytest.mark.asyncio
+    async def test_get_events_deduplicates_by_event_id(self):
+        """Verify duplicate event_ids are skipped on read."""
+        import json
+        from unittest.mock import AsyncMock
+
+        event = {
+            "event_id": "e1",
+            "timestamp": "2026-01-01T00:00:00+00:00",
+            "event_type": "user_message",
+            "content": "hi",
+            "metadata": {},
+        }
+        mock_redis = AsyncMock()
+        mock_redis.lrange = AsyncMock(return_value=[json.dumps(event), json.dumps(event)])
+
+        memory = self._make_redis_memory(mock_redis)
+        events = await memory._get_raw_events("s1")
+        assert len(events) == 1
+
+    @pytest.mark.asyncio
+    async def test_add_event_rejects_missing_session(self):
+        """Verify add_event returns False for non-existent sessions."""
+        from unittest.mock import AsyncMock
 
         mock_redis = AsyncMock()
         mock_redis.exists = AsyncMock(return_value=False)
 
-        with patch("redis.asyncio.from_url", return_value=mock_redis):
-            memory = RedisMemory(redis_url="redis://localhost:6379")
-
+        memory = self._make_redis_memory(mock_redis)
         result = await memory.add_event("nonexistent", "user_message", "Hello")
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_redis_memory_create_event_has_otel_support(self):
-        """Test that RedisMemory.create_event includes OTel trace context."""
-        from unittest.mock import patch, AsyncMock
+    async def test_close_calls_aclose(self):
+        """Verify close() shuts down the Redis connection."""
+        from unittest.mock import AsyncMock
 
         mock_redis = AsyncMock()
-        with patch("redis.asyncio.from_url", return_value=mock_redis):
-            memory = RedisMemory(redis_url="redis://localhost:6379")
+        memory = self._make_redis_memory(mock_redis)
+        await memory.close()
+        mock_redis.aclose.assert_called_once()
 
-        event = memory.create_event("user_message", "Hello", {"custom": "meta"})
-        assert event.event_type == "user_message"
-        assert event.content == "Hello"
-        assert "custom" in event.metadata
+    @pytest.mark.asyncio
+    async def test_get_memory_stats_uses_llen(self):
+        """Verify stats use LLEN (list length) instead of ZCARD (sorted set)."""
+        from unittest.mock import AsyncMock
+
+        mock_redis = AsyncMock()
+        mock_redis.zcard = AsyncMock(return_value=2)
+        mock_redis.zrange = AsyncMock(return_value=["s1", "s2"])
+        mock_redis.llen = AsyncMock(return_value=5)
+
+        memory = self._make_redis_memory(mock_redis)
+        stats = await memory.get_memory_stats()
+
+        assert stats["total_sessions"] == 2
+        assert stats["total_events"] == 10  # 5 per session * 2
+        assert mock_redis.llen.call_count == 2
 
 
 class TestMessageProcessing:

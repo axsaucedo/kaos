@@ -444,8 +444,12 @@ class NullMemory:
 class RedisMemory:
     """Distributed memory backed by Redis.
 
-    Uses Redis hashes for session metadata and sorted sets for events.
-    Provides the same interface as LocalMemory but with distributed storage.
+    Storage model:
+    - Session metadata: Redis hash (HSET/HGETALL)
+    - Events: Redis list (RPUSH/LRANGE) — append-only conversation log
+    - Session index: Redis sorted set (ZADD/ZRANGE) — for listing/cleanup
+    - TTL: EXPIRE on session and event keys for automatic retention
+    - Writes: Single pipeline (RPUSH + LTRIM + HSET + ZADD) for atomicity
     """
 
     def __init__(
@@ -454,6 +458,7 @@ class RedisMemory:
         max_sessions: int = 1000,
         max_events_per_session: int = 500,
         key_prefix: str = "kaos:memory",
+        session_ttl_hours: int = 24,
     ):
         try:
             import redis.asyncio as aioredis
@@ -464,10 +469,11 @@ class RedisMemory:
         self.max_sessions = max_sessions
         self.max_events_per_session = max_events_per_session
         self._prefix = key_prefix
+        self._session_ttl = session_ttl_hours * 3600
 
         logger.info(
             f"RedisMemory initialized: url={redis_url}, max_sessions={max_sessions}, "
-            f"max_events_per_session={max_events_per_session}"
+            f"max_events={max_events_per_session}, ttl={session_ttl_hours}h"
         )
 
     def _session_key(self, session_id: str) -> str:
@@ -478,6 +484,14 @@ class RedisMemory:
 
     def _sessions_index_key(self) -> str:
         return f"{self._prefix}:sessions"
+
+    async def close(self):
+        """Close the Redis connection pool."""
+        try:
+            await self._redis.aclose()
+            logger.debug("RedisMemory connection closed")
+        except Exception as e:
+            logger.warning(f"Error closing Redis connection: {e}")
 
     async def create_session(
         self, app_name: str, user_id: str, session_id: Optional[str] = None
@@ -498,6 +512,7 @@ class RedisMemory:
 
         pipe = self._redis.pipeline()
         pipe.hset(self._session_key(session_id), mapping=session_data)
+        pipe.expire(self._session_key(session_id), self._session_ttl)
         pipe.zadd(self._sessions_index_key(), {session_id: now.timestamp()})
         await pipe.execute()
 
@@ -548,18 +563,15 @@ class RedisMemory:
         now = datetime.now(timezone.utc)
         event_json = json.dumps(event.to_dict())
 
+        # Atomic pipeline: append event, trim to cap, update session, refresh index/TTL
         pipe = self._redis.pipeline()
-        pipe.zadd(self._events_key(session_id), {event_json: now.timestamp()})
+        pipe.rpush(self._events_key(session_id), event_json)
+        pipe.ltrim(self._events_key(session_id), -self.max_events_per_session, -1)
         pipe.hset(self._session_key(session_id), "updated_at", now.isoformat())
         pipe.zadd(self._sessions_index_key(), {session_id: now.timestamp()})
+        pipe.expire(self._session_key(session_id), self._session_ttl)
+        pipe.expire(self._events_key(session_id), self._session_ttl)
         await pipe.execute()
-
-        # Trim to max events
-        count = await self._redis.zcard(self._events_key(session_id))
-        if count > self.max_events_per_session:
-            await self._redis.zremrangebyrank(
-                self._events_key(session_id), 0, count - self.max_events_per_session - 1
-            )
 
         logger.debug(f"Added {event.event_type} event to session {session_id}")
         return True
@@ -573,12 +585,21 @@ class RedisMemory:
         return events
 
     async def _get_raw_events(self, session_id: str) -> List[MemoryEvent]:
-        raw = await self._redis.zrange(self._events_key(session_id), 0, -1)
+        raw = await self._redis.lrange(
+            self._events_key(session_id), 0, -1
+        )  # ty: ignore[invalid-await]
         events = []
+        seen_ids: set = set()
         for item in raw:
             try:
-                events.append(MemoryEvent.from_dict(json.loads(item)))
-            except (json.JSONDecodeError, KeyError):
+                data = json.loads(item)
+                eid = data.get("event_id", "")
+                if eid and eid in seen_ids:
+                    continue
+                if eid:
+                    seen_ids.add(eid)
+                events.append(MemoryEvent.from_dict(data))
+            except (json.JSONDecodeError, KeyError, TypeError):
                 logger.warning(f"Skipping malformed event in session {session_id}")
         return events
 
@@ -651,7 +672,9 @@ class RedisMemory:
         total_events = 0
         session_ids = await self._redis.zrange(self._sessions_index_key(), 0, -1)
         for sid in session_ids:
-            total_events += await self._redis.zcard(self._events_key(sid))
+            total_events += await self._redis.llen(
+                self._events_key(sid)
+            )  # ty: ignore[invalid-await]
 
         return {
             "total_sessions": total_sessions,

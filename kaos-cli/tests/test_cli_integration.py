@@ -514,6 +514,7 @@ class TestSystemInstallFlags:
         output = strip_ansi(result.output)
         assert "--gateway-enabled" in output
         assert "--metallb-enabled" in output
+        assert "--redis-enabled" in output
 
     def test_install_invalid_monitoring_backend(self):
         result = runner.invoke(

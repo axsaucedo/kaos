@@ -986,6 +986,8 @@ class Agent:
                     await mcp_client.close()
             for sub_agent in self.sub_agents.values():
                 await sub_agent.close()
+            if hasattr(self.memory, "close"):
+                await self.memory.close()  # type: ignore[operator]
             logger.debug(f"Agent {self.name} closed successfully")
         except Exception as e:
             logger.warning(f"Error closing Agent {self.name}: {e}")

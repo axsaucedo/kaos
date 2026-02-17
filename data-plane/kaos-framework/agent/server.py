@@ -646,20 +646,15 @@ def create_agent_server(
     from agent.memory import LocalMemory, RedisMemory, NullMemory
 
     if settings.memory_enabled:
-        if settings.memory_type == "redis":
-            if not settings.memory_redis_url:
-                logger.warning("MEMORY_REDIS_URL not set, falling back to LocalMemory")
-                memory = LocalMemory(
-                    max_sessions=settings.memory_max_sessions,
-                    max_events_per_session=settings.memory_max_session_events,
-                )
-            else:
-                memory = RedisMemory(
-                    redis_url=settings.memory_redis_url,
-                    max_sessions=settings.memory_max_sessions,
-                    max_events_per_session=settings.memory_max_session_events,
-                )
+        if settings.memory_type == "redis" and settings.memory_redis_url:
+            memory = RedisMemory(
+                redis_url=settings.memory_redis_url,
+                max_sessions=settings.memory_max_sessions,
+                max_events_per_session=settings.memory_max_session_events,
+            )
         else:
+            if settings.memory_type == "redis":
+                logger.warning("MEMORY_REDIS_URL not set, falling back to LocalMemory")
             memory = LocalMemory(
                 max_sessions=settings.memory_max_sessions,
                 max_events_per_session=settings.memory_max_session_events,

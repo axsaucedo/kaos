@@ -10,6 +10,8 @@ Tests the agent server running in Kubernetes via Gateway API:
 import pytest
 import httpx
 
+from sh import kubectl
+
 from e2e.conftest import (
     async_wait_for_healthy,
     create_custom_resource,
@@ -141,7 +143,7 @@ async def test_agent_chat_completions(test_namespace: str, shared_modelapi: str)
 
 @pytest.mark.asyncio
 async def test_agent_redis_memory(test_namespace: str, shared_modelapi: str):
-    """Test agent with Redis-backed distributed memory."""
+    """Test agent with Redis-backed distributed memory persists across pod restarts."""
     agent_name = "redis-mem-agent"
 
     # Deploy Redis in the test namespace
@@ -218,12 +220,33 @@ async def test_agent_redis_memory(test_namespace: str, shared_modelapi: str):
         assert result["object"] == "chat.completion"
         assert len(result["choices"][0]["message"]["content"]) > 0
 
-        # Verify memory events are stored and retrieved via Redis
+        # Verify memory events are stored via Redis
         response = await client.get(f"{agent_base}/memory/events")
         assert response.status_code == 200
         memory = response.json()
-        # At least user_message + one response event (agent_response or error)
         assert memory["total"] >= 2, f"Expected >=2 events, got {memory['total']}: {memory}"
-
         event_types = [e["event_type"] for e in memory["events"]]
         assert "user_message" in event_types, f"Missing user_message in {event_types}"
+        initial_total = memory["total"]
+
+    # Delete the agent pod to test persistence across restarts
+    kubectl(
+        "delete", "pods",
+        "-n", test_namespace,
+        "-l", f"kaos.tools/agent={agent_name}",
+        "--wait=false",
+    )
+
+    # Wait for the pod to be recreated by the deployment
+    wait_for_deployment(test_namespace, f"agent-{agent_name}", timeout=120)
+    wait_for_resource_ready(agent_base)
+    await async_wait_for_healthy(agent_base)
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        # Verify memory events survived the pod restart (stored in Redis)
+        response = await client.get(f"{agent_base}/memory/events")
+        assert response.status_code == 200
+        memory = response.json()
+        assert memory["total"] >= initial_total, (
+            f"Events lost after pod restart: had {initial_total}, now {memory['total']}"
+        )

@@ -120,6 +120,11 @@ def uninstall(
         "--metallb-enabled",
         help="Also uninstall MetalLB.",
     ),
+    redis_enabled: bool = typer.Option(
+        False,
+        "--redis-enabled",
+        help="Also uninstall Redis.",
+    ),
 ) -> None:
     """Uninstall the KAOS operator."""
     if monitoring_enabled is not None and monitoring_enabled not in MONITORING_BACKENDS:
@@ -134,6 +139,7 @@ def uninstall(
         monitoring_enabled=monitoring_enabled,
         gateway_enabled=gateway_enabled,
         metallb_enabled=metallb_enabled,
+        redis_enabled=redis_enabled,
     )
 
 
