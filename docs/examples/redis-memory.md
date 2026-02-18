@@ -163,37 +163,14 @@ else:
 Delete the agent pod to simulate a restart. The deployment controller will recreate it automatically:
 
 ```bash
-kubectl delete pods -l kaos.tools/agent=memory-agent --wait=false
+kubectl delete pods -l kaos.tools/agent=memory-agent
 ```
+
+Wait for the new pod to be ready:
 
 ```bash
-kubectl rollout status deployment/agent-memory-agent --timeout=120s
-```
-
-Wait for the new pod to be healthy:
-
-```python
-import subprocess, time
-
-for attempt in range(30):
-    result = subprocess.run(
-        ["kubectl", "get", "pods", "-l", "kaos.tools/agent=memory-agent",
-         "-o", "jsonpath={.items[0].status.phase}"],
-        capture_output=True, text=True
-    )
-    if result.stdout.strip() == "Running":
-        # Check readiness
-        ready = subprocess.run(
-            ["kubectl", "get", "pods", "-l", "kaos.tools/agent=memory-agent",
-             "-o", "jsonpath={.items[0].status.conditions[?(@.type=='Ready')].status}"],
-            capture_output=True, text=True
-        )
-        if ready.stdout.strip() == "True":
-            print("Agent pod is running and ready!")
-            break
-    time.sleep(5)
-else:
-    raise AssertionError("Agent pod did not become ready after restart")
+kubectl rollout status deployment/agent-memory-agent --timeout=180s
+kubectl wait --for=condition=ready pod -l kaos.tools/agent=memory-agent --timeout=120s
 ```
 
 ## Step 7: Verify Memory Survived
