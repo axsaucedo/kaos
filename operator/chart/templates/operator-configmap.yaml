@@ -34,7 +34,7 @@ data:
   {{- end }}
   # Global log level for all components
   DEFAULT_LOG_LEVEL: {{ .Values.logLevel | default "INFO" | upper | quote }}
-  # Redis configuration for distributed agent memory
-  {{- if .Values.redis.enabled }}
-  DEFAULT_REDIS_URL: {{ .Values.redis.url | quote }}
+  # Agent defaults: memory configuration
+  {{- if eq .Values.agentDefaults.memory.type "redis" }}
+  DEFAULT_REDIS_URL: {{ .Values.agentDefaults.memory.redisUrl | quote }}
   {{- end }}

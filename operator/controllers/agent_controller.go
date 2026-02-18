@@ -501,12 +501,24 @@ func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *
 				Value: mem.Type,
 			})
 			// Pass Redis URL from operator config when memory type is redis
+			// Only inject if user hasn't set MEMORY_REDIS_URL in spec.container.env
 			if mem.Type == "redis" {
-				if redisURL := os.Getenv("DEFAULT_REDIS_URL"); redisURL != "" {
-					env = append(env, corev1.EnvVar{
-						Name:  "MEMORY_REDIS_URL",
-						Value: redisURL,
-					})
+				userHasRedisURL := false
+				if agent.Spec.Container != nil {
+					for _, e := range agent.Spec.Container.Env {
+						if e.Name == "MEMORY_REDIS_URL" {
+							userHasRedisURL = true
+							break
+						}
+					}
+				}
+				if !userHasRedisURL {
+					if redisURL := os.Getenv("DEFAULT_REDIS_URL"); redisURL != "" {
+						env = append(env, corev1.EnvVar{
+							Name:  "MEMORY_REDIS_URL",
+							Value: redisURL,
+						})
+					}
 				}
 			}
 		}

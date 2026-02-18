@@ -460,10 +460,7 @@ class RedisMemory:
         key_prefix: str = "kaos:memory",
         session_ttl_hours: int = 24,
     ):
-        try:
-            import redis.asyncio as aioredis
-        except ImportError:
-            raise ImportError("redis package required for RedisMemory: pip install redis")
+        import redis.asyncio as aioredis
 
         self._redis: aioredis.Redis = aioredis.from_url(redis_url, decode_responses=True)
         self.max_sessions = max_sessions
@@ -641,11 +638,28 @@ class RedisMemory:
 
     async def list_sessions(self, user_id: Optional[str] = None) -> List[str]:
         session_ids = await self._redis.zrange(self._sessions_index_key(), 0, -1)
+
+        # Session index hygiene: remove stale entries whose keys have expired
+        stale = []
+        live = []
+        for sid in session_ids:
+            exists = await self._redis.exists(self._session_key(sid))
+            if exists:
+                live.append(sid)
+            else:
+                stale.append(sid)
+        if stale:
+            pipe = self._redis.pipeline()
+            for sid in stale:
+                pipe.zrem(self._sessions_index_key(), sid)
+            await pipe.execute()
+            logger.debug(f"Reaped {len(stale)} stale session index entries")
+
         if not user_id:
-            return session_ids
+            return live
 
         filtered = []
-        for sid in session_ids:
+        for sid in live:
             stored_uid = await self._redis.hget(
                 self._session_key(sid), "user_id"
             )  # ty: ignore[invalid-await]
@@ -669,12 +683,15 @@ class RedisMemory:
 
     async def get_memory_stats(self) -> Dict[str, int]:
         total_sessions = await self._redis.zcard(self._sessions_index_key())
-        total_events = 0
         session_ids = await self._redis.zrange(self._sessions_index_key(), 0, -1)
-        for sid in session_ids:
-            total_events += await self._redis.llen(
-                self._events_key(sid)
-            )  # ty: ignore[invalid-await]
+
+        total_events = 0
+        if session_ids:
+            pipe = self._redis.pipeline()
+            for sid in session_ids:
+                pipe.llen(self._events_key(sid))
+            lengths = await pipe.execute()
+            total_events = sum(lengths)
 
         return {
             "total_sessions": total_sessions,

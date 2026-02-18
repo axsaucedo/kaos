@@ -603,9 +603,9 @@ def install_command(
         helm_args.extend(["--set", f"gatewayAPI.gatewayClassName={GATEWAY_CLASS_NAME}"])
 
     if redis_enabled:
-        helm_args.extend(["--set", "redis.enabled=true"])
+        helm_args.extend(["--set", "agentDefaults.memory.type=redis"])
         redis_url = f"redis://redis-master.{namespace}:6379"
-        helm_args.extend(["--set", f"redis.url={redis_url}"])
+        helm_args.extend(["--set", f"agentDefaults.memory.redisUrl={redis_url}"])
 
     typer.echo(f"Installing chart {HELM_CHART_NAME}...")
     result = run_helm_command(helm_args)

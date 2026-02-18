@@ -233,8 +233,8 @@ config:
 | `maxSessionEvents` | int | `500` | Maximum events per session before eviction |
 
 **Redis memory:**
-- Set `type: redis` and ensure Redis is configured globally via `redis.enabled=true` and `redis.url` in Helm values
-- Or set `MEMORY_REDIS_URL` env var directly on the agent container
+- Set `type: redis` and configure `agentDefaults.memory.type=redis` and `agentDefaults.memory.redisUrl` in Helm values
+- Or set `MEMORY_REDIS_URL` env var directly on the agent container (takes precedence over global config)
 - Provides distributed session storage shared across agent replicas
 
 **When to disable memory:**

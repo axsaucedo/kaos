@@ -424,21 +424,81 @@ class TestRedisMemory:
         mock_redis.aclose.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_get_memory_stats_uses_llen(self):
-        """Verify stats use LLEN (list length) instead of ZCARD (sorted set)."""
-        from unittest.mock import AsyncMock
+    async def test_get_memory_stats_uses_pipeline(self):
+        """Verify stats use pipelined LLEN calls instead of N+1 round-trips."""
+        from unittest.mock import AsyncMock, MagicMock
 
         mock_redis = AsyncMock()
         mock_redis.zcard = AsyncMock(return_value=2)
         mock_redis.zrange = AsyncMock(return_value=["s1", "s2"])
-        mock_redis.llen = AsyncMock(return_value=5)
+        mock_pipe = MagicMock()
+        mock_pipe.execute = AsyncMock(return_value=[5, 3])
+        mock_redis.pipeline = MagicMock(return_value=mock_pipe)
 
         memory = self._make_redis_memory(mock_redis)
         stats = await memory.get_memory_stats()
 
         assert stats["total_sessions"] == 2
-        assert stats["total_events"] == 10  # 5 per session * 2
-        assert mock_redis.llen.call_count == 2
+        assert stats["total_events"] == 8  # 5 + 3
+        assert mock_pipe.llen.call_count == 2
+        mock_pipe.execute.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_cleanup_old_sessions_deletes_expired(self):
+        """Verify cleanup_old_sessions removes sessions older than cutoff."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        mock_redis = AsyncMock()
+        mock_redis.zrangebyscore = AsyncMock(return_value=["old1", "old2"])
+        mock_redis.exists = AsyncMock(return_value=True)
+        mock_pipe = MagicMock()
+        mock_pipe.execute = AsyncMock(return_value=[])
+        mock_redis.pipeline = MagicMock(return_value=mock_pipe)
+
+        memory = self._make_redis_memory(mock_redis)
+        removed = await memory.cleanup_old_sessions(max_age_hours=1)
+
+        assert removed == 2
+        mock_redis.zrangebyscore.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_cleanup_sessions_if_needed_evicts_oldest(self):
+        """Verify _cleanup_sessions_if_needed evicts when at max_sessions."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        mock_redis = AsyncMock()
+        mock_redis.zcard = AsyncMock(return_value=10)
+        mock_redis.zrange = AsyncMock(return_value=["s1"])
+        mock_redis.exists = AsyncMock(return_value=True)
+        mock_pipe = MagicMock()
+        mock_pipe.execute = AsyncMock(return_value=[])
+        mock_redis.pipeline = MagicMock(return_value=mock_pipe)
+
+        memory = self._make_redis_memory(mock_redis)
+        memory.max_sessions = 10  # At limit
+        await memory._cleanup_sessions_if_needed()
+
+        # Should evict 10% = 1 session
+        mock_redis.zrange.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_list_sessions_reaps_stale_entries(self):
+        """Verify list_sessions removes index entries whose keys have expired."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        mock_redis = AsyncMock()
+        mock_redis.zrange = AsyncMock(return_value=["live1", "stale1"])
+        # live1 exists, stale1 doesn't
+        mock_redis.exists = AsyncMock(side_effect=[True, False])
+        mock_pipe = MagicMock()
+        mock_pipe.execute = AsyncMock(return_value=[])
+        mock_redis.pipeline = MagicMock(return_value=mock_pipe)
+
+        memory = self._make_redis_memory(mock_redis)
+        sessions = await memory.list_sessions()
+
+        assert sessions == ["live1"]
+        mock_pipe.zrem.assert_called_once_with("kaos:memory:sessions", "stale1")
 
 
 class TestMessageProcessing:
