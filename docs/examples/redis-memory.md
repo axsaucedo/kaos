@@ -164,13 +164,26 @@ Delete the agent pod to simulate a restart. The deployment controller will recre
 
 ```bash
 kubectl delete pods -l kaos.tools/agent=memory-agent
+kubectl rollout status deployment/agent-memory-agent --timeout=180s
 ```
 
-Wait for the new pod to be ready:
+Allow the new pod time to initialize and connect to Redis:
 
-```bash
-kubectl rollout status deployment/agent-memory-agent --timeout=180s
-kubectl wait --for=condition=ready pod -l kaos.tools/agent=memory-agent --timeout=120s
+```python
+import subprocess, time
+
+for attempt in range(24):
+    result = subprocess.run(
+        ["kubectl", "get", "pods", "-l", "kaos.tools/agent=memory-agent",
+         "-o", "jsonpath={.items[?(@.status.phase=='Running')].status.conditions[?(@.type=='Ready')].status}"],
+        capture_output=True, text=True
+    )
+    if "True" in result.stdout:
+        print("Agent pod is ready!")
+        break
+    time.sleep(5)
+else:
+    raise AssertionError("Agent pod did not become ready after restart")
 ```
 
 ## Step 7: Verify Memory Survived
