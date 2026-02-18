@@ -83,6 +83,9 @@ jobs:
           - name: examples-code-mode
             files: "e2e/test_examples_e2e.py"
             pytest_filter: "test_unified_mcp_gateway_example"
+          - name: example-redis-memory
+            files: "e2e/test_examples_e2e.py"
+            pytest_filter: "test_redis_memory_example"
     name: E2E (${{ matrix.shard.name }})
     steps:
       - name: Checkout
