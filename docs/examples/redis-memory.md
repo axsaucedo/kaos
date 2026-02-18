@@ -175,14 +175,30 @@ import subprocess, time
 for attempt in range(24):
     result = subprocess.run(
         ["kubectl", "get", "pods", "-l", "kaos.tools/agent=memory-agent",
-         "-o", "jsonpath={.items[?(@.status.phase=='Running')].status.conditions[?(@.type=='Ready')].status}"],
+         "-o", "wide"],
         capture_output=True, text=True
     )
-    if "True" in result.stdout:
+    if attempt % 4 == 0:
+        print(f"Attempt {attempt}: {result.stdout.strip()}")
+    # Check readiness via jsonpath
+    ready = subprocess.run(
+        ["kubectl", "get", "pods", "-l", "kaos.tools/agent=memory-agent",
+         "-o", "jsonpath={.items[0].status.conditions[?(@.type=='Ready')].status}"],
+        capture_output=True, text=True
+    )
+    if ready.stdout.strip() == "True":
         print("Agent pod is ready!")
         break
     time.sleep(5)
 else:
+    # Debug output on failure
+    debug = subprocess.run(["kubectl", "get", "pods", "-A"], capture_output=True, text=True)
+    print(f"All pods:\n{debug.stdout}")
+    debug = subprocess.run(
+        ["kubectl", "describe", "pod", "-l", "kaos.tools/agent=memory-agent"],
+        capture_output=True, text=True
+    )
+    print(f"Pod describe:\n{debug.stdout[-2000:]}")
     raise AssertionError("Agent pod did not become ready after restart")
 ```
 
