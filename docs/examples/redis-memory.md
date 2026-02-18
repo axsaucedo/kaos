@@ -163,7 +163,7 @@ else:
 Delete the agent pod to simulate a restart. The deployment controller will recreate it automatically:
 
 ```bash
-kubectl delete pods -l kaos.tools/agent=memory-agent
+kubectl delete pods -l agent=memory-agent
 kubectl rollout status deployment/agent-memory-agent --timeout=180s
 ```
 
@@ -173,16 +173,8 @@ Allow the new pod time to initialize and connect to Redis:
 import subprocess, time
 
 for attempt in range(24):
-    result = subprocess.run(
-        ["kubectl", "get", "pods", "-l", "kaos.tools/agent=memory-agent",
-         "-o", "wide"],
-        capture_output=True, text=True
-    )
-    if attempt % 4 == 0:
-        print(f"Attempt {attempt}: {result.stdout.strip()}")
-    # Check readiness via jsonpath
     ready = subprocess.run(
-        ["kubectl", "get", "pods", "-l", "kaos.tools/agent=memory-agent",
+        ["kubectl", "get", "pods", "-l", "agent=memory-agent",
          "-o", "jsonpath={.items[0].status.conditions[?(@.type=='Ready')].status}"],
         capture_output=True, text=True
     )
@@ -191,14 +183,8 @@ for attempt in range(24):
         break
     time.sleep(5)
 else:
-    # Debug output on failure
     debug = subprocess.run(["kubectl", "get", "pods", "-A"], capture_output=True, text=True)
     print(f"All pods:\n{debug.stdout}")
-    debug = subprocess.run(
-        ["kubectl", "describe", "pod", "-l", "kaos.tools/agent=memory-agent"],
-        capture_output=True, text=True
-    )
-    print(f"Pod describe:\n{debug.stdout[-2000:]}")
     raise AssertionError("Agent pod did not become ready after restart")
 ```
 
