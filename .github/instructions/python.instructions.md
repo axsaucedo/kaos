@@ -16,7 +16,7 @@ make format                     # Auto-format code
 ## Project Structure
 - `agent/client.py`: Agent, RemoteAgent, AgentCard classes with two-phase agentic loop
 - `agent/server.py`: AgentServer with A2A endpoints
-- `agent/memory.py`: LocalMemory for session/event management
+- `agent/memory.py`: LocalMemory, RedisMemory, NullMemory for session/event management
 - `agent/telemetry/`: OpenTelemetry instrumentation (tracing, metrics)
 - `mcptools/`: MCP (Model Context Protocol) tools
 - `modelapi/`: Model API client for OpenAI-compatible servers
@@ -29,6 +29,8 @@ make format                     # Auto-format code
 | `MODEL_NAME` | Model name (required) |
 | `AGENT_SUB_AGENTS` | Direct format: `"name:url,name:url"` |
 | `TOOL_CALL_MODE` | Tool calling mode: `auto` (default), `native`, `string` |
+| `MEMORY_TYPE` | Memory backend: `local` (default) or `redis` |
+| `MEMORY_REDIS_URL` | Redis connection URL (required when `MEMORY_TYPE=redis`) |
 | `DEBUG_MOCK_RESPONSES` | JSON array of mock responses (tool_calls JSON or plain text) |
 | `OTEL_ENABLED` | Enable OpenTelemetry instrumentation |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP exporter endpoint |

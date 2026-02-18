@@ -56,9 +56,8 @@ type MemoryConfig struct {
 	Enabled *bool `json:"enabled,omitempty"`
 
 	// Type specifies the memory implementation (default: "local")
-	// Currently only "local" is supported
 	// +kubebuilder:default="local"
-	// +kubebuilder:validation:Enum=local
+	// +kubebuilder:validation:Enum=local;redis
 	Type string `json:"type,omitempty"`
 
 	// ContextLimit is the number of messages to include in delegation context (default: 6)

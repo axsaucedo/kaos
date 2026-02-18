@@ -24,7 +24,7 @@ from dataclasses import dataclass
 import litellm
 import httpx
 from modelapi.client import ModelAPI, ModelResponse, ToolCall
-from agent.memory import LocalMemory, NullMemory
+from agent.memory import LocalMemory, NullMemory, RedisMemory
 from mcptools.client import MCPClient
 from telemetry.manager import (
     otel,
@@ -39,7 +39,7 @@ from opentelemetry.trace import SpanKind
 logger = logging.getLogger(__name__)
 
 # Type alias for memory implementations
-Memory = LocalMemory | NullMemory
+Memory = LocalMemory | RedisMemory | NullMemory
 
 DELEGATION_TOOL_PREFIX = "delegate_to_"
 
@@ -986,6 +986,8 @@ class Agent:
                     await mcp_client.close()
             for sub_agent in self.sub_agents.values():
                 await sub_agent.close()
+            if hasattr(self.memory, "close"):
+                await self.memory.close()  # type: ignore[operator]
             logger.debug(f"Agent {self.name} closed successfully")
         except Exception as e:
             logger.warning(f"Error closing Agent {self.name}: {e}")

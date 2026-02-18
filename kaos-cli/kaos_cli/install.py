@@ -378,6 +378,63 @@ def _install_monitoring(backend: str, namespace: str) -> bool:
     return _install_signoz(namespace)
 
 
+def _install_redis(namespace: str) -> bool:
+    """Install Redis for distributed agent memory."""
+    typer.echo("Installing Redis...")
+
+    result = run_helm_command(
+        ["repo", "add", "bitnami", "https://charts.bitnami.com/bitnami", "--force-update"],
+        check=False,
+    )
+    if result.returncode != 0 and "already exists" not in result.stderr:
+        typer.echo(f"Warning adding Bitnami repo: {result.stderr}", err=True)
+
+    run_helm_command(["repo", "update"], check=False)
+
+    result = run_helm_command(
+        [
+            "upgrade",
+            "--install",
+            "redis",
+            "bitnami/redis",
+            "--namespace",
+            namespace,
+            "--create-namespace",
+            "--set",
+            "architecture=standalone",
+            "--set",
+            "auth.enabled=false",
+        ],
+        check=False,
+    )
+    if result.returncode != 0:
+        typer.echo(f"Error installing Redis: {result.stderr}", err=True)
+        return False
+
+    typer.echo(f"✅ Redis installed in '{namespace}' namespace")
+    return True
+
+
+def _uninstall_redis(namespace: str) -> bool:
+    """Uninstall Redis."""
+    typer.echo("Uninstalling Redis...")
+
+    result = run_helm_command(
+        ["uninstall", "redis", "--namespace", namespace],
+        check=False,
+    )
+
+    if result.returncode == 0:
+        typer.echo(f"✅ Redis uninstalled from '{namespace}'")
+        return True
+    elif "not found" in result.stderr.lower():
+        typer.echo(f"Redis release not found in namespace '{namespace}'.")
+        return True
+    else:
+        typer.echo(f"Error uninstalling Redis: {result.stderr}", err=True)
+        return False
+
+
 def _uninstall_monitoring(backend: str, namespace: str) -> bool:
     """Uninstall monitoring stack for the given backend."""
     release = "jaeger" if backend == "jaeger" else "signoz"
@@ -423,6 +480,7 @@ def install_command(
     monitoring_enabled: str | None = None,
     gateway_enabled: bool = False,
     metallb_enabled: bool = False,
+    redis_enabled: bool = False,
     chart_path: str | None = None,
 ) -> None:
     """Install the KAOS operator using Helm."""
@@ -443,6 +501,10 @@ def install_command(
     if monitoring_enabled:
         if not _install_monitoring(monitoring_enabled, namespace):
             typer.echo("Warning: Monitoring installation failed, continuing...", err=True)
+
+    if redis_enabled:
+        if not _install_redis(namespace):
+            typer.echo("Warning: Redis installation failed, continuing...", err=True)
 
     # Phase 2: Wait for infra that the operator depends on
     if gateway_enabled:
@@ -540,6 +602,11 @@ def install_command(
         helm_args.extend(["--set", "gatewayAPI.createGateway=true"])
         helm_args.extend(["--set", f"gatewayAPI.gatewayClassName={GATEWAY_CLASS_NAME}"])
 
+    if redis_enabled:
+        helm_args.extend(["--set", "agentDefaults.memory.type=redis"])
+        redis_url = f"redis://redis-master.{namespace}:6379"
+        helm_args.extend(["--set", f"agentDefaults.memory.redisUrl={redis_url}"])
+
     typer.echo(f"Installing chart {HELM_CHART_NAME}...")
     result = run_helm_command(helm_args)
 
@@ -562,6 +629,7 @@ def uninstall_command(
     monitoring_enabled: str | None = None,
     gateway_enabled: bool = False,
     metallb_enabled: bool = False,
+    redis_enabled: bool = False,
 ) -> None:
     """Uninstall the KAOS operator using Helm."""
     if not check_helm_installed():
@@ -571,6 +639,10 @@ def uninstall_command(
     # Uninstall monitoring if requested
     if monitoring_enabled:
         _uninstall_monitoring(monitoring_enabled, namespace)
+
+    # Uninstall Redis if requested
+    if redis_enabled:
+        _uninstall_redis(namespace)
 
     # Delete all KAOS custom resources so operator can process finalizers
     typer.echo("Deleting KAOS custom resources...")

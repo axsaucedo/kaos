@@ -11,7 +11,7 @@ from unittest.mock import Mock, AsyncMock
 from typing import List, Dict, Optional
 
 from agent.client import Agent, RemoteAgent, AgentCard
-from agent.memory import LocalMemory, NullMemory
+from agent.memory import LocalMemory, NullMemory, RedisMemory
 from agent.server import AgentServer
 from modelapi.client import ModelAPI, ModelResponse, LiteLLM
 
@@ -284,6 +284,221 @@ class TestNullMemory:
         assert sessions == []
 
         logger.info("✓ Agent with NullMemory processes messages correctly")
+
+
+class TestRedisMemory:
+    """Tests for RedisMemory verifying actual Redis commands issued."""
+
+    def _make_redis_memory(self, mock_redis):
+        """Create a RedisMemory with a mocked Redis client."""
+        from unittest.mock import patch
+
+        with patch("redis.asyncio.from_url", return_value=mock_redis):
+            return RedisMemory(redis_url="redis://localhost:6379", max_events_per_session=10)
+
+    @pytest.mark.asyncio
+    async def test_create_session_issues_hset_and_zadd(self):
+        """Verify create_session pipelines HSET (session data) + EXPIRE + ZADD (index)."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        mock_redis = AsyncMock()
+        mock_pipe = MagicMock()
+        mock_pipe.execute = AsyncMock(return_value=[])
+        mock_redis.pipeline = MagicMock(return_value=mock_pipe)
+        mock_redis.zcard = AsyncMock(return_value=0)
+
+        memory = self._make_redis_memory(mock_redis)
+        sid = await memory.create_session("app", "user1", "s1")
+        assert sid == "s1"
+
+        # Pipeline must contain: hset, expire, zadd
+        mock_pipe.hset.assert_called_once()
+        call_args = mock_pipe.hset.call_args
+        assert call_args[0][0] == "kaos:memory:session:s1"
+        mapping = call_args[1]["mapping"]
+        assert mapping["session_id"] == "s1"
+        assert mapping["user_id"] == "user1"
+
+        mock_pipe.expire.assert_called_once()
+        mock_pipe.zadd.assert_called_once()
+        mock_pipe.execute.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_add_event_uses_rpush_and_ltrim(self):
+        """Verify add_event uses RPUSH + LTRIM (list-based) in a single pipeline."""
+        import json
+        from unittest.mock import AsyncMock, MagicMock
+
+        mock_redis = AsyncMock()
+        mock_pipe = MagicMock()
+        mock_pipe.execute = AsyncMock(return_value=[])
+        mock_redis.pipeline = MagicMock(return_value=mock_pipe)
+        mock_redis.exists = AsyncMock(return_value=True)
+
+        memory = self._make_redis_memory(mock_redis)
+        result = await memory.add_event("s1", "user_message", "Hello!")
+        assert result is True
+
+        # Verify RPUSH with JSON event data
+        mock_pipe.rpush.assert_called_once()
+        rpush_args = mock_pipe.rpush.call_args[0]
+        assert rpush_args[0] == "kaos:memory:events:s1"
+        event_data = json.loads(rpush_args[1])
+        assert event_data["event_type"] == "user_message"
+        assert event_data["content"] == "Hello!"
+        assert "event_id" in event_data
+
+        # Verify LTRIM for cap enforcement (keep last N)
+        mock_pipe.ltrim.assert_called_once_with("kaos:memory:events:s1", -10, -1)
+
+        # Verify session update + index + TTL refresh
+        mock_pipe.hset.assert_called_once()
+        mock_pipe.zadd.assert_called_once()
+        assert mock_pipe.expire.call_count == 2  # session key + events key
+
+    @pytest.mark.asyncio
+    async def test_get_events_uses_lrange_and_skips_malformed(self):
+        """Verify _get_raw_events uses LRANGE and skips malformed entries."""
+        import json
+        from unittest.mock import AsyncMock
+
+        valid_event = json.dumps(
+            {
+                "event_id": "e1",
+                "timestamp": "2026-01-01T00:00:00+00:00",
+                "event_type": "user_message",
+                "content": "hi",
+                "metadata": {},
+            }
+        )
+        mock_redis = AsyncMock()
+        mock_redis.lrange = AsyncMock(return_value=[valid_event, "not-json", "{}"])
+
+        memory = self._make_redis_memory(mock_redis)
+        events = await memory._get_raw_events("s1")
+
+        mock_redis.lrange.assert_called_once_with("kaos:memory:events:s1", 0, -1)
+        assert len(events) == 1
+        assert events[0].event_type == "user_message"
+
+    @pytest.mark.asyncio
+    async def test_get_events_deduplicates_by_event_id(self):
+        """Verify duplicate event_ids are skipped on read."""
+        import json
+        from unittest.mock import AsyncMock
+
+        event = {
+            "event_id": "e1",
+            "timestamp": "2026-01-01T00:00:00+00:00",
+            "event_type": "user_message",
+            "content": "hi",
+            "metadata": {},
+        }
+        mock_redis = AsyncMock()
+        mock_redis.lrange = AsyncMock(return_value=[json.dumps(event), json.dumps(event)])
+
+        memory = self._make_redis_memory(mock_redis)
+        events = await memory._get_raw_events("s1")
+        assert len(events) == 1
+
+    @pytest.mark.asyncio
+    async def test_add_event_rejects_missing_session(self):
+        """Verify add_event returns False for non-existent sessions."""
+        from unittest.mock import AsyncMock
+
+        mock_redis = AsyncMock()
+        mock_redis.exists = AsyncMock(return_value=False)
+
+        memory = self._make_redis_memory(mock_redis)
+        result = await memory.add_event("nonexistent", "user_message", "Hello")
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_close_calls_aclose(self):
+        """Verify close() shuts down the Redis connection."""
+        from unittest.mock import AsyncMock
+
+        mock_redis = AsyncMock()
+        memory = self._make_redis_memory(mock_redis)
+        await memory.close()
+        mock_redis.aclose.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_get_memory_stats_uses_pipeline(self):
+        """Verify stats use pipelined LLEN calls instead of N+1 round-trips."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        mock_redis = AsyncMock()
+        mock_redis.zcard = AsyncMock(return_value=2)
+        mock_redis.zrange = AsyncMock(return_value=["s1", "s2"])
+        mock_pipe = MagicMock()
+        mock_pipe.execute = AsyncMock(return_value=[5, 3])
+        mock_redis.pipeline = MagicMock(return_value=mock_pipe)
+
+        memory = self._make_redis_memory(mock_redis)
+        stats = await memory.get_memory_stats()
+
+        assert stats["total_sessions"] == 2
+        assert stats["total_events"] == 8  # 5 + 3
+        assert mock_pipe.llen.call_count == 2
+        mock_pipe.execute.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_cleanup_old_sessions_deletes_expired(self):
+        """Verify cleanup_old_sessions removes sessions older than cutoff."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        mock_redis = AsyncMock()
+        mock_redis.zrangebyscore = AsyncMock(return_value=["old1", "old2"])
+        mock_redis.exists = AsyncMock(return_value=True)
+        mock_pipe = MagicMock()
+        mock_pipe.execute = AsyncMock(return_value=[])
+        mock_redis.pipeline = MagicMock(return_value=mock_pipe)
+
+        memory = self._make_redis_memory(mock_redis)
+        removed = await memory.cleanup_old_sessions(max_age_hours=1)
+
+        assert removed == 2
+        mock_redis.zrangebyscore.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_cleanup_sessions_if_needed_evicts_oldest(self):
+        """Verify _cleanup_sessions_if_needed evicts when at max_sessions."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        mock_redis = AsyncMock()
+        mock_redis.zcard = AsyncMock(return_value=10)
+        mock_redis.zrange = AsyncMock(return_value=["s1"])
+        mock_redis.exists = AsyncMock(return_value=True)
+        mock_pipe = MagicMock()
+        mock_pipe.execute = AsyncMock(return_value=[])
+        mock_redis.pipeline = MagicMock(return_value=mock_pipe)
+
+        memory = self._make_redis_memory(mock_redis)
+        memory.max_sessions = 10  # At limit
+        await memory._cleanup_sessions_if_needed()
+
+        # Should evict 10% = 1 session
+        mock_redis.zrange.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_list_sessions_reaps_stale_entries(self):
+        """Verify list_sessions removes index entries whose keys have expired."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        mock_redis = AsyncMock()
+        mock_redis.zrange = AsyncMock(return_value=["live1", "stale1"])
+        # live1 exists, stale1 doesn't
+        mock_redis.exists = AsyncMock(side_effect=[True, False])
+        mock_pipe = MagicMock()
+        mock_pipe.execute = AsyncMock(return_value=[])
+        mock_redis.pipeline = MagicMock(return_value=mock_pipe)
+
+        memory = self._make_redis_memory(mock_redis)
+        sessions = await memory.list_sessions()
+
+        assert sessions == ["live1"]
+        mock_pipe.zrem.assert_called_once_with("kaos:memory:sessions", "stale1")
 
 
 class TestMessageProcessing:

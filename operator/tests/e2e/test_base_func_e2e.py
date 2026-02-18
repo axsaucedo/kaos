@@ -137,3 +137,4 @@ async def test_agent_chat_completions(test_namespace: str, shared_modelapi: str)
         assert len(data["choices"]) > 0
         assert data["choices"][0]["message"]["role"] == "assistant"
         assert len(data["choices"][0]["message"]["content"]) > 0
+

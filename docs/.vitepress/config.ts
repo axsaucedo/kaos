@@ -95,6 +95,7 @@ export default withMermaid(defineConfig({
         items: [
           { text: 'Custom MCP Server', link: '/examples/custom-mcp-server' },
           { text: 'KAOS Monkey', link: '/examples/kaos-monkey' },
+          { text: 'Redis Distributed Memory', link: '/examples/redis-memory' },
           { text: 'Unified MCP Code Mode', link: '/examples/unified-mcp-gateway' },
           { text: 'Multi-Agent Telemetry', link: '/examples/multi-agent-telemetry' }
         ]
