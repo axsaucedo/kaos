@@ -421,6 +421,23 @@ class TestSamples:
         assert secret_ref["name"] == "my-secret"
         assert secret_ref["key"] == "my-key"
 
+    def test_deploy_sample_with_provider_override(self):
+        result = runner.invoke(
+            app,
+            [
+                "samples",
+                "deploy",
+                "5-proxy-external-api",
+                "--provider",
+                "openai",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0
+        docs = list(yaml.safe_load_all(result.output))
+        modelapi = next(d for d in docs if d and d["kind"] == "ModelAPI")
+        assert modelapi["spec"]["proxyConfig"]["provider"] == "openai"
+
     def test_deploy_nonexistent_sample(self):
         result = runner.invoke(
             app, ["samples", "deploy", "nonexistent", "--dry-run"]

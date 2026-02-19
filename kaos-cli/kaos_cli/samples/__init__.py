@@ -71,6 +71,7 @@ def _apply_overrides(
     model: str | None,
     api_secret: str | None,
     namespace: str | None,
+    provider: str | None = None,
 ) -> str:
     """Apply CLI overrides to sample YAML content using YAML parser."""
     docs = list(yaml.safe_load_all(yaml_content))
@@ -112,6 +113,8 @@ def _apply_overrides(
             if hosted and model:
                 hosted["model"] = model
             proxy = spec.get("proxyConfig")
+            if proxy and provider:
+                proxy["provider"] = provider
             if proxy and secret_name:
                 proxy["apiKey"] = {
                     "valueFrom": {
@@ -151,6 +154,7 @@ def deploy_sample(
     mode: str | None = None,
     model: str | None = None,
     api_secret: str | None = None,
+    provider: str | None = None,
 ) -> None:
     """Deploy a sample configuration."""
     sample_path = _find_sample(name)
@@ -169,6 +173,7 @@ def deploy_sample(
         model=model,
         api_secret=api_secret,
         namespace=namespace,
+        provider=provider,
     )
 
     if dry_run:
@@ -301,6 +306,11 @@ def deploy_cmd(
         "--api-secret",
         help="Override API secret (secretname:key format).",
     ),
+    provider: str = typer.Option(
+        None,
+        "--provider",
+        help="Override LiteLLM provider for ModelAPI (e.g., openai, nebius).",
+    ),
 ) -> None:
     """Deploy a sample configuration.
 
@@ -309,6 +319,7 @@ def deploy_cmd(
       kaos samples deploy 3-hierarchical-agents --namespace my-ns
       kaos samples deploy 1-simple-echo-agent --model "llama3:8b" --dry-run
       kaos samples deploy 1-simple-echo-agent --api-secret nebius-secrets:api-key
+      kaos samples deploy 5-proxy-external-api --provider openai
     """
     deploy_sample(
         name=name,
@@ -320,6 +331,7 @@ def deploy_cmd(
         mode=mode,
         model=model,
         api_secret=api_secret,
+        provider=provider,
     )
 
 
