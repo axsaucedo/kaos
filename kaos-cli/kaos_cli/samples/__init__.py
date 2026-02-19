@@ -1,11 +1,15 @@
 """KAOS samples commands - deploy example configurations."""
 
+import getpass
 import subprocess
 import tempfile
 from pathlib import Path
 
+import click
 import typer
 import yaml
+
+_API_SECRET_PROMPT = "__PROMPT__"
 
 # Resolve samples directory: bundled package data (copied at build time), or repo path
 _PACKAGE_DATA_DIR = Path(__file__).resolve().parent / "data"
@@ -144,6 +148,33 @@ def list_samples() -> None:
         typer.echo("")
 
 
+def _create_api_secret(
+    name: str, namespace: str | None, api_key: str
+) -> tuple[str, str]:
+    """Create a Kubernetes secret for API key and return (secret_name, key_name)."""
+    secret_name = f"kaos-{name}-api-key"
+    key_name = "api-key"
+    secret_yaml = (
+        f"apiVersion: v1\nkind: Secret\nmetadata:\n  name: {secret_name}\n"
+        f"type: Opaque\nstringData:\n  {key_name}: {api_key}\n"
+    )
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        f.write(secret_yaml)
+        tmp_path = f.name
+    try:
+        args = ["kubectl", "apply", "-f", tmp_path]
+        if namespace:
+            args.extend(["-n", namespace])
+        result = subprocess.run(args, capture_output=True, text=True)
+        if result.returncode != 0:
+            typer.echo(f"Error creating secret: {result.stderr}", err=True)
+            raise typer.Exit(result.returncode)
+        typer.echo(f"🔑 Created secret '{secret_name}'")
+    finally:
+        Path(tmp_path).unlink()
+    return secret_name, key_name
+
+
 def deploy_sample(
     name: str,
     namespace: str | None = None,
@@ -164,6 +195,20 @@ def deploy_sample(
         raise typer.Exit(1)
 
     raw_content = sample_path.read_text()
+
+    # Handle api_secret prompt: bare flag or name without colon triggers key input
+    if api_secret == _API_SECRET_PROMPT or (api_secret and ":" not in api_secret):
+        if dry_run:
+            typer.echo(
+                "Note: --api-secret without secretname:key would prompt for API key",
+                err=True,
+            )
+            secret_name = f"kaos-{name}-api-key"
+            api_secret = f"{secret_name}:api-key"
+        else:
+            api_key = getpass.getpass("Enter API key: ")
+            secret_name, secret_key = _create_api_secret(name, namespace, api_key)
+            api_secret = f"{secret_name}:{secret_key}"
 
     # Apply overrides
     yaml_content = _apply_overrides(
@@ -262,7 +307,40 @@ def delete_sample(name: str, namespace: str | None = None) -> None:
     typer.echo(f"\n✅ Deleted sample '{name}'")
 
 
+from typer.core import TyperGroup
+
+
+class _SamplesGroup(TyperGroup):
+    """Custom Group that allows --api-secret to be used without a value."""
+
+    def get_command(self, ctx, cmd_name):
+        cmd = super().get_command(ctx, cmd_name)
+        if cmd and cmd_name == "deploy":
+            original_parse = cmd.parse_args
+
+            def patched_parse(ctx, args):
+                new_args = []
+                i = 0
+                while i < len(args):
+                    if args[i] == "--api-secret":
+                        new_args.append(args[i])
+                        if i + 1 < len(args) and not args[i + 1].startswith("-"):
+                            new_args.append(args[i + 1])
+                            i += 2
+                        else:
+                            new_args.append(_API_SECRET_PROMPT)
+                            i += 1
+                    else:
+                        new_args.append(args[i])
+                        i += 1
+                return original_parse(ctx, new_args)
+
+            cmd.parse_args = patched_parse
+        return cmd
+
+
 app = typer.Typer(
+    cls=_SamplesGroup,
     help="Deploy and manage example configurations.",
     no_args_is_help=True,
 )
@@ -304,7 +382,7 @@ def deploy_cmd(
     api_secret: str = typer.Option(
         None,
         "--api-secret",
-        help="Override API secret (secretname:key format).",
+        help="API secret (secretname:key format, or pass without value to prompt for key).",
     ),
     provider: str = typer.Option(
         None,

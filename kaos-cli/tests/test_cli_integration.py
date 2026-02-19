@@ -438,6 +438,49 @@ class TestSamples:
         modelapi = next(d for d in docs if d and d["kind"] == "ModelAPI")
         assert modelapi["spec"]["proxyConfig"]["provider"] == "openai"
 
+    def test_deploy_sample_api_secret_without_value_dry_run(self):
+        """--api-secret without value shows prompt note and uses placeholder in dry-run."""
+        result = runner.invoke(
+            app,
+            [
+                "samples",
+                "deploy",
+                "5-proxy-external-api",
+                "--api-secret",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0
+        docs = list(yaml.safe_load_all(result.output))
+        modelapi = next(d for d in docs if d and d["kind"] == "ModelAPI")
+        secret_ref = modelapi["spec"]["proxyConfig"]["apiKey"]["valueFrom"][
+            "secretKeyRef"
+        ]
+        assert secret_ref["name"] == "kaos-5-proxy-external-api-api-key"
+        assert secret_ref["key"] == "api-key"
+
+    def test_deploy_sample_api_secret_bare_name_dry_run(self):
+        """--api-secret with bare name (no colon) shows prompt note in dry-run."""
+        result = runner.invoke(
+            app,
+            [
+                "samples",
+                "deploy",
+                "5-proxy-external-api",
+                "--api-secret",
+                "my-custom-secret",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0
+        docs = list(yaml.safe_load_all(result.output))
+        modelapi = next(d for d in docs if d and d["kind"] == "ModelAPI")
+        secret_ref = modelapi["spec"]["proxyConfig"]["apiKey"]["valueFrom"][
+            "secretKeyRef"
+        ]
+        assert secret_ref["name"] == "kaos-5-proxy-external-api-api-key"
+        assert secret_ref["key"] == "api-key"
+
     def test_deploy_nonexistent_sample(self):
         result = runner.invoke(
             app, ["samples", "deploy", "nonexistent", "--dry-run"]
