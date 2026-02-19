@@ -555,6 +555,18 @@ class TestMonitoringValidation:
         assert result.exit_code != 0
         assert "Invalid monitoring backend" in result.output
 
+    def test_ui_monitoring_enabled_without_value_defaults_signoz(self):
+        """--monitoring-enabled without value defaults to signoz (no invalid backend error)."""
+        from unittest.mock import patch
+
+        with patch("kaos_cli.ui.check_monitoring_service", return_value=False):
+            result = runner.invoke(
+                app, ["ui", "--monitoring-enabled", "--no-browser"]
+            )
+        # Should not error on invalid backend; fails on service not found instead
+        assert "Invalid monitoring backend" not in result.output
+        assert "signoz" in result.output.lower()
+
 
 # ─── System install flags ───────────────────────────────────────────────
 
@@ -582,6 +594,60 @@ class TestSystemInstallFlags:
         )
         assert result.exit_code != 0
         assert "Invalid monitoring backend" in result.output
+
+    def test_install_monitoring_enabled_without_value(self):
+        """--monitoring-enabled without value defaults to signoz (not an invalid backend error)."""
+        from unittest.mock import patch
+
+        with patch("kaos_cli.install.check_helm_installed", return_value=False):
+            result = runner.invoke(
+                app, ["system", "install", "--monitoring-enabled"]
+            )
+        # Should not error on invalid backend (signoz is valid)
+        assert "Invalid monitoring backend" not in result.output
+
+    def test_uninstall_monitoring_enabled_without_value(self):
+        """--monitoring-enabled without value defaults to signoz on uninstall."""
+        from unittest.mock import patch
+
+        with patch("kaos_cli.install.check_helm_installed", return_value=False):
+            result = runner.invoke(
+                app, ["system", "uninstall", "--monitoring-enabled"]
+            )
+        assert "Invalid monitoring backend" not in result.output
+
+
+# ─── Optional value flag preprocessing ──────────────────────────────────
+
+
+class TestPreprocessOptionalValueFlag:
+    def test_flag_without_value_inserts_default(self):
+        from kaos_cli.utils import preprocess_optional_value_flag
+
+        args = ["--monitoring-enabled", "--other-flag"]
+        result = preprocess_optional_value_flag(args, "--monitoring-enabled", "signoz")
+        assert result == ["--monitoring-enabled", "signoz", "--other-flag"]
+
+    def test_flag_with_value_preserves_it(self):
+        from kaos_cli.utils import preprocess_optional_value_flag
+
+        args = ["--monitoring-enabled", "jaeger", "--other-flag"]
+        result = preprocess_optional_value_flag(args, "--monitoring-enabled", "signoz")
+        assert result == ["--monitoring-enabled", "jaeger", "--other-flag"]
+
+    def test_flag_at_end_inserts_default(self):
+        from kaos_cli.utils import preprocess_optional_value_flag
+
+        args = ["--some-flag", "--monitoring-enabled"]
+        result = preprocess_optional_value_flag(args, "--monitoring-enabled", "signoz")
+        assert result == ["--some-flag", "--monitoring-enabled", "signoz"]
+
+    def test_flag_not_present_unchanged(self):
+        from kaos_cli.utils import preprocess_optional_value_flag
+
+        args = ["--other-flag", "value"]
+        result = preprocess_optional_value_flag(args, "--monitoring-enabled", "signoz")
+        assert result == ["--other-flag", "value"]
 
 
 # ─── Version command ────────────────────────────────────────────────────

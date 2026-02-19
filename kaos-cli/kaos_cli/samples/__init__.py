@@ -5,7 +5,6 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-import click
 import typer
 import yaml
 
@@ -308,6 +307,7 @@ def delete_sample(name: str, namespace: str | None = None) -> None:
 
 
 from typer.core import TyperGroup
+from kaos_cli.utils import preprocess_optional_value_flag
 
 
 class _SamplesGroup(TyperGroup):
@@ -319,21 +319,10 @@ class _SamplesGroup(TyperGroup):
             original_parse = cmd.parse_args
 
             def patched_parse(ctx, args):
-                new_args = []
-                i = 0
-                while i < len(args):
-                    if args[i] == "--api-secret":
-                        new_args.append(args[i])
-                        if i + 1 < len(args) and not args[i + 1].startswith("-"):
-                            new_args.append(args[i + 1])
-                            i += 2
-                        else:
-                            new_args.append(_API_SECRET_PROMPT)
-                            i += 1
-                    else:
-                        new_args.append(args[i])
-                        i += 1
-                return original_parse(ctx, new_args)
+                args = preprocess_optional_value_flag(
+                    args, "--api-secret", _API_SECRET_PROMPT
+                )
+                return original_parse(ctx, args)
 
             cmd.parse_args = patched_parse
         return cmd

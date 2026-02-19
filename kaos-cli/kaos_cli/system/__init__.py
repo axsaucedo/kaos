@@ -4,14 +4,36 @@ import subprocess
 import sys
 
 import typer
+from typer.core import TyperGroup
 
 from kaos_cli.system.install import install_command, uninstall_command
 from kaos_cli.system.create_rbac import create_rbac_command
 from kaos_cli.system.status import status_command
 from kaos_cli.install import DEFAULT_RELEASE_NAME, MONITORING_BACKENDS
 from kaos_cli.system.runtimes import runtimes_command
+from kaos_cli.utils import DEFAULT_MONITORING_BACKEND, preprocess_optional_value_flag
+
+
+class _SystemGroup(TyperGroup):
+    """Custom Group that allows --monitoring-enabled without a value (defaults to signoz)."""
+
+    def get_command(self, ctx, cmd_name):
+        cmd = super().get_command(ctx, cmd_name)
+        if cmd and cmd_name in ("install", "uninstall"):
+            original_parse = cmd.parse_args
+
+            def patched_parse(ctx, args):
+                args = preprocess_optional_value_flag(
+                    args, "--monitoring-enabled", DEFAULT_MONITORING_BACKEND
+                )
+                return original_parse(ctx, args)
+
+            cmd.parse_args = patched_parse
+        return cmd
+
 
 app = typer.Typer(
+    cls=_SystemGroup,
     help="System management commands for KAOS operator.",
     no_args_is_help=True,
 )
