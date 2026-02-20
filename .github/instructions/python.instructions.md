@@ -49,7 +49,8 @@ make format                     # Auto-format code
 
 ### Core: Pydantic AI Agent Wrapper
 The KAOS `Agent` class wraps `pydantic_ai.Agent`:
-- Model configured via `OpenAIChatModel(model_name, provider=OpenAIProvider(base_url=MODEL_API_URL))`
+- Model configured via `OpenAIChatModel(model_name, provider=OpenAIProvider(base_url=MODEL_API_URL + "/v1"))`
+- `/v1` is auto-appended to `MODEL_API_URL` if not present (required for Ollama OpenAI-compat endpoint)
 - MCP servers passed as `toolsets=[MCPServerStreamableHTTP(url)]` to Pydantic AI
 - Sub-agent delegation registered as `@agent.tool_plain` functions with `delegate_to_` prefix
 - Agentic loop handled entirely by Pydantic AI (no custom loop code)
