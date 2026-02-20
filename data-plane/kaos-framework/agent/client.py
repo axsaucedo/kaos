@@ -449,10 +449,20 @@ class Agent:
                 if isinstance(part, ToolReturnPart):
                     is_delegation = part.tool_name.startswith("delegate_to_")
                     event_type = "delegation_response" if is_delegation else "tool_result"
+                    result_content = part.content
+                    if isinstance(result_content, (dict, list)):
+                        result_value = result_content
+                    elif isinstance(result_content, str):
+                        try:
+                            result_value = json.loads(result_content)
+                        except (json.JSONDecodeError, ValueError):
+                            result_value = result_content
+                    else:
+                        result_value = str(result_content)
                     await self.memory.add_event(
                         session_id,
                         event_type,
-                        {"tool": part.tool_name, "result": str(part.content)},
+                        {"tool": part.tool_name, "result": result_value},
                     )
 
     async def get_agent_card(self, base_url: str) -> AgentCard:

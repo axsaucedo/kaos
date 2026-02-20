@@ -171,13 +171,13 @@ Set `DEBUG_MOCK_RESPONSES` environment variable to test loop behavior determinis
 The `tool_calls` format works for both native and string mode:
 
 ```bash
-# Test tool calling (tool call → no action → final)
-export DEBUG_MOCK_RESPONSES='["{\"tool_calls\": [{\"id\": \"call_1\", \"name\": \"echo\", \"arguments\": {\"text\": \"hello\"}}]}", "No more actions.", "The echo returned: hello"]'
+# Test tool calling (tool call → final)
+export DEBUG_MOCK_RESPONSES='["{\"tool_calls\": [{\"id\": \"call_1\", \"name\": \"echo\", \"arguments\": {\"text\": \"hello\"}}]}", "The echo returned: hello"]'
 
-# Test delegation (delegation → no action → final)
-export DEBUG_MOCK_RESPONSES='["{\"tool_calls\": [{\"id\": \"call_1\", \"name\": \"delegate_to_researcher\", \"arguments\": {\"task\": \"Find quantum info\"}}]}", "No more actions.", "Based on the research, quantum computing uses qubits."]'
+# Test delegation (delegation → final)
+export DEBUG_MOCK_RESPONSES='["{\"tool_calls\": [{\"id\": \"call_1\", \"name\": \"delegate_to_researcher\", \"arguments\": {\"task\": \"Find quantum info\"}}]}", "Based on the research, quantum computing uses qubits."]'
 
-# Simple response (no tools → Phase 2 only)
+# Simple response (no tools)
 export DEBUG_MOCK_RESPONSES='["Hello! How can I help you?"]'
 ```
 
@@ -187,7 +187,7 @@ spec:
   container:
     env:
     - name: DEBUG_MOCK_RESPONSES
-      value: '["{\"tool_calls\": [{\"id\": \"call_1\", \"name\": \"delegate_to_worker\", \"arguments\": {\"task\": \"process data\"}}]}", "No more actions.", "Done."]'
+      value: '["{\"tool_calls\": [{\"id\": \"call_1\", \"name\": \"delegate_to_worker\", \"arguments\": {\"task\": \"process data\"}}]}", "Done."]'
 ```
 
 ## Best Practices
