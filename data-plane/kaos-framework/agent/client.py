@@ -253,9 +253,14 @@ class Agent:
                 self._mock_state = mock_state
                 logger.info(f"Agent {name}: using mock model (DEBUG_MOCK_RESPONSES)")
             elif model_api_url and model_name:
-                provider = OpenAIProvider(base_url=model_api_url, api_key="not-needed")
+                # Ensure base_url includes /v1 for OpenAI-compatible endpoints
+                # (Ollama serves at /v1/chat/completions, LiteLLM at /chat/completions)
+                base_url = model_api_url.rstrip("/")
+                if not base_url.endswith("/v1"):
+                    base_url = f"{base_url}/v1"
+                provider = OpenAIProvider(base_url=base_url, api_key="not-needed")
                 self._model = OpenAIChatModel(model_name=model_name, provider=provider)
-                logger.info(f"Agent {name}: using OpenAI model {model_name} at {model_api_url}")
+                logger.info(f"Agent {name}: using OpenAI model {model_name} at {base_url}")
             else:
                 raise ValueError(
                     "Agent requires either 'model', 'model_api_url'+'model_name', "
