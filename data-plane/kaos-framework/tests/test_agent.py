@@ -13,7 +13,7 @@ from pydantic_ai.models.test import TestModel
 from pydantic_ai.models.function import FunctionModel, AgentInfo
 from pydantic_ai.messages import ModelResponse as PydanticModelResponse, TextPart, ToolCallPart
 
-from agent.client import Agent, AgentCard, RemoteAgent, reset_mock_responses
+from agent.client import Agent, AgentCard, RemoteAgent
 from agent.memory import LocalMemory, NullMemory, RedisMemory
 
 logger = logging.getLogger(__name__)

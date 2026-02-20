@@ -27,7 +27,7 @@ from pydantic_ai.messages import (
     UserPromptPart,
 )
 
-from agent.client import Agent, RemoteAgent, DELEGATION_TOOL_PREFIX, reset_mock_responses
+from agent.client import Agent, RemoteAgent, DELEGATION_TOOL_PREFIX
 from agent.memory import LocalMemory, NullMemory
 
 logger = logging.getLogger(__name__)
@@ -161,6 +161,39 @@ class TestToolCallExecution:
         assert steps_executed == ["one", "two"]
         assert "Both steps done" in response
 
+    @pytest.mark.asyncio
+    async def test_max_steps_limits_model_calls(self):
+        """Test that max_steps limits tool-calling loop via UsageLimits."""
+        call_count = 0
+
+        def infinite_tool_handler(messages: list, info: AgentInfo) -> PydanticModelResponse:
+            nonlocal call_count
+            call_count += 1
+            # Always return a tool call — should be stopped by usage limit
+            return PydanticModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="repeat",
+                        args={},
+                        tool_call_id=f"call_{call_count}",
+                    )
+                ]
+            )
+
+        model = FunctionModel(infinite_tool_handler)
+        agent = Agent(name="limited-agent", model=model, instructions="Test", max_steps=3)
+
+        @agent._agent.tool_plain(name="repeat", description="Repeat forever")
+        async def repeat() -> str:
+            return "again"
+
+        response = ""
+        async for chunk in agent.process_message("Go"):
+            response += chunk
+
+        # Should have been stopped — call_count limited by max_steps
+        assert call_count <= 4, f"Expected max ~3 calls, got {call_count}"
+
 
 class TestDelegation:
     """Test sub-agent delegation as Pydantic AI tools."""
@@ -267,6 +300,55 @@ class TestDelegation:
 
         await sub.close()
 
+    @pytest.mark.asyncio
+    async def test_delegation_forwards_conversation_context(self):
+        """Test that delegation includes recent conversation context."""
+        call_count = 0
+
+        def mock_handler(messages: list, info: AgentInfo) -> PydanticModelResponse:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                return PydanticModelResponse(
+                    parts=[
+                        ToolCallPart(
+                            tool_name="delegate_to_worker",
+                            args={"task": "Summarize above"},
+                            tool_call_id="call_1",
+                        )
+                    ]
+                )
+            return PydanticModelResponse(parts=[TextPart(content="Response")])
+
+        model = FunctionModel(mock_handler)
+        memory = LocalMemory()
+        sub = RemoteAgent(name="worker", card_url="http://localhost:8001")
+        sub._active = True
+
+        agent = Agent(name="coordinator", model=model, sub_agents=[sub], memory=memory)
+
+        captured_messages = []
+
+        async def mock_process(msgs):
+            captured_messages.extend(msgs)
+            return "Summarized"
+
+        with patch.object(sub, "process_message", side_effect=mock_process):
+            # First message to build history
+            async for _ in agent.process_message("Initial context", session_id="ctx-sess"):
+                pass
+            # Second message triggers delegation
+            async for _ in agent.process_message("Now delegate", session_id="ctx-sess"):
+                pass
+
+        # Verify context was forwarded (should include user/assistant messages before delegation)
+        assert len(captured_messages) > 1, f"Expected context + delegation, got {captured_messages}"
+        roles = [m["role"] for m in captured_messages]
+        assert "task-delegation" in roles
+        # Should have at least one context message before the delegation
+        deleg_idx = roles.index("task-delegation")
+        assert deleg_idx > 0, "Expected context messages before delegation"
+
 
 class TestMemoryWithToolCalls:
     """Test memory event tracking during tool call execution."""
@@ -333,6 +415,81 @@ class TestMemoryWithToolCalls:
         assert len(user_events) == 2
         assert user_events[0].content == "First message"
         assert user_events[1].content == "Second message"
+
+    @pytest.mark.asyncio
+    async def test_delegation_prompt_replayed_in_history(self):
+        """Test that task_delegation_received events appear in message history."""
+        memory = LocalMemory()
+        model = TestModel(custom_output_text="Delegation response")
+        agent = Agent(
+            name="deleg-hist-agent",
+            model=model,
+            memory=memory,
+            instructions="Test agent",
+        )
+
+        # Simulate a delegation message
+        delegation_msg = [{"role": "task-delegation", "content": "Delegated task"}]
+        async for _ in agent.process_message(delegation_msg, session_id="deleg-hist"):
+            pass
+
+        # Send a follow-up — history should include the delegation prompt
+        async for _ in agent.process_message("Follow up", session_id="deleg-hist"):
+            pass
+
+        # Build history for the third hypothetical call
+        history = await agent._build_message_history("deleg-hist")
+        assert history is not None
+        user_parts = [
+            p
+            for msg in history
+            if isinstance(msg, ModelRequest)
+            for p in msg.parts
+            if isinstance(p, UserPromptPart)
+        ]
+        assert any("Delegated task" in str(p.content) for p in user_parts)
+
+    @pytest.mark.asyncio
+    async def test_memory_disabled_skips_storage(self):
+        """Test that memory_enabled=False skips all memory operations."""
+        memory = LocalMemory()
+        model = TestModel(custom_output_text="No memory response")
+        agent = Agent(
+            name="no-mem-agent",
+            model=model,
+            memory=memory,
+            memory_enabled=False,
+            instructions="Test",
+        )
+
+        async for _ in agent.process_message("Hello", session_id="no-mem"):
+            pass
+
+        events = await memory.get_session_events("no-mem")
+        assert len(events) == 0, f"Expected no events when memory disabled, got {len(events)}"
+
+    @pytest.mark.asyncio
+    async def test_memory_context_limit_enforced(self):
+        """Test that memory_context_limit caps the history size."""
+        memory = LocalMemory()
+        model = TestModel(custom_output_text="Response")
+        agent = Agent(
+            name="limit-agent",
+            model=model,
+            memory=memory,
+            memory_context_limit=2,
+            instructions="Test",
+        )
+
+        # Add 5 exchanges
+        for i in range(5):
+            async for _ in agent.process_message(f"Message {i}", session_id="limit-sess"):
+                pass
+
+        # History should be capped at 2 events (most recent)
+        history = await agent._build_message_history("limit-sess")
+        assert history is not None
+        assert len(history) <= 2, f"Expected at most 2 history items, got {len(history)}"
 
 
 class TestMockModelEnvVar:
@@ -436,6 +593,56 @@ class TestStreamingResponses:
         events = await memory.get_session_events("stream-session")
         agent_events = [e for e in events if e.event_type == "agent_response"]
         assert len(agent_events) >= 1
+
+    @pytest.mark.asyncio
+    async def test_streaming_stores_tool_call_events_in_memory(self):
+        """Test that streaming mode persists tool_call/tool_result memory events."""
+        call_count = 0
+
+        def mock_handler(messages: list, info: AgentInfo) -> PydanticModelResponse:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return PydanticModelResponse(
+                    parts=[
+                        ToolCallPart(
+                            tool_name="lookup",
+                            args={"key": "test"},
+                            tool_call_id="call_s1",
+                        )
+                    ]
+                )
+            return PydanticModelResponse(parts=[TextPart(content="Streamed tool result")])
+
+        async def mock_stream_handler(messages: list, info: AgentInfo):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                from pydantic_ai.models.function import DeltaToolCall
+
+                yield {
+                    0: DeltaToolCall(
+                        name="lookup", json_args='{"key": "test"}', tool_call_id="call_s1"
+                    )
+                }
+            else:
+                yield "Streamed tool result"
+
+        model = FunctionModel(function=mock_handler, stream_function=mock_stream_handler)
+        memory = LocalMemory()
+        agent = Agent(name="stream-tool-agent", model=model, memory=memory, instructions="Test")
+
+        @agent._agent.tool_plain(name="lookup", description="Lookup a key")
+        async def lookup(key: str) -> str:
+            return f"value_for_{key}"
+
+        async for _ in agent.process_message("Lookup test", session_id="stream-tool", stream=True):
+            pass
+
+        events = await memory.get_session_events("stream-tool")
+        event_types = [e.event_type for e in events]
+        assert "tool_call" in event_types, f"Expected tool_call in {event_types}"
+        assert "tool_result" in event_types, f"Expected tool_result in {event_types}"
 
 
 class TestNoToolsAgent:

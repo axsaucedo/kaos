@@ -18,6 +18,7 @@ from dataclasses import dataclass
 
 import httpx
 from pydantic_ai import Agent as PydanticAgent
+from pydantic_ai.usage import UsageLimits
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.models.function import FunctionModel, AgentInfo
@@ -207,11 +208,6 @@ def _build_mock_model_function():
     return mock_handler, state
 
 
-def reset_mock_responses():
-    """Reset per-request mock response state. No-op if no mock model."""
-    pass
-
-
 class Agent:
     """KAOS Agent — wraps pydantic_ai.Agent with memory, delegation, and telemetry."""
 
@@ -242,6 +238,7 @@ class Agent:
         }
         self._mcp_servers = mcp_servers or []
         self._mock_state: Optional[_MockResponseState] = None
+        self._current_session_id: Optional[str] = None
 
         # Resolve the Pydantic AI model
         if model is not None:
@@ -272,7 +269,6 @@ class Agent:
             model=self._model,
             instructions=instructions,
             name=name,
-            retries=max_steps,
             defer_model_check=True,
             toolsets=self._mcp_servers if self._mcp_servers else None,
         )
@@ -305,7 +301,7 @@ class Agent:
                 return await self._execute_delegation(_n, task, _s)
 
     async def _execute_delegation(self, agent_name: str, task: str, sub_agent: RemoteAgent) -> str:
-        """Execute delegation to a sub-agent."""
+        """Execute delegation to a sub-agent, forwarding conversation context."""
         otel.span_begin(
             f"delegate.{agent_name}",
             attrs={ATTR_DELEGATION_TARGET: agent_name},
@@ -314,7 +310,19 @@ class Agent:
         )
         failed = False
         try:
-            messages: List[Dict[str, str]] = [{"role": "task-delegation", "content": task}]
+            messages: List[Dict[str, str]] = []
+
+            # Forward recent conversation context from memory
+            if self.memory_enabled and self._current_session_id:
+                events = await self.memory.get_session_events(self._current_session_id)
+                context_events = events[-self.memory_context_limit :] if events else []
+                for event in context_events:
+                    if event.event_type in ("user_message", "task_delegation_received"):
+                        messages.append({"role": "user", "content": str(event.content)})
+                    elif event.event_type == "agent_response":
+                        messages.append({"role": "assistant", "content": str(event.content)})
+
+            messages.append({"role": "task-delegation", "content": task})
             result = await sub_agent.process_message(messages)
             return result
         except Exception as e:
@@ -331,7 +339,6 @@ class Agent:
         message: Union[str, List[Dict[str, str]]],
         session_id: Optional[str] = None,
         stream: bool = False,
-        seed: Optional[int] = None,
     ) -> AsyncIterator[str]:
         """Process a message using Pydantic AI agent.
 
@@ -341,10 +348,13 @@ class Agent:
             self._mock_state.reset()
 
         # Get or create session
-        if session_id:
-            session_id = await self.memory.get_or_create_session(session_id, "agent", "user")
+        if self.memory_enabled:
+            if session_id:
+                session_id = await self.memory.get_or_create_session(session_id, "agent", "user")
+            else:
+                session_id = await self.memory.create_session("agent", "user")
         else:
-            session_id = await self.memory.create_session("agent", "user")
+            session_id = session_id or "ephemeral"
 
         logger.debug(f"Processing message for session {session_id}, streaming={stream}")
 
@@ -367,28 +377,46 @@ class Agent:
 
             # Store incoming message event
             event_type = "task_delegation_received" if is_delegation else "user_message"
-            await self.memory.add_event(session_id, event_type, user_prompt)
+            if self.memory_enabled:
+                await self.memory.add_event(session_id, event_type, user_prompt)
 
             # Build message history from memory for context
-            message_history = await self._build_message_history(session_id)
+            message_history = (
+                await self._build_message_history(session_id) if self.memory_enabled else None
+            )
+
+            # Make session_id available to delegation tools
+            self._current_session_id = session_id
+
+            # Limit model request count to max_steps
+            usage_limits = UsageLimits(request_limit=self.max_steps)
 
             if stream:
                 full_response = ""
                 async with self._agent.run_stream(
-                    user_prompt, message_history=message_history
+                    user_prompt, message_history=message_history, usage_limits=usage_limits
                 ) as result:
                     async for chunk in result.stream_text(delta=True):
                         full_response += chunk
                         yield chunk
-                await self.memory.add_event(session_id, "agent_response", full_response)
-            else:
-                result = await self._agent.run(user_prompt, message_history=message_history)
-                content = str(result.output) if result.output else ""
-                await self.memory.add_event(session_id, "agent_response", content)
+                if self.memory_enabled:
+                    await self.memory.add_event(session_id, "agent_response", full_response)
 
-                # Store new messages from Pydantic AI into memory
-                for msg in result.new_messages():
-                    await self._store_pydantic_message(session_id, msg)
+                # Persist tool/delegation events (parity with non-stream)
+                if self.memory_enabled:
+                    for msg in result.new_messages():
+                        await self._store_pydantic_message(session_id, msg)
+            else:
+                result = await self._agent.run(
+                    user_prompt, message_history=message_history, usage_limits=usage_limits
+                )
+                content = str(result.output) if result.output else ""
+                if self.memory_enabled:
+                    await self.memory.add_event(session_id, "agent_response", content)
+
+                    # Store new messages from Pydantic AI into memory
+                    for msg in result.new_messages():
+                        await self._store_pydantic_message(session_id, msg)
 
                 yield content
 
@@ -396,7 +424,8 @@ class Agent:
             span_failed = True
             logger.error(f"Error processing message: {str(e)}")
             otel.span_failure(e)
-            await self.memory.add_event(session_id, "error", str(e))
+            if self.memory_enabled:
+                await self.memory.add_event(session_id, "error", str(e))
             yield f"Sorry, I encountered an error: {str(e)}"
         finally:
             if not span_failed:
@@ -416,15 +445,30 @@ class Agent:
         """Build Pydantic AI message_history from KAOS memory events.
 
         Returns None if no history, otherwise a list of ModelRequest/ModelResponse.
+        Excludes the latest user_message/task_delegation_received (the current prompt)
+        and respects memory_context_limit for history size.
         """
         events = await self.memory.get_session_events(session_id)
         if not events or len(events) <= 1:
             return None
 
-        # Convert memory events to Pydantic AI message format (excluding latest)
+        # Exclude latest prompt event (user_message or task_delegation_received)
+        prompt_types = ("user_message", "task_delegation_received")
+        exclude_idx = None
+        for i in range(len(events) - 1, -1, -1):
+            if events[i].event_type in prompt_types:
+                exclude_idx = i
+                break
+
+        replayable = [e for i, e in enumerate(events) if i != exclude_idx]
+
+        # Apply context limit (take most recent N replayable events)
+        if self.memory_context_limit and len(replayable) > self.memory_context_limit:
+            replayable = replayable[-self.memory_context_limit :]
+
         history: list = []
-        for event in events[:-1]:
-            if event.event_type == "user_message":
+        for event in replayable:
+            if event.event_type in prompt_types:
                 history.append(ModelRequest(parts=[UserPromptPart(content=str(event.content))]))
             elif event.event_type == "agent_response":
                 history.append(PydanticModelResponse(parts=[TextPart(content=str(event.content))]))

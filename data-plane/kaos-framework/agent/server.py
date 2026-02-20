@@ -158,7 +158,6 @@ class ChatCompletionRequest(BaseModel):
     stream: Optional[bool] = False
     temperature: Optional[float] = 1.0
     max_tokens: Optional[int] = None
-    seed: Optional[int] = None
 
 
 class AgentServer:
@@ -389,7 +388,6 @@ class AgentServer:
 
                 model_name = body.get("model", "agent")
                 stream_requested = body.get("stream", False)
-                seed = body.get("seed")  # Optional seed for reproducible generation
 
                 # Extract session_id from header (preferred) or body
                 session_id = request.headers.get("X-Session-ID") or body.get("session_id")
@@ -407,13 +405,9 @@ class AgentServer:
                 # Pass full messages array to agent for processing
                 # Agent handles tool calls and delegations based on model response
                 if stream_requested:
-                    return await self._stream_chat_completion(
-                        messages, model_name, session_id, seed
-                    )
+                    return await self._stream_chat_completion(messages, model_name, session_id)
                 else:
-                    return await self._complete_chat_completion(
-                        messages, model_name, session_id, seed
-                    )
+                    return await self._complete_chat_completion(messages, model_name, session_id)
 
             except HTTPException:
                 raise
@@ -428,7 +422,6 @@ class AgentServer:
         messages: list,
         model_name: str,
         session_id: Optional[str] = None,
-        seed: Optional[int] = None,
     ) -> JSONResponse:
         """Handle non-streaming chat completion.
 
@@ -436,12 +429,11 @@ class AgentServer:
             messages: Full OpenAI-style messages array for context
             model_name: Model name for response
             session_id: Optional session ID for conversation continuity
-            seed: Optional seed for reproducible generation
         """
         # Collect complete response
         response_content = ""
         async for chunk in self.agent.process_message(
-            messages, stream=False, session_id=session_id, seed=seed
+            messages, stream=False, session_id=session_id
         ):
             response_content += chunk
 
@@ -471,7 +463,6 @@ class AgentServer:
         messages: list,
         model_name: str,
         session_id: Optional[str] = None,
-        seed: Optional[int] = None,
     ) -> StreamingResponse:
         """Handle streaming chat completion with SSE.
 
@@ -479,7 +470,6 @@ class AgentServer:
             messages: Full OpenAI-style messages array for context
             model_name: Model name for response
             session_id: Optional session ID for conversation continuity
-            seed: Optional seed for reproducible generation
         """
 
         async def generate_stream():
@@ -490,7 +480,7 @@ class AgentServer:
 
                 # Stream response chunks
                 async for chunk in self.agent.process_message(
-                    messages, stream=True, session_id=session_id, seed=seed
+                    messages, stream=True, session_id=session_id
                 ):
                     if chunk:  # Only send non-empty chunks
                         sse_data = {
