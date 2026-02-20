@@ -49,10 +49,12 @@ kaos system install --gateway-enabled --metallb-enabled --wait
 ## Project Structure
 ```
 data-plane/
-├── kaos-framework/        # Agent runtime (pytest, black, ty)
-│   ├── agent/             # Agent, RemoteAgent, AgentServer
-│   ├── mcptools/          # MCP tool client
-│   └── modelapi/          # Model API client
+├── kaos-framework/        # Agent runtime (Pydantic AI, pytest, black, ty)
+│   ├── agent/             # Agent (pydantic_ai wrapper), RemoteAgent, AgentServer
+│   │   ├── client.py      # Core agent — wraps pydantic_ai.Agent
+│   │   ├── server.py      # FastAPI HTTP server, health probes, memory endpoints
+│   │   └── memory.py      # LocalMemory, RedisMemory, NullMemory
+│   └── telemetry/         # OpenTelemetry instrumentation
 └── mcp-servers/           # Standalone MCP server implementations
     └── python-string/     # Python code execution runtime
 
@@ -85,9 +87,9 @@ tmp/                       # Local work files (gitignored)
 - `operator/api/v1alpha1/*_types.go`: CRD schemas
 - `operator/controllers/*_controller.go`: Reconciliation logic
 - `operator/chart/`: Helm chart (generated from kustomize)
-- `data-plane/kaos-framework/agent/client.py`: Agent runtime core (native function calling via OpenAI tools API)
+- `data-plane/kaos-framework/agent/client.py`: Agent runtime core (Pydantic AI wrapper with delegation, memory bridge, mock model)
+- `data-plane/kaos-framework/agent/server.py`: FastAPI HTTP server (health, memory, chat completions, A2A)
 - `data-plane/kaos-framework/agent/memory.py`: Memory backends (LocalMemory, RedisMemory, NullMemory)
-- `data-plane/kaos-framework/modelapi/client.py`: Model API client with `ModelResponse`/`ToolCall` dataclasses
 
 ## Testing Notes
 

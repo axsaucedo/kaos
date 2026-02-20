@@ -112,13 +112,14 @@ spec:
 
 ### Mock Response Patterns (DEBUG_MOCK_RESPONSES)
 
-E2E tests use `DEBUG_MOCK_RESPONSES` env var. The `tool_calls` format works for both native and string mode (the agent checks `response.tool_calls` first regardless of mode). Delegation uses the same `delegate_to_` prefix as regular tools.
+E2E tests use `DEBUG_MOCK_RESPONSES` env var. The framework uses Pydantic AI with native tool calling only (no string-mode concept). Delegation uses the same `delegate_to_` prefix.
+
+**Important:** Pydantic AI needs 2 mock responses for tool calls (not 3 like the old framework). Existing tests with 3 entries still work — the extra entry is unused.
 
 **Tool call (MCP tool):**
 ```json
 [
   "{\"tool_calls\": [{\"id\": \"call_1\", \"name\": \"echo\", \"arguments\": {\"message\": \"hello\"}}]}",
-  "No more actions needed.",
   "The echo tool returned the result."
 ]
 ```
@@ -127,7 +128,6 @@ E2E tests use `DEBUG_MOCK_RESPONSES` env var. The `tool_calls` format works for 
 ```json
 [
   "{\"tool_calls\": [{\"id\": \"call_1\", \"name\": \"delegate_to_worker-name\", \"arguments\": {\"task\": \"Process this\"}}]}",
-  "No more actions needed.",
   "The worker completed the task."
 ]
 ```
@@ -137,7 +137,17 @@ E2E tests use `DEBUG_MOCK_RESPONSES` env var. The `tool_calls` format works for 
 ["Task completed by worker."]
 ```
 
-Note: Absence of `tool_calls` in a response signals loop completion. No `{}` no-action signal is needed.
+**Legacy 3-entry format (still works):**
+```json
+[
+  "{\"tool_calls\": [{\"id\": \"call_1\", \"name\": \"echo\", \"arguments\": {\"message\": \"hello\"}}]}",
+  "No more actions needed.",
+  "The echo tool returned the result."
+]
+```
+The 2nd entry becomes the output (Pydantic AI stops there), 3rd is ignored.
+
+Note: Absence of `tool_calls` in a response signals loop completion. The old `{"tool": "name", ...}` single-tool format is NOT supported — always use `tool_calls` array.
 
 ### Key Patterns
 - Tests create unique namespaces per session
