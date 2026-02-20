@@ -4,6 +4,7 @@ AgentServer implementation for OpenAI-compatible API.
 FastAPI server with health probes, agent discovery, and chat completions endpoint.
 Supports both streaming and non-streaming responses.
 Includes OpenTelemetry instrumentation for tracing, metrics, and log correlation.
+Uses Pydantic AI as the core agent framework.
 """
 
 import os
@@ -21,10 +22,9 @@ from pydantic import BaseModel, model_validator
 from pydantic_settings import BaseSettings
 import uvicorn
 
-from modelapi.client import ModelAPI
+from pydantic_ai.mcp import MCPServerStreamableHTTP
 from agent.client import Agent, RemoteAgent
 from agent.memory import LocalMemory
-from mcptools.client import MCPClient
 from telemetry.manager import (
     init_otel,
     is_otel_enabled,
@@ -135,9 +135,6 @@ class AgentServerSettings(BaseSettings):
 
     # Agentic loop configuration (from K8s operator)
     agentic_loop_max_steps: int = 5
-
-    # Tool call mode: "auto" (default), "native", or "string"
-    tool_call_mode: str = "auto"
 
     # Memory configuration
     memory_enabled: bool = True  # Enable/disable memory (NullMemory when disabled)
@@ -250,21 +247,16 @@ class AgentServer:
         logger.info(f"Description: {self.agent.description}")
         logger.info(f"Port: {self.port}")
         logger.info(f"Max Steps: {self.agent.max_steps}")
-        logger.info(f"Native Tool Calling: {self.agent._supports_native_tools}")
-        logger.info(f"Memory Context Limit: {self.agent.memory_context_limit}")
         logger.info(f"Memory Enabled: {self.agent.memory_enabled}")
         logger.info(f"Log Level: {get_log_level()}")
 
         # Log model API info
-        if self.agent.model_api:
-            logger.info(f"Model API: {self.agent.model_api.api_base}")
-            logger.info(f"Model: {self.agent.model_api.model}")
+        logger.info(f"Model API: {self.agent._model}")
+        logger.info(f"Model Name: {self.agent.name}")
 
         # Log MCP tools
-        if self.agent.mcp_clients:
-            logger.info(f"MCP Servers: {len(self.agent.mcp_clients)}")
-            for mcp in self.agent.mcp_clients:
-                logger.info(f"  - {mcp.name}: {mcp.url}")
+        if self.agent._mcp_servers:
+            logger.info(f"MCP Servers: {len(self.agent._mcp_servers)}")
         else:
             logger.info("MCP Servers: None")
 
@@ -575,24 +567,18 @@ def create_agent_server(
     import re
 
     if not settings:
-        # Load from environment variables - requires AGENT_NAME and MODEL_API_URL
         settings = AgentServerSettings()  # type: ignore[call-arg]
 
-    # Check if OTel should be enabled based on env vars (before init_otel)
+    # Check if OTel should be enabled based on env vars
     otel_should_enable = should_enable_otel()
 
-    # Configure logging with optional OTel correlation
-    # Use LOG_LEVEL env var (preferred) or fallback to AGENT_LOG_LEVEL
+    # Configure logging
     log_level = get_log_level()
     configure_logging(log_level, otel_correlation=otel_should_enable)
 
-    model_api = ModelAPI(model=settings.model_name, api_base=settings.model_api_url)
-
-    # Parse MCP servers from settings
-    # Format: "[server1,server2]" or "server1,server2"
-    mcp_clients: List[MCPClient] = []
+    # Parse MCP servers from settings -> Pydantic AI MCPServerStreamableHTTP
+    mcp_servers: list = []
     if settings.mcp_servers:
-        # Remove brackets if present (K8s operator format: "[name1,name2]")
         mcp_servers_str = settings.mcp_servers.strip()
         if mcp_servers_str.startswith("[") and mcp_servers_str.endswith("]"):
             mcp_servers_str = mcp_servers_str[1:-1]
@@ -600,12 +586,10 @@ def create_agent_server(
         for server_name in mcp_servers_str.split(","):
             server_name = server_name.strip()
             if server_name:
-                # Look for MCP_SERVER_<NAME>_URL env var
-                # Operator uses exact name: MCP_SERVER_<name>_URL (preserves hyphens and case)
                 env_name = f"MCP_SERVER_{server_name}_URL"
                 server_url = os.environ.get(env_name)
                 if server_url:
-                    mcp_clients.append(MCPClient(name=server_name, url=server_url))
+                    mcp_servers.append(MCPServerStreamableHTTP(server_url))
                     logger.info(f"Configured MCP server: {server_name} -> {server_url}")
                 else:
                     logger.warning(
@@ -616,7 +600,6 @@ def create_agent_server(
     if sub_agents is None:
         sub_agents = []
 
-        # Method 1: Direct agent_sub_agents format "name:url,name:url"
         if settings.agent_sub_agents:
             for agent_spec in settings.agent_sub_agents.split(","):
                 agent_spec = agent_spec.strip()
@@ -625,12 +608,10 @@ def create_agent_server(
                     sub_agents.append(RemoteAgent(name=name.strip(), card_url=url.strip()))
                     logger.info(f"Configured sub-agent (direct): {name} -> {url}")
 
-        # Method 2: Kubernetes operator format with PEER_AGENTS and PEER_AGENT_<NAME>_CARD_URL
         elif settings.peer_agents:
             for peer_name in settings.peer_agents.split(","):
                 peer_name = peer_name.strip()
                 if peer_name:
-                    # Look for PEER_AGENT_<NAME>_CARD_URL env var
                     env_name = f"PEER_AGENT_{peer_name.upper().replace('-', '_')}_CARD_URL"
                     card_url = os.environ.get(env_name)
                     if card_url:
@@ -641,8 +622,7 @@ def create_agent_server(
                             f"No URL found for peer agent {peer_name} (expected {env_name})"
                         )
 
-    # Create agent with MCP clients and sub-agents
-    # Use NullMemory when memory is disabled
+    # Create memory
     from agent.memory import LocalMemory, RedisMemory, NullMemory
 
     if settings.memory_enabled:
@@ -662,22 +642,21 @@ def create_agent_server(
     else:
         memory = NullMemory()
 
-    # Initialize OpenTelemetry if enabled (uses standard OTEL_* env vars)
-    # Note: LoggingInstrumentor is already called in configure_logging() above
+    # Initialize OpenTelemetry
     init_otel(settings.agent_name)
 
     agent = Agent(
         name=settings.agent_name,
         description=settings.agent_description,
         instructions=settings.agent_instructions,
-        model_api=model_api,
-        mcp_clients=mcp_clients,
+        model_api_url=settings.model_api_url,
+        model_name=settings.model_name,
+        mcp_servers=mcp_servers if mcp_servers else None,
         sub_agents=sub_agents,
         max_steps=settings.agentic_loop_max_steps,
         memory_context_limit=settings.memory_context_limit,
         memory=memory,
         memory_enabled=settings.memory_enabled,
-        tool_call_mode=settings.tool_call_mode,
     )
 
     server = AgentServer(
