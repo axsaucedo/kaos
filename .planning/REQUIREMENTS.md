@@ -101,33 +101,33 @@ Deferred to future release. Tracked but not in current roadmap.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| EVAL-01 | Phase 1 | Pending |
-| EVAL-02 | Phase 1 | Pending |
-| EVAL-03 | Phase 1 | Pending |
-| MODL-01 | Phase 2 | Pending |
-| MODL-02 | Phase 2 | Pending |
-| STRC-01 | Phase 2 | Pending |
-| STRC-02 | Phase 2 | Pending |
-| STRC-03 | Phase 2 | Pending |
-| A2A-01 | Phase 3 | Pending |
-| A2A-02 | Phase 3 | Pending |
-| A2A-03 | Phase 3 | Pending |
-| A2A-04 | Phase 3 | Pending |
-| MCPS-01 | Phase 3 | Pending |
-| MCPS-02 | Phase 3 | Pending |
-| OTEL-01 | Phase 2 | Pending |
-| OTEL-02 | Phase 2 | Pending |
-| ADPT-01 | Phase 3 | Pending |
-| ADPT-02 | Phase 3 | Pending |
-| ADPT-03 | Phase 3 | Pending |
-| ADPT-04 | Phase 3 | Pending |
-| ADPT-05 | Phase 3 | Pending |
-| ADPT-06 | Phase 3 | Pending |
-| VALD-01 | Phase 4 | Pending |
-| VALD-02 | Phase 4 | Pending |
-| VALD-03 | Phase 4 | Pending |
-| VALD-04 | Phase 4 | Pending |
-| VALD-05 | Phase 4 | Pending |
+| EVAL-01 | Phase 1: Framework Evaluation & Decision | Pending |
+| EVAL-02 | Phase 1: Framework Evaluation & Decision | Pending |
+| EVAL-03 | Phase 1: Framework Evaluation & Decision | Pending |
+| MODL-01 | Phase 2: Model Routing Enhancement | Pending |
+| MODL-02 | Phase 2: Model Routing Enhancement | Pending |
+| STRC-01 | Phase 3: Structured Output Validation | Pending |
+| STRC-02 | Phase 3: Structured Output Validation | Pending |
+| STRC-03 | Phase 3: Structured Output Validation | Pending |
+| OTEL-01 | Phase 4: OTel GenAI Conventions | Pending |
+| OTEL-02 | Phase 4: OTel GenAI Conventions | Pending |
+| A2A-03 | Phase 5: A2A Protocol Assessment | Pending |
+| A2A-04 | Phase 5: A2A Protocol Assessment | Pending |
+| ADPT-01 | Phase 6: Pydantic AI Adapter Core | Pending |
+| ADPT-02 | Phase 6: Pydantic AI Adapter Core | Pending |
+| ADPT-03 | Phase 6: Pydantic AI Adapter Core | Pending |
+| ADPT-04 | Phase 6: Pydantic AI Adapter Core | Pending |
+| A2A-01 | Phase 7: A2A Protocol & MCP Server | Pending |
+| A2A-02 | Phase 7: A2A Protocol & MCP Server | Pending |
+| ADPT-05 | Phase 7: A2A Protocol & MCP Server | Pending |
+| MCPS-01 | Phase 7: A2A Protocol & MCP Server | Pending |
+| MCPS-02 | Phase 7: A2A Protocol & MCP Server | Pending |
+| ADPT-06 | Phase 8: Prototype & Validation | Pending |
+| VALD-01 | Phase 8: Prototype & Validation | Pending |
+| VALD-02 | Phase 8: Prototype & Validation | Pending |
+| VALD-03 | Phase 8: Prototype & Validation | Pending |
+| VALD-04 | Phase 8: Prototype & Validation | Pending |
+| VALD-05 | Phase 8: Prototype & Validation | Pending |
 
 **Coverage:**
 - v1 requirements: 27 total
@@ -136,4 +136,4 @@ Deferred to future release. Tracked but not in current roadmap.
 
 ---
 *Requirements defined: 2026-02-20*
-*Last updated: 2026-02-20 after initial definition*
+*Last updated: 2026-02-20 after roadmap creation (8-phase comprehensive structure)*
