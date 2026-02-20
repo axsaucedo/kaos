@@ -221,6 +221,52 @@ class TestDelegation:
 
         await sub.close()
 
+    @pytest.mark.asyncio
+    async def test_delegation_memory_event_types(self):
+        """Test that delegation creates delegation_request/delegation_response events."""
+        call_count = 0
+
+        def mock_handler(messages: list, info: AgentInfo) -> PydanticModelResponse:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return PydanticModelResponse(
+                    parts=[
+                        ToolCallPart(
+                            tool_name="delegate_to_worker",
+                            args={"task": "Test delegation"},
+                            tool_call_id="call_1",
+                        )
+                    ]
+                )
+            return PydanticModelResponse(parts=[TextPart(content="Done")])
+
+        model = FunctionModel(mock_handler)
+        memory = LocalMemory()
+        sub = RemoteAgent(name="worker", card_url="http://localhost:8001")
+        sub._active = True
+
+        agent = Agent(name="coordinator", model=model, sub_agents=[sub], memory=memory)
+
+        mock_process = AsyncMock(return_value="Result")
+        with patch.object(sub, "process_message", mock_process):
+            async for _ in agent.process_message("Delegate", session_id="del-session"):
+                pass
+
+        events = await memory.get_session_events("del-session")
+        event_types = [e.event_type for e in events]
+        assert (
+            "delegation_request" in event_types
+        ), f"Expected delegation_request, got {event_types}"
+        assert (
+            "delegation_response" in event_types
+        ), f"Expected delegation_response, got {event_types}"
+        # Regular tool_call/tool_result should NOT be used for delegation
+        tool_call_events = [e for e in events if e.event_type == "tool_call"]
+        assert len(tool_call_events) == 0, "Delegation should use delegation_request, not tool_call"
+
+        await sub.close()
+
 
 class TestMemoryWithToolCalls:
     """Test memory event tracking during tool call execution."""

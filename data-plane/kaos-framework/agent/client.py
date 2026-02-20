@@ -355,8 +355,14 @@ class Agent:
             # Extract user prompt from message
             user_prompt = self._extract_user_prompt(message)
 
-            # Store user message in memory
-            await self.memory.add_event(session_id, "user_message", user_prompt)
+            # Detect delegation: check if message has task-delegation role
+            is_delegation = False
+            if isinstance(message, list):
+                is_delegation = any(msg.get("role") == "task-delegation" for msg in message)
+
+            # Store incoming message event
+            event_type = "task_delegation_received" if is_delegation else "user_message"
+            await self.memory.add_event(session_id, event_type, user_prompt)
 
             # Build message history from memory for context
             message_history = await self._build_message_history(session_id)
@@ -424,9 +430,11 @@ class Agent:
         if isinstance(msg, PydanticModelResponse):
             for part in msg.parts:
                 if isinstance(part, ToolCallPart):
+                    is_delegation = part.tool_name.startswith("delegate_to_")
+                    event_type = "delegation_request" if is_delegation else "tool_call"
                     await self.memory.add_event(
                         session_id,
-                        "tool_call",
+                        event_type,
                         {"tool": part.tool_name, "arguments": part.args},
                     )
                 elif isinstance(part, TextPart):
@@ -434,9 +442,11 @@ class Agent:
         elif isinstance(msg, ModelRequest):
             for part in msg.parts:
                 if isinstance(part, ToolReturnPart):
+                    is_delegation = part.tool_name.startswith("delegate_to_")
+                    event_type = "delegation_response" if is_delegation else "tool_result"
                     await self.memory.add_event(
                         session_id,
-                        "tool_result",
+                        event_type,
                         {"tool": part.tool_name, "result": str(part.content)},
                     )
 
@@ -448,11 +458,31 @@ class Agent:
         if self.sub_agents:
             capabilities.append("task_delegation")
 
+        # Discover tools from MCP servers for skills list
+        skills: list = []
+        for mcp_server in self._mcp_servers:
+            try:
+                async with mcp_server:
+                    tools = await mcp_server.list_tools()
+                    for tool in tools:
+                        skills.append({"name": tool.name, "description": tool.description or ""})
+            except Exception as e:
+                logger.warning(f"Failed to list tools from MCP server: {e}")
+
+        # Add delegation tools as skills
+        for agent_name in self.sub_agents:
+            skills.append(
+                {
+                    "name": f"delegate_to_{agent_name}",
+                    "description": f"Delegate task to {agent_name}",
+                }
+            )
+
         return AgentCard(
             name=self.name,
             description=self.description,
             url=base_url,
-            skills=[],
+            skills=skills,
             capabilities=capabilities,
         )
 

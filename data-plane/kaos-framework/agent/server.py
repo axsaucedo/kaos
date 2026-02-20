@@ -587,8 +587,12 @@ def create_agent_server(
                 env_name = f"MCP_SERVER_{server_name}_URL"
                 server_url = os.environ.get(env_name)
                 if server_url:
-                    mcp_servers.append(MCPServerStreamableHTTP(server_url))
-                    logger.info(f"Configured MCP server: {server_name} -> {server_url}")
+                    # Append /mcp for Streamable HTTP MCP endpoint
+                    mcp_url = server_url.rstrip("/")
+                    if not mcp_url.endswith("/mcp"):
+                        mcp_url = f"{mcp_url}/mcp"
+                    mcp_servers.append(MCPServerStreamableHTTP(mcp_url))
+                    logger.info(f"Configured MCP server: {server_name} -> {mcp_url}")
                 else:
                     logger.warning(
                         f"No URL found for MCP server {server_name} (expected {env_name})"

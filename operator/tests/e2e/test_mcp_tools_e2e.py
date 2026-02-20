@@ -388,10 +388,11 @@ async def test_agent_multiple_mcp_servers(test_namespace: str, shared_modelapi: 
 async def test_agent_string_mode_tool_calling(
     test_namespace: str, shared_modelapi: str
 ):
-    """Test Agent with auto-detected string-mode calls MCP tools via text-based JSON.
+    """Test Agent calls MCP tools via mock responses with tool_calls format.
 
-    Uses a model name that litellm recognizes as not supporting native function calling,
-    triggering string-mode tool calling with JSON action in content text.
+    Pydantic AI uses native tool calling (no separate string mode).
+    This test validates tool calling with a different model name to ensure
+    tool calling works regardless of model configuration.
     """
     task_id = f"STR_{int(time.time())}"
     mcp_name = "mcp-str-mode"
@@ -405,10 +406,19 @@ async def test_agent_string_mode_tool_calling(
     mcp_url = gateway_url(test_namespace, "mcp", mcp_name)
     await wait_for_mcp_server_ready(mcp_url)
 
-    # String-mode mock responses: tool call JSON, no-action text, final response
+    # Pydantic AI uses native tool calling (no string mode), so use tool_calls format
     mock_responses = [
-        json.dumps({"tool": "echo", "arguments": {"message": f"Task {task_id}"}}),
-        "No more actions needed.",
+        json.dumps(
+            {
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "name": "echo",
+                        "arguments": {"message": f"Task {task_id}"},
+                    }
+                ]
+            }
+        ),
         f"The echo tool returned result for task {task_id}.",
     ]
 
@@ -445,7 +455,7 @@ async def test_agent_string_mode_tool_calling(
     await async_wait_for_healthy(agent_url)
 
     async with httpx.AsyncClient(timeout=60.0) as client:
-        # Send user message - string-mode mock will trigger tool call via JSON in content
+        # Send user message - mock responses will trigger tool call
         response = await client.post(
             f"{agent_url}/v1/chat/completions",
             json={
