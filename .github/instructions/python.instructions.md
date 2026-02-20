@@ -59,14 +59,20 @@ The KAOS `Agent` class wraps `pydantic_ai.Agent`:
 - Pydantic AI uses native function calling exclusively (no string-mode concept)
 - MCP tools: `MCPServerStreamableHTTP(url + "/mcp")` — `/mcp` path appended for FastMCP servers
 - Delegation tools: `delegate_to_{agent_name}` registered as plain tool functions
+- Delegation forwards recent conversation context from memory to sub-agents
 - Tool discovery for agent card: connects to MCP servers via `list_tools()` on card requests
+- `max_steps` controls model call limit via `UsageLimits(request_limit=max_steps)` (not `retries`)
 
 ### Memory Bridge
 - KAOS memory (Local/Redis/Null) persists across sessions — Pydantic AI has no built-in persistence
-- `_convert_kaos_events_to_pydantic()`: KAOS events → Pydantic AI `ModelRequest`/`ModelResponse` messages
+- `_build_message_history()`: KAOS events → Pydantic AI `ModelRequest`/`ModelResponse` messages
 - `_store_pydantic_message()`: Pydantic AI messages → KAOS memory events
 - Memory event types for delegation: `delegation_request`/`delegation_response` (not `tool_call`/`tool_result`)
 - Incoming task-delegation: detected via `task-delegation` role → stored as `task_delegation_received`
+- `memory_enabled` flag gates all memory reads/writes (set `False` for stateless agents)
+- `memory_context_limit` caps history size passed to model (default 6)
+- Streaming and non-streaming paths both persist tool/delegation events via `result.new_messages()`
+- History exclusion: latest prompt event explicitly excluded (not fragile `events[:-1]`)
 
 ### Key Classes
 - `Agent`: Main wrapper — `process_message()`, `process_message_stream()`, `get_agent_card()`
