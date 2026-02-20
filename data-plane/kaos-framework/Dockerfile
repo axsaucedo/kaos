@@ -17,8 +17,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # Copy source code (changes frequently, so copied last)
 COPY agent/ agent/
-COPY mcptools/ mcptools/
-COPY modelapi/ modelapi/
 COPY telemetry/ telemetry/
 
 # Create non-root user
