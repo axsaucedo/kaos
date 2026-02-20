@@ -460,7 +460,7 @@ class TestSamples:
         assert secret_ref["key"] == "api-key"
 
     def test_deploy_sample_api_secret_bare_name_dry_run(self):
-        """--api-secret with bare name (no colon) shows prompt note in dry-run."""
+        """--api-secret with bare name (no colon) should fail with format error."""
         result = runner.invoke(
             app,
             [
@@ -472,14 +472,8 @@ class TestSamples:
                 "--dry-run",
             ],
         )
-        assert result.exit_code == 0
-        docs = list(yaml.safe_load_all(result.output))
-        modelapi = next(d for d in docs if d and d["kind"] == "ModelAPI")
-        secret_ref = modelapi["spec"]["proxyConfig"]["apiKey"]["valueFrom"][
-            "secretKeyRef"
-        ]
-        assert secret_ref["name"] == "kaos-5-proxy-external-api-api-key"
-        assert secret_ref["key"] == "api-key"
+        assert result.exit_code != 0
+        assert "Invalid --api-secret format" in result.output
 
     def test_deploy_nonexistent_sample(self):
         result = runner.invoke(

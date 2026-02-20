@@ -79,13 +79,13 @@ def _apply_overrides(
     """Apply CLI overrides to sample YAML content using YAML parser."""
     docs = list(yaml.safe_load_all(yaml_content))
 
-    # Parse api_secret once
+    # Parse api_secret (must be secretname:key format at this point)
     secret_name = secret_key = None
     if api_secret:
         if ":" in api_secret:
             secret_name, secret_key = api_secret.split(":", 1)
         else:
-            secret_name, secret_key = api_secret, "api-key"
+            raise ValueError(f"Invalid api_secret format: {api_secret!r}. Expected secretname:key.")
 
     for doc in docs:
         if not doc or not isinstance(doc, dict):
@@ -195,11 +195,11 @@ def deploy_sample(
 
     raw_content = sample_path.read_text()
 
-    # Handle api_secret prompt: bare flag or name without colon triggers key input
-    if api_secret == _API_SECRET_PROMPT or (api_secret and ":" not in api_secret):
+    # Handle api_secret: bare flag triggers prompt, value must be secretname:key format
+    if api_secret == _API_SECRET_PROMPT:
         if dry_run:
             typer.echo(
-                "Note: --api-secret without secretname:key would prompt for API key",
+                "Note: --api-secret without value would prompt for API key",
                 err=True,
             )
             secret_name = f"kaos-{name}-api-key"
@@ -208,6 +208,12 @@ def deploy_sample(
             api_key = getpass.getpass("Enter API key: ")
             secret_name, secret_key = _create_api_secret(name, namespace, api_key)
             api_secret = f"{secret_name}:{secret_key}"
+    elif api_secret and ":" not in api_secret:
+        typer.echo(
+            f"Error: Invalid --api-secret format '{api_secret}'. Expected secretname:key format.",
+            err=True,
+        )
+        raise typer.Exit(1)
 
     # Apply overrides
     yaml_content = _apply_overrides(
