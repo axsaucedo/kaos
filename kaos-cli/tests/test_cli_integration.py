@@ -421,6 +421,60 @@ class TestSamples:
         assert secret_ref["name"] == "my-secret"
         assert secret_ref["key"] == "my-key"
 
+    def test_deploy_sample_with_provider_override(self):
+        result = runner.invoke(
+            app,
+            [
+                "samples",
+                "deploy",
+                "5-proxy-external-api",
+                "--provider",
+                "openai",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0
+        docs = list(yaml.safe_load_all(result.output))
+        modelapi = next(d for d in docs if d and d["kind"] == "ModelAPI")
+        assert modelapi["spec"]["proxyConfig"]["provider"] == "openai"
+
+    def test_deploy_sample_api_secret_without_value_dry_run(self):
+        """--api-secret without value shows prompt note and uses placeholder in dry-run."""
+        result = runner.invoke(
+            app,
+            [
+                "samples",
+                "deploy",
+                "5-proxy-external-api",
+                "--api-secret",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0
+        docs = list(yaml.safe_load_all(result.output))
+        modelapi = next(d for d in docs if d and d["kind"] == "ModelAPI")
+        secret_ref = modelapi["spec"]["proxyConfig"]["apiKey"]["valueFrom"][
+            "secretKeyRef"
+        ]
+        assert secret_ref["name"] == "kaos-5-proxy-external-api-api-key"
+        assert secret_ref["key"] == "api-key"
+
+    def test_deploy_sample_api_secret_bare_name_dry_run(self):
+        """--api-secret with bare name (no colon) should fail with format error."""
+        result = runner.invoke(
+            app,
+            [
+                "samples",
+                "deploy",
+                "5-proxy-external-api",
+                "--api-secret",
+                "my-custom-secret",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code != 0
+        assert "Invalid --api-secret format" in result.output
+
     def test_deploy_nonexistent_sample(self):
         result = runner.invoke(
             app, ["samples", "deploy", "nonexistent", "--dry-run"]
@@ -495,6 +549,18 @@ class TestMonitoringValidation:
         assert result.exit_code != 0
         assert "Invalid monitoring backend" in result.output
 
+    def test_ui_monitoring_enabled_without_value_defaults_signoz(self):
+        """--monitoring-enabled without value defaults to signoz (no invalid backend error)."""
+        from unittest.mock import patch
+
+        with patch("kaos_cli.ui.check_monitoring_service", return_value=False):
+            result = runner.invoke(
+                app, ["ui", "--monitoring-enabled", "--no-browser"]
+            )
+        # Should not error on invalid backend; fails on service not found instead
+        assert "Invalid monitoring backend" not in result.output
+        assert "signoz" in result.output.lower()
+
 
 # ─── System install flags ───────────────────────────────────────────────
 
@@ -522,6 +588,60 @@ class TestSystemInstallFlags:
         )
         assert result.exit_code != 0
         assert "Invalid monitoring backend" in result.output
+
+    def test_install_monitoring_enabled_without_value(self):
+        """--monitoring-enabled without value defaults to signoz (not an invalid backend error)."""
+        from unittest.mock import patch
+
+        with patch("kaos_cli.install.check_helm_installed", return_value=False):
+            result = runner.invoke(
+                app, ["system", "install", "--monitoring-enabled"]
+            )
+        # Should not error on invalid backend (signoz is valid)
+        assert "Invalid monitoring backend" not in result.output
+
+    def test_uninstall_monitoring_enabled_without_value(self):
+        """--monitoring-enabled without value defaults to signoz on uninstall."""
+        from unittest.mock import patch
+
+        with patch("kaos_cli.install.check_helm_installed", return_value=False):
+            result = runner.invoke(
+                app, ["system", "uninstall", "--monitoring-enabled"]
+            )
+        assert "Invalid monitoring backend" not in result.output
+
+
+# ─── Optional value flag preprocessing ──────────────────────────────────
+
+
+class TestPreprocessOptionalValueFlag:
+    def test_flag_without_value_inserts_default(self):
+        from kaos_cli.utils import preprocess_optional_value_flag
+
+        args = ["--monitoring-enabled", "--other-flag"]
+        result = preprocess_optional_value_flag(args, "--monitoring-enabled", "signoz")
+        assert result == ["--monitoring-enabled", "signoz", "--other-flag"]
+
+    def test_flag_with_value_preserves_it(self):
+        from kaos_cli.utils import preprocess_optional_value_flag
+
+        args = ["--monitoring-enabled", "jaeger", "--other-flag"]
+        result = preprocess_optional_value_flag(args, "--monitoring-enabled", "signoz")
+        assert result == ["--monitoring-enabled", "jaeger", "--other-flag"]
+
+    def test_flag_at_end_inserts_default(self):
+        from kaos_cli.utils import preprocess_optional_value_flag
+
+        args = ["--some-flag", "--monitoring-enabled"]
+        result = preprocess_optional_value_flag(args, "--monitoring-enabled", "signoz")
+        assert result == ["--some-flag", "--monitoring-enabled", "signoz"]
+
+    def test_flag_not_present_unchanged(self):
+        from kaos_cli.utils import preprocess_optional_value_flag
+
+        args = ["--other-flag", "value"]
+        result = preprocess_optional_value_flag(args, "--monitoring-enabled", "signoz")
+        assert result == ["--other-flag", "value"]
 
 
 # ─── Version command ────────────────────────────────────────────────────

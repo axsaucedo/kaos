@@ -1,6 +1,7 @@
 """KAOS CLI main entry point."""
 
 import typer
+from typer.core import TyperGroup
 
 from kaos_cli.ui import ui_command
 from kaos_cli.install import DEFAULT_NAMESPACE, MONITORING_BACKENDS
@@ -9,9 +10,30 @@ from kaos_cli.mcp import app as mcp_app
 from kaos_cli.agent import app as agent_app
 from kaos_cli.modelapi import app as modelapi_app
 from kaos_cli.samples import app as samples_app
+from kaos_cli.utils import DEFAULT_MONITORING_BACKEND, preprocess_optional_value_flag
+
+
+class _RootGroup(TyperGroup):
+    """Custom Group that allows --monitoring-enabled without a value on the ui command."""
+
+    def get_command(self, ctx, cmd_name):
+        cmd = super().get_command(ctx, cmd_name)
+        if cmd and cmd_name == "ui":
+            original_parse = cmd.parse_args
+
+            def patched_parse(ctx, args):
+                args = preprocess_optional_value_flag(
+                    args, "--monitoring-enabled", DEFAULT_MONITORING_BACKEND
+                )
+                return original_parse(ctx, args)
+
+            cmd.parse_args = patched_parse
+        return cmd
+
 
 # Disable shell completion message
 app = typer.Typer(
+    cls=_RootGroup,
     add_completion=False,
     help="KAOS - K8s Agent Orchestration System CLI",
     no_args_is_help=True,

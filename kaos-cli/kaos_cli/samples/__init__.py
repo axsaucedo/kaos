@@ -1,11 +1,14 @@
 """KAOS samples commands - deploy example configurations."""
 
+import getpass
 import subprocess
 import tempfile
 from pathlib import Path
 
 import typer
 import yaml
+
+_API_SECRET_PROMPT = "__PROMPT__"
 
 # Resolve samples directory: bundled package data (copied at build time), or repo path
 _PACKAGE_DATA_DIR = Path(__file__).resolve().parent / "data"
@@ -71,17 +74,18 @@ def _apply_overrides(
     model: str | None,
     api_secret: str | None,
     namespace: str | None,
+    provider: str | None = None,
 ) -> str:
     """Apply CLI overrides to sample YAML content using YAML parser."""
     docs = list(yaml.safe_load_all(yaml_content))
 
-    # Parse api_secret once
+    # Parse api_secret (must be secretname:key format at this point)
     secret_name = secret_key = None
     if api_secret:
         if ":" in api_secret:
             secret_name, secret_key = api_secret.split(":", 1)
         else:
-            secret_name, secret_key = api_secret, "api-key"
+            raise ValueError(f"Invalid api_secret format: {api_secret!r}. Expected secretname:key.")
 
     for doc in docs:
         if not doc or not isinstance(doc, dict):
@@ -112,6 +116,8 @@ def _apply_overrides(
             if hosted and model:
                 hosted["model"] = model
             proxy = spec.get("proxyConfig")
+            if proxy and provider:
+                proxy["provider"] = provider
             if proxy and secret_name:
                 proxy["apiKey"] = {
                     "valueFrom": {
@@ -141,6 +147,33 @@ def list_samples() -> None:
         typer.echo("")
 
 
+def _create_api_secret(
+    name: str, namespace: str | None, api_key: str
+) -> tuple[str, str]:
+    """Create a Kubernetes secret for API key and return (secret_name, key_name)."""
+    secret_name = f"kaos-{name}-api-key"
+    key_name = "api-key"
+    secret_yaml = (
+        f"apiVersion: v1\nkind: Secret\nmetadata:\n  name: {secret_name}\n"
+        f"type: Opaque\nstringData:\n  {key_name}: {api_key}\n"
+    )
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        f.write(secret_yaml)
+        tmp_path = f.name
+    try:
+        args = ["kubectl", "apply", "-f", tmp_path]
+        if namespace:
+            args.extend(["-n", namespace])
+        result = subprocess.run(args, capture_output=True, text=True)
+        if result.returncode != 0:
+            typer.echo(f"Error creating secret: {result.stderr}", err=True)
+            raise typer.Exit(result.returncode)
+        typer.echo(f"🔑 Created secret '{secret_name}'")
+    finally:
+        Path(tmp_path).unlink()
+    return secret_name, key_name
+
+
 def deploy_sample(
     name: str,
     namespace: str | None = None,
@@ -151,6 +184,7 @@ def deploy_sample(
     mode: str | None = None,
     model: str | None = None,
     api_secret: str | None = None,
+    provider: str | None = None,
 ) -> None:
     """Deploy a sample configuration."""
     sample_path = _find_sample(name)
@@ -161,6 +195,26 @@ def deploy_sample(
 
     raw_content = sample_path.read_text()
 
+    # Handle api_secret: bare flag triggers prompt, value must be secretname:key format
+    if api_secret == _API_SECRET_PROMPT:
+        if dry_run:
+            typer.echo(
+                "Note: --api-secret without value would prompt for API key",
+                err=True,
+            )
+            secret_name = f"kaos-{name}-api-key"
+            api_secret = f"{secret_name}:api-key"
+        else:
+            api_key = getpass.getpass("Enter API key: ")
+            secret_name, secret_key = _create_api_secret(name, namespace, api_key)
+            api_secret = f"{secret_name}:{secret_key}"
+    elif api_secret and ":" not in api_secret:
+        typer.echo(
+            f"Error: Invalid --api-secret format '{api_secret}'. Expected secretname:key format.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
     # Apply overrides
     yaml_content = _apply_overrides(
         raw_content,
@@ -169,6 +223,7 @@ def deploy_sample(
         model=model,
         api_secret=api_secret,
         namespace=namespace,
+        provider=provider,
     )
 
     if dry_run:
@@ -257,7 +312,30 @@ def delete_sample(name: str, namespace: str | None = None) -> None:
     typer.echo(f"\n✅ Deleted sample '{name}'")
 
 
+from typer.core import TyperGroup
+from kaos_cli.utils import preprocess_optional_value_flag
+
+
+class _SamplesGroup(TyperGroup):
+    """Custom Group that allows --api-secret to be used without a value."""
+
+    def get_command(self, ctx, cmd_name):
+        cmd = super().get_command(ctx, cmd_name)
+        if cmd and cmd_name == "deploy":
+            original_parse = cmd.parse_args
+
+            def patched_parse(ctx, args):
+                args = preprocess_optional_value_flag(
+                    args, "--api-secret", _API_SECRET_PROMPT
+                )
+                return original_parse(ctx, args)
+
+            cmd.parse_args = patched_parse
+        return cmd
+
+
 app = typer.Typer(
+    cls=_SamplesGroup,
     help="Deploy and manage example configurations.",
     no_args_is_help=True,
 )
@@ -299,7 +377,12 @@ def deploy_cmd(
     api_secret: str = typer.Option(
         None,
         "--api-secret",
-        help="Override API secret (secretname:key format).",
+        help="API secret (secretname:key format, or pass without value to prompt for key).",
+    ),
+    provider: str = typer.Option(
+        None,
+        "--provider",
+        help="Override LiteLLM provider for ModelAPI (e.g., openai, nebius).",
     ),
 ) -> None:
     """Deploy a sample configuration.
@@ -309,6 +392,7 @@ def deploy_cmd(
       kaos samples deploy 3-hierarchical-agents --namespace my-ns
       kaos samples deploy 1-simple-echo-agent --model "llama3:8b" --dry-run
       kaos samples deploy 1-simple-echo-agent --api-secret nebius-secrets:api-key
+      kaos samples deploy 5-proxy-external-api --provider openai
     """
     deploy_sample(
         name=name,
@@ -320,6 +404,7 @@ def deploy_cmd(
         mode=mode,
         model=model,
         api_secret=api_secret,
+        provider=provider,
     )
 
 
