@@ -147,9 +147,7 @@ class AgentServerSettings(BaseSettings):
     # Logging settings
     agent_access_log: bool = False  # Mute uvicorn access logs by default
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = False
+    model_config = {"env_file": ".env", "case_sensitive": False}
 
 
 class ChatCompletionRequest(BaseModel):
