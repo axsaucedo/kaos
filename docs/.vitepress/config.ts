@@ -123,8 +123,7 @@ export default withMermaid(defineConfig({
               { text: 'Memory', link: '/python-framework/memory' }
             ]
           },
-          { text: 'MCP Tools', link: '/python-framework/mcp-tools' },
-          { text: 'Model API Client', link: '/python-framework/model-api' }
+          { text: 'MCP Tools', link: '/python-framework/mcp-tools' }
         ]
       },
       {

@@ -1,10 +1,10 @@
 # Python Agent Framework Overview
 
-The Python agent framework provides the runtime components for AI agents. It replaces Google ADK with a simpler, Kubernetes-native implementation.
+The Python agent framework provides the runtime components for AI agents, built on [Pydantic AI](https://ai.pydantic.dev/) as the core agent runtime.
 
 ## Design Principles
 
-1. **Keep It Simple** - Minimal abstractions, clear data flow
+1. **Keep It Simple** - Thin wrapper around Pydantic AI, minimal abstractions
 2. **HTTP-First** - All components communicate via HTTP
 3. **OpenAI Compatible** - Standard `/v1/chat/completions` API
 4. **Kubernetes Native** - Environment variable configuration, health probes
@@ -12,17 +12,14 @@ The Python agent framework provides the runtime components for AI agents. It rep
 ## Module Structure
 
 ```
-python/
+data-plane/kaos-framework/
 ├── agent/
-│   ├── client.py      # Agent, RemoteAgent, AgentCard, AgenticLoopConfig
-│   ├── server.py      # AgentServer, HTTP endpoints
-│   └── memory.py      # LocalMemory, MemoryEvent, SessionMemory
-├── mcptools/
-│   ├── server.py      # MCPServer with FastMCP
-│   └── client.py      # MCPClient for tool discovery
-├── modelapi/
-│   └── client.py      # ModelAPI for LLM calls
-├── tests/             # Test suite
+│   ├── client.py      # Agent (wraps pydantic_ai.Agent), RemoteAgent, AgentCard
+│   ├── server.py      # AgentServer, HTTP endpoints, env-var configuration
+│   └── memory.py      # LocalMemory, RedisMemory, NullMemory
+├── telemetry/
+│   └── manager.py     # OpenTelemetry tracing, metrics, context propagation
+├── tests/             # Test suite (75+ unit tests)
 └── Dockerfile         # Container image
 ```
 
@@ -30,75 +27,67 @@ python/
 
 ```mermaid
 flowchart TB
-    subgraph server["AgentServer"]
-        subgraph agent["Agent"]
-            memory["LocalMemory"]
-            model["ModelAPI<br/>(LLM)"]
-            mcp["MCPClient[]<br/>(Tools)"]
-            remote["RemoteAgent[]<br/>(Sub-agents)"]
-        end
-        
-        endpoints["Endpoints:<br/>• /health, /ready (K8s probes)<br/>• /.well-known/agent (A2A discovery)<br/>• /agent/invoke (A2A invocation)<br/>• /v1/chat/completions (OpenAI API)<br/>• /memory/events (Debug)"]
+    subgraph server["AgentServer (FastAPI)"]
+        health["GET /health, /ready"]
+        a2a["GET /.well-known/agent"]
+        chat["POST /v1/chat/completions"]
+        mem_ep["GET /memory/events, /sessions"]
     end
+
+    subgraph agent["KAOS Agent (wraps pydantic_ai.Agent)"]
+        pydantic["pydantic_ai.Agent<br/>• Native tool calling<br/>• Agentic loop<br/>• Streaming"]
+        memory["Memory Bridge<br/>• KAOS events ↔ Pydantic AI messages<br/>• LocalMemory / RedisMemory / NullMemory"]
+        delegation["Delegation Tools<br/>• delegate_to_{name}<br/>• Context forwarding"]
+        mcp["MCP Toolsets<br/>• MCPServerStreamableHTTP"]
+    end
+
+    subgraph external["External Services"]
+        model["ModelAPI (Ollama/LiteLLM)"]
+        mcpsrv["MCP Servers"]
+        peers["Peer Agents"]
+    end
+
+    chat --> pydantic
+    pydantic --> model
+    pydantic --> mcp
+    mcp --> mcpsrv
+    delegation --> peers
+    pydantic --> memory
 ```
 
-## Quick Start
+## Key Environment Variables
 
-### Programmatic Usage
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `AGENT_NAME` | Yes | Agent name |
+| `MODEL_API_URL` | Yes | LLM API base URL (auto-appends `/v1`) |
+| `MODEL_NAME` | Yes | Model name |
+| `AGENT_INSTRUCTIONS` | No | System prompt |
+| `AGENT_DESCRIPTION` | No | Agent description for A2A card |
+| `MCP_SERVERS` | No | Comma-separated MCP server names |
+| `MCP_SERVER_<NAME>_URL` | No | URL for each MCP server |
+| `PEER_AGENTS` | No | Comma-separated peer agent names |
+| `PEER_AGENT_<NAME>_CARD_URL` | No | URL for each peer agent |
+| `MEMORY_TYPE` | No | `local` (default) or `redis` |
+| `MEMORY_ENABLED` | No | Enable/disable memory (default: true) |
+| `MEMORY_CONTEXT_LIMIT` | No | Max history events (default: 6) |
+| `DEBUG_MOCK_RESPONSES` | No | JSON array for mock testing |
 
-```python
-from agent.client import Agent, AgenticLoopConfig
-from agent.server import AgentServer
-from modelapi.client import ModelAPI
+## Architecture
 
-# Create model API client
-model_api = ModelAPI(
-    model="smollm2:135m",
-    api_base="http://localhost:8000"
-)
+The KAOS Agent wraps `pydantic_ai.Agent` to add:
+- **Memory persistence**: KAOS memory events bridged to Pydantic AI `message_history`
+- **Sub-agent delegation**: Registered as `delegate_to_{name}` tool functions
+- **MCP tools**: Passed as `MCPServerStreamableHTTP` toolsets
+- **Telemetry**: Custom OTel spans for agent runs, tool calls, delegation
+- **HTTP surface**: OpenAI-compatible `/v1/chat/completions` endpoint
 
-# Create agent
-agent = Agent(
-    name="my-agent",
-    model_api=model_api,
-    instructions="You are a helpful assistant.",
-    loop_config=AgenticLoopConfig(max_steps=5)
-)
+The agentic loop (tool calling, retries, streaming) is handled entirely by Pydantic AI.
 
-# Create and run server
-server = AgentServer(agent, port=8080)
-server.run()
-```
+## Further Reading
 
-### Environment Variable Configuration
-
-```bash
-export AGENT_NAME="my-agent"
-export MODEL_API_URL="http://localhost:8000"
-export AGENT_INSTRUCTIONS="You are a helpful assistant."
-
-# Run with uvicorn
-cd python
-uvicorn agent.server:get_app --factory --host 0.0.0.0 --port 8000
-```
-
-## Key Classes
-
-| Class | Description |
-|-------|-------------|
-| `Agent` | Main agent with agentic loop, tools, sub-agents |
-| `AgentServer` | FastAPI server exposing agent endpoints |
-| `RemoteAgent` | Client for invoking remote agents |
-| `ModelAPI` | OpenAI-compatible LLM client |
-| `MCPClient` | MCP tool discovery and invocation |
-| `MCPServer` | MCP tool hosting with FastMCP |
-| `LocalMemory` | In-memory session/event storage |
-
-## Documentation
-
-- [Agent](agent.md) - Agent class details
-- [Agentic Loop](agentic-loop.md) - Reasoning loop implementation
-- [Memory](memory.md) - Session and event management
-- [MCP Tools](mcp-tools.md) - Tool integration
-- [ModelAPI](model-api.md) - LLM client
-- [Server](server.md) - HTTP endpoints
+- [Agent](./agent) — Core agent class and delegation
+- [Agentic Loop](./agentic-loop) — How Pydantic AI handles tool calling
+- [Memory](./memory) — Session storage and event tracking
+- [MCP Tools](./mcp-tools) — Tool server integration
+- [Server](./server) — HTTP API and configuration

@@ -1,226 +1,77 @@
 # MCP Tools
 
-The Model Context Protocol (MCP) integration enables agents to discover and call external tools hosted on any MCP-compliant server.
+MCP (Model Context Protocol) tools are integrated via Pydantic AI's native `MCPServerStreamableHTTP` support. The Agent discovers and calls tools from any MCP-compliant server.
 
 ## Architecture
 
 ```mermaid
 flowchart TB
-    subgraph agent["Agent"]
-        client["MCPClient<br/>• Uses MCP SDK Streamable HTTP<br/>• list_tools() → Discover tools<br/>• call_tool(name, args) → Execute"]
+    subgraph agent["Agent (Pydantic AI)"]
+        pydantic["pydantic_ai.Agent<br/>• MCP servers as toolsets<br/>• Native tool discovery"]
     end
     
-    subgraph server["MCPServer (FastMCP)"]
-        fastmcp["FastMCP<br/>• /mcp → Streamable HTTP transport<br/>• /health → Health check<br/>• /ready → Readiness check"]
+    subgraph mcp["MCP Server (FastMCP)"]
+        fastmcp["FastMCP<br/>• /mcp → Streamable HTTP<br/>• /health → Health check"]
     end
     
-    agent -->|"MCP Protocol (Streamable HTTP)"| server
+    agent -->|"MCP Protocol (Streamable HTTP)"| mcp
 ```
 
-## MCPClient
+## How It Works
 
-Protocol-compliant client using the official MCP SDK for tool discovery and execution.
+MCP servers are passed directly to the Pydantic AI agent as `toolsets`. Tool discovery and invocation are handled natively by Pydantic AI — there is no custom `MCPClient` wrapper.
 
-### Configuration
-
-```python
-from mcptools.client import MCPClient
-
-# Create client with name and URL
-# The client automatically appends /mcp for Streamable HTTP transport
-client = MCPClient(name="my-server", url="http://localhost:8001")
-```
-
-### Discover Tools
-
-The client uses lazy initialization - tools are discovered automatically on first use:
+### Agent Configuration
 
 ```python
-# Tools are discovered automatically when needed
-# Or manually initialize with _init()
-await client._init()
+from pydantic_ai_slim.pydantic_ai.mcp import MCPServerStreamableHTTP
 
-for tool in client.get_tools():
-    print(f"{tool.name}: {tool.description}")
-    print(f"  Schema: {tool.input_schema}")
-```
-
-### Call Tool
-
-```python
-result = await client.call_tool(
-    name="echo",
-    args={"text": "Hello, world!"}
+mcp = MCPServerStreamableHTTP(url="http://mcp-server:8000/mcp")
+agent = Agent(
+    name="tool-agent",
+    model_api_url="http://ollama:11434",
+    model_name="llama3.2",
+    mcp_servers=[mcp],
 )
-print(result)  # {"result": "Echo: Hello, world!"}
 ```
 
-### Tool Data Structure
+### Environment Variable Configuration
 
-The Tool dataclass uses MCP standard `inputSchema` format:
-
-```python
-@dataclass
-class Tool:
-    name: str              # Tool identifier
-    description: str       # Human-readable description
-    input_schema: Dict     # JSON Schema for parameters (MCP standard)
-```
-
-Example input_schema (MCP standard format):
-```python
-{
-    "type": "object",
-    "properties": {
-        "text": {"type": "string", "description": "Text to echo"}
-    },
-    "required": ["text"]
-}
-```
-
-### External MCP Server Support
-
-The MCPClient uses the official MCP SDK, enabling connection to any MCP-compliant server:
-
-```python
-# Connect to external FastMCP server
-external_client = MCPClient(
-    name="github-mcp",
-    url="http://github-mcp-server:8000"
-)
-
-# Discover and use tools
-await external_client._init()
-repos = await external_client.call_tool("list_repos", {"user": "octocat"})
-```
-
-## MCPServer
-
-Server for hosting tools via FastMCP protocol.
-
-### Configuration
-
-```python
-from mcptools.server import MCPServer, MCPServerSettings
-
-settings = MCPServerSettings(
-    mcp_host="0.0.0.0",
-    mcp_port=8000,
-    mcp_tools_string="",     # Dynamic tools (optional)
-    mcp_log_level="INFO"
-)
-
-server = MCPServer(settings)
-```
-
-### Register Tools Programmatically
-
-```python
-def echo(text: str) -> str:
-    """Echo the input text back."""
-    return f"Echo: {text}"
-
-def calculate(expression: str) -> str:
-    """Evaluate a mathematical expression."""
-    return str(eval(expression))
-
-server.register_tools({
-    "echo": echo,
-    "calculate": calculate
-})
-```
-
-### Register Tools from String
-
-For dynamic tool creation (used in Kubernetes):
-
-```python
-tools_string = '''
-def echo(text: str) -> str:
-    """Echo the input text back."""
-    return f"Echo: {text}"
-
-def add(a: int, b: int) -> int:
-    """Add two numbers."""
-    return a + b
-'''
-
-server.register_tools_from_string(tools_string)
-```
-
-### Run Server
-
-```python
-# Streamable HTTP transport (default, recommended)
-server.run(transport="streamable-http")
-
-# SSE transport (legacy, for backward compatibility)
-server.run(transport="sse")
-```
-
-## Environment Variable Configuration
-
-For Kubernetes deployment, tools can be defined via environment variable:
+In Kubernetes, MCP servers are configured via environment variables:
 
 ```bash
-export MCP_TOOLS_STRING='
-def echo(text: str) -> str:
-    """Echo the input text."""
-    return f"Echo: {text}"
-'
+# Comma-separated list of MCP server names
+export MCP_SERVERS="echo,calc"
+
+# URL for each server (auto-appends /mcp)
+export MCP_SERVER_ECHO_URL="http://echo-server:8000"
+export MCP_SERVER_CALC_URL="http://calc-server:8000"
 ```
 
-The server automatically registers tools from `MCP_TOOLS_STRING` on startup.
+The `AgentServerSettings` parses these into `MCPServerStreamableHTTP` instances.
 
-## Tool Definition Guidelines
+### Agent CRD
 
-### Type Annotations
-
-Tools must use type annotations for parameters:
-
-```python
-# Supported types
-def my_tool(
-    text: str,           # String
-    count: int,          # Integer
-    data: dict,          # Dictionary
-    items: list          # List
-) -> str:
-    ...
+```yaml
+apiVersion: kaos.tools/v1alpha1
+kind: Agent
+metadata:
+  name: tool-agent
+spec:
+  modelApiRef:
+    name: my-model
+  mcpServerRefs:
+  - name: echo-server
+  - name: calc-server
 ```
 
-### Docstrings
+The operator resolves `mcpServerRefs` to service URLs and sets `MCP_SERVERS` + `MCP_SERVER_*_URL` env vars.
 
-Docstrings are used as tool descriptions:
+## MCPServer CRD
 
-```python
-def search(query: str) -> str:
-    """Search for information using the query string.
-    
-    Args:
-        query: The search query to execute
-        
-    Returns:
-        Search results as a string
-    """
-    return f"Results for: {query}"
-```
+### Runtime-Based Architecture
 
-### Error Handling
-
-Tools should handle errors gracefully:
-
-```python
-def safe_divide(a: int, b: int) -> str:
-    """Safely divide two numbers."""
-    if b == 0:
-        return "Error: Division by zero"
-    return str(a / b)
-```
-
-## Kubernetes MCPServer CRD
-
-### Using PyPI Package
+MCPServers use a `runtime` field to specify the tool implementation:
 
 ```yaml
 apiVersion: kaos.tools/v1alpha1
@@ -228,91 +79,53 @@ kind: MCPServer
 metadata:
   name: echo-server
 spec:
-  type: python-runtime
-  config:
-    mcp: "test-mcp-echo-server"  # PyPI package name
+  runtime: python-string
+  params: |
+    def echo(message: str) -> str:
+        """Echo the input message."""
+        return f"Echo: {message}"
 ```
 
-### Using Dynamic Tools
+### Supported Runtimes
 
-```yaml
-apiVersion: kaos.tools/v1alpha1
-kind: MCPServer
-metadata:
-  name: calc-server
-spec:
-  type: python-runtime
-  config:
-    toolsString: |
-      def add(a: int, b: int) -> int:
-          """Add two numbers."""
-          return a + b
-      
-      def multiply(a: int, b: int) -> int:
-          """Multiply two numbers."""
-          return a * b
-```
+| Runtime | Description |
+|---------|-------------|
+| `python-string` | Dynamic Python functions defined inline |
+| `kubernetes` | Kubernetes API operations |
+| `slack` | Slack API integration |
+| `custom` | Custom container image |
 
-## Integration with Agent
+## MCP Server Implementation
 
-### Connecting Agent to MCP
+The `data-plane/mcp-servers/python-string/` module provides the `python-string` runtime:
 
 ```python
-from agent.client import Agent
-from mcptools.client import MCPClient
-from modelapi.client import ModelAPI
-
-# Create MCP client
-mcp_client = MCPClient(name="my-tools", url="http://localhost:8001")
-
-# Create agent with MCP client (tools are discovered automatically)
-agent = Agent(
-    name="tool-agent",
-    model_api=ModelAPI(model="gpt-4", api_base="http://localhost:8000"),
-    mcp_clients=[mcp_client],
-    instructions="Use the available tools to help users."
-)
-```
-
-### How Agent Uses Tools
-
-1. Agent builds system prompt with tool descriptions
-2. LLM responds with `tool_call` block when appropriate
-3. Agent parses tool name and arguments
-4. Agent calls `execute_tool()` which routes to correct MCP client
-5. Result is added to conversation
-6. Loop continues until final response
-
-## Testing
-
-### Mock MCP Server
-
-```python
-import pytest
 from mcptools.server import MCPServer, MCPServerSettings
 
-@pytest.fixture
-async def mcp_server():
-    settings = MCPServerSettings(mcp_port=8001)
-    server = MCPServer(settings)
-    
-    def echo(text: str) -> str:
-        return f"Echo: {text}"
-    
-    server.register_tools({"echo": echo})
-    
-    # Start server in background
-    # ... test code ...
+settings = MCPServerSettings(
+    mcp_host="0.0.0.0",
+    mcp_port=8000,
+    mcp_tools_string="def echo(text: str) -> str: return text"
+)
+server = MCPServer(settings)
+server.run(transport="streamable-http")
 ```
 
-### Verify Tool Discovery
+Tools are registered from the `MCP_TOOLS_STRING` environment variable at startup.
+
+## Tool Definition Guidelines
 
 ```python
-async def test_tool_discovery():
-    client = MCPClient(name="test-server", url="http://localhost:8001")
-    await client._init()  # Discover tools
+def search(query: str, limit: int = 10) -> str:
+    """Search for information.
     
-    tools = client.get_tools()
-    assert len(tools) > 0
-    assert "echo" in [t.name for t in tools]
+    Args:
+        query: The search query
+        limit: Maximum results to return
+    """
+    return f"Results for: {query}"
 ```
+
+- **Type annotations** are required for all parameters
+- **Docstrings** become tool descriptions for the LLM
+- **Return type** should be `str` for best LLM compatibility
