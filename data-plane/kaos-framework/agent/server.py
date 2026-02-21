@@ -539,9 +539,6 @@ def create_agent_server(
     Returns:
         AgentServer instance
     """
-    import os
-    import re
-
     if not settings:
         settings = AgentServerSettings()  # type: ignore[call-arg]
 
