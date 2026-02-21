@@ -242,51 +242,21 @@ class AgentServer:
 
     def _log_startup_config(self):
         """Log server configuration on startup for debugging."""
-        logger.info("=" * 60)
-        logger.info("AgentServer Starting")
-        logger.info("=" * 60)
-        logger.info(f"Agent Name: {self.agent.name}")
-        logger.info(f"Description: {self.agent.description}")
-        logger.info(f"Port: {self.port}")
-        logger.info(f"Max Steps: {self.agent.max_steps}")
-        logger.info(f"Memory Type: {type(self.agent.memory).__name__}")
-        logger.info(f"Log Level: {get_log_level()}")
+        sub_agents = list(self.agent.sub_agents.keys()) if self.agent.sub_agents else []
+        logger.info(
+            f"AgentServer starting: name={self.agent.name} port={self.port} "
+            f"memory={type(self.agent.memory).__name__} max_steps={self.agent.max_steps} "
+            f"mcp_servers={len(self.agent._mcp_servers)} sub_agents={sub_agents}"
+        )
+        logger.info(f"Model: {self.agent._model}")
 
-        # Log model API info
-        logger.info(f"Model API: {self.agent._model}")
-        logger.info(f"Model Name: {self.agent.name}")
-
-        # Log MCP tools
-        if self.agent._mcp_servers:
-            logger.info(f"MCP Servers: {len(self.agent._mcp_servers)}")
+        if is_otel_enabled():
+            logger.info(
+                f"OpenTelemetry: endpoint={os.getenv('OTEL_EXPORTER_OTLP_ENDPOINT', 'N/A')} "
+                f"service={os.getenv('OTEL_SERVICE_NAME', 'N/A')}"
+            )
         else:
-            logger.info("MCP Servers: None")
-
-        # Log sub-agents
-        if self.agent.sub_agents:
-            logger.info(f"Sub-agents: {len(self.agent.sub_agents)}")
-            for name, sub in self.agent.sub_agents.items():
-                logger.info(f"  - {name}: {sub.card_url}")
-        else:
-            logger.info("Sub-agents: None")
-
-        # Log OpenTelemetry configuration
-        otel_enabled = is_otel_enabled()
-        logger.info(f"OpenTelemetry Enabled: {otel_enabled}")
-        if otel_enabled:
-            logger.info(f"  OTEL_SERVICE_NAME: {os.getenv('OTEL_SERVICE_NAME', 'N/A')}")
-            logger.info(
-                f"  OTEL_EXPORTER_OTLP_ENDPOINT: {os.getenv('OTEL_EXPORTER_OTLP_ENDPOINT', 'N/A')}"
-            )
-            logger.info(
-                f"  OTEL_INCLUDE_HTTP_CLIENT: {getenv_bool('OTEL_INCLUDE_HTTP_CLIENT', False)}"
-            )
-            logger.info(
-                f"  OTEL_INCLUDE_HTTP_SERVER: {getenv_bool('OTEL_INCLUDE_HTTP_SERVER', False)}"
-            )
-            logger.debug(
-                f"  OTEL_RESOURCE_ATTRIBUTES: {os.getenv('OTEL_RESOURCE_ATTRIBUTES', 'N/A')}"
-            )
+            logger.info("OpenTelemetry: disabled")
 
         logger.info(f"Access Log: {self.access_log}")
         logger.info("=" * 60)
