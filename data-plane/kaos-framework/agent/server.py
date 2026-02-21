@@ -18,7 +18,6 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel
 from pydantic_settings import BaseSettings
 from opentelemetry import trace as trace_api
 import uvicorn
@@ -165,16 +164,6 @@ class AgentServerSettings(BaseSettings):
     otel_event_mode: Literal["attributes", "logs"] = "attributes"
 
     model_config = {"env_file": ".env", "case_sensitive": False}
-
-
-class ChatCompletionRequest(BaseModel):
-    """OpenAI chat completion request model."""
-
-    messages: List[Dict[str, str]]
-    model: Optional[str] = None
-    stream: Optional[bool] = False
-    temperature: Optional[float] = 1.0
-    max_tokens: Optional[int] = None
 
 
 class AgentServer:
