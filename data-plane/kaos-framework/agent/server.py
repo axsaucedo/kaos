@@ -23,6 +23,7 @@ from pydantic_settings import BaseSettings
 import uvicorn
 
 from pydantic_ai.mcp import MCPServerStreamableHTTP
+from pydantic_ai.agent import Agent as PydanticAgent
 from agent.client import Agent, RemoteAgent
 from agent.memory import LocalMemory
 from telemetry.manager import (
@@ -637,6 +638,10 @@ def create_agent_server(
 
     # Initialize OpenTelemetry
     init_otel(settings.agent_name)
+
+    # Enable Pydantic AI instrumentation for all agents (uses global OTEL provider)
+    if is_otel_enabled():
+        PydanticAgent.instrument_all(True)
 
     agent = Agent(
         name=settings.agent_name,

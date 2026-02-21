@@ -293,6 +293,7 @@ class Agent:
                 instructions=instructions,
                 name=name,
                 defer_model_check=True,
+                instrument=True,
                 toolsets=self._mcp_servers if self._mcp_servers else None,
             )
 
