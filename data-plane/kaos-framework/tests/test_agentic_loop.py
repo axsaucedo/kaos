@@ -614,21 +614,7 @@ class TestStreamingResponses:
                 )
             return PydanticModelResponse(parts=[TextPart(content="Streamed tool result")])
 
-        async def mock_stream_handler(messages: list, info: AgentInfo):
-            nonlocal call_count
-            call_count += 1
-            if call_count == 1:
-                from pydantic_ai.models.function import DeltaToolCall
-
-                yield {
-                    0: DeltaToolCall(
-                        name="lookup", json_args='{"key": "test"}', tool_call_id="call_s1"
-                    )
-                }
-            else:
-                yield "Streamed tool result"
-
-        model = FunctionModel(function=mock_handler, stream_function=mock_stream_handler)
+        model = FunctionModel(function=mock_handler)
         memory = LocalMemory()
         agent = Agent(name="stream-tool-agent", model=model, memory=memory, instructions="Test")
 
@@ -643,6 +629,46 @@ class TestStreamingResponses:
         event_types = [e.event_type for e in events]
         assert "tool_call" in event_types, f"Expected tool_call in {event_types}"
         assert "tool_result" in event_types, f"Expected tool_result in {event_types}"
+
+    @pytest.mark.asyncio
+    async def test_streaming_emits_progress_events_for_tool_calls(self):
+        """Test that streaming yields progress JSON events before final response."""
+        call_count = 0
+
+        def mock_handler(messages: list, info: AgentInfo) -> PydanticModelResponse:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return PydanticModelResponse(
+                    parts=[
+                        ToolCallPart(
+                            tool_name="echo",
+                            args={"message": "hello"},
+                            tool_call_id="call_p1",
+                        )
+                    ]
+                )
+            return PydanticModelResponse(parts=[TextPart(content="Echo said hello")])
+
+        model = FunctionModel(function=mock_handler)
+        agent = Agent(name="progress-agent", model=model, instructions="Test")
+
+        @agent._agent.tool_plain(name="echo", description="Echo a message")
+        async def echo(message: str) -> str:
+            return f"echoed: {message}"
+
+        chunks = []
+        async for chunk in agent.process_message("Use echo", stream=True):
+            chunks.append(chunk)
+
+        # First chunk should be progress event for tool call
+        assert len(chunks) >= 2
+        progress = json.loads(chunks[0])
+        assert progress["type"] == "progress"
+        assert progress["action"] == "tool_call"
+        assert progress["target"] == "echo"
+        # Last chunk should be the final response text
+        assert "Echo said hello" in chunks[-1]
 
 
 class TestNoToolsAgent:

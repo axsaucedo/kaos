@@ -32,6 +32,8 @@ from pydantic_ai.messages import (
     ToolReturnPart,
     UserPromptPart,
 )
+from pydantic_ai._agent_graph import CallToolsNode
+from pydantic_graph import End
 
 from agent.memory import LocalMemory, NullMemory, RedisMemory
 from telemetry.manager import (
@@ -414,18 +416,35 @@ class Agent:
 
             if stream:
                 full_response = ""
-                async with self._agent.run_stream(
+                # Use iter() for node-by-node control:
+                # - Emit progress events for tool calls (frontend reasoning status)
+                # - Yield final text after agentic loop completes
+                async with self._agent.iter(
                     user_prompt, message_history=message_history, usage_limits=usage_limits
-                ) as result:
-                    async for chunk in result.stream_text(delta=True):
-                        full_response += chunk
-                        yield chunk
+                ) as run:
+                    node = run.next_node
+                    while not isinstance(node, End):
+                        if isinstance(node, CallToolsNode):
+                            for part in node.model_response.parts:
+                                if isinstance(part, ToolCallPart):
+                                    progress = json.dumps(
+                                        {
+                                            "type": "progress",
+                                            "action": "tool_call",
+                                            "target": part.tool_name,
+                                        }
+                                    )
+                                    yield progress
+                        node = await run.next(node)
+
+                if run.result:
+                    full_response = str(run.result.output)
+                    yield full_response
+
                 if self.memory_enabled:
                     await self.memory.add_event(session_id, "agent_response", full_response)
-
-                # Persist tool/delegation events (parity with non-stream)
-                if self.memory_enabled:
-                    for msg in result.new_messages():
+                    new_msgs = run.result.new_messages() if run.result else []
+                    for msg in new_msgs:
                         await self._store_pydantic_message(session_id, msg)
             else:
                 result = await self._agent.run(
