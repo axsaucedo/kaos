@@ -27,12 +27,13 @@ from pydantic_ai.models.function import FunctionModel, AgentInfo
 from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse as PydanticModelResponse,
+    RetryPromptPart,
     TextPart,
     ToolCallPart,
     ToolReturnPart,
     UserPromptPart,
 )
-from pydantic_ai._agent_graph import CallToolsNode
+from pydantic_ai._agent_graph import CallToolsNode, ModelRequestNode
 from pydantic_graph import End
 
 from agent.memory import LocalMemory, NullMemory, RedisMemory
@@ -419,6 +420,9 @@ class Agent:
                 step = 0
                 # Use iter() for node-by-node control:
                 # - Emit progress events for tool calls (frontend reasoning status)
+                # - Record per-tool OTEL spans (interim until upstream pydantic-ai
+                #   adds per-tool spans in _call_tool — see REPORT-PYDANTIC-PR.md)
+                # - Detect unknown tool errors via RetryPromptPart
                 # - Yield final text after agentic loop completes
                 async with self._agent.iter(
                     user_prompt, message_history=message_history, usage_limits=usage_limits
@@ -433,6 +437,14 @@ class Agent:
                                 step += 1
                             for part in node.model_response.parts:
                                 if isinstance(part, ToolCallPart):
+                                    # Per-tool OTEL span (interim — upstream pydantic-ai
+                                    # contribution will add native per-tool spans)
+                                    otel.span_begin(
+                                        f"agent.tool_call.{part.tool_name}",
+                                        attrs={ATTR_TOOL_NAME: part.tool_name, "step": step},
+                                    )
+                                    # Emit progress SSE event with step/max_steps
+                                    # for frontend reasoning status display
                                     is_delegation = part.tool_name.startswith(
                                         DELEGATION_TOOL_PREFIX
                                     )
@@ -452,7 +464,29 @@ class Agent:
                                         }
                                     )
                                     yield progress
-                        node = await run.next(node)
+
+                        prev_node = node
+                        node = await run.next(prev_node)
+
+                        # After advancing a CallToolsNode, check for tool errors
+                        # (unknown tool name, validation errors) via RetryPromptPart
+                        if isinstance(prev_node, CallToolsNode) and isinstance(
+                            node, ModelRequestNode
+                        ):
+                            if hasattr(node, "request") and node.request:
+                                for part in node.request.parts:
+                                    if isinstance(part, RetryPromptPart):
+                                        otel.span_failure(Exception(str(part.content)))
+                                        logger.warning(f"Tool error: {part.content}")
+                                    elif isinstance(part, ToolReturnPart):
+                                        otel.span_success()
+
+                        # Close any open tool spans when CallToolsNode completes
+                        # without retry (normal tool execution success)
+                        if isinstance(prev_node, CallToolsNode) and not isinstance(
+                            node, ModelRequestNode
+                        ):
+                            otel.span_success()
 
                 if run.result:
                     full_response = str(run.result.output)

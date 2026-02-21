@@ -710,6 +710,44 @@ class TestStreamingResponses:
         assert progress["target"] == "worker"
         assert progress["step"] == 1
 
+    @pytest.mark.asyncio
+    async def test_streaming_logs_warning_for_unknown_tool(self):
+        """Test that unknown tool names trigger a warning log."""
+        call_count = 0
+
+        def mock_handler(messages: list, info: AgentInfo) -> PydanticModelResponse:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return PydanticModelResponse(
+                    parts=[
+                        ToolCallPart(
+                            tool_name="nonexistent_tool",
+                            args={"x": 1},
+                            tool_call_id="call_u1",
+                        )
+                    ]
+                )
+            return PydanticModelResponse(parts=[TextPart(content="Tool not found")])
+
+        model = FunctionModel(function=mock_handler)
+        agent = Agent(name="unknown-tool-agent", model=model, instructions="Test")
+
+        @agent._agent.tool_plain(name="echo", description="Echo")
+        async def echo(message: str) -> str:
+            return f"echoed: {message}"
+
+        chunks = []
+        async for chunk in agent.process_message("Use nonexistent", stream=True):
+            chunks.append(chunk)
+
+        # Progress event should still be emitted for the attempted tool call
+        assert len(chunks) >= 1
+        progress = json.loads(chunks[0])
+        assert progress["target"] == "nonexistent_tool"
+        # Final response should come after the retry
+        assert "Tool not found" in chunks[-1]
+
 
 class TestNoToolsAgent:
     """Test agent behavior without tools (no Phase 1)."""
