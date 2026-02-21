@@ -80,10 +80,6 @@ def configure_logging(level: str = "INFO", otel_correlation: bool = False) -> No
         "agent.server",
         "agent.client",
         "agent.memory",
-        "modelapi",
-        "modelapi.client",
-        "mcptools",
-        "mcptools.client",
     ]:
         logging.getLogger(logger_name).setLevel(log_level)
 
