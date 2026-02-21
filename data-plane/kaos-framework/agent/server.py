@@ -104,6 +104,18 @@ def configure_logging(level: str = "INFO", otel_correlation: bool = False) -> No
 logger = logging.getLogger(__name__)
 
 
+def _format_sse_chunk(chat_id: str, created_at: int, model_name: str, content: str) -> str:
+    """Format a content chunk as an SSE data line."""
+    data = {
+        "id": chat_id,
+        "object": "chat.completion.chunk",
+        "created": created_at,
+        "model": model_name,
+        "choices": [{"index": 0, "delta": {"content": content}, "finish_reason": None}],
+    }
+    return f"data: {json.dumps(data)}\n\n"
+
+
 class AgentServerSettings(BaseSettings):
     """Agent server configuration from environment variables."""
 
@@ -393,6 +405,13 @@ class AgentServer:
                 logger.error(f"Chat completion error: {e}")
                 raise HTTPException(status_code=500, detail=str(e))
 
+    def _build_span_attrs(self, session_id: Optional[str] = None) -> dict:
+        """Build span attributes for server-run tracing."""
+        attrs: dict = {"agent.name": self.agent.name}
+        if session_id:
+            attrs["session.id"] = session_id
+        return attrs
+
     async def _complete_chat_completion(
         self,
         messages: list,
@@ -400,26 +419,15 @@ class AgentServer:
         session_id: Optional[str] = None,
         parent_ctx: Optional[Any] = None,
     ) -> JSONResponse:
-        """Handle non-streaming chat completion.
-
-        Args:
-            messages: Full OpenAI-style messages array for context
-            model_name: Model name for response
-            session_id: Optional session ID for conversation continuity
-            parent_ctx: Parent trace context for distributed tracing
-        """
+        """Handle non-streaming chat completion."""
         tracer = get_tracer()
-        span_attrs = {"agent.name": self.agent.name}
-        if session_id:
-            span_attrs["session.id"] = session_id
 
         with tracer.start_as_current_span(
             "server-run",
             context=parent_ctx,
             kind=trace_api.SpanKind.SERVER,
-            attributes=span_attrs,
+            attributes=self._build_span_attrs(session_id),
         ):
-            # Collect complete response
             response_content = ""
             async for chunk in self.agent.process_message(
                 messages, stream=False, session_id=session_id
@@ -440,7 +448,7 @@ class AgentServer:
                         }
                     ],
                     "usage": {
-                        "prompt_tokens": 0,  # Not counting for simplicity
+                        "prompt_tokens": 0,
                         "completion_tokens": 0,
                         "total_tokens": 0,
                     },
@@ -454,26 +462,13 @@ class AgentServer:
         session_id: Optional[str] = None,
         parent_ctx: Optional[Any] = None,
     ) -> StreamingResponse:
-        """Handle streaming chat completion with SSE.
-
-        Args:
-            messages: Full OpenAI-style messages array for context
-            model_name: Model name for response
-            session_id: Optional session ID for conversation continuity
-            parent_ctx: Parent trace context for distributed tracing
-        """
+        """Handle streaming chat completion with SSE."""
+        span_attrs = self._build_span_attrs(session_id)
 
         async def generate_stream():
-            """Generate SSE stream for OpenAI-compatible streaming.
-
-            The server-run span is created here (inside the generator) so it
-            stays active for the entire processing duration. If placed in the
-            caller, the span would close before FastAPI consumes the generator.
-            """
+            # Span is created inside the generator so it stays active
+            # for the entire duration (not closed before FastAPI consumes it)
             tracer = get_tracer()
-            span_attrs = {"agent.name": self.agent.name}
-            if session_id:
-                span_attrs["session.id"] = session_id
 
             with tracer.start_as_current_span(
                 "server-run",
@@ -485,29 +480,13 @@ class AgentServer:
                     chat_id = f"chatcmpl-{uuid.uuid4().hex}"
                     created_at = int(time.time())
 
-                    # Stream response chunks
                     async for chunk in self.agent.process_message(
                         messages, stream=True, session_id=session_id
                     ):
-                        if chunk:  # Only send non-empty chunks
-                            sse_data = {
-                                "id": chat_id,
-                                "object": "chat.completion.chunk",
-                                "created": created_at,
-                                "model": model_name,
-                                "choices": [
-                                    {
-                                        "index": 0,
-                                        "delta": {"content": chunk},
-                                        "finish_reason": None,
-                                    }
-                                ],
-                            }
+                        if chunk:
+                            yield _format_sse_chunk(chat_id, created_at, model_name, chunk)
 
-                            # Format as SSE with proper JSON serialization
-                            yield f"data: {json.dumps(sse_data)}\n\n"
-
-                    # Send final chunk to indicate completion
+                    # Final stop chunk
                     final_data = {
                         "id": chat_id,
                         "object": "chat.completion.chunk",
