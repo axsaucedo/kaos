@@ -81,7 +81,90 @@ class SessionMemory:
         }
 
 
-class LocalMemory:
+class Memory(ABC):
+    """Abstract interface for all memory implementations."""
+
+    @abstractmethod
+    async def create_session(
+        self, app_name: str, user_id: str, session_id: Optional[str] = None
+    ) -> str: ...
+
+    @abstractmethod
+    async def get_session(self, session_id: str) -> Optional[SessionMemory]: ...
+
+    @abstractmethod
+    async def get_or_create_session(
+        self, session_id: str, app_name: str = "agent", user_id: str = "user"
+    ) -> str: ...
+
+    @abstractmethod
+    async def add_event(
+        self,
+        session_id: str,
+        event_or_type: Union[MemoryEvent, str],
+        content: Any = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> bool: ...
+
+    @abstractmethod
+    async def get_session_events(
+        self, session_id: str, event_types: Optional[List[str]] = None
+    ) -> List[MemoryEvent]: ...
+
+    @abstractmethod
+    async def list_sessions(self, user_id: Optional[str] = None) -> List[str]: ...
+
+    @abstractmethod
+    async def delete_session(self, session_id: str) -> bool: ...
+
+    def create_event(
+        self, event_type: str, content: Any, metadata: Optional[Dict[str, Any]] = None
+    ) -> MemoryEvent:
+        """Create a MemoryEvent with optional OTEL trace context."""
+        from telemetry.manager import is_otel_enabled, get_current_trace_context
+
+        event_metadata = metadata.copy() if metadata else {}
+
+        if is_otel_enabled():
+            trace_ctx = get_current_trace_context()
+            if trace_ctx:
+                event_metadata.update(trace_ctx)
+
+        return MemoryEvent(
+            event_id=f"event_{uuid.uuid4().hex[:8]}",
+            timestamp=datetime.now(timezone.utc),
+            event_type=event_type,
+            content=content,
+            metadata=event_metadata,
+        )
+
+    async def build_conversation_context(self, session_id: str, max_events: int = 20) -> str:
+        """Build a text conversation context from memory events."""
+        events = await self.get_session_events(session_id, ["user_message", "agent_response"])
+        recent_events = events[-max_events:] if len(events) > max_events else events
+
+        if not recent_events:
+            return ""
+
+        context_lines = []
+        for event in recent_events:
+            if event.event_type == "user_message":
+                context_lines.append(f"User: {event.content}")
+            elif event.event_type == "agent_response":
+                context_lines.append(f"Assistant: {event.content}")
+
+        return "\n".join(context_lines)
+
+    async def get_memory_stats(self) -> Dict[str, int]:
+        """Get memory usage statistics. Override for real implementations."""
+        return {"total_sessions": 0, "total_events": 0, "avg_events_per_session": 0}
+
+    async def cleanup_old_sessions(self, max_age_hours: int = 24) -> int:
+        """Clean up old sessions. Override for real implementations."""
+        return 0
+
+
+class LocalMemory(Memory):
     """Local in-memory session storage similar to Google ADK's InMemorySessionService."""
 
     def __init__(self, max_sessions: int = 1000, max_events_per_session: int = 500):
@@ -227,58 +310,6 @@ class LocalMemory:
 
         return events
 
-    async def build_conversation_context(self, session_id: str, max_events: int = 20) -> str:
-        events = await self.get_session_events(session_id, ["user_message", "agent_response"])
-
-        # Get most recent events
-        recent_events = events[-max_events:] if len(events) > max_events else events
-
-        if not recent_events:
-            return ""
-
-        context_lines = []
-        for event in recent_events:
-            if event.event_type == "user_message":
-                context_lines.append(f"User: {event.content}")
-            elif event.event_type == "agent_response":
-                context_lines.append(f"Assistant: {event.content}")
-
-        return "\n".join(context_lines)
-
-    def create_event(
-        self, event_type: str, content: Any, metadata: Optional[Dict[str, Any]] = None
-    ) -> MemoryEvent:
-        """Create a memory event.
-
-        Args:
-            event_type: Type of event (e.g., "user_message", "agent_response")
-            content: Event content/data
-            metadata: Optional metadata dictionary
-
-        Returns:
-            MemoryEvent instance
-
-        If OpenTelemetry is enabled, automatically includes trace_id and span_id
-        in the metadata for log correlation.
-        """
-        from telemetry.manager import is_otel_enabled, get_current_trace_context
-
-        event_metadata = metadata.copy() if metadata else {}
-
-        # Add trace context if OTel is enabled
-        if is_otel_enabled():
-            trace_ctx = get_current_trace_context()
-            if trace_ctx:
-                event_metadata.update(trace_ctx)
-
-        return MemoryEvent(
-            event_id=f"event_{uuid.uuid4().hex[:8]}",
-            timestamp=datetime.now(timezone.utc),
-            event_type=event_type,
-            content=content,
-            metadata=event_metadata,
-        )
-
     async def list_sessions(self, user_id: Optional[str] = None) -> List[str]:
         """Get list of session IDs, optionally filtered by user.
 
@@ -361,11 +392,11 @@ class LocalMemory:
             logger.info(f"Cleaned up {sessions_to_remove} oldest sessions to stay under limit")
 
 
-class NullMemory:
+class NullMemory(Memory):
     """No-op memory implementation for when memory is disabled.
 
     All methods succeed silently without storing any data.
-    This avoids adding conditional checks throughout the agent code.
+    Inherits create_event and build_conversation_context from Memory base.
     """
 
     def __init__(self, *args, **kwargs):
@@ -375,73 +406,38 @@ class NullMemory:
     async def create_session(
         self, app_name: str = "", user_id: str = "", session_id: Optional[str] = None
     ) -> str:
-        """Return a constant session ID."""
         return session_id or "null-session"
 
     async def get_session(self, session_id: str) -> Optional[SessionMemory]:
-        """Always returns None."""
         return None
 
     async def get_or_create_session(
         self, session_id: str, app_name: str = "agent", user_id: str = "user"
     ) -> str:
-        """Return the provided session ID."""
         return session_id
 
     async def add_event(
         self,
         session_id: str,
-        event_or_type: Union[Optional[MemoryEvent], str] = None,
+        event_or_type: Union[MemoryEvent, str] = "",
         content: Any = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> bool:
-        """Silently accept and discard events."""
         return True
 
     async def get_session_events(
         self, session_id: str, event_types: Optional[List[str]] = None
     ) -> List[MemoryEvent]:
-        """Always returns empty list."""
         return []
 
-    async def build_conversation_context(self, session_id: str, max_events: int = 20) -> str:
-        """Always returns empty string."""
-        return ""
-
-    def create_event(
-        self, event_type: str, content: Any, metadata: Optional[Dict[str, Any]] = None
-    ) -> MemoryEvent:
-        """Create a memory event (even though it won't be stored)."""
-        return MemoryEvent(
-            event_id=f"null_{uuid.uuid4().hex[:8]}",
-            timestamp=datetime.now(timezone.utc),
-            event_type=event_type,
-            content=content,
-            metadata=metadata or {},
-        )
-
     async def list_sessions(self, user_id: Optional[str] = None) -> List[str]:
-        """Always returns empty list."""
         return []
 
     async def delete_session(self, session_id: str) -> bool:
-        """Always returns True."""
         return True
 
-    async def get_memory_stats(self) -> Dict[str, int]:
-        """Return zero stats."""
-        return {
-            "total_sessions": 0,
-            "total_events": 0,
-            "avg_events_per_session": 0,
-        }
 
-    async def cleanup_old_sessions(self, max_age_hours: int = 24) -> int:
-        """No-op cleanup."""
-        return 0
-
-
-class RedisMemory:
+class RedisMemory(Memory):
     """Distributed memory backed by Redis.
 
     Storage model:
@@ -600,42 +596,6 @@ class RedisMemory:
                 logger.warning(f"Skipping malformed event in session {session_id}")
         return events
 
-    async def build_conversation_context(self, session_id: str, max_events: int = 20) -> str:
-        events = await self.get_session_events(session_id, ["user_message", "agent_response"])
-        recent_events = events[-max_events:] if len(events) > max_events else events
-
-        if not recent_events:
-            return ""
-
-        context_lines = []
-        for event in recent_events:
-            if event.event_type == "user_message":
-                context_lines.append(f"User: {event.content}")
-            elif event.event_type == "agent_response":
-                context_lines.append(f"Assistant: {event.content}")
-
-        return "\n".join(context_lines)
-
-    def create_event(
-        self, event_type: str, content: Any, metadata: Optional[Dict[str, Any]] = None
-    ) -> MemoryEvent:
-        from telemetry.manager import is_otel_enabled, get_current_trace_context
-
-        event_metadata = metadata.copy() if metadata else {}
-
-        if is_otel_enabled():
-            trace_ctx = get_current_trace_context()
-            if trace_ctx:
-                event_metadata.update(trace_ctx)
-
-        return MemoryEvent(
-            event_id=f"event_{uuid.uuid4().hex[:8]}",
-            timestamp=datetime.now(timezone.utc),
-            event_type=event_type,
-            content=content,
-            metadata=event_metadata,
-        )
-
     async def list_sessions(self, user_id: Optional[str] = None) -> List[str]:
         session_ids = await self._redis.zrange(self._sessions_index_key(), 0, -1)
 
@@ -720,7 +680,3 @@ class RedisMemory:
             for sid in oldest:
                 await self.delete_session(sid)
             logger.info(f"Cleaned up {len(oldest)} oldest sessions to stay under limit")
-
-
-# Backwards compatibility - this is the main class to use
-InMemorySessionService = LocalMemory

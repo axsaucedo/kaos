@@ -655,8 +655,9 @@ def create_agent_server(
                         )
 
     # Create memory
-    from agent.memory import LocalMemory, RedisMemory, NullMemory
+    from agent.memory import LocalMemory, RedisMemory, NullMemory, Memory
 
+    memory: Memory
     if settings.memory_enabled:
         if settings.memory_type == "redis" and settings.memory_redis_url:
             memory = RedisMemory(

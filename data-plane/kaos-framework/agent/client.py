@@ -35,7 +35,7 @@ from pydantic_ai.messages import (
 from pydantic_ai._agent_graph import CallToolsNode
 from pydantic_graph import End
 
-from agent.memory import LocalMemory, NullMemory, RedisMemory
+from agent.memory import LocalMemory, NullMemory, Memory
 from telemetry.manager import (
     is_otel_enabled,
     get_tracer,
@@ -47,7 +47,6 @@ from telemetry.manager import (
 
 logger = logging.getLogger(__name__)
 
-Memory = LocalMemory | RedisMemory | NullMemory
 DELEGATION_TOOL_PREFIX = "delegate_to_"
 
 
