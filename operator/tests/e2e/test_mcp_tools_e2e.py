@@ -388,11 +388,10 @@ async def test_agent_multiple_mcp_servers(test_namespace: str, shared_modelapi: 
 async def test_agent_string_mode_tool_calling(
     test_namespace: str, shared_modelapi: str
 ):
-    """Test Agent calls MCP tools via mock responses with tool_calls format.
+    """Test Agent calls MCP tools using string-mode tool calling.
 
-    Pydantic AI uses native tool calling (no separate string mode).
-    This test validates tool calling with a different model name to ensure
-    tool calling works regardless of model configuration.
+    String mode injects tool descriptions into the system prompt and parses
+    JSON tool calls from text responses instead of using native function calling.
     """
     task_id = f"STR_{int(time.time())}"
     mcp_name = "mcp-str-mode"
@@ -406,7 +405,7 @@ async def test_agent_string_mode_tool_calling(
     mcp_url = gateway_url(test_namespace, "mcp", mcp_name)
     await wait_for_mcp_server_ready(mcp_url)
 
-    # Pydantic AI uses native tool calling (no string mode), so use tool_calls format
+    # String-mode mock: model returns tool call JSON as plain text
     mock_responses = [
         json.dumps(
             {
@@ -434,6 +433,7 @@ async def test_agent_string_mode_tool_calling(
                 "description": "String mode tool agent",
                 "instructions": "You have access to echo tool.",
                 "reasoningLoopMaxSteps": 5,
+                "toolCallMode": "string",
             },
             "container": {
                 "env": [
