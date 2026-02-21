@@ -378,59 +378,54 @@ class AgentServer:
             - X-Session-ID header
             - session_id field in request body
             """
-            # Extract parent trace context from incoming request headers
-            parent_ctx = extract_trace_context(request.headers)
-            tracer = get_tracer()
+            try:
+                body = await request.json()
 
-            with tracer.start_as_current_span(
-                "chat_completions",
-                context=parent_ctx,
-                kind=trace_api.SpanKind.SERVER,
-                attributes={"agent.name": self.agent.name},
-            ):
-                try:
-                    body = await request.json()
+                messages = body.get("messages", [])
+                if not messages:
+                    raise HTTPException(status_code=400, detail="messages are required")
 
-                    messages = body.get("messages", [])
-                    if not messages:
-                        raise HTTPException(status_code=400, detail="messages are required")
+                model_name = body.get("model", "agent")
+                stream_requested = body.get("stream", False)
 
-                    model_name = body.get("model", "agent")
-                    stream_requested = body.get("stream", False)
+                # Extract session_id from header (preferred) or body
+                session_id = request.headers.get("X-Session-ID") or body.get("session_id")
 
-                    # Extract session_id from header (preferred) or body
-                    session_id = request.headers.get("X-Session-ID") or body.get("session_id")
-
-                    # Validate at least one user or task-delegation message exists
-                    has_valid_message = any(
-                        msg.get("role") in ["user", "task-delegation"] for msg in messages
+                # Validate at least one user or task-delegation message exists
+                has_valid_message = any(
+                    msg.get("role") in ["user", "task-delegation"] for msg in messages
+                )
+                if not has_valid_message:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="No user or task-delegation message found",
                     )
-                    if not has_valid_message:
-                        raise HTTPException(
-                            status_code=400,
-                            detail="No user or task-delegation message found",
-                        )
 
-                    # Pass full messages array to agent for processing
-                    # Agent handles tool calls and delegations based on model response
-                    if stream_requested:
-                        return await self._stream_chat_completion(messages, model_name, session_id)
-                    else:
-                        return await self._complete_chat_completion(
-                            messages, model_name, session_id
-                        )
+                # Extract parent trace context for distributed tracing
+                # Span is created inside each method so it stays active during processing
+                parent_ctx = extract_trace_context(request.headers)
 
-                except HTTPException:
-                    raise
-                except Exception as e:
-                    logger.error(f"Chat completion error: {e}")
-                    raise HTTPException(status_code=500, detail=str(e))
+                if stream_requested:
+                    return await self._stream_chat_completion(
+                        messages, model_name, session_id, parent_ctx
+                    )
+                else:
+                    return await self._complete_chat_completion(
+                        messages, model_name, session_id, parent_ctx
+                    )
+
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"Chat completion error: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
 
     async def _complete_chat_completion(
         self,
         messages: list,
         model_name: str,
         session_id: Optional[str] = None,
+        parent_ctx: Optional[Any] = None,
     ) -> JSONResponse:
         """Handle non-streaming chat completion.
 
@@ -438,40 +433,53 @@ class AgentServer:
             messages: Full OpenAI-style messages array for context
             model_name: Model name for response
             session_id: Optional session ID for conversation continuity
+            parent_ctx: Parent trace context for distributed tracing
         """
-        # Collect complete response
-        response_content = ""
-        async for chunk in self.agent.process_message(
-            messages, stream=False, session_id=session_id
-        ):
-            response_content += chunk
+        tracer = get_tracer()
+        span_attrs = {"agent.name": self.agent.name}
+        if session_id:
+            span_attrs["session.id"] = session_id
 
-        return JSONResponse(
-            {
-                "id": f"chatcmpl-{uuid.uuid4().hex}",
-                "object": "chat.completion",
-                "created": int(time.time()),
-                "model": model_name,
-                "choices": [
-                    {
-                        "index": 0,
-                        "message": {"role": "assistant", "content": response_content},
-                        "finish_reason": "stop",
-                    }
-                ],
-                "usage": {
-                    "prompt_tokens": 0,  # Not counting for simplicity
-                    "completion_tokens": 0,
-                    "total_tokens": 0,
-                },
-            }
-        )
+        with tracer.start_as_current_span(
+            "server-run",
+            context=parent_ctx,
+            kind=trace_api.SpanKind.SERVER,
+            attributes=span_attrs,
+        ):
+            # Collect complete response
+            response_content = ""
+            async for chunk in self.agent.process_message(
+                messages, stream=False, session_id=session_id
+            ):
+                response_content += chunk
+
+            return JSONResponse(
+                {
+                    "id": f"chatcmpl-{uuid.uuid4().hex}",
+                    "object": "chat.completion",
+                    "created": int(time.time()),
+                    "model": model_name,
+                    "choices": [
+                        {
+                            "index": 0,
+                            "message": {"role": "assistant", "content": response_content},
+                            "finish_reason": "stop",
+                        }
+                    ],
+                    "usage": {
+                        "prompt_tokens": 0,  # Not counting for simplicity
+                        "completion_tokens": 0,
+                        "total_tokens": 0,
+                    },
+                }
+            )
 
     async def _stream_chat_completion(
         self,
         messages: list,
         model_name: str,
         session_id: Optional[str] = None,
+        parent_ctx: Optional[Any] = None,
     ) -> StreamingResponse:
         """Handle streaming chat completion with SSE.
 
@@ -479,52 +487,69 @@ class AgentServer:
             messages: Full OpenAI-style messages array for context
             model_name: Model name for response
             session_id: Optional session ID for conversation continuity
+            parent_ctx: Parent trace context for distributed tracing
         """
 
         async def generate_stream():
-            """Generate SSE stream for OpenAI-compatible streaming."""
-            try:
-                chat_id = f"chatcmpl-{uuid.uuid4().hex}"
-                created_at = int(time.time())
+            """Generate SSE stream for OpenAI-compatible streaming.
 
-                # Stream response chunks
-                async for chunk in self.agent.process_message(
-                    messages, stream=True, session_id=session_id
-                ):
-                    if chunk:  # Only send non-empty chunks
-                        sse_data = {
-                            "id": chat_id,
-                            "object": "chat.completion.chunk",
-                            "created": created_at,
-                            "model": model_name,
-                            "choices": [
-                                {
-                                    "index": 0,
-                                    "delta": {"content": chunk},
-                                    "finish_reason": None,
-                                }
-                            ],
-                        }
+            The server-run span is created here (inside the generator) so it
+            stays active for the entire processing duration. If placed in the
+            caller, the span would close before FastAPI consumes the generator.
+            """
+            tracer = get_tracer()
+            span_attrs = {"agent.name": self.agent.name}
+            if session_id:
+                span_attrs["session.id"] = session_id
 
-                        # Format as SSE with proper JSON serialization
-                        yield f"data: {json.dumps(sse_data)}\n\n"
+            with tracer.start_as_current_span(
+                "server-run",
+                context=parent_ctx,
+                kind=trace_api.SpanKind.SERVER,
+                attributes=span_attrs,
+            ):
+                try:
+                    chat_id = f"chatcmpl-{uuid.uuid4().hex}"
+                    created_at = int(time.time())
 
-                # Send final chunk to indicate completion
-                final_data = {
-                    "id": chat_id,
-                    "object": "chat.completion.chunk",
-                    "created": created_at,
-                    "model": model_name,
-                    "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-                }
-                yield f"data: {json.dumps(final_data)}\n\n"
-                yield "data: [DONE]\n\n"
+                    # Stream response chunks
+                    async for chunk in self.agent.process_message(
+                        messages, stream=True, session_id=session_id
+                    ):
+                        if chunk:  # Only send non-empty chunks
+                            sse_data = {
+                                "id": chat_id,
+                                "object": "chat.completion.chunk",
+                                "created": created_at,
+                                "model": model_name,
+                                "choices": [
+                                    {
+                                        "index": 0,
+                                        "delta": {"content": chunk},
+                                        "finish_reason": None,
+                                    }
+                                ],
+                            }
 
-            except Exception as e:
-                logger.error(f"Streaming error: {e}")
-                error_data = {"error": {"type": "server_error", "message": str(e)}}
-                yield f"data: {json.dumps(error_data)}\n\n"
-                yield "data: [DONE]\n\n"
+                            # Format as SSE with proper JSON serialization
+                            yield f"data: {json.dumps(sse_data)}\n\n"
+
+                    # Send final chunk to indicate completion
+                    final_data = {
+                        "id": chat_id,
+                        "object": "chat.completion.chunk",
+                        "created": created_at,
+                        "model": model_name,
+                        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                    }
+                    yield f"data: {json.dumps(final_data)}\n\n"
+                    yield "data: [DONE]\n\n"
+
+                except Exception as e:
+                    logger.error(f"Streaming error: {e}")
+                    error_data = {"error": {"type": "server_error", "message": str(e)}}
+                    yield f"data: {json.dumps(error_data)}\n\n"
+                    yield "data: [DONE]\n\n"
 
         return StreamingResponse(
             generate_stream(),
