@@ -163,6 +163,10 @@ class Memory(ABC):
         """Clean up old sessions. Override for real implementations."""
         return 0
 
+    async def close(self) -> None:
+        """Close the memory backend. Override for backends with connections."""
+        pass
+
 
 class LocalMemory(Memory):
     """Local in-memory session storage similar to Google ADK's InMemorySessionService."""
