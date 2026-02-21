@@ -131,6 +131,14 @@ Pydantic AI runs `FunctionModel` handlers in a copied context — `ContextVar` s
 - Prefer async/await patterns
 - Minimal comments (only when clarification needed)
 
+## OpenTelemetry
+- Pydantic AI instrumentation enabled via `instrument=True` on Agent and `Agent.instrument_all(True)` in server startup
+- KAOS's `KaosOtelManager` handles SDK init, custom spans, metrics, context propagation
+- Pydantic AI uses the global `TracerProvider` set by KAOS — spans auto-parent correctly
+- Per-tool spans exist in both KAOS (iter loop) and Pydantic AI (`_tool_manager.py`) — some redundancy
+- See `PLAN-FULL-OTEL-REFACTOR.md` (gitignored) for future migration plan to simplify KAOS OTEL code
+- See `REPORT-PYDANTIC-TELEMETRY-FULL.md` (gitignored) for deep-dive into Pydantic AI internals
+
 ## API Endpoints
 - `GET /health`: Health probe
 - `GET /ready`: Readiness probe
