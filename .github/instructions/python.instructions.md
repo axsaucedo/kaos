@@ -84,19 +84,27 @@ The KAOS `Agent` class wraps `pydantic_ai.Agent`:
 
 ### Memory Bridge
 - KAOS memory (Local/Redis/Null) persists across sessions — Pydantic AI has no built-in persistence
+- All memory implementations extend `Memory` ABC (`agent/memory.py`) with shared `create_event()` and `build_conversation_context()`
+- NullMemory is a no-op — use it for stateless agents instead of disabling memory
 - `_build_message_history()`: KAOS events → Pydantic AI `ModelRequest`/`ModelResponse` messages
 - `_store_pydantic_message()`: Pydantic AI messages → KAOS memory events
 - Memory event types for delegation: `delegation_request`/`delegation_response` (not `tool_call`/`tool_result`)
 - Incoming task-delegation: detected via `task-delegation` role → stored as `task_delegation_received`
-- `memory_enabled` flag gates all memory reads/writes (set `False` for stateless agents)
 - `memory_context_limit` caps history size passed to model (default 6)
 - Streaming and non-streaming paths both persist tool/delegation events via `result.new_messages()`
 - History exclusion: latest prompt event explicitly excluded (not fragile `events[:-1]`)
 
+### Dependency Injection
+- `AgentDeps(session_id=...)` passed via Pydantic AI `RunContext` to delegation tools
+- Delegation tools use `ctx: RunContext[AgentDeps]` for concurrency-safe session access
+- No mutable per-Agent state for session tracking
+
 ### Key Classes
-- `Agent`: Main wrapper — `process_message()`, `process_message_stream()`, `get_agent_card()`
+- `Agent`: Main wrapper — `process_message()`, `get_agent_card()`
+- `AgentDeps`: Per-run dependencies (session_id) injected via RunContext
 - `RemoteAgent`: Represents a peer agent for delegation (stores URL, optional AgentCard)
 - `AgentCard`: A2A discovery card with name, description, URL, skills
+- `Memory`: ABC interface for LocalMemory, RedisMemory, NullMemory
 - `_MockResponseState`: Mutable mock response state shared via closure (workaround for ContextVar + FunctionModel issue)
 
 ## Mock Response Pattern
