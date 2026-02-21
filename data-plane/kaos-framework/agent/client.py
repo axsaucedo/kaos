@@ -53,6 +53,7 @@ class AgentDeps:
     """Per-run dependencies passed via RunContext to tools."""
 
     session_id: str = ""
+    memory: Optional["Memory"] = None
 
 
 class _MockResponseState:
@@ -335,10 +336,17 @@ class Agent:
 
         @self._agent.tool(name=tool_name, description=description)
         async def _delegate(ctx: RunContext[AgentDeps], task: str) -> str:
-            return await self._execute_delegation(agent_name, task, sub_agent, ctx.deps.session_id)
+            return await self._execute_delegation(
+                agent_name, task, sub_agent, ctx.deps.session_id, ctx.deps.memory
+            )
 
     async def _execute_delegation(
-        self, agent_name: str, task: str, sub_agent: RemoteAgent, session_id: str = ""
+        self,
+        agent_name: str,
+        task: str,
+        sub_agent: RemoteAgent,
+        session_id: str = "",
+        memory: Optional[Memory] = None,
     ) -> str:
         """Execute delegation to a sub-agent, forwarding conversation context."""
         import time
@@ -347,6 +355,7 @@ class Agent:
         delegation_counter, delegation_duration = get_delegation_metrics()
         start_time = time.perf_counter()
         success = False
+        mem = memory or self.memory
 
         with tracer.start_as_current_span(
             f"delegate.{agent_name}",
@@ -357,7 +366,7 @@ class Agent:
 
                 # Forward recent conversation context from memory
                 if session_id:
-                    events = await self.memory.get_session_events(session_id)
+                    events = await mem.get_session_events(session_id)
                     context_events = events[-self.memory_context_limit :] if events else []
                     for event in context_events:
                         if event.event_type in ("user_message", "task_delegation_received"):
@@ -420,8 +429,8 @@ class Agent:
             # Build message history from memory for context
             message_history = await self._build_message_history(session_id)
 
-            # Pass session_id to delegation tools via deps
-            deps = AgentDeps(session_id=session_id)
+            # Pass session_id and memory to tools via deps
+            deps = AgentDeps(session_id=session_id, memory=self.memory)
 
             # Limit model request count to max_steps
             usage_limits = UsageLimits(request_limit=self.max_steps)
