@@ -345,11 +345,6 @@ func (r *AgentReconciler) constructDeployment(agent *kaosv1alpha1.Agent, modelap
 		return nil, fmt.Errorf("DEFAULT_AGENT_IMAGE environment variable is required but not set")
 	}
 
-	// Apply container image override if specified in CRD
-	if agent.Spec.Container != nil && agent.Spec.Container.Image != "" {
-		agentImage = agent.Spec.Container.Image
-	}
-
 	container := corev1.Container{
 		Name:            "agent",
 		Image:           agentImage,
@@ -390,20 +385,22 @@ func (r *AgentReconciler) constructDeployment(agent *kaosv1alpha1.Agent, modelap
 		},
 	}
 
-	// Apply container command override if specified in CRD
-	if agent.Spec.Container != nil && len(agent.Spec.Container.Command) > 0 {
-		container.Command = agent.Spec.Container.Command
-	}
-
 	basePodSpec := corev1.PodSpec{
 		Containers: []corev1.Container{container},
 	}
 
-	// Apply podSpec override using strategic merge patch if provided
+	// Apply spec.container override using strategic merge patch
+	if agent.Spec.Container != nil {
+		containerPatch := containerOverrideToPodSpecPatch(*agent.Spec.Container)
+		if merged, err := util.MergePodSpec(basePodSpec, containerPatch); err == nil {
+			basePodSpec = merged
+		}
+	}
+
+	// Apply spec.podSpec override using strategic merge patch
 	finalPodSpec := basePodSpec
 	if agent.Spec.PodSpec != nil {
-		merged, err := util.MergePodSpec(basePodSpec, *agent.Spec.PodSpec)
-		if err == nil {
+		if merged, err := util.MergePodSpec(basePodSpec, *agent.Spec.PodSpec); err == nil {
 			finalPodSpec = merged
 		}
 	}
@@ -461,11 +458,6 @@ func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *
 				Value: agent.Spec.Config.Instructions,
 			})
 		}
-	}
-
-	// Add user-provided container env vars
-	if agent.Spec.Container != nil {
-		env = append(env, agent.Spec.Container.Env...)
 	}
 
 	// ModelAPI configuration
@@ -653,6 +645,30 @@ func (r *AgentReconciler) constructService(agent *kaosv1alpha1.Agent) *corev1.Se
 	}
 
 	return service
+}
+
+// containerOverrideToPodSpecPatch converts a ContainerOverride to a PodSpec patch
+// for strategic merge with the base container named "agent".
+func containerOverrideToPodSpecPatch(override kaosv1alpha1.ContainerOverride) corev1.PodSpec {
+	c := corev1.Container{Name: "agent"}
+	if override.Image != "" {
+		c.Image = override.Image
+	}
+	if len(override.Command) > 0 {
+		c.Command = override.Command
+	}
+	if len(override.Args) > 0 {
+		c.Args = override.Args
+	}
+	if override.Resources != nil {
+		c.Resources = *override.Resources
+	}
+	if len(override.Env) > 0 {
+		c.Env = override.Env
+	}
+	return corev1.PodSpec{
+		Containers: []corev1.Container{c},
+	}
 }
 
 // SetupWithManager sets up the controller with the Manager.
