@@ -544,12 +544,14 @@ class AgentServer:
 def create_agent_server(
     settings: Optional[AgentServerSettings] = None,
     sub_agents: Optional[List[RemoteAgent]] = None,
+    custom_agent: Any = None,
 ) -> AgentServer:
     """Create an AgentServer with optional sub-agents and MCP clients.
 
     Args:
         settings: Server settings (loaded from env if not provided)
         sub_agents: List of RemoteAgent instances (overrides settings.agent_sub_agents)
+        custom_agent: Pre-built Pydantic AI agent with custom tools (custom image pattern)
 
     Returns:
         AgentServer instance
@@ -653,6 +655,7 @@ def create_agent_server(
         memory=memory,
         memory_enabled=settings.memory_enabled,
         tool_call_mode=settings.tool_call_mode,
+        custom_pydantic_agent=custom_agent,
     )
 
     server = AgentServer(

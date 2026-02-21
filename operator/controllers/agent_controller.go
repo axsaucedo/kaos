@@ -345,6 +345,11 @@ func (r *AgentReconciler) constructDeployment(agent *kaosv1alpha1.Agent, modelap
 		return nil, fmt.Errorf("DEFAULT_AGENT_IMAGE environment variable is required but not set")
 	}
 
+	// Apply container image override if specified in CRD
+	if agent.Spec.Container != nil && agent.Spec.Container.Image != "" {
+		agentImage = agent.Spec.Container.Image
+	}
+
 	container := corev1.Container{
 		Name:            "agent",
 		Image:           agentImage,
@@ -383,6 +388,11 @@ func (r *AgentReconciler) constructDeployment(agent *kaosv1alpha1.Agent, modelap
 			TimeoutSeconds:      3,
 			FailureThreshold:    2,
 		},
+	}
+
+	// Apply container command override if specified in CRD
+	if agent.Spec.Container != nil && len(agent.Spec.Container.Command) > 0 {
+		container.Command = agent.Spec.Container.Command
 	}
 
 	basePodSpec := corev1.PodSpec{

@@ -228,6 +228,7 @@ class Agent:
         model_api_url: Optional[str] = None,
         model_name: Optional[str] = None,
         tool_call_mode: str = "auto",
+        custom_pydantic_agent: Any = None,
     ):
         self.name = name
         self.instructions = instructions
@@ -275,13 +276,23 @@ class Agent:
                 )
 
         # Build the Pydantic AI agent
-        self._agent = PydanticAgent(
-            model=self._model,
-            instructions=instructions,
-            name=name,
-            defer_model_check=True,
-            toolsets=self._mcp_servers if self._mcp_servers else None,
-        )
+        if custom_pydantic_agent is not None:
+            # Use the pre-built Pydantic AI agent (custom image pattern)
+            self._agent = custom_pydantic_agent
+            # Override model if mock responses are set
+            if self._mock_state is not None:
+                self._agent.model = self._model
+            elif self._model is not None:
+                self._agent.model = self._model
+            logger.info(f"Agent {name}: using custom Pydantic AI agent")
+        else:
+            self._agent = PydanticAgent(
+                model=self._model,
+                instructions=instructions,
+                name=name,
+                defer_model_check=True,
+                toolsets=self._mcp_servers if self._mcp_servers else None,
+            )
 
         # Register delegation tools for sub-agents
         self._register_delegation_tools()
@@ -537,6 +548,17 @@ class Agent:
                         skills.append({"name": tool.name, "description": tool.description or ""})
             except Exception as e:
                 logger.warning(f"Failed to list tools from MCP server: {e}")
+
+        # Add native tools defined directly on the Pydantic AI agent
+        if hasattr(self._agent, "_function_toolset"):
+            toolset = self._agent._function_toolset
+            if hasattr(toolset, "tools") and isinstance(toolset.tools, dict):
+                for tool_name, tool in toolset.tools.items():
+                    if not tool_name.startswith("delegate_to_"):
+                        desc = getattr(tool, "description", "") or ""
+                        skills.append({"name": tool_name, "description": desc})
+                if skills:
+                    capabilities.append("tool_execution")
 
         # Add delegation tools as skills
         for agent_name in self.sub_agents:
