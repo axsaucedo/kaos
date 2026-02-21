@@ -54,7 +54,7 @@ The KAOS `Agent` class wraps `pydantic_ai.Agent`:
 - Model configured via `OpenAIChatModel(model_name, provider=OpenAIProvider(base_url=MODEL_API_URL + "/v1"))`
 - `/v1` is auto-appended to `MODEL_API_URL` if not present (required for Ollama OpenAI-compat endpoint)
 - MCP servers passed as `toolsets=[MCPServerStreamableHTTP(url)]` to Pydantic AI
-- Sub-agent delegation registered as `@agent.tool_plain` functions with `delegate_to_` prefix
+- Sub-agent delegation registered as `@agent.tool` functions with `delegate_to_` prefix (receive RunContext)
 - Agentic loop handled entirely by Pydantic AI (no custom loop code)
 
 ### Tool Calling
@@ -95,16 +95,17 @@ The KAOS `Agent` class wraps `pydantic_ai.Agent`:
 - History exclusion: latest prompt event explicitly excluded (not fragile `events[:-1]`)
 
 ### Dependency Injection
-- `AgentDeps(session_id=...)` passed via Pydantic AI `RunContext` to delegation tools
-- Delegation tools use `ctx: RunContext[AgentDeps]` for concurrency-safe session access
-- No mutable per-Agent state for session tracking
+- `AgentDeps(session_id, memory)` passed via Pydantic AI `RunContext` to tools
+- Delegation tools use `ctx: RunContext[AgentDeps]` for concurrency-safe access
+- `ctx.deps.memory` provides memory access without relying on Agent instance closure
+- Custom tools registered on the Pydantic AI agent can also use `ctx.deps.memory`
 
 ### Key Classes
 - `Agent`: Main wrapper — `process_message()`, `get_agent_card()`
-- `AgentDeps`: Per-run dependencies (session_id) injected via RunContext
+- `AgentDeps`: Per-run dependencies (session_id, memory) injected via RunContext
 - `RemoteAgent`: Represents a peer agent for delegation (stores URL, optional AgentCard)
-- `AgentCard`: A2A discovery card with name, description, URL, skills
-- `Memory`: ABC interface for LocalMemory, RedisMemory, NullMemory
+- `AgentCard`: A2A discovery card (uses `asdict()` for serialization)
+- `Memory`: ABC interface for LocalMemory, RedisMemory, NullMemory (includes `close()`)
 - `_MockResponseState`: Mutable mock response state shared via closure (workaround for ContextVar + FunctionModel issue)
 
 ## Mock Response Pattern
