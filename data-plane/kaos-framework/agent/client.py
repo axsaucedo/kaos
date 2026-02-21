@@ -433,13 +433,22 @@ class Agent:
                                 step += 1
                             for part in node.model_response.parts:
                                 if isinstance(part, ToolCallPart):
+                                    is_delegation = part.tool_name.startswith(
+                                        DELEGATION_TOOL_PREFIX
+                                    )
+                                    action = "delegate" if is_delegation else "tool_call"
+                                    target = (
+                                        part.tool_name[len(DELEGATION_TOOL_PREFIX) :]
+                                        if is_delegation
+                                        else part.tool_name
+                                    )
                                     progress = json.dumps(
                                         {
                                             "type": "progress",
                                             "step": step,
                                             "max_steps": self.max_steps,
-                                            "action": "tool_call",
-                                            "target": part.tool_name,
+                                            "action": action,
+                                            "target": target,
                                         }
                                     )
                                     yield progress

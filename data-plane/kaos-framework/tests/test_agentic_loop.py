@@ -672,6 +672,44 @@ class TestStreamingResponses:
         # Last chunk should be the final response text
         assert "Echo said hello" in chunks[-1]
 
+    @pytest.mark.asyncio
+    async def test_streaming_emits_delegate_action_for_delegation(self):
+        """Test that delegation tool calls emit action='delegate' with agent name."""
+        call_count = 0
+
+        def mock_handler(messages: list, info: AgentInfo) -> PydanticModelResponse:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return PydanticModelResponse(
+                    parts=[
+                        ToolCallPart(
+                            tool_name="delegate_to_worker",
+                            args={"task": "do something"},
+                            tool_call_id="call_d1",
+                        )
+                    ]
+                )
+            return PydanticModelResponse(parts=[TextPart(content="Worker finished")])
+
+        model = FunctionModel(function=mock_handler)
+        agent = Agent(name="delegator", model=model, instructions="Test", max_steps=5)
+
+        # Register a delegation tool matching the delegate_to_ prefix
+        @agent._agent.tool_plain(name="delegate_to_worker", description="Delegate to worker")
+        async def delegate_to_worker(task: str) -> str:
+            return "done"
+
+        chunks = []
+        async for chunk in agent.process_message("Delegate", stream=True):
+            chunks.append(chunk)
+
+        assert len(chunks) >= 2
+        progress = json.loads(chunks[0])
+        assert progress["action"] == "delegate"
+        assert progress["target"] == "worker"
+        assert progress["step"] == 1
+
 
 class TestNoToolsAgent:
     """Test agent behavior without tools (no Phase 1)."""
