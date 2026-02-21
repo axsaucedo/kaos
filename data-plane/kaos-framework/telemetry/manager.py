@@ -109,8 +109,6 @@ class KaosLoggingHandler(LoggingHandler):
 
 
 # Semantic conventions for KAOS spans
-ATTR_AGENT_NAME = "agent.name"
-ATTR_SESSION_ID = "session.id"
 ATTR_DELEGATION_TARGET = "agent.delegation.target"
 
 # Process-global initialization state
