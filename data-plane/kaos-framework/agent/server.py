@@ -674,16 +674,25 @@ def create_agent_server(
     init_otel(settings.agent_name)
 
     # Enable Pydantic AI instrumentation with explicit KAOS OTEL providers
+    # Configurable via env vars:
+    #   OTEL_INSTRUMENTATION_VERSION: 1-4 (default: 4, latest with multimodal support)
+    #   OTEL_EVENT_MODE: 'attributes' or 'logs' (default: 'attributes')
+    #     Note: event_mode='logs' forces version=1 (deprecated in Pydantic AI)
     if is_otel_enabled():
         from pydantic_ai.models.instrumented import InstrumentationSettings
         from opentelemetry.trace import get_tracer_provider
         from opentelemetry.metrics import get_meter_provider
         from opentelemetry._logs import get_logger_provider
 
+        instr_version = int(os.environ.get("OTEL_INSTRUMENTATION_VERSION", "4"))
+        event_mode = os.environ.get("OTEL_EVENT_MODE", "attributes")
+
         instrumentation = InstrumentationSettings(
             tracer_provider=get_tracer_provider(),
             meter_provider=get_meter_provider(),
             logger_provider=get_logger_provider(),
+            version=instr_version,  # type: ignore[arg-type]
+            event_mode=event_mode,  # type: ignore[arg-type]
         )
         PydanticAgent.instrument_all(instrumentation)
 
