@@ -89,7 +89,6 @@ class AgentCard:
 class RemoteAgent:
     """Remote agent client for A2A protocol with graceful degradation."""
 
-    DISCOVERY_TIMEOUT = 5.0
     REQUEST_TIMEOUT = 60.0
 
     def __init__(
@@ -105,14 +104,13 @@ class RemoteAgent:
         self.card_url = url.rstrip("/")
         self.agent_card: Optional[AgentCard] = None
         self._active = False
-        self._discovery_client = httpx.AsyncClient(timeout=self.DISCOVERY_TIMEOUT)
-        self._request_client = httpx.AsyncClient(timeout=self.REQUEST_TIMEOUT)
+        self._client = httpx.AsyncClient(timeout=self.REQUEST_TIMEOUT)
         logger.info(f"RemoteAgent initialized: {name} -> {url}")
 
     async def _init(self) -> bool:
         """Fetch agent card and activate. Returns True if successful."""
         try:
-            response = await self._discovery_client.get(f"{self.card_url}/.well-known/agent")
+            response = await self._client.get(f"{self.card_url}/.well-known/agent")
             response.raise_for_status()
             data = response.json()
             self.agent_card = AgentCard(
@@ -139,7 +137,7 @@ class RemoteAgent:
         try:
             headers: Dict[str, str] = {}
             inject_trace_context(headers)
-            response = await self._request_client.post(
+            response = await self._client.post(
                 f"{self.card_url}/v1/chat/completions",
                 json={"model": self.name, "messages": messages, "stream": False},
                 headers=headers,
@@ -154,8 +152,7 @@ class RemoteAgent:
 
     async def close(self):
         try:
-            await self._discovery_client.aclose()
-            await self._request_client.aclose()
+            await self._client.aclose()
         except Exception:
             pass
 
