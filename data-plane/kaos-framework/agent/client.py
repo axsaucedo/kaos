@@ -35,13 +35,11 @@ from pydantic_ai.messages import (
 from pydantic_ai._agent_graph import CallToolsNode
 from pydantic_graph import End
 
-from agent.memory import LocalMemory, NullMemory, Memory
+from agent.memory import LocalMemory, Memory
 from telemetry.manager import (
-    is_otel_enabled,
     get_tracer,
     get_delegation_metrics,
     inject_trace_context,
-    ATTR_SESSION_ID,
     ATTR_DELEGATION_TARGET,
 )
 

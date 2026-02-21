@@ -18,7 +18,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel
 from pydantic_settings import BaseSettings
 from opentelemetry import trace as trace_api
 import uvicorn
@@ -26,7 +26,6 @@ import uvicorn
 from pydantic_ai.mcp import MCPServerStreamableHTTP
 from pydantic_ai.agent import Agent as PydanticAgent
 from agent.client import Agent, RemoteAgent
-from agent.memory import LocalMemory
 from telemetry.manager import (
     init_otel,
     is_otel_enabled,
