@@ -113,3 +113,37 @@ spec:
     - name: DEBUG_MOCK_RESPONSES
       value: '["{\"tool_calls\": [{\"id\": \"call_1\", \"name\": \"echo\", \"arguments\": {\"message\": \"test\"}}]}", "Done."]'
 ```
+
+## String Mode
+
+For models without native function calling support (e.g., small Ollama models), string mode injects tool descriptions into the system prompt and parses JSON tool calls from the response text.
+
+### Enable String Mode
+
+```yaml
+# In Agent CRD
+spec:
+  config:
+    toolCallMode: "string"
+```
+
+Or via environment variable:
+
+```bash
+export TOOL_CALL_MODE=string
+```
+
+### How It Works
+
+1. Tool definitions are formatted as text descriptions and appended to the system prompt
+2. The model is instructed to respond with `{"tool_calls": [...]}` JSON when using tools
+3. Response text is parsed for tool call JSON patterns
+4. Detected tool calls are converted to `ToolCallPart` objects for Pydantic AI processing
+
+### Supported Modes
+
+| Mode | Behavior |
+|------|----------|
+| `auto` | Default — uses Pydantic AI native function calling |
+| `native` | Same as `auto` (explicit) |
+| `string` | Text-based tool calling via system prompt injection |

@@ -89,6 +89,7 @@ tmp/                       # Local work files (gitignored)
 - `operator/chart/`: Helm chart (generated from kustomize)
 - `data-plane/kaos-framework/agent/client.py`: Agent runtime core (Pydantic AI wrapper with delegation, memory bridge, mock model)
 - `data-plane/kaos-framework/agent/server.py`: FastAPI HTTP server (health, memory, chat completions, A2A)
+- `data-plane/kaos-framework/agent/string_mode.py`: String-mode FunctionModel wrapper for models without native function calling
 - `data-plane/kaos-framework/agent/memory.py`: Memory backends (LocalMemory, RedisMemory, NullMemory)
 
 ## Testing Notes

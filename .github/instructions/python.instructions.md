@@ -18,6 +18,7 @@ make format                     # Auto-format code
 ## Project Structure
 - `agent/client.py`: Agent (wraps pydantic_ai.Agent), RemoteAgent, AgentCard, _MockResponseState
 - `agent/server.py`: FastAPI HTTP server with health probes, memory endpoints, chat completions, A2A discovery
+- `agent/string_mode.py`: String-mode FunctionModel wrapper for models without native function calling
 - `agent/memory.py`: LocalMemory, RedisMemory, NullMemory for session/event management (unchanged)
 - `agent/telemetry/`: OpenTelemetry instrumentation (tracing, metrics)
 - `pyproject.toml`: Dependencies — `pydantic-ai`, `fasta2a`, `opentelemetry-*`
@@ -40,10 +41,9 @@ make format                     # Auto-format code
 | `MEMORY_TYPE` | Memory backend: `local` (default) or `redis` |
 | `MEMORY_REDIS_URL` | Redis connection URL (required when `MEMORY_TYPE=redis`) |
 | `DEBUG_MOCK_RESPONSES` | JSON array of mock responses (tool_calls JSON or plain text) |
+| `TOOL_CALL_MODE` | Tool calling mode: `auto` (default), `native`, `string` |
 | `OTEL_ENABLED` | Enable OpenTelemetry instrumentation |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP exporter endpoint |
-
-**Removed:** `TOOL_CALL_MODE` — Pydantic AI always uses native tool calling (no string mode).
 
 ## Architecture
 
@@ -56,12 +56,29 @@ The KAOS `Agent` class wraps `pydantic_ai.Agent`:
 - Agentic loop handled entirely by Pydantic AI (no custom loop code)
 
 ### Tool Calling
-- Pydantic AI uses native function calling exclusively (no string-mode concept)
+- Pydantic AI uses native function calling by default
+- `TOOL_CALL_MODE=string`: FunctionModel wrapper injects tool descriptions into system prompt, parses JSON tool calls from text
+- `TOOL_CALL_MODE=auto|native`: Standard Pydantic AI native function calling (default)
 - MCP tools: `MCPServerStreamableHTTP(url + "/mcp")` — `/mcp` path appended for FastMCP servers
 - Delegation tools: `delegate_to_{agent_name}` registered as plain tool functions
 - Delegation forwards recent conversation context from memory to sub-agents
 - Tool discovery for agent card: connects to MCP servers via `list_tools()` on card requests
+- Native Pydantic AI tools (from custom_pydantic_agent) also exposed in agent card via `_function_toolset`
 - `max_steps` controls model call limit via `UsageLimits(request_limit=max_steps)` (not `retries`)
+
+### String Mode (`agent/string_mode.py`)
+- For models without native function calling support (e.g., small Ollama models)
+- `build_string_mode_handler(base_url, model_name)` → FunctionModel handler
+- Injects tool descriptions + JSON format instructions into system prompt
+- Parses `{"tool_calls": [...]}` JSON from model response text
+- Returns `ToolCallPart` objects when tool calls detected, `TextPart` otherwise
+- Controlled via `TOOL_CALL_MODE` env var (CRD: `spec.config.toolCallMode`)
+
+### Custom Agent Image Pattern
+- Users create custom Pydantic AI agents with their own tools
+- Use `create_agent_server(custom_agent=my_agent)` to wrap with KAOS endpoints
+- Deploy via Agent CRD with `container.image` override
+- Example: `examples/custom-agent/server.py`
 
 ### Memory Bridge
 - KAOS memory (Local/Redis/Null) persists across sessions — Pydantic AI has no built-in persistence
@@ -106,7 +123,7 @@ Pydantic AI runs `FunctionModel` handlers in a copied context — `ContextVar` s
 - `TestModel` from `pydantic_ai.models.test` for simple predetermined responses
 - Agents with tools: 2 mock responses (tool call + final answer)
 - Agents without tools: 1 mock response (final answer only)
-- No string-mode tests — Pydantic AI always uses native tool calling
+- String-mode tests in `tests/test_string_mode.py` — tool description generation, JSON parsing, agent integration
 
 ## Code Style
 - Use `black` for formatting
