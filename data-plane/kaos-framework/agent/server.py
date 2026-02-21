@@ -136,6 +136,9 @@ class AgentServerSettings(BaseSettings):
     # Agentic loop configuration (from K8s operator)
     agentic_loop_max_steps: int = 5
 
+    # Tool calling mode: "auto" (default), "native", "string"
+    tool_call_mode: str = "auto"
+
     # Memory configuration
     memory_enabled: bool = True  # Enable/disable memory (NullMemory when disabled)
     memory_type: str = "local"  # Memory type: "local" or "redis"
@@ -649,6 +652,7 @@ def create_agent_server(
         memory_context_limit=settings.memory_context_limit,
         memory=memory,
         memory_enabled=settings.memory_enabled,
+        tool_call_mode=settings.tool_call_mode,
     )
 
     server = AgentServer(

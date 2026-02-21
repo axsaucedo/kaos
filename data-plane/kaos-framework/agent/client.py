@@ -16,6 +16,8 @@ import os
 from typing import List, Dict, Any, Optional, AsyncIterator, Union
 from dataclasses import dataclass
 
+from agent.string_mode import build_string_mode_handler
+
 import httpx
 from pydantic_ai import Agent as PydanticAgent
 from pydantic_ai.usage import UsageLimits
@@ -225,6 +227,7 @@ class Agent:
         memory_enabled: bool = True,
         model_api_url: Optional[str] = None,
         model_name: Optional[str] = None,
+        tool_call_mode: str = "auto",
     ):
         self.name = name
         self.instructions = instructions
@@ -233,6 +236,7 @@ class Agent:
         self.memory_context_limit = memory_context_limit
         self.memory_enabled = memory_enabled
         self.max_steps = max_steps
+        self.tool_call_mode = tool_call_mode
         self.sub_agents: Dict[str, RemoteAgent] = {
             agent.name: agent for agent in (sub_agents or [])
         }
@@ -250,14 +254,20 @@ class Agent:
                 self._mock_state = mock_state
                 logger.info(f"Agent {name}: using mock model (DEBUG_MOCK_RESPONSES)")
             elif model_api_url and model_name:
-                # Ensure base_url includes /v1 for OpenAI-compatible endpoints
-                # (Ollama serves at /v1/chat/completions, LiteLLM at /chat/completions)
                 base_url = model_api_url.rstrip("/")
                 if not base_url.endswith("/v1"):
                     base_url = f"{base_url}/v1"
-                provider = OpenAIProvider(base_url=base_url, api_key="not-needed")
-                self._model = OpenAIChatModel(model_name=model_name, provider=provider)
-                logger.info(f"Agent {name}: using OpenAI model {model_name} at {base_url}")
+
+                if tool_call_mode == "string":
+                    # String-mode: wrap model in FunctionModel with string-mode handler
+                    handler = build_string_mode_handler(base_url, model_name)
+                    self._model = FunctionModel(handler, model_name=f"string:{model_name}")
+                    logger.info(f"Agent {name}: using string-mode model {model_name} at {base_url}")
+                else:
+                    # Native mode (auto/native): use Pydantic AI OpenAI model
+                    provider = OpenAIProvider(base_url=base_url, api_key="not-needed")
+                    self._model = OpenAIChatModel(model_name=model_name, provider=provider)
+                    logger.info(f"Agent {name}: using OpenAI model {model_name} at {base_url}")
             else:
                 raise ValueError(
                     "Agent requires either 'model', 'model_api_url'+'model_name', "
@@ -278,7 +288,7 @@ class Agent:
 
         logger.info(
             f"Agent initialized: {name} (sub_agents={list(self.sub_agents.keys())}, "
-            f"mcp_servers={len(self._mcp_servers)})"
+            f"mcp_servers={len(self._mcp_servers)}, tool_call_mode={tool_call_mode})"
         )
 
     def _register_delegation_tools(self):
