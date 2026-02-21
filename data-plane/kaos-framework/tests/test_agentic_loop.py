@@ -632,7 +632,7 @@ class TestStreamingResponses:
 
     @pytest.mark.asyncio
     async def test_streaming_emits_progress_events_for_tool_calls(self):
-        """Test that streaming yields progress JSON events before final response."""
+        """Test that streaming yields progress JSON events with step info."""
         call_count = 0
 
         def mock_handler(messages: list, info: AgentInfo) -> PydanticModelResponse:
@@ -651,7 +651,7 @@ class TestStreamingResponses:
             return PydanticModelResponse(parts=[TextPart(content="Echo said hello")])
 
         model = FunctionModel(function=mock_handler)
-        agent = Agent(name="progress-agent", model=model, instructions="Test")
+        agent = Agent(name="progress-agent", model=model, instructions="Test", max_steps=5)
 
         @agent._agent.tool_plain(name="echo", description="Echo a message")
         async def echo(message: str) -> str:
@@ -661,10 +661,12 @@ class TestStreamingResponses:
         async for chunk in agent.process_message("Use echo", stream=True):
             chunks.append(chunk)
 
-        # First chunk should be progress event for tool call
+        # First chunk should be progress event for tool call with step info
         assert len(chunks) >= 2
         progress = json.loads(chunks[0])
         assert progress["type"] == "progress"
+        assert progress["step"] == 1
+        assert progress["max_steps"] == 5
         assert progress["action"] == "tool_call"
         assert progress["target"] == "echo"
         # Last chunk should be the final response text

@@ -416,6 +416,7 @@ class Agent:
 
             if stream:
                 full_response = ""
+                step = 0
                 # Use iter() for node-by-node control:
                 # - Emit progress events for tool calls (frontend reasoning status)
                 # - Yield final text after agentic loop completes
@@ -425,11 +426,18 @@ class Agent:
                     node = run.next_node
                     while not isinstance(node, End):
                         if isinstance(node, CallToolsNode):
+                            has_tools = any(
+                                isinstance(p, ToolCallPart) for p in node.model_response.parts
+                            )
+                            if has_tools:
+                                step += 1
                             for part in node.model_response.parts:
                                 if isinstance(part, ToolCallPart):
                                     progress = json.dumps(
                                         {
                                             "type": "progress",
+                                            "step": step,
+                                            "max_steps": self.max_steps,
                                             "action": "tool_call",
                                             "target": part.tool_name,
                                         }
