@@ -133,11 +133,12 @@ Pydantic AI runs `FunctionModel` handlers in a copied context — `ContextVar` s
 
 ## OpenTelemetry
 - Pydantic AI instrumentation enabled via `instrument=True` on Agent and `Agent.instrument_all(True)` in server startup
-- KAOS's `KaosOtelManager` handles SDK init, custom spans, metrics, context propagation
-- Pydantic AI uses the global `TracerProvider` set by KAOS — spans auto-parent correctly
-- Per-tool spans exist in both KAOS (iter loop) and Pydantic AI (`_tool_manager.py`) — some redundancy
-- See `PLAN-FULL-OTEL-REFACTOR.md` (gitignored) for future migration plan to simplify KAOS OTEL code
-- See `REPORT-PYDANTIC-TELEMETRY-FULL.md` (gitignored) for deep-dive into Pydantic AI internals
+- `telemetry/manager.py` provides: `init_otel()` (SDK setup), `get_tracer()`, `get_delegation_metrics()`, `inject_trace_context()`, `extract_trace_context()`
+- Pydantic AI handles agent/model/tool spans internally; KAOS adds delegation spans and server request span
+- Context propagation: `tracer.start_as_current_span()` for delegation/server spans (no manual attach/detach)
+- Delegation metrics: `kaos.delegations` counter + `kaos.delegation.duration` histogram
+- Pydantic AI does NOT use Python `logging` — uses OTEL Logger API with span attributes (version 2+)
+- KAOS logs are correlated via `KaosLoggingHandler` (adds trace_id/span_id to log records)
 
 ## API Endpoints
 - `GET /health`: Health probe
