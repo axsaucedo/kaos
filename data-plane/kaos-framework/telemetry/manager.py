@@ -1,26 +1,25 @@
 """
-OpenTelemetry Manager for KAOS.
+OpenTelemetry setup for KAOS.
 
-Provides a simplified interface for OpenTelemetry instrumentation using standard
-OTEL_* environment variables. Uses OTEL_SDK_DISABLED (standard OTel env var) to
-control whether telemetry is enabled.
+Provides SDK initialization using standard OTEL_* environment variables and
+lightweight helpers for trace context propagation and delegation metrics.
+
+Span management is handled by:
+- Pydantic AI instrumentation (agent run, model call, tool execution spans)
+- Standard OTEL context managers (tracer.start_as_current_span) in KAOS code
 
 Key design:
 - Process-global SDK initialization via module-level _initialized flag
-- Inline span management via span_begin/span_success/span_failure (no context managers)
-- Async-safe span stack via contextvars for nesting support
+- Direct OTEL API usage — no custom span stack or context manipulation
 - OtelConfig uses pydantic BaseSettings with OTEL-compliant env var names
 """
 
 import logging
 import os
-import time
-from contextvars import ContextVar, Token
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from opentelemetry import trace, metrics, context as otel_context
+from opentelemetry import trace, metrics
 from opentelemetry import _logs as otel_logs
 from opentelemetry.context import Context
 from opentelemetry.sdk.trace import TracerProvider
@@ -37,8 +36,6 @@ from opentelemetry.propagate import set_global_textmap, inject, extract
 from opentelemetry.propagators.composite import CompositePropagator
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 from opentelemetry.baggage.propagation import W3CBaggagePropagator
-from opentelemetry.trace import Span, SpanKind, Status, StatusCode
-from opentelemetry.context import Context
 
 logger = logging.getLogger(__name__)
 
@@ -114,29 +111,14 @@ class KaosLoggingHandler(LoggingHandler):
 # Semantic conventions for KAOS spans
 ATTR_AGENT_NAME = "agent.name"
 ATTR_SESSION_ID = "session.id"
-ATTR_MODEL_NAME = "gen_ai.request.model"
-ATTR_TOOL_NAME = "tool.name"
 ATTR_DELEGATION_TARGET = "agent.delegation.target"
 
 # Process-global initialization state
 _initialized: bool = False
 
-
-@dataclass
-class SpanState:
-    """State for an active span on the stack."""
-
-    span: Span
-    token: Token[Context]  # Context token for detaching
-    start_time: float
-    metric_kind: Optional[str] = None  # "request", "model", "tool", "delegation"
-    metric_attrs: Dict[str, Any] = field(default_factory=dict)
-    ended: bool = False
-
-
-# Async-safe span stack per context (supports nesting)
-# default=None to avoid shared mutable list across async contexts
-_span_stack: ContextVar[Optional[List[SpanState]]] = ContextVar("kaos_span_stack", default=None)
+# Lazily initialized delegation metrics
+_delegation_counter: Optional[metrics.Counter] = None
+_delegation_duration: Optional[metrics.Histogram] = None
 
 
 class OtelConfig(BaseSettings):
@@ -300,326 +282,54 @@ def _get_service_name() -> str:
     return os.getenv("OTEL_SERVICE_NAME", os.getenv("AGENT_NAME", "kaos-service"))
 
 
-class KaosOtelManager:
-    """Lightweight helper for creating spans and recording metrics.
+def get_tracer() -> trace.Tracer:
+    """Get the KAOS tracer instance.
 
-    Uses inline span management via span_begin/span_success/span_failure instead
-    of context managers. Timing is handled internally via contextvars.
-
-    This is a singleton class - instantiate it in each module as:
-        otel = KaosOtelManager()
-
-    The first instantiation sets the service name (from env var or parameter).
-    Subsequent instantiations return the same instance; if a different service_name
-    is passed, a warning is logged and ignored.
-
-    Example:
-        otel = KaosOtelManager()
-        otel.span_begin("process_request", attrs={"session.id": "abc123"})
-        try:
-            # do work
-            pass
-        except Exception as e:
-            otel.span_failure(e)
-            raise
-        else:
-            otel.span_success()
+    Returns the global tracer using the service name. When OTel is not
+    initialized, the returned tracer is a no-op tracer.
     """
+    service_name = _get_service_name()
+    return trace.get_tracer(f"kaos.{service_name}")
 
-    _instance: Optional["KaosOtelManager"] = None
-    _initialized: bool = False
 
-    def __new__(cls, service_name: Optional[str] = None) -> "KaosOtelManager":
-        """Ensure only one instance exists (singleton pattern)."""
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        elif service_name is not None:
-            # Warn if trying to re-init with different service name
-            existing_name = getattr(cls._instance, "service_name", None)
-            if existing_name and service_name != existing_name:
-                logger.warning(
-                    f"KaosOtelManager already initialized with service '{existing_name}', "
-                    f"ignoring new service_name '{service_name}'"
-                )
-        return cls._instance
+def get_delegation_metrics() -> Tuple[Optional[metrics.Counter], Optional[metrics.Histogram]]:
+    """Get delegation counter and duration histogram.
 
-    def __init__(self, service_name: Optional[str] = None):
-        """Initialize manager with service context.
+    Lazily initializes metrics on first call. Returns (None, None) when
+    OTel is not initialized.
+    """
+    global _delegation_counter, _delegation_duration
 
-        Args:
-            service_name: Name of the service (reads from OTEL_SERVICE_NAME if not provided).
-                          Only used on first initialization; ignored on subsequent calls.
-        """
-        if self.__class__._initialized:
-            return
-        self.__class__._initialized = True
+    if not _initialized:
+        return None, None
 
-        self.service_name = service_name or _get_service_name()
-        self._tracer = trace.get_tracer(f"kaos.{self.service_name}")
-        self._meter = metrics.get_meter(f"kaos.{self.service_name}")
-
-        # Lazily initialized metrics
-        self._request_counter: Optional[metrics.Counter] = None
-        self._request_duration: Optional[metrics.Histogram] = None
-        self._model_counter: Optional[metrics.Counter] = None
-        self._model_duration: Optional[metrics.Histogram] = None
-        self._tool_counter: Optional[metrics.Counter] = None
-        self._tool_duration: Optional[metrics.Histogram] = None
-        self._delegation_counter: Optional[metrics.Counter] = None
-        self._delegation_duration: Optional[metrics.Histogram] = None
-
-    @classmethod
-    def _reset_for_testing(cls) -> None:
-        """Reset singleton state for testing purposes only.
-
-        This allows tests to create fresh instances with specific service names.
-        Should NOT be used in production code.
-        """
-        cls._instance = None
-        cls._initialized = False
-
-    def _ensure_metrics(self) -> None:
-        """Lazily initialize metric instruments."""
-        if self._request_counter is not None:
-            return
-
-        self._request_counter = self._meter.create_counter(
-            "kaos.requests", description="Request count", unit="1"
-        )
-        self._request_duration = self._meter.create_histogram(
-            "kaos.request.duration", description="Request duration", unit="ms"
-        )
-        self._model_counter = self._meter.create_counter(
-            "kaos.model.calls", description="Model API call count", unit="1"
-        )
-        self._model_duration = self._meter.create_histogram(
-            "kaos.model.duration", description="Model API call duration", unit="ms"
-        )
-        self._tool_counter = self._meter.create_counter(
-            "kaos.tool.calls", description="Tool call count", unit="1"
-        )
-        self._tool_duration = self._meter.create_histogram(
-            "kaos.tool.duration", description="Tool call duration", unit="ms"
-        )
-        self._delegation_counter = self._meter.create_counter(
+    if _delegation_counter is None:
+        service_name = _get_service_name()
+        meter = metrics.get_meter(f"kaos.{service_name}")
+        _delegation_counter = meter.create_counter(
             "kaos.delegations", description="Delegation count", unit="1"
         )
-        self._delegation_duration = self._meter.create_histogram(
+        _delegation_duration = meter.create_histogram(
             "kaos.delegation.duration", description="Delegation duration", unit="ms"
         )
 
-    def _get_stack(self) -> List[SpanState]:
-        """Get or create the span stack for current async context.
-
-        Allocates a new list per-context to avoid sharing mutable state.
-        """
-        stack = _span_stack.get()
-        if stack is None:
-            stack = []
-            _span_stack.set(stack)
-        return stack
-
-    def span_begin(
-        self,
-        name: str,
-        *,
-        kind: SpanKind = SpanKind.INTERNAL,
-        attrs: Optional[Dict[str, Any]] = None,
-        metric_kind: Optional[str] = None,
-        metric_attrs: Optional[Dict[str, Any]] = None,
-    ) -> None:
-        """Begin a span. Must be paired with span_success() or span_failure().
-
-        Args:
-            name: Span name
-            kind: Span kind (INTERNAL, CLIENT, SERVER)
-            attrs: Span attributes
-            metric_kind: Type of metric to record ("request", "model", "tool", "delegation")
-            metric_attrs: Additional attributes for metric recording
-        """
-        if not _initialized:
-            return
-
-        # Build attributes
-        span_attrs = {ATTR_AGENT_NAME: self.service_name}
-        if attrs:
-            span_attrs.update({k: v for k, v in attrs.items() if v is not None})
-
-        # Start span and make it current
-        span = self._tracer.start_span(name, kind=kind, attributes=span_attrs)
-        token = otel_context.attach(trace.set_span_in_context(span))
-
-        # Push state onto stack
-        state = SpanState(
-            span=span,
-            token=token,
-            start_time=time.perf_counter(),
-            metric_kind=metric_kind,
-            metric_attrs=metric_attrs or {},
-        )
-        stack = self._get_stack()
-        stack.append(state)
-
-    def span_success(self) -> None:
-        """End the current span with OK status. No-op if already ended or OTel disabled."""
-        if not _initialized:
-            return
-
-        stack = self._get_stack()
-        if not stack:
-            return
-
-        state = stack[-1]
-        if state.ended:
-            return
-
-        # Mark ended and calculate duration
-        state.ended = True
-        duration_ms = (time.perf_counter() - state.start_time) * 1000
-
-        # Set status and end span
-        state.span.set_status(Status(StatusCode.OK))
-        state.span.end()
-
-        # Detach context
-        otel_context.detach(state.token)
-
-        # Record metrics
-        self._record_metric(state.metric_kind, state.metric_attrs, duration_ms, success=True)
-
-        # Pop from stack
-        stack.pop()
-
-    def span_failure(self, exc: Exception) -> None:
-        """End the current span with ERROR status. Records the exception."""
-        if not _initialized:
-            return
-
-        stack = self._get_stack()
-        if not stack:
-            return
-
-        state = stack[-1]
-        if state.ended:
-            return
-
-        # Mark ended and calculate duration
-        state.ended = True
-        duration_ms = (time.perf_counter() - state.start_time) * 1000
-
-        # Set status, record exception, and end span
-        state.span.set_status(Status(StatusCode.ERROR, str(exc)))
-        state.span.record_exception(exc)
-        state.span.end()
-
-        # Detach context
-        otel_context.detach(state.token)
-
-        # Record metrics
-        self._record_metric(state.metric_kind, state.metric_attrs, duration_ms, success=False)
-
-        # Pop from stack
-        stack.pop()
-
-    def _record_metric(
-        self,
-        metric_kind: Optional[str],
-        metric_attrs: Dict[str, Any],
-        duration_ms: float,
-        success: bool,
-    ) -> None:
-        """Record metrics based on metric_kind."""
-        if not metric_kind:
-            return
-
-        self._ensure_metrics()
-
-        if metric_kind == "request":
-            labels = {"agent.name": self.service_name, "success": str(success).lower()}
-            if self._request_counter:
-                self._request_counter.add(1, labels)
-            if self._request_duration:
-                self._request_duration.record(duration_ms, labels)
-
-        elif metric_kind == "model":
-            model = metric_attrs.get("model", "unknown")
-            labels = {
-                "agent.name": self.service_name,
-                "model": model,
-                "success": str(success).lower(),
-            }
-            if self._model_counter:
-                self._model_counter.add(1, labels)
-            if self._model_duration:
-                self._model_duration.record(duration_ms, labels)
-
-        elif metric_kind == "tool":
-            tool = metric_attrs.get("tool", "unknown")
-            labels = {
-                "agent.name": self.service_name,
-                "tool": tool,
-                "success": str(success).lower(),
-            }
-            if self._tool_counter:
-                self._tool_counter.add(1, labels)
-            if self._tool_duration:
-                self._tool_duration.record(duration_ms, labels)
-
-        elif metric_kind == "delegation":
-            target = metric_attrs.get("target", "unknown")
-            labels = {
-                "agent.name": self.service_name,
-                "target": target,
-                "success": str(success).lower(),
-            }
-            if self._delegation_counter:
-                self._delegation_counter.add(1, labels)
-            if self._delegation_duration:
-                self._delegation_duration.record(duration_ms, labels)
-
-    @staticmethod
-    def inject_context(carrier: Dict[str, str]) -> Dict[str, str]:
-        """Inject trace context into headers for propagation."""
-        inject(carrier)
-        return carrier
-
-    @staticmethod
-    def extract_context(carrier: Dict[str, str]) -> Context:
-        """Extract trace context from headers."""
-        return extract(carrier)
-
-    @staticmethod
-    def attach_context(ctx: Context) -> Token[Context]:
-        """Attach a context to make it current.
-
-        Returns a token that should be passed to detach_context() when done.
-        """
-        return otel_context.attach(ctx)
-
-    @staticmethod
-    def detach_context(token: Token[Context]) -> None:
-        """Detach a previously attached context."""
-        otel_context.detach(token)
-
-    @staticmethod
-    def extract_and_attach_context(headers: Any) -> Token[Context]:
-        """Extract trace context from headers and attach it as current context.
-
-        Convenience method that combines extract_context + attach_context.
-        Returns a token that must be passed to detach_context() in finally block.
-
-        Args:
-            headers: HTTP headers (dict, starlette Headers, or any mapping)
-
-        Returns:
-            Token for detaching context in finally block
-        """
-        # Convert to dict if needed (handles Starlette Headers, etc.)
-        carrier = dict(headers) if not isinstance(headers, dict) else headers
-        ctx = extract(carrier)
-        return otel_context.attach(ctx)
+    return _delegation_counter, _delegation_duration
 
 
-# Module-level singleton for easy import: `from telemetry.manager import otel`
-# Can also be instantiated in any module as `otel = KaosOtelManager()` - returns same instance
-otel = KaosOtelManager()
+def inject_trace_context(carrier: Dict[str, str]) -> Dict[str, str]:
+    """Inject trace context into headers for propagation (e.g., A2A delegation)."""
+    inject(carrier)
+    return carrier
+
+
+def extract_trace_context(headers: Any) -> Context:
+    """Extract trace context from HTTP headers.
+
+    Args:
+        headers: HTTP headers (dict, Starlette Headers, or any mapping)
+
+    Returns:
+        Context with extracted trace information (use as parent for new spans)
+    """
+    carrier = dict(headers) if not isinstance(headers, dict) else headers
+    return extract(carrier)

@@ -37,11 +37,11 @@ from pydantic_graph import End
 
 from agent.memory import LocalMemory, NullMemory, RedisMemory
 from telemetry.manager import (
-    otel,
-    KaosOtelManager,
+    is_otel_enabled,
+    get_tracer,
+    get_delegation_metrics,
+    inject_trace_context,
     ATTR_SESSION_ID,
-    ATTR_MODEL_NAME,
-    ATTR_TOOL_NAME,
     ATTR_DELEGATION_TARGET,
 )
 
@@ -134,7 +134,7 @@ class RemoteAgent:
 
         try:
             headers: Dict[str, str] = {}
-            KaosOtelManager.inject_context(headers)
+            inject_trace_context(headers)
             response = await self._request_client.post(
                 f"{self.card_url}/v1/chat/completions",
                 json={"model": self.name, "messages": messages, "stream": False},
@@ -328,37 +328,47 @@ class Agent:
 
     async def _execute_delegation(self, agent_name: str, task: str, sub_agent: RemoteAgent) -> str:
         """Execute delegation to a sub-agent, forwarding conversation context."""
-        otel.span_begin(
+        import time
+
+        tracer = get_tracer()
+        delegation_counter, delegation_duration = get_delegation_metrics()
+        start_time = time.perf_counter()
+        success = False
+
+        with tracer.start_as_current_span(
             f"delegate.{agent_name}",
-            attrs={ATTR_DELEGATION_TARGET: agent_name},
-            metric_kind="delegation",
-            metric_attrs={"target": agent_name},
-        )
-        failed = False
-        try:
-            messages: List[Dict[str, str]] = []
+            attributes={ATTR_DELEGATION_TARGET: agent_name},
+        ) as span:
+            try:
+                messages: List[Dict[str, str]] = []
 
-            # Forward recent conversation context from memory
-            if self.memory_enabled and self._current_session_id:
-                events = await self.memory.get_session_events(self._current_session_id)
-                context_events = events[-self.memory_context_limit :] if events else []
-                for event in context_events:
-                    if event.event_type in ("user_message", "task_delegation_received"):
-                        messages.append({"role": "user", "content": str(event.content)})
-                    elif event.event_type == "agent_response":
-                        messages.append({"role": "assistant", "content": str(event.content)})
+                # Forward recent conversation context from memory
+                if self.memory_enabled and self._current_session_id:
+                    events = await self.memory.get_session_events(self._current_session_id)
+                    context_events = events[-self.memory_context_limit :] if events else []
+                    for event in context_events:
+                        if event.event_type in ("user_message", "task_delegation_received"):
+                            messages.append({"role": "user", "content": str(event.content)})
+                        elif event.event_type == "agent_response":
+                            messages.append({"role": "assistant", "content": str(event.content)})
 
-            messages.append({"role": "task-delegation", "content": task})
-            result = await sub_agent.process_message(messages)
-            return result
-        except Exception as e:
-            failed = True
-            logger.error(f"Delegation to {agent_name} failed: {type(e).__name__}: {e}")
-            otel.span_failure(e)
-            return f"[Delegation failed: {e}]"
-        finally:
-            if not failed:
-                otel.span_success()
+                messages.append({"role": "task-delegation", "content": task})
+                result = await sub_agent.process_message(messages)
+                success = True
+                return result
+            except Exception as e:
+                logger.error(f"Delegation to {agent_name} failed: {type(e).__name__}: {e}")
+                from opentelemetry.trace import StatusCode, Status
+
+                span.set_status(Status(StatusCode.ERROR, str(e)))
+                span.record_exception(e)
+                return f"[Delegation failed: {e}]"
+            finally:
+                duration_ms = (time.perf_counter() - start_time) * 1000
+                if delegation_counter and delegation_duration:
+                    labels = {"target": agent_name, "success": str(success).lower()}
+                    delegation_counter.add(1, labels)
+                    delegation_duration.record(duration_ms, labels)
 
     async def process_message(
         self,
@@ -383,14 +393,6 @@ class Agent:
             session_id = session_id or "ephemeral"
 
         logger.debug(f"Processing message for session {session_id}, streaming={stream}")
-
-        span_attrs = {
-            "agent.max_steps": self.max_steps,
-            "stream": stream,
-            ATTR_SESSION_ID: session_id,
-        }
-        otel.span_begin("agent.agentic_loop", attrs=span_attrs, metric_kind="request")
-        span_failed = False
 
         try:
             # Extract user prompt from message
@@ -481,15 +483,10 @@ class Agent:
                 yield content
 
         except Exception as e:
-            span_failed = True
             logger.error(f"Error processing message: {str(e)}")
-            otel.span_failure(e)
             if self.memory_enabled:
                 await self.memory.add_event(session_id, "error", str(e))
             yield f"Sorry, I encountered an error: {str(e)}"
-        finally:
-            if not span_failed:
-                otel.span_success()
 
     def _extract_user_prompt(self, message: Union[str, List[Dict[str, str]]]) -> str:
         """Extract user prompt from string or message array."""

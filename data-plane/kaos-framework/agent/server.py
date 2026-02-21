@@ -20,6 +20,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, model_validator
 from pydantic_settings import BaseSettings
+from opentelemetry import trace as trace_api
 import uvicorn
 
 from pydantic_ai.mcp import MCPServerStreamableHTTP
@@ -32,7 +33,8 @@ from telemetry.manager import (
     should_enable_otel,
     get_log_level,
     getenv_bool,
-    KaosOtelManager,
+    extract_trace_context,
+    get_tracer,
 )
 
 
@@ -376,46 +378,53 @@ class AgentServer:
             - X-Session-ID header
             - session_id field in request body
             """
-            # Extract and attach trace context for distributed tracing
-            ctx_token = KaosOtelManager.extract_and_attach_context(request.headers)
+            # Extract parent trace context from incoming request headers
+            parent_ctx = extract_trace_context(request.headers)
+            tracer = get_tracer()
 
-            try:
-                body = await request.json()
+            with tracer.start_as_current_span(
+                "chat_completions",
+                context=parent_ctx,
+                kind=trace_api.SpanKind.SERVER,
+                attributes={"agent.name": self.agent.name},
+            ):
+                try:
+                    body = await request.json()
 
-                messages = body.get("messages", [])
-                if not messages:
-                    raise HTTPException(status_code=400, detail="messages are required")
+                    messages = body.get("messages", [])
+                    if not messages:
+                        raise HTTPException(status_code=400, detail="messages are required")
 
-                model_name = body.get("model", "agent")
-                stream_requested = body.get("stream", False)
+                    model_name = body.get("model", "agent")
+                    stream_requested = body.get("stream", False)
 
-                # Extract session_id from header (preferred) or body
-                session_id = request.headers.get("X-Session-ID") or body.get("session_id")
+                    # Extract session_id from header (preferred) or body
+                    session_id = request.headers.get("X-Session-ID") or body.get("session_id")
 
-                # Validate at least one user or task-delegation message exists
-                has_valid_message = any(
-                    msg.get("role") in ["user", "task-delegation"] for msg in messages
-                )
-                if not has_valid_message:
-                    raise HTTPException(
-                        status_code=400,
-                        detail="No user or task-delegation message found",
+                    # Validate at least one user or task-delegation message exists
+                    has_valid_message = any(
+                        msg.get("role") in ["user", "task-delegation"] for msg in messages
                     )
+                    if not has_valid_message:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="No user or task-delegation message found",
+                        )
 
-                # Pass full messages array to agent for processing
-                # Agent handles tool calls and delegations based on model response
-                if stream_requested:
-                    return await self._stream_chat_completion(messages, model_name, session_id)
-                else:
-                    return await self._complete_chat_completion(messages, model_name, session_id)
+                    # Pass full messages array to agent for processing
+                    # Agent handles tool calls and delegations based on model response
+                    if stream_requested:
+                        return await self._stream_chat_completion(messages, model_name, session_id)
+                    else:
+                        return await self._complete_chat_completion(
+                            messages, model_name, session_id
+                        )
 
-            except HTTPException:
-                raise
-            except Exception as e:
-                logger.error(f"Chat completion error: {e}")
-                raise HTTPException(status_code=500, detail=str(e))
-            finally:
-                KaosOtelManager.detach_context(ctx_token)
+                except HTTPException:
+                    raise
+                except Exception as e:
+                    logger.error(f"Chat completion error: {e}")
+                    raise HTTPException(status_code=500, detail=str(e))
 
     async def _complete_chat_completion(
         self,

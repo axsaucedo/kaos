@@ -121,107 +121,36 @@ class TestOtelConfig:
             assert config.enabled is False
 
 
-class TestKaosOtelManager:
-    """Tests for KaosOtelManager class."""
+class TestTracerAndMetrics:
+    """Tests for get_tracer and get_delegation_metrics helpers."""
 
-    def setup_method(self):
-        """Reset singleton before each test."""
-        from telemetry.manager import KaosOtelManager
+    def test_get_tracer(self):
+        """Test getting a tracer."""
+        from telemetry.manager import get_tracer
 
-        KaosOtelManager._reset_for_testing()
+        tracer = get_tracer()
+        assert tracer is not None
 
-    def teardown_method(self):
-        """Reset singleton after each test."""
-        from telemetry.manager import KaosOtelManager
+    def test_get_delegation_metrics_when_not_initialized(self):
+        """Test get_delegation_metrics returns (None, None) when not initialized."""
+        import telemetry.manager as tm
 
-        KaosOtelManager._reset_for_testing()
-
-    def test_manager_creation(self):
-        """Test creating a KaosOtelManager."""
-        from telemetry.manager import KaosOtelManager
-
-        manager = KaosOtelManager("test-agent")
-        assert manager.service_name == "test-agent"
-
-    def test_tracer_available(self):
-        """Test getting a tracer from manager."""
-        from telemetry.manager import KaosOtelManager
-
-        manager = KaosOtelManager("test-agent")
-        assert manager._tracer is not None
-
-    def test_meter_available(self):
-        """Test getting a meter from manager."""
-        from telemetry.manager import KaosOtelManager
-
-        manager = KaosOtelManager("test-agent")
-        assert manager._meter is not None
-
-    def test_span_begin_success_pattern(self):
-        """Test span_begin/span_success pattern (no-op when not initialized)."""
-        from telemetry.manager import KaosOtelManager
-
-        manager = KaosOtelManager("test-agent")
-        manager.span_begin("test-operation")
+        original = tm._initialized
+        tm._initialized = False
         try:
-            pass  # do work
-        except Exception as e:
-            manager.span_failure(e)
-            raise
-        else:
-            manager.span_success()
+            counter, histogram = tm.get_delegation_metrics()
+            assert counter is None
+            assert histogram is None
+        finally:
+            tm._initialized = original
 
-    def test_span_begin_failure_pattern(self):
-        """Test span_begin/span_failure pattern."""
-        from telemetry.manager import KaosOtelManager
+    def test_tracer_start_as_current_span(self):
+        """Test using tracer context manager for spans."""
+        from telemetry.manager import get_tracer
 
-        manager = KaosOtelManager("test-agent")
-        manager.span_begin("test-operation")
-        try:
-            raise ValueError("test error")
-        except ValueError as e:
-            manager.span_failure(e)
-        else:
-            manager.span_success()
-
-    def test_nested_spans(self):
-        """Test nested span_begin calls."""
-        from telemetry.manager import KaosOtelManager
-
-        manager = KaosOtelManager("test-agent")
-        manager.span_begin("outer")
-        try:
-            manager.span_begin("inner")
-            try:
-                pass
-            except Exception as e:
-                manager.span_failure(e)
-                raise
-            else:
-                manager.span_success()
-        except Exception as e:
-            manager.span_failure(e)
-            raise
-        else:
-            manager.span_success()
-
-    def test_span_with_metric_kind(self):
-        """Test span_begin with metric_kind parameter."""
-        from telemetry.manager import KaosOtelManager
-
-        manager = KaosOtelManager("test-agent")
-        manager.span_begin(
-            "model.inference",
-            metric_kind="model",
-            metric_attrs={"model": "gpt-4"},
-        )
-        try:
-            pass
-        except Exception as e:
-            manager.span_failure(e)
-            raise
-        else:
-            manager.span_success()
+        tracer = get_tracer()
+        with tracer.start_as_current_span("test-span") as span:
+            assert span is not None
 
 
 class TestContextPropagation:
@@ -229,16 +158,16 @@ class TestContextPropagation:
 
     def test_inject_context(self):
         """Test context injection into headers."""
-        from telemetry.manager import KaosOtelManager
+        from telemetry.manager import inject_trace_context
 
         carrier: dict = {}
-        result = KaosOtelManager.inject_context(carrier)
+        result = inject_trace_context(carrier)
         assert isinstance(result, dict)
 
     def test_extract_context(self):
         """Test context extraction from headers."""
-        from telemetry.manager import KaosOtelManager
+        from telemetry.manager import extract_trace_context
 
         carrier: dict = {}
-        context = KaosOtelManager.extract_context(carrier)
+        context = extract_trace_context(carrier)
         assert context is not None
