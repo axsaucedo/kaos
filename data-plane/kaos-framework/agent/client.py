@@ -315,14 +315,16 @@ class Agent:
                     f"{sub_agent.agent_card.description}"
                 )
             tool_name = f"{DELEGATION_TOOL_PREFIX}{sub_agent_name}"
+            self._register_single_delegation_tool(tool_name, description, sub_agent_name, sub_agent)
 
-            # Capture sub_agent in closure
-            _sub = sub_agent
-            _name = sub_agent_name
+    def _register_single_delegation_tool(
+        self, tool_name: str, description: str, agent_name: str, sub_agent: "RemoteAgent"
+    ):
+        """Register a single delegation tool, capturing agent_name/sub_agent via closure scope."""
 
-            @self._agent.tool_plain(name=tool_name, description=description)
-            async def _delegate(task: str, _s=_sub, _n=_name) -> str:
-                return await self._execute_delegation(_n, task, _s)
+        @self._agent.tool_plain(name=tool_name, description=description)
+        async def _delegate(task: str) -> str:
+            return await self._execute_delegation(agent_name, task, sub_agent)
 
     async def _execute_delegation(self, agent_name: str, task: str, sub_agent: RemoteAgent) -> str:
         """Execute delegation to a sub-agent, forwarding conversation context."""
