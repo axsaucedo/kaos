@@ -218,6 +218,45 @@ def _build_mock_model_function():
     return mock_handler, state
 
 
+def _resolve_model(
+    name: str,
+    model: Any,
+    model_api_url: Optional[str],
+    model_name: Optional[str],
+    tool_call_mode: str,
+) -> tuple:
+    """Resolve the Pydantic AI model from configuration.
+
+    Returns (model, mock_state) tuple.
+    """
+    if model is not None:
+        return model, None
+
+    mock_handler, mock_state = _build_mock_model_function()
+    if mock_handler:
+        logger.info(f"Agent {name}: using mock model (DEBUG_MOCK_RESPONSES)")
+        return FunctionModel(mock_handler), mock_state
+
+    if model_api_url and model_name:
+        base_url = model_api_url.rstrip("/")
+        if not base_url.endswith("/v1"):
+            base_url = f"{base_url}/v1"
+
+        if tool_call_mode == "string":
+            handler = build_string_mode_handler(base_url, model_name)
+            logger.info(f"Agent {name}: using string-mode model {model_name} at {base_url}")
+            return FunctionModel(handler, model_name=f"string:{model_name}"), None
+        else:
+            provider = OpenAIProvider(base_url=base_url, api_key="not-needed")
+            logger.info(f"Agent {name}: using OpenAI model {model_name} at {base_url}")
+            return OpenAIChatModel(model_name=model_name, provider=provider), None
+
+    raise ValueError(
+        "Agent requires either 'model', 'model_api_url'+'model_name', "
+        "or DEBUG_MOCK_RESPONSES env var"
+    )
+
+
 class Agent:
     """KAOS Agent — wraps pydantic_ai.Agent with memory, delegation, and telemetry."""
 
@@ -248,37 +287,11 @@ class Agent:
             agent.name: agent for agent in (sub_agents or [])
         }
         self._mcp_servers = mcp_servers or []
-        self._mock_state: Optional[_MockResponseState] = None
 
         # Resolve the Pydantic AI model
-        if model is not None:
-            self._model = model
-        else:
-            mock_handler, mock_state = _build_mock_model_function()
-            if mock_handler:
-                self._model = FunctionModel(mock_handler)
-                self._mock_state = mock_state
-                logger.info(f"Agent {name}: using mock model (DEBUG_MOCK_RESPONSES)")
-            elif model_api_url and model_name:
-                base_url = model_api_url.rstrip("/")
-                if not base_url.endswith("/v1"):
-                    base_url = f"{base_url}/v1"
-
-                if tool_call_mode == "string":
-                    # String-mode: wrap model in FunctionModel with string-mode handler
-                    handler = build_string_mode_handler(base_url, model_name)
-                    self._model = FunctionModel(handler, model_name=f"string:{model_name}")
-                    logger.info(f"Agent {name}: using string-mode model {model_name} at {base_url}")
-                else:
-                    # Native mode (auto/native): use Pydantic AI OpenAI model
-                    provider = OpenAIProvider(base_url=base_url, api_key="not-needed")
-                    self._model = OpenAIChatModel(model_name=model_name, provider=provider)
-                    logger.info(f"Agent {name}: using OpenAI model {model_name} at {base_url}")
-            else:
-                raise ValueError(
-                    "Agent requires either 'model', 'model_api_url'+'model_name', "
-                    "or DEBUG_MOCK_RESPONSES env var"
-                )
+        self._model, self._mock_state = _resolve_model(
+            name, model, model_api_url, model_name, tool_call_mode
+        )
 
         # Build the Pydantic AI agent
         if custom_pydantic_agent is not None:
