@@ -178,6 +178,17 @@ jobs:
           cache-to: type=gha,scope=mcp-pctx-e2e,mode=max
           github-token: ${{ github.token }}
 
+      - name: Build custom agent example image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./examples/custom-agent/Dockerfile
+          load: true
+          tags: custom-agent:test
+          cache-from: type=gha,scope=custom-agent-e2e
+          cache-to: type=gha,scope=custom-agent-e2e,mode=max
+          github-token: ${{ github.token }}
+
       - name: Load images into KIND
         run: |
           # Load images in parallel for faster execution
@@ -186,6 +197,7 @@ jobs:
           kind load docker-image ${{ env.REGISTRY }}/kaos-mcp-server:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }} &
           kind load docker-image ${{ env.REGISTRY }}/kaos-mcp-python-string:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }} &
           kind load docker-image ${{ env.REGISTRY }}/kaos-mcp-pctx:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }} &
+          kind load docker-image custom-agent:test --name ${{ env.KIND_CLUSTER_NAME }} &
           kind load docker-image ghcr.io/berriai/litellm:main-stable --name ${{ env.KIND_CLUSTER_NAME }} &
           kind load docker-image alpine/ollama:latest --name ${{ env.KIND_CLUSTER_NAME }} &
           kind load docker-image redis:7-alpine --name ${{ env.KIND_CLUSTER_NAME }} &
