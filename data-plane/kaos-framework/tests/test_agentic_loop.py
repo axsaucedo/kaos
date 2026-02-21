@@ -451,14 +451,13 @@ class TestMemoryWithToolCalls:
 
     @pytest.mark.asyncio
     async def test_memory_disabled_skips_storage(self):
-        """Test that memory_enabled=False skips all memory operations."""
-        memory = LocalMemory()
+        """Test that NullMemory skips all memory storage."""
+        memory = NullMemory()
         model = TestModel(custom_output_text="No memory response")
         agent = Agent(
             name="no-mem-agent",
             model=model,
             memory=memory,
-            memory_enabled=False,
             instructions="Test",
         )
 
@@ -466,7 +465,7 @@ class TestMemoryWithToolCalls:
             pass
 
         events = await memory.get_session_events("no-mem")
-        assert len(events) == 0, f"Expected no events when memory disabled, got {len(events)}"
+        assert len(events) == 0, f"Expected no events with NullMemory, got {len(events)}"
 
     @pytest.mark.asyncio
     async def test_memory_context_limit_enforced(self):
@@ -789,7 +788,6 @@ class TestMessageHistoryBridge:
             name="null-hist-agent",
             model=model,
             memory=null_memory,
-            memory_enabled=False,
             instructions="Test agent",
         )
 
@@ -886,11 +884,11 @@ class TestAgentConfiguration:
         with pytest.raises(ValueError, match="Agent requires"):
             Agent(name="no-model-agent")
 
-    def test_memory_enabled_flag(self):
-        """Test memory_enabled flag."""
+    def test_memory_type_flag(self):
+        """Test memory type detection."""
         model = TestModel(custom_output_text="test")
-        agent = Agent(name="no-mem-agent", model=model, memory_enabled=False)
-        assert not agent.memory_enabled
+        agent = Agent(name="no-mem-agent", model=model, memory=NullMemory())
+        assert isinstance(agent.memory, NullMemory)
 
 
 class TestUserPromptExtraction:

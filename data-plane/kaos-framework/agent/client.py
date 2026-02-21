@@ -226,7 +226,6 @@ class Agent:
         mcp_servers: Optional[list] = None,
         max_steps: int = 5,
         memory_context_limit: int = 6,
-        memory_enabled: bool = True,
         model_api_url: Optional[str] = None,
         model_name: Optional[str] = None,
         tool_call_mode: str = "auto",
@@ -237,7 +236,6 @@ class Agent:
         self.description = description
         self.memory: Memory = memory or LocalMemory()
         self.memory_context_limit = memory_context_limit
-        self.memory_enabled = memory_enabled
         self.max_steps = max_steps
         self.tool_call_mode = tool_call_mode
         self.sub_agents: Dict[str, RemoteAgent] = {
@@ -342,7 +340,7 @@ class Agent:
                 messages: List[Dict[str, str]] = []
 
                 # Forward recent conversation context from memory
-                if self.memory_enabled and self._current_session_id:
+                if self._current_session_id:
                     events = await self.memory.get_session_events(self._current_session_id)
                     context_events = events[-self.memory_context_limit :] if events else []
                     for event in context_events:
@@ -383,13 +381,10 @@ class Agent:
             self._mock_state.reset()
 
         # Get or create session
-        if self.memory_enabled:
-            if session_id:
-                session_id = await self.memory.get_or_create_session(session_id, "agent", "user")
-            else:
-                session_id = await self.memory.create_session("agent", "user")
+        if session_id:
+            session_id = await self.memory.get_or_create_session(session_id, "agent", "user")
         else:
-            session_id = session_id or "ephemeral"
+            session_id = await self.memory.create_session("agent", "user")
 
         logger.debug(f"Processing message for session {session_id}, streaming={stream}")
 
@@ -404,13 +399,10 @@ class Agent:
 
             # Store incoming message event
             event_type = "task_delegation_received" if is_delegation else "user_message"
-            if self.memory_enabled:
-                await self.memory.add_event(session_id, event_type, user_prompt)
+            await self.memory.add_event(session_id, event_type, user_prompt)
 
             # Build message history from memory for context
-            message_history = (
-                await self._build_message_history(session_id) if self.memory_enabled else None
-            )
+            message_history = await self._build_message_history(session_id)
 
             # Make session_id available to delegation tools
             self._current_session_id = session_id
@@ -462,29 +454,26 @@ class Agent:
                     full_response = str(run.result.output)
                     yield full_response
 
-                if self.memory_enabled:
-                    await self.memory.add_event(session_id, "agent_response", full_response)
-                    new_msgs = run.result.new_messages() if run.result else []
-                    for msg in new_msgs:
-                        await self._store_pydantic_message(session_id, msg)
+                await self.memory.add_event(session_id, "agent_response", full_response)
+                new_msgs = run.result.new_messages() if run.result else []
+                for msg in new_msgs:
+                    await self._store_pydantic_message(session_id, msg)
             else:
                 result = await self._agent.run(
                     user_prompt, message_history=message_history, usage_limits=usage_limits
                 )
                 content = str(result.output) if result.output else ""
-                if self.memory_enabled:
-                    await self.memory.add_event(session_id, "agent_response", content)
+                await self.memory.add_event(session_id, "agent_response", content)
 
-                    # Store new messages from Pydantic AI into memory
-                    for msg in result.new_messages():
-                        await self._store_pydantic_message(session_id, msg)
+                # Store new messages from Pydantic AI into memory
+                for msg in result.new_messages():
+                    await self._store_pydantic_message(session_id, msg)
 
                 yield content
 
         except Exception as e:
             logger.error(f"Error processing message: {str(e)}")
-            if self.memory_enabled:
-                await self.memory.add_event(session_id, "error", str(e))
+            await self.memory.add_event(session_id, "error", str(e))
             yield f"Sorry, I encountered an error: {str(e)}"
 
     def _extract_user_prompt(self, message: Union[str, List[Dict[str, str]]]) -> str:

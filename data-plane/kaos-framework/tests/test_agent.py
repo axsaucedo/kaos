@@ -161,7 +161,6 @@ class TestAgentMemory:
             name="test-agent",
             model=model,
             memory=NullMemory(),
-            memory_enabled=False,
             instructions="You are a test assistant.",
         )
 
@@ -412,7 +411,6 @@ class TestNullMemory:
             instructions="Test agent with disabled memory.",
             model=model,
             memory=null_memory,
-            memory_enabled=False,
         )
 
         response_chunks = []

@@ -250,7 +250,7 @@ class AgentServer:
         logger.info(f"Description: {self.agent.description}")
         logger.info(f"Port: {self.port}")
         logger.info(f"Max Steps: {self.agent.max_steps}")
-        logger.info(f"Memory Enabled: {self.agent.memory_enabled}")
+        logger.info(f"Memory Type: {type(self.agent.memory).__name__}")
         logger.info(f"Log Level: {get_log_level()}")
 
         # Log model API info
@@ -704,7 +704,6 @@ def create_agent_server(
         max_steps=settings.agentic_loop_max_steps,
         memory_context_limit=settings.memory_context_limit,
         memory=memory,
-        memory_enabled=settings.memory_enabled,
         tool_call_mode=settings.tool_call_mode,
         custom_pydantic_agent=custom_agent,
     )
