@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from agent.string_mode import build_string_mode_handler
 
 import httpx
-from pydantic_ai import Agent as PydanticAgent
+from pydantic_ai import Agent as PydanticAgent, RunContext
 from pydantic_ai.usage import UsageLimits
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
@@ -48,6 +48,13 @@ from telemetry.manager import (
 logger = logging.getLogger(__name__)
 
 DELEGATION_TOOL_PREFIX = "delegate_to_"
+
+
+@dataclass
+class AgentDeps:
+    """Per-run dependencies passed via RunContext to tools."""
+
+    session_id: str = ""
 
 
 class _MockResponseState:
@@ -242,7 +249,6 @@ class Agent:
         }
         self._mcp_servers = mcp_servers or []
         self._mock_state: Optional[_MockResponseState] = None
-        self._current_session_id: Optional[str] = None
 
         # Resolve the Pydantic AI model
         if model is not None:
@@ -290,6 +296,7 @@ class Agent:
                 instructions=instructions,
                 name=name,
                 defer_model_check=True,
+                deps_type=AgentDeps,
                 toolsets=self._mcp_servers if self._mcp_servers else None,
             )
 
@@ -318,11 +325,13 @@ class Agent:
     ):
         """Register a single delegation tool, capturing agent_name/sub_agent via closure scope."""
 
-        @self._agent.tool_plain(name=tool_name, description=description)
-        async def _delegate(task: str) -> str:
-            return await self._execute_delegation(agent_name, task, sub_agent)
+        @self._agent.tool(name=tool_name, description=description)
+        async def _delegate(ctx: RunContext[AgentDeps], task: str) -> str:
+            return await self._execute_delegation(agent_name, task, sub_agent, ctx.deps.session_id)
 
-    async def _execute_delegation(self, agent_name: str, task: str, sub_agent: RemoteAgent) -> str:
+    async def _execute_delegation(
+        self, agent_name: str, task: str, sub_agent: RemoteAgent, session_id: str = ""
+    ) -> str:
         """Execute delegation to a sub-agent, forwarding conversation context."""
         import time
 
@@ -339,8 +348,8 @@ class Agent:
                 messages: List[Dict[str, str]] = []
 
                 # Forward recent conversation context from memory
-                if self._current_session_id:
-                    events = await self.memory.get_session_events(self._current_session_id)
+                if session_id:
+                    events = await self.memory.get_session_events(session_id)
                     context_events = events[-self.memory_context_limit :] if events else []
                     for event in context_events:
                         if event.event_type in ("user_message", "task_delegation_received"):
@@ -403,8 +412,8 @@ class Agent:
             # Build message history from memory for context
             message_history = await self._build_message_history(session_id)
 
-            # Make session_id available to delegation tools
-            self._current_session_id = session_id
+            # Pass session_id to delegation tools via deps
+            deps = AgentDeps(session_id=session_id)
 
             # Limit model request count to max_steps
             usage_limits = UsageLimits(request_limit=self.max_steps)
@@ -416,7 +425,10 @@ class Agent:
                 # - Emit progress events for tool calls (frontend reasoning status)
                 # - Yield final text after agentic loop completes
                 async with self._agent.iter(
-                    user_prompt, message_history=message_history, usage_limits=usage_limits
+                    user_prompt,
+                    message_history=message_history,
+                    usage_limits=usage_limits,
+                    deps=deps,
                 ) as run:
                     node = run.next_node
                     while not isinstance(node, End):
@@ -459,7 +471,10 @@ class Agent:
                     await self._store_pydantic_message(session_id, msg)
             else:
                 result = await self._agent.run(
-                    user_prompt, message_history=message_history, usage_limits=usage_limits
+                    user_prompt,
+                    message_history=message_history,
+                    usage_limits=usage_limits,
+                    deps=deps,
                 )
                 content = str(result.output) if result.output else ""
                 await self.memory.add_event(session_id, "agent_response", content)
