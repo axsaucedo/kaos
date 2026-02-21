@@ -14,7 +14,7 @@ import json
 import logging
 import os
 from typing import List, Dict, Any, Optional, AsyncIterator, Union
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 
 from agent.string_mode import build_string_mode_handler
 
@@ -78,13 +78,7 @@ class AgentCard:
     capabilities: List[str]
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
-            "name": self.name,
-            "description": self.description,
-            "url": self.url,
-            "skills": self.skills,
-            "capabilities": self.capabilities,
-        }
+        return asdict(self)
 
 
 class RemoteAgent:
