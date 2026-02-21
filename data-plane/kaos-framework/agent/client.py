@@ -392,6 +392,21 @@ class Agent:
                     delegation_counter.add(1, labels)
                     delegation_duration.record(duration_ms, labels)
 
+    def _format_progress_event(self, part: ToolCallPart, step: int) -> str:
+        """Format a tool call as a JSON progress event for streaming."""
+        is_deleg = part.tool_name.startswith(DELEGATION_TOOL_PREFIX)
+        return json.dumps(
+            {
+                "type": "progress",
+                "step": step,
+                "max_steps": self.max_steps,
+                "action": "delegate" if is_deleg else "tool_call",
+                "target": (
+                    part.tool_name[len(DELEGATION_TOOL_PREFIX) :] if is_deleg else part.tool_name
+                ),
+            }
+        )
+
     async def process_message(
         self,
         message: Union[str, List[Dict[str, str]]],
@@ -457,25 +472,7 @@ class Agent:
                                 step += 1
                             for part in node.model_response.parts:
                                 if isinstance(part, ToolCallPart):
-                                    is_delegation = part.tool_name.startswith(
-                                        DELEGATION_TOOL_PREFIX
-                                    )
-                                    action = "delegate" if is_delegation else "tool_call"
-                                    target = (
-                                        part.tool_name[len(DELEGATION_TOOL_PREFIX) :]
-                                        if is_delegation
-                                        else part.tool_name
-                                    )
-                                    progress = json.dumps(
-                                        {
-                                            "type": "progress",
-                                            "step": step,
-                                            "max_steps": self.max_steps,
-                                            "action": action,
-                                            "target": target,
-                                        }
-                                    )
-                                    yield progress
+                                    yield self._format_progress_event(part, step)
                         node = await run.next(node)
 
                 if run.result:
