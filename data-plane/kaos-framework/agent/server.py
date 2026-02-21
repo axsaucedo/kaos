@@ -673,9 +673,19 @@ def create_agent_server(
     # Initialize OpenTelemetry
     init_otel(settings.agent_name)
 
-    # Enable Pydantic AI instrumentation for all agents (uses global OTEL provider)
+    # Enable Pydantic AI instrumentation with explicit KAOS OTEL providers
     if is_otel_enabled():
-        PydanticAgent.instrument_all(True)
+        from pydantic_ai.models.instrumented import InstrumentationSettings
+        from opentelemetry.trace import get_tracer_provider
+        from opentelemetry.metrics import get_meter_provider
+        from opentelemetry._logs import get_logger_provider
+
+        instrumentation = InstrumentationSettings(
+            tracer_provider=get_tracer_provider(),
+            meter_provider=get_meter_provider(),
+            logger_provider=get_logger_provider(),
+        )
+        PydanticAgent.instrument_all(instrumentation)
 
     agent = Agent(
         name=settings.agent_name,
