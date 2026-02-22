@@ -16,7 +16,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system -r requirements.txt
 
 # Copy source code (changes frequently, so copied last)
-COPY kaos_server/ kaos_server/
+COPY pai_server/ pai_server/
 
 # Create non-root user
 RUN useradd -m -u 65532 agentic && chown -R agentic:agentic /app
@@ -31,4 +31,4 @@ EXPOSE 8000
 
 # Run the agent server using factory pattern
 # Access logs are controlled by OTEL_INCLUDE_HTTP_SERVER env var in Python code
-CMD ["python", "-m", "uvicorn", "kaos_server.server:get_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "uvicorn", "pai_server.server:get_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]

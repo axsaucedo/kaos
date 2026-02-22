@@ -161,7 +161,7 @@ async def test_tool_call():
 
 ```python
 import pytest
-from kaos_server.client import Agent
+from pai_server.client import Agent
 from modelapi.client import ModelAPI
 
 @pytest.fixture
@@ -216,8 +216,8 @@ async def test_memory_events():
 ```python
 import pytest
 from httpx import AsyncClient
-from kaos_server.server import AgentServer
-from kaos_server.client import Agent
+from pai_server.server import AgentServer
+from pai_server.client import Agent
 
 @pytest.fixture
 async def test_client():

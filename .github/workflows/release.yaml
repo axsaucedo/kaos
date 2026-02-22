@@ -245,7 +245,7 @@ jobs:
           echo "$NEXT_DEV" > VERSION
 
           # Update Python versions (PEP 440 compliant)
-          sed -i "s/^version = .*/version = \"$PYTHON_DEV\"/" data-plane/kaos-server/pyproject.toml
+          sed -i "s/^version = .*/version = \"$PYTHON_DEV\"/" data-plane/pai-server/pyproject.toml
           sed -i "s/^version = .*/version = \"$PYTHON_DEV\"/" kaos-cli/pyproject.toml
 
           # Update Helm chart version
@@ -263,7 +263,7 @@ jobs:
 
           echo "Updated files:"
           cat VERSION
-          grep "^version" data-plane/kaos-server/pyproject.toml
+          grep "^version" data-plane/pai-server/pyproject.toml
           grep "^version" kaos-cli/pyproject.toml
           grep "^version:\|^appVersion:" operator/chart/Chart.yaml
           grep -E "tag:|kaos-(agent|mcp-server|mcp-python-string|mcp-pctx):" operator/chart/values.yaml

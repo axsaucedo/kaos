@@ -23,7 +23,7 @@ from pydantic_ai.messages import (
 from opentelemetry.propagate import inject
 
 if TYPE_CHECKING:
-    from kaos_server.memory import Memory
+    from pai_server.memory import Memory
 
 logger = logging.getLogger(__name__)
 
@@ -205,7 +205,7 @@ def _resolve_model(
             base_url = f"{base_url}/v1"
 
         if tool_call_mode == "string":
-            from kaos_server.tools import build_string_mode_handler
+            from pai_server.tools import build_string_mode_handler
 
             handler = build_string_mode_handler(base_url, model_name)
             logger.info(f"Agent {name}: using string-mode model {model_name} at {base_url}")

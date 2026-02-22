@@ -1,7 +1,7 @@
 [project]
-name = "kaos-runtime"
+name = "pai-server"
 version = "0.2.8.dev0"
-description = "KAOS Runtime - K8s Agent Orchestration System"
+description = "PAIS - Pydantic AI Server for Kubernetes Agent Orchestration"
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.0.0",

@@ -89,7 +89,7 @@ await agent.close()
 Sub-agents are registered as `delegate_to_{name}` tool functions on the Pydantic AI agent. The LLM decides when to delegate.
 
 ```python
-from kaos_server.client import Agent, RemoteAgent
+from pai_server.client import Agent, RemoteAgent
 
 worker = RemoteAgent(name="worker", card_url="http://worker:8000")
 coordinator = Agent(

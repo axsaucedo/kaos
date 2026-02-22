@@ -12,8 +12,8 @@ The Python agent framework provides the runtime components for AI agents, built 
 ## Module Structure
 
 ```
-data-plane/kaos-server/
-├── kaos_server/
+data-plane/pai-server/
+├── pai_server/
 │   ├── client.py      # Agent (wraps pydantic_ai.Agent), RemoteAgent, AgentCard
 │   ├── server.py      # AgentServer, HTTP endpoints, env-var configuration
 │   └── memory.py      # LocalMemory, RedisMemory, NullMemory

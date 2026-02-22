@@ -1,6 +1,6 @@
 .PHONY: help build docker-build test lint format clean run
 
-IMG ?= kaos-runtime:latest
+IMG ?= pai-server:latest
 
 help:
 	@echo "Agent Runtime build targets:"

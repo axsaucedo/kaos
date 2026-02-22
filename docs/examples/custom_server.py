@@ -2,7 +2,7 @@
 
 import random
 from pydantic_ai import Agent as PydanticAgent
-from kaos_server.server import create_agent_server
+from pai_server.server import create_agent_server
 
 
 def create_custom_agent():
