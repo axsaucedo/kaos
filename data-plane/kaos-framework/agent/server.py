@@ -192,23 +192,11 @@ class AgentServer:
 
         @self.app.get("/health")
         async def health():
-            return JSONResponse(
-                {
-                    "status": "healthy",
-                    "name": self.settings.agent_name,
-                    "timestamp": int(time.time()),
-                }
-            )
+            return self._probe_response("healthy")
 
         @self.app.get("/ready")
         async def ready():
-            return JSONResponse(
-                {
-                    "status": "ready",
-                    "name": self.settings.agent_name,
-                    "timestamp": int(time.time()),
-                }
-            )
+            return self._probe_response("ready")
 
         @self.app.get("/.well-known/agent")
         async def agent_card():
@@ -301,6 +289,11 @@ class AgentServer:
             except Exception as e:
                 logger.error(f"Chat completion error: {e}")
                 raise HTTPException(status_code=500, detail=str(e))
+
+    def _probe_response(self, status: str) -> JSONResponse:
+        return JSONResponse(
+            {"status": status, "name": self.settings.agent_name, "timestamp": int(time.time())}
+        )
 
     def _build_span_attrs(self, session_id: Optional[str] = None) -> dict:
         attrs: dict = {"agent.name": self.settings.agent_name}
