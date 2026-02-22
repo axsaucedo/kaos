@@ -16,14 +16,16 @@ make format                     # Auto-format code
 ```
 
 ## Project Structure
-- `pai_server/server.py`: AgentServer, create_agent_server(), routes, _process_message(), AgentDeps, AgentCard, RemoteAgent, model resolution
+- `pai_server/server.py`: AgentServer, create_agent_server(), routes, _process_message(), logging
+- `pai_server/serverutils.py`: AgentDeps, AgentCard, RemoteAgent, AgentServerSettings, _resolve_model, response builders
 - `pai_server/tools.py`: DelegationToolset (AbstractToolset), execute_delegation, format_progress_event, build_string_mode_handler
 - `pai_server/memory.py`: Memory ABC, LocalMemory, RedisMemory, NullMemory + build_message_history/store_pydantic_message utilities
-- `pai_server/telemetry/`: OpenTelemetry instrumentation (tracing, metrics)
+- `pai_server/telemetry.py`: OpenTelemetry instrumentation (tracing, metrics, SERVICE_NAME)
 - `pyproject.toml`: Dependencies — `pydantic-ai`, `opentelemetry-*`
 
 **Module layout rationale:**
-- `server.py` owns everything that creates/runs agents: AgentServer, create_agent_server(), RemoteAgent (HTTP client for sub-agents), model resolution, request lifecycle
+- `server.py` owns the server lifecycle: AgentServer class, create_agent_server() factory, request routing
+- `serverutils.py` owns data classes, settings, model resolution, and response formatting helpers
 - `tools.py` owns tool extensions: DelegationToolset (AbstractToolset subclass), string-mode model handler, progress event formatting
 - `memory.py` owns persistence: Memory ABC + all backends, plus build_message_history/store_pydantic_message utilities on the base class
 
@@ -84,7 +86,7 @@ make format                     # Auto-format code
 - Use `create_agent_server(custom_agent=my_agent)` to wrap with KAOS endpoints
 - KAOS overrides the model and adds DelegationToolset to custom agents
 - Deploy via Agent CRD with `container.image` override
-- Example: `examples/custom-pai_server/server.py`
+- Example: `examples/custom-agent/server.py`
 
 ### Memory (memory.py)
 - KAOS memory (Local/Redis/Null) persists across sessions — Pydantic AI has no built-in persistence

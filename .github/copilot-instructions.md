@@ -51,10 +51,11 @@ kaos system install --gateway-enabled --metallb-enabled --wait
 data-plane/
 ├── pai-server/        # Agent runtime (Pydantic AI, pytest, black, ty)
 │   ├── pai_server/             # AgentServer, tools, memory
-│   │   ├── server.py      # AgentServer, create_agent_server, routes, model resolution, RemoteAgent
+│   │   ├── server.py      # AgentServer, create_agent_server, routes
+│   │   ├── serverutils.py # AgentDeps, AgentCard, RemoteAgent, AgentServerSettings, model resolution
 │   │   ├── tools.py       # DelegationToolset, string-mode handler
-│   │   └── memory.py      # Memory ABC, LocalMemory, RedisMemory, NullMemory
-│   └── telemetry/         # OpenTelemetry instrumentation
+│   │   ├── memory.py      # Memory ABC, LocalMemory, RedisMemory, NullMemory
+│   │   └── telemetry.py   # OpenTelemetry instrumentation
 └── mcp-servers/           # Standalone MCP server implementations
     └── python-string/     # Python code execution runtime
 
@@ -87,7 +88,8 @@ tmp/                       # Local work files (gitignored)
 - `operator/api/v1alpha1/*_types.go`: CRD schemas
 - `operator/controllers/*_controller.go`: Reconciliation logic
 - `operator/chart/`: Helm chart (generated from kustomize)
-- `data-plane/pai-server/pai_server/server.py`: AgentServer, create_agent_server, routes, model resolution, RemoteAgent, AgentDeps
+- `data-plane/pai-server/pai_server/server.py`: AgentServer, create_agent_server, routes
+- `data-plane/pai-server/pai_server/serverutils.py`: AgentDeps, AgentCard, RemoteAgent, AgentServerSettings, model resolution
 - `data-plane/pai-server/pai_server/tools.py`: DelegationToolset (AbstractToolset), string-mode handler
 - `data-plane/pai-server/pai_server/memory.py`: Memory ABC + backends + build_message_history/store_pydantic_message
 
