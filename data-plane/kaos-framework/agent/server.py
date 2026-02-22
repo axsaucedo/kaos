@@ -139,36 +139,24 @@ class AgentServer:
         logger.info(f"AgentServer initialized for {self.name} on port {port}")
 
     def _setup_telemetry(self):
-        """Setup OTel instrumentation (FastAPI/HTTPX opt-in to reduce noise)."""
-        if is_otel_enabled():
-            try:
-                # FastAPI instrumentation is opt-in (noisy with health probes)
-                include_http_server = getenv_bool("OTEL_INCLUDE_HTTP_SERVER", False)
+        """Setup OTel HTTP instrumentation (opt-in to reduce noise)."""
+        if not is_otel_enabled():
+            return
+        try:
+            enabled = []
+            if getenv_bool("OTEL_INCLUDE_HTTP_SERVER", False):
+                from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 
-                # HTTPX instrumentation is opt-in (noisy with MCP SSE)
-                include_http_client = getenv_bool("OTEL_INCLUDE_HTTP_CLIENT", False)
+                FastAPIInstrumentor.instrument_app(self.app)
+                enabled.append("FastAPI")
+            if getenv_bool("OTEL_INCLUDE_HTTP_CLIENT", False):
+                from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
-                instrumentations = []
-                if include_http_server:
-                    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-
-                    FastAPIInstrumentor.instrument_app(self.app)
-                    instrumentations.append("FastAPI")
-
-                if include_http_client:
-                    from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
-
-                    HTTPXClientInstrumentor().instrument()
-                    instrumentations.append("HTTPX")
-
-                if instrumentations:
-                    logger.info(
-                        f"OpenTelemetry HTTP instrumentation enabled: {', '.join(instrumentations)}"
-                    )
-                else:
-                    logger.info("OpenTelemetry enabled (HTTP instrumentation disabled by default)")
-            except Exception as e:
-                logger.warning(f"Failed to enable OpenTelemetry instrumentation: {e}")
+                HTTPXClientInstrumentor().instrument()
+                enabled.append("HTTPX")
+            logger.info(f"OTel HTTP instrumentation: {', '.join(enabled) or 'none (opt-in)'}")
+        except Exception as e:
+            logger.warning(f"Failed to enable OTel HTTP instrumentation: {e}")
 
     @asynccontextmanager
     async def _lifespan(self, app: FastAPI):
