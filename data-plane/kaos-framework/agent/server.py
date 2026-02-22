@@ -371,6 +371,35 @@ class AgentServer:
             capabilities=capabilities,
         )
 
+    async def _prepare_run(
+        self,
+        message: Union[str, List[Dict[str, str]]],
+        session_id: Optional[str] = None,
+    ) -> tuple:
+        """Setup for agent run: session, memory event, history, deps. Returns (session_id, user_prompt, message_history, deps, usage_limits)."""
+        if self._mock_state:
+            self._mock_state.reset()
+
+        if session_id:
+            session_id = await self.memory.get_or_create_session(session_id, "agent", "user")
+        else:
+            session_id = await self.memory.create_session("agent", "user")
+
+        user_prompt = _extract_user_prompt(message)
+        is_delegation = isinstance(message, list) and any(
+            msg.get("role") == "task-delegation" for msg in message
+        )
+        await self.memory.add_event(
+            session_id, "task_delegation_received" if is_delegation else "user_message", user_prompt
+        )
+
+        message_history = await self.memory.build_message_history(
+            session_id, self._memory_context_limit
+        )
+        deps = AgentDeps(session_id=session_id, memory=self.memory)
+        usage_limits = UsageLimits(request_limit=self._max_steps)
+        return session_id, user_prompt, message_history, deps, usage_limits
+
     async def _process_message(
         self,
         message: Union[str, List[Dict[str, str]]],
@@ -378,35 +407,12 @@ class AgentServer:
         stream: bool = False,
     ) -> AsyncIterator[str]:
         """Yields content chunks (streaming) or single complete response."""
-        if self._mock_state:
-            self._mock_state.reset()
-
-        # Get or create session
-        if session_id:
-            session_id = await self.memory.get_or_create_session(session_id, "agent", "user")
-        else:
-            session_id = await self.memory.create_session("agent", "user")
-
+        session_id, user_prompt, message_history, deps, usage_limits = await self._prepare_run(
+            message, session_id
+        )
         logger.debug(f"Processing message for session {session_id}, streaming={stream}")
 
         try:
-            user_prompt = _extract_user_prompt(message)
-
-            # Detect delegation
-            is_delegation = isinstance(message, list) and any(
-                msg.get("role") == "task-delegation" for msg in message
-            )
-            event_type = "task_delegation_received" if is_delegation else "user_message"
-            await self.memory.add_event(session_id, event_type, user_prompt)
-
-            # Build message history from memory
-            message_history = await self.memory.build_message_history(
-                session_id, self._memory_context_limit
-            )
-
-            deps = AgentDeps(session_id=session_id, memory=self.memory)
-            usage_limits = UsageLimits(request_limit=self._max_steps)
-
             if stream:
                 full_response = ""
                 step = 0
