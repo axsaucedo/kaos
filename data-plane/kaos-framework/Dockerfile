@@ -17,7 +17,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # Copy source code (changes frequently, so copied last)
 COPY agent/ agent/
-COPY telemetry/ telemetry/
 
 # Create non-root user
 RUN useradd -m -u 65532 agentic && chown -R agentic:agentic /app

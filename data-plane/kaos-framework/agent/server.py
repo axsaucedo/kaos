@@ -20,7 +20,7 @@ from pydantic_ai.messages import ToolCallPart
 from pydantic_ai.usage import UsageLimits
 from pydantic_ai._agent_graph import CallToolsNode
 from pydantic_graph import End
-from telemetry.manager import (
+from agent.telemetry import (
     init_otel,
     is_otel_enabled,
     should_enable_otel,

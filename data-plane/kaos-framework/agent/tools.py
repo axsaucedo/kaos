@@ -29,7 +29,7 @@ from pydantic_ai.messages import (
 from pydantic_ai import RunContext
 from pydantic_core import SchemaValidator, core_schema
 
-from telemetry.manager import (
+from agent.telemetry import (
     get_tracer,
     get_delegation_metrics,
     inject_trace_context,

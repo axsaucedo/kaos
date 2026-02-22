@@ -13,7 +13,7 @@ class TestIsOtelEnabled:
     def test_returns_false_before_init(self):
         """Test that is_otel_enabled returns False before initialization."""
         # Import fresh module - is_otel_enabled checks _initialized flag, not env var
-        import telemetry.manager as tm
+        import agent.telemetry as tm
 
         # Reset module state for testing
         original = tm._initialized
@@ -38,7 +38,7 @@ class TestShouldEnableOtel:
             },
             clear=True,
         ):
-            from telemetry.manager import should_enable_otel
+            from agent.telemetry import should_enable_otel
 
             assert should_enable_otel() is False
 
@@ -49,14 +49,14 @@ class TestShouldEnableOtel:
             {"OTEL_EXPORTER_OTLP_ENDPOINT": "http://collector:4317"},
             clear=True,
         ):
-            from telemetry.manager import should_enable_otel
+            from agent.telemetry import should_enable_otel
 
             assert should_enable_otel() is False
 
     def test_returns_false_without_endpoint(self):
         """Test should_enable_otel returns False without OTEL_EXPORTER_OTLP_ENDPOINT."""
         with patch.dict(os.environ, {"OTEL_SERVICE_NAME": "test-agent"}, clear=True):
-            from telemetry.manager import should_enable_otel
+            from agent.telemetry import should_enable_otel
 
             assert should_enable_otel() is False
 
@@ -70,7 +70,7 @@ class TestShouldEnableOtel:
             },
             clear=True,
         ):
-            from telemetry.manager import should_enable_otel
+            from agent.telemetry import should_enable_otel
 
             assert should_enable_otel() is True
 
@@ -81,7 +81,7 @@ class TestOtelConfig:
     def test_config_requires_service_name_and_endpoint(self):
         """Test that config requires OTEL_SERVICE_NAME and OTEL_EXPORTER_OTLP_ENDPOINT."""
         with patch.dict(os.environ, {}, clear=True):
-            from telemetry.manager import OtelConfig
+            from agent.telemetry import OtelConfig
             from pydantic import ValidationError
 
             with pytest.raises(ValidationError):
@@ -97,7 +97,7 @@ class TestOtelConfig:
             },
             clear=True,
         ):
-            from telemetry.manager import OtelConfig
+            from agent.telemetry import OtelConfig
 
             config = OtelConfig()  # type: ignore[call-arg]
             assert config.otel_service_name == "test-agent"
@@ -115,7 +115,7 @@ class TestOtelConfig:
             },
             clear=True,
         ):
-            from telemetry.manager import OtelConfig
+            from agent.telemetry import OtelConfig
 
             config = OtelConfig()  # type: ignore[call-arg]
             assert config.enabled is False
@@ -126,14 +126,14 @@ class TestTracerAndMetrics:
 
     def test_get_tracer(self):
         """Test getting a tracer."""
-        from telemetry.manager import get_tracer
+        from agent.telemetry import get_tracer
 
         tracer = get_tracer()
         assert tracer is not None
 
     def test_get_delegation_metrics_when_not_initialized(self):
         """Test get_delegation_metrics returns (None, None) when not initialized."""
-        import telemetry.manager as tm
+        import agent.telemetry as tm
 
         original = tm._initialized
         tm._initialized = False
@@ -146,7 +146,7 @@ class TestTracerAndMetrics:
 
     def test_tracer_start_as_current_span(self):
         """Test using tracer context manager for spans."""
-        from telemetry.manager import get_tracer
+        from agent.telemetry import get_tracer
 
         tracer = get_tracer()
         with tracer.start_as_current_span("test-span") as span:
@@ -158,7 +158,7 @@ class TestContextPropagation:
 
     def test_inject_context(self):
         """Test context injection into headers."""
-        from telemetry.manager import inject_trace_context
+        from agent.telemetry import inject_trace_context
 
         carrier: dict = {}
         result = inject_trace_context(carrier)
@@ -166,7 +166,7 @@ class TestContextPropagation:
 
     def test_extract_context(self):
         """Test context extraction from headers."""
-        from telemetry.manager import extract_trace_context
+        from agent.telemetry import extract_trace_context
 
         carrier: dict = {}
         context = extract_trace_context(carrier)

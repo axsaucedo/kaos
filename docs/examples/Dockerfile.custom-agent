@@ -13,7 +13,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # Copy framework source
 COPY data-plane/kaos-framework/agent/ /app/agent/
-COPY data-plane/kaos-framework/telemetry/ /app/telemetry/
 
 # Copy custom agent
 COPY docs/examples/custom_server.py /app/custom_server.py

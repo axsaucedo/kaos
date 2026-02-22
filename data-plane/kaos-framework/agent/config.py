@@ -18,7 +18,7 @@ from pydantic_ai.messages import (
     TextPart,
     ToolCallPart,
 )
-from telemetry.manager import inject_trace_context
+from agent.telemetry import inject_trace_context
 
 if TYPE_CHECKING:
     from agent.memory import Memory
