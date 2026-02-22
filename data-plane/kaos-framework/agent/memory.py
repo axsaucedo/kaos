@@ -155,6 +155,86 @@ class Memory(ABC):
 
         return "\n".join(context_lines)
 
+    async def build_message_history(
+        self, session_id: str, context_limit: int = 6
+    ) -> Optional[list]:
+        """Build Pydantic AI message_history from stored KAOS events.
+
+        Returns None if no history. Excludes the latest prompt event
+        (the current user message) and respects context_limit.
+        """
+        from pydantic_ai.messages import (
+            ModelRequest,
+            ModelResponse as PydanticModelResponse,
+            TextPart,
+            UserPromptPart,
+        )
+
+        events = await self.get_session_events(session_id)
+        if not events or len(events) <= 1:
+            return None
+
+        prompt_types = ("user_message", "task_delegation_received")
+        exclude_idx = next(
+            (i for i in range(len(events) - 1, -1, -1) if events[i].event_type in prompt_types),
+            None,
+        )
+        replayable = [e for i, e in enumerate(events) if i != exclude_idx]
+
+        if context_limit and len(replayable) > context_limit:
+            replayable = replayable[-context_limit:]
+
+        history: list = []
+        for event in replayable:
+            if event.event_type in prompt_types:
+                history.append(ModelRequest(parts=[UserPromptPart(content=str(event.content))]))
+            elif event.event_type == "agent_response":
+                history.append(PydanticModelResponse(parts=[TextPart(content=str(event.content))]))
+        return history or None
+
+    async def store_pydantic_message(self, session_id: str, msg: Any) -> None:
+        """Store a Pydantic AI message as KAOS memory events.
+
+        Converts ModelResponse tool calls and ModelRequest tool returns
+        into structured KAOS events for the REST API.
+        """
+        from pydantic_ai.messages import (
+            ModelRequest,
+            ModelResponse as PydanticModelResponse,
+            TextPart,
+            ToolCallPart,
+            ToolReturnPart,
+        )
+
+        if isinstance(msg, PydanticModelResponse):
+            for part in msg.parts:
+                if isinstance(part, ToolCallPart):
+                    is_deleg = part.tool_name.startswith("delegate_to_")
+                    await self.add_event(
+                        session_id,
+                        "delegation_request" if is_deleg else "tool_call",
+                        {"tool": part.tool_name, "arguments": part.args},
+                    )
+        elif isinstance(msg, ModelRequest):
+            for part in msg.parts:
+                if isinstance(part, ToolReturnPart):
+                    is_deleg = part.tool_name.startswith("delegate_to_")
+                    result = part.content
+                    if isinstance(result, (dict, list)):
+                        result_value = result
+                    elif isinstance(result, str):
+                        try:
+                            result_value = json.loads(result)
+                        except (json.JSONDecodeError, ValueError):
+                            result_value = result
+                    else:
+                        result_value = str(result)
+                    await self.add_event(
+                        session_id,
+                        "delegation_response" if is_deleg else "tool_result",
+                        {"tool": part.tool_name, "result": result_value},
+                    )
+
     async def get_memory_stats(self) -> Dict[str, int]:
         """Get memory usage statistics. Override for real implementations."""
         return {"total_sessions": 0, "total_events": 0, "avg_events_per_session": 0}
