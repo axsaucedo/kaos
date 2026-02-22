@@ -48,7 +48,7 @@ from telemetry.manager import (
     get_tracer,
     inject_trace_context,
 )
-from agent.tools import format_progress_event, DELEGATION_TOOL_PREFIX
+from agent.tools import format_progress_event, DELEGATION_TOOL_PREFIX, DelegationToolset
 
 if TYPE_CHECKING:
     from agent.memory import Memory
@@ -402,33 +402,49 @@ class AgentServer:
 
     def __init__(
         self,
-        agent: Any,
+        pydantic_agent: PydanticAgent[AgentDeps],
+        name: str,
+        description: str = "Agent",
+        memory: Optional["Memory"] = None,
+        max_steps: int = 5,
+        memory_context_limit: int = 6,
+        mock_state: Optional[_MockResponseState] = None,
+        sub_agents: Optional[Dict[str, RemoteAgent]] = None,
+        mcp_servers: Optional[list] = None,
+        model: Any = None,
         port: int = 8000,
         access_log: bool = False,
         settings: Optional["AgentServerSettings"] = None,
     ):
-        """Initialize AgentServer with an agent.
+        """Initialize AgentServer.
 
         Args:
-            agent: Agent instance (KAOS wrapper) to serve
+            pydantic_agent: Standard pydantic_ai.Agent instance
+            name: Agent name
+            description: Agent description
+            memory: Memory backend
+            max_steps: Maximum agentic loop steps
+            memory_context_limit: History context limit
+            mock_state: Mock response state (testing)
+            sub_agents: Dict of remote sub-agents
+            mcp_servers: List of MCP server instances
+            model: Resolved model reference (for logging)
             port: Port to serve on
-            access_log: Whether to enable uvicorn access logs (default: False)
+            access_log: Enable uvicorn access logs
             settings: Optional settings for DEBUG-level config dump
         """
-        # Extract fields from Agent wrapper for direct access
-        self.name = agent.name
-        self.description = agent.description
-        self.memory: "Memory" = agent.memory
-        self._agent: PydanticAgent[AgentDeps] = agent._agent
-        self._max_steps = agent.max_steps
-        self._memory_context_limit = agent.memory_context_limit
-        self._mock_state = agent._mock_state
-        self._sub_agents = agent.sub_agents
-        self._mcp_servers = agent._mcp_servers
-        self._model = agent._model
+        from agent.memory import NullMemory
 
-        # Keep reference for lifecycle (close) and startup logging
-        self._wrapped_agent = agent
+        self.name = name
+        self.description = description
+        self.memory: "Memory" = memory or NullMemory()
+        self._agent = pydantic_agent
+        self._max_steps = max_steps
+        self._memory_context_limit = memory_context_limit
+        self._mock_state = mock_state
+        self._sub_agents = sub_agents or {}
+        self._mcp_servers = mcp_servers or []
+        self._model = model
 
         self.port = port
         self.access_log = access_log
@@ -487,7 +503,9 @@ class AgentServer:
         self._log_startup_config(self._settings)
         yield
         logger.info("AgentServer shutdown")
-        await self._wrapped_agent.close()
+        for sub_agent in self._sub_agents.values():
+            await sub_agent.close()
+        await self.memory.close()
 
     def _log_startup_config(self, settings: Optional["AgentServerSettings"] = None):
         """Log server configuration on startup for debugging.
@@ -1013,26 +1031,58 @@ def create_agent_server(
         )
         PydanticAgent.instrument_all(instrumentation)
 
-    # Lazy import to avoid circular dependency (temporary — removed in Task 5)
-    from agent.client import Agent
+    # Build sub-agents dict
+    sub_agents_dict: Dict[str, RemoteAgent] = {a.name: a for a in sub_agents}
 
-    agent = Agent(
-        name=settings.agent_name,
-        description=settings.agent_description,
-        instructions=settings.agent_instructions,
-        model_api_url=settings.model_api_url,
-        model_name=settings.model_name,
-        mcp_servers=mcp_servers if mcp_servers else None,
-        sub_agents=sub_agents,
-        max_steps=settings.agentic_loop_max_steps,
-        memory_context_limit=settings.memory_context_limit,
-        memory=memory,
-        tool_call_mode=settings.tool_call_mode,
-        custom_pydantic_agent=custom_agent,
+    # Resolve the model
+    model, mock_state = _resolve_model(
+        settings.agent_name,
+        None,
+        settings.model_api_url,
+        settings.model_name,
+        settings.tool_call_mode,
+    )
+
+    # Build toolsets list
+    toolsets: list = list(mcp_servers)
+    if sub_agents_dict:
+        toolsets.append(DelegationToolset(sub_agents_dict, settings.memory_context_limit))
+
+    if custom_agent:
+        # Custom agent: override model and add KAOS toolsets
+        pydantic_agent = custom_agent
+        pydantic_agent.model = model
+        for ts in toolsets:
+            pydantic_agent._toolsets.append(ts)
+        logger.info(f"Agent {settings.agent_name}: using custom Pydantic AI agent")
+    else:
+        pydantic_agent = PydanticAgent(
+            model=model,
+            instructions=settings.agent_instructions,
+            name=settings.agent_name,
+            defer_model_check=True,
+            deps_type=AgentDeps,
+            toolsets=toolsets if toolsets else None,
+        )
+
+    logger.info(
+        f"Agent initialized: {settings.agent_name} "
+        f"(sub_agents={list(sub_agents_dict.keys())}, "
+        f"mcp_servers={len(mcp_servers)}, "
+        f"tool_call_mode={settings.tool_call_mode})"
     )
 
     server = AgentServer(
-        agent,
+        pydantic_agent=pydantic_agent,
+        name=settings.agent_name,
+        description=settings.agent_description,
+        memory=memory,
+        max_steps=settings.agentic_loop_max_steps,
+        memory_context_limit=settings.memory_context_limit,
+        mock_state=mock_state,
+        sub_agents=sub_agents_dict,
+        mcp_servers=mcp_servers,
+        model=model,
         port=settings.agent_port,
         access_log=settings.agent_access_log,
         settings=settings,

@@ -177,85 +177,73 @@ class TestParseToolCallsFromText:
 
 
 class TestStringModeAgentIntegration:
-    """Tests for string-mode integration with Agent."""
+    """Tests for string-mode integration with model resolution."""
 
-    def test_agent_accepts_tool_call_mode(self):
-        """Agent can be constructed with tool_call_mode parameter."""
-        from agent.client import Agent
-
-        os.environ["DEBUG_MOCK_RESPONSES"] = json.dumps(["hello"])
-        try:
-            agent = Agent(
-                name="test-agent",
-                instructions="Test",
-                tool_call_mode="string",
-            )
-            assert agent.tool_call_mode == "string"
-        finally:
-            del os.environ["DEBUG_MOCK_RESPONSES"]
-
-    def test_agent_default_tool_call_mode(self):
-        """Agent defaults to 'auto' tool_call_mode."""
-        from agent.client import Agent
-
-        os.environ["DEBUG_MOCK_RESPONSES"] = json.dumps(["hello"])
-        try:
-            agent = Agent(name="test-agent", instructions="Test")
-            assert agent.tool_call_mode == "auto"
-        finally:
-            del os.environ["DEBUG_MOCK_RESPONSES"]
-
-    def test_agent_string_mode_with_model_url(self):
-        """Agent with string mode and model URL uses FunctionModel."""
-        from agent.client import Agent
+    def test_string_mode_model_resolution(self):
+        """String mode creates FunctionModel."""
+        from agent.server import _resolve_model
         from pydantic_ai.models.function import FunctionModel
 
-        agent = Agent(
-            name="test-agent",
-            instructions="Test",
-            model_api_url="http://localhost:11434",
-            model_name="test-model",
-            tool_call_mode="string",
+        model, _ = _resolve_model(
+            "test-agent",
+            None,
+            "http://localhost:11434",
+            "test-model",
+            "string",
         )
-        assert isinstance(agent._model, FunctionModel)
+        assert isinstance(model, FunctionModel)
 
-    def test_agent_native_mode_with_model_url(self):
-        """Agent with native mode and model URL uses OpenAIChatModel."""
-        from agent.client import Agent
+    def test_native_mode_model_resolution(self):
+        """Native mode creates OpenAIChatModel."""
+        from agent.server import _resolve_model
         from pydantic_ai.models.openai import OpenAIChatModel
 
-        agent = Agent(
-            name="test-agent",
-            instructions="Test",
-            model_api_url="http://localhost:11434",
-            model_name="test-model",
-            tool_call_mode="native",
+        model, _ = _resolve_model(
+            "test-agent",
+            None,
+            "http://localhost:11434",
+            "test-model",
+            "native",
         )
-        assert isinstance(agent._model, OpenAIChatModel)
+        assert isinstance(model, OpenAIChatModel)
 
     @pytest.mark.asyncio
     async def test_string_mode_agent_with_mock_responses(self):
-        """String-mode agent works with mock responses (mock takes priority over string mode)."""
-        from agent.client import Agent
+        """String-mode agent works with mock responses."""
+        from tests.helpers import make_test_server
 
         os.environ["DEBUG_MOCK_RESPONSES"] = json.dumps(["Mock response"])
         try:
-            agent = Agent(
-                name="test-agent",
-                instructions="Test",
-                tool_call_mode="string",
-            )
+            from agent.server import _resolve_model
+
+            model, mock_state = _resolve_model("test-agent", None, None, None, "string")
+            server = make_test_server(name="test-agent", model=model)
+            server._mock_state = mock_state
             chunks = []
-            async for chunk in agent.process_message("hello"):
+            async for chunk in server._process_message("hello"):
                 chunks.append(chunk)
             assert "Mock response" in "".join(chunks)
         finally:
             del os.environ["DEBUG_MOCK_RESPONSES"]
 
+    def test_default_tool_call_mode_setting(self):
+        """Default tool_call_mode is 'auto'."""
+        from agent.server import AgentServerSettings
 
-# ────────────────────────────────────────────────────────────────────────────
-# Server Settings Tests
-# ────────────────────────────────────────────────────────────────────────────
+        settings = AgentServerSettings(agent_name="test", model_api_url="http://x", model_name="m")
+        assert settings.tool_call_mode == "auto"
+
+    def test_string_tool_call_mode_setting(self):
+        """tool_call_mode can be set to 'string'."""
+        from agent.server import AgentServerSettings
+
+        settings = AgentServerSettings(
+            agent_name="test",
+            model_api_url="http://x",
+            model_name="m",
+            tool_call_mode="string",
+        )
+        assert settings.tool_call_mode == "string"
 
 
 class TestServerSettingsToolCallMode:

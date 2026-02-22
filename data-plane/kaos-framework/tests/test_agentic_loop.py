@@ -27,7 +27,8 @@ from pydantic_ai.messages import (
     UserPromptPart,
 )
 
-from agent.client import Agent, RemoteAgent
+from tests.helpers import make_test_server
+from agent.server import RemoteAgent
 from agent.tools import DELEGATION_TOOL_PREFIX
 from agent.memory import LocalMemory, NullMemory
 
@@ -58,15 +59,15 @@ class TestToolCallExecution:
             return PydanticModelResponse(parts=[TextPart(content="Tool returned: hello")])
 
         model = FunctionModel(mock_handler)
-        agent = Agent(name="tool-agent", model=model, instructions="Test agent")
+        server = make_test_server(name="tool-agent", model=model, instructions="Test agent")
 
         # Register a simple tool
-        @agent._agent.tool_plain(name="echo", description="Echo a message")
+        @server._agent.tool_plain(name="echo", description="Echo a message")
         async def echo(message: str) -> str:
             return f"echo: {message}"
 
         response = ""
-        async for chunk in agent.process_message("Say hello"):
+        async for chunk in server._process_message("Say hello"):
             response += chunk
 
         assert "Tool returned: hello" in response
@@ -94,16 +95,16 @@ class TestToolCallExecution:
             return PydanticModelResponse(parts=[TextPart(content="Result is 8")])
 
         model = FunctionModel(mock_handler)
-        agent = Agent(name="calc-agent", model=model, instructions="Test agent")
+        server = make_test_server(name="calc-agent", model=model, instructions="Test agent")
 
-        @agent._agent.tool_plain(name="calculator", description="Add two numbers")
+        @server._agent.tool_plain(name="calculator", description="Add two numbers")
         async def calculator(a: int, b: int) -> str:
             received_args["a"] = a
             received_args["b"] = b
             return str(a + b)
 
         response = ""
-        async for chunk in agent.process_message("Add 5 and 3"):
+        async for chunk in server._process_message("Add 5 and 3"):
             response += chunk
 
         assert received_args["a"] == 5
@@ -141,22 +142,22 @@ class TestToolCallExecution:
             return PydanticModelResponse(parts=[TextPart(content="Both steps done")])
 
         model = FunctionModel(mock_handler)
-        agent = Agent(name="multi-step-agent", model=model, instructions="Test agent")
+        server = make_test_server(name="multi-step-agent", model=model, instructions="Test agent")
 
         steps_executed = []
 
-        @agent._agent.tool_plain(name="step_one", description="First step")
+        @server._agent.tool_plain(name="step_one", description="First step")
         async def step_one() -> str:
             steps_executed.append("one")
             return "step one done"
 
-        @agent._agent.tool_plain(name="step_two", description="Second step")
+        @server._agent.tool_plain(name="step_two", description="Second step")
         async def step_two() -> str:
             steps_executed.append("two")
             return "step two done"
 
         response = ""
-        async for chunk in agent.process_message("Do both steps"):
+        async for chunk in server._process_message("Do both steps"):
             response += chunk
 
         assert steps_executed == ["one", "two"]
@@ -182,14 +183,16 @@ class TestToolCallExecution:
             )
 
         model = FunctionModel(infinite_tool_handler)
-        agent = Agent(name="limited-agent", model=model, instructions="Test", max_steps=3)
+        server = make_test_server(
+            name="limited-agent", model=model, instructions="Test", max_steps=3
+        )
 
-        @agent._agent.tool_plain(name="repeat", description="Repeat forever")
+        @server._agent.tool_plain(name="repeat", description="Repeat forever")
         async def repeat() -> str:
             return "again"
 
         response = ""
-        async for chunk in agent.process_message("Go"):
+        async for chunk in server._process_message("Go"):
             response += chunk
 
         # Should have been stopped — call_count limited by max_steps
@@ -205,16 +208,16 @@ class TestDelegation:
         model = TestModel(custom_output_text="test")
         sub = RemoteAgent(name="worker-1", card_url="http://localhost:8001")
 
-        agent = Agent(name="coordinator", model=model, sub_agents=[sub])
+        server = make_test_server(name="coordinator", model=model, sub_agents=[sub])
 
-        assert "worker-1" in agent.sub_agents
+        assert "worker-1" in server._sub_agents
         # Verify delegation tool was registered on the Pydantic AI agent
         tool_names = []
-        for ts in agent._agent.toolsets:
+        for ts in server._agent.toolsets:
             if hasattr(ts, "name"):
                 tool_names.append(ts.name)
         # Also check via sub_agents dict
-        assert len(agent.sub_agents) == 1
+        assert len(server._sub_agents) == 1
 
         await sub.close()
 
@@ -242,12 +245,12 @@ class TestDelegation:
         sub = RemoteAgent(name="worker", card_url="http://localhost:8001")
         sub._active = True
 
-        agent = Agent(name="coordinator", model=model, sub_agents=[sub])
+        server = make_test_server(name="coordinator", model=model, sub_agents=[sub])
 
         mock_process = AsyncMock(return_value="Processed data successfully")
         with patch.object(sub, "process_message", mock_process):
             response = ""
-            async for chunk in agent.process_message("Delegate to worker"):
+            async for chunk in server._process_message("Delegate to worker"):
                 response += chunk
 
             assert "Worker processed the data" in response
@@ -280,11 +283,11 @@ class TestDelegation:
         sub = RemoteAgent(name="worker", card_url="http://localhost:8001")
         sub._active = True
 
-        agent = Agent(name="coordinator", model=model, sub_agents=[sub], memory=memory)
+        server = make_test_server(name="coordinator", model=model, sub_agents=[sub], memory=memory)
 
         mock_process = AsyncMock(return_value="Result")
         with patch.object(sub, "process_message", mock_process):
-            async for _ in agent.process_message("Delegate", session_id="del-session"):
+            async for _ in server._process_message("Delegate", session_id="del-session"):
                 pass
 
         events = await memory.get_session_events("del-session")
@@ -326,7 +329,7 @@ class TestDelegation:
         sub = RemoteAgent(name="worker", card_url="http://localhost:8001")
         sub._active = True
 
-        agent = Agent(name="coordinator", model=model, sub_agents=[sub], memory=memory)
+        server = make_test_server(name="coordinator", model=model, sub_agents=[sub], memory=memory)
 
         captured_messages = []
 
@@ -336,10 +339,10 @@ class TestDelegation:
 
         with patch.object(sub, "process_message", side_effect=mock_process):
             # First message to build history
-            async for _ in agent.process_message("Initial context", session_id="ctx-sess"):
+            async for _ in server._process_message("Initial context", session_id="ctx-sess"):
                 pass
             # Second message triggers delegation
-            async for _ in agent.process_message("Now delegate", session_id="ctx-sess"):
+            async for _ in server._process_message("Now delegate", session_id="ctx-sess"):
                 pass
 
         # Verify context was forwarded (should include user/assistant messages before delegation)
@@ -376,14 +379,16 @@ class TestMemoryWithToolCalls:
 
         model = FunctionModel(mock_handler)
         memory = LocalMemory()
-        agent = Agent(name="memory-agent", model=model, memory=memory, instructions="Test agent")
+        server = make_test_server(
+            name="memory-agent", model=model, memory=memory, instructions="Test agent"
+        )
 
-        @agent._agent.tool_plain(name="search", description="Search for something")
+        @server._agent.tool_plain(name="search", description="Search for something")
         async def search(query: str) -> str:
             return f"Results for: {query}"
 
         response = ""
-        async for chunk in agent.process_message("Search for test", session_id="mem-session"):
+        async for chunk in server._process_message("Search for test", session_id="mem-session"):
             response += chunk
 
         events = await memory.get_session_events("mem-session")
@@ -396,7 +401,7 @@ class TestMemoryWithToolCalls:
         """Test that memory history is passed to subsequent calls."""
         memory = LocalMemory()
         model = TestModel(custom_output_text="Second response")
-        agent = Agent(
+        server = make_test_server(
             name="history-agent",
             model=model,
             memory=memory,
@@ -404,11 +409,11 @@ class TestMemoryWithToolCalls:
         )
 
         # First message
-        async for _ in agent.process_message("First message", session_id="hist-session"):
+        async for _ in server._process_message("First message", session_id="hist-session"):
             pass
 
         # Second message should have history from first
-        async for _ in agent.process_message("Second message", session_id="hist-session"):
+        async for _ in server._process_message("Second message", session_id="hist-session"):
             pass
 
         events = await memory.get_session_events("hist-session")
@@ -422,7 +427,7 @@ class TestMemoryWithToolCalls:
         """Test that task_delegation_received events appear in message history."""
         memory = LocalMemory()
         model = TestModel(custom_output_text="Delegation response")
-        agent = Agent(
+        server = make_test_server(
             name="deleg-hist-agent",
             model=model,
             memory=memory,
@@ -431,15 +436,15 @@ class TestMemoryWithToolCalls:
 
         # Simulate a delegation message
         delegation_msg = [{"role": "task-delegation", "content": "Delegated task"}]
-        async for _ in agent.process_message(delegation_msg, session_id="deleg-hist"):
+        async for _ in server._process_message(delegation_msg, session_id="deleg-hist"):
             pass
 
         # Send a follow-up — history should include the delegation prompt
-        async for _ in agent.process_message("Follow up", session_id="deleg-hist"):
+        async for _ in server._process_message("Follow up", session_id="deleg-hist"):
             pass
 
         # Build history for the third hypothetical call
-        history = await agent._build_message_history("deleg-hist")
+        history = await server.memory.build_message_history("deleg-hist")
         assert history is not None
         user_parts = [
             p
@@ -455,14 +460,14 @@ class TestMemoryWithToolCalls:
         """Test that NullMemory skips all memory storage."""
         memory = NullMemory()
         model = TestModel(custom_output_text="No memory response")
-        agent = Agent(
+        server = make_test_server(
             name="no-mem-agent",
             model=model,
             memory=memory,
             instructions="Test",
         )
 
-        async for _ in agent.process_message("Hello", session_id="no-mem"):
+        async for _ in server._process_message("Hello", session_id="no-mem"):
             pass
 
         events = await memory.get_session_events("no-mem")
@@ -473,7 +478,7 @@ class TestMemoryWithToolCalls:
         """Test that memory_context_limit caps the history size."""
         memory = LocalMemory()
         model = TestModel(custom_output_text="Response")
-        agent = Agent(
+        server = make_test_server(
             name="limit-agent",
             model=model,
             memory=memory,
@@ -483,11 +488,13 @@ class TestMemoryWithToolCalls:
 
         # Add 5 exchanges
         for i in range(5):
-            async for _ in agent.process_message(f"Message {i}", session_id="limit-sess"):
+            async for _ in server._process_message(f"Message {i}", session_id="limit-sess"):
                 pass
 
         # History should be capped at 2 events (most recent)
-        history = await agent._build_message_history("limit-sess")
+        history = await server.memory.build_message_history(
+            "limit-sess", server._memory_context_limit
+        )
         assert history is not None
         assert len(history) <= 2, f"Expected at most 2 history items, got {len(history)}"
 
@@ -500,10 +507,10 @@ class TestMockModelEnvVar:
         """Test mock responses with plain text."""
         monkeypatch.setenv("DEBUG_MOCK_RESPONSES", json.dumps(["Hello from mock!"]))
 
-        agent = Agent(name="mock-agent", instructions="Test agent")
+        server = make_test_server(name="mock-agent", instructions="Test agent")
 
         response = ""
-        async for chunk in agent.process_message("Hi"):
+        async for chunk in server._process_message("Hi"):
             response += chunk
 
         assert "Hello from mock!" in response
@@ -527,14 +534,14 @@ class TestMockModelEnvVar:
         ]
         monkeypatch.setenv("DEBUG_MOCK_RESPONSES", json.dumps(mock_data))
 
-        agent = Agent(name="mock-tool-agent", instructions="Test agent")
+        server = make_test_server(name="mock-tool-agent", instructions="Test agent")
 
-        @agent._agent.tool_plain(name="echo", description="Echo a message")
+        @server._agent.tool_plain(name="echo", description="Echo a message")
         async def echo(message: str) -> str:
             return f"echo: {message}"
 
         response = ""
-        async for chunk in agent.process_message("Use echo tool"):
+        async for chunk in server._process_message("Use echo tool"):
             response += chunk
 
         assert "Tool executed successfully" in response
@@ -544,17 +551,17 @@ class TestMockModelEnvVar:
         """Test that mock responses reset for each new request."""
         monkeypatch.setenv("DEBUG_MOCK_RESPONSES", json.dumps(["Response A"]))
 
-        agent = Agent(name="reset-agent", instructions="Test agent")
+        server = make_test_server(name="reset-agent", instructions="Test agent")
 
         # First request
         r1 = ""
-        async for chunk in agent.process_message("First"):
+        async for chunk in server._process_message("First"):
             r1 += chunk
         assert "Response A" in r1
 
         # Second request should also get the same mock response
         r2 = ""
-        async for chunk in agent.process_message("Second"):
+        async for chunk in server._process_message("Second"):
             r2 += chunk
         assert "Response A" in r2
 
@@ -566,10 +573,10 @@ class TestStreamingResponses:
     async def test_streaming_collects_all_chunks(self):
         """Test that streaming yields chunks that combine to full response."""
         model = TestModel(custom_output_text="Streaming response text")
-        agent = Agent(name="stream-agent", model=model, instructions="Test agent")
+        server = make_test_server(name="stream-agent", model=model, instructions="Test agent")
 
         chunks = []
-        async for chunk in agent.process_message("Stream please", stream=True):
+        async for chunk in server._process_message("Stream please", stream=True):
             chunks.append(chunk)
 
         full_response = "".join(chunks)
@@ -580,14 +587,16 @@ class TestStreamingResponses:
         """Test that streamed responses are stored in memory."""
         model = TestModel(custom_output_text="Complete streamed text")
         memory = LocalMemory()
-        agent = Agent(
+        server = make_test_server(
             name="stream-mem-agent",
             model=model,
             memory=memory,
             instructions="Test agent",
         )
 
-        async for _ in agent.process_message("Stream it", session_id="stream-session", stream=True):
+        async for _ in server._process_message(
+            "Stream it", session_id="stream-session", stream=True
+        ):
             pass
 
         events = await memory.get_session_events("stream-session")
@@ -616,13 +625,17 @@ class TestStreamingResponses:
 
         model = FunctionModel(function=mock_handler)
         memory = LocalMemory()
-        agent = Agent(name="stream-tool-agent", model=model, memory=memory, instructions="Test")
+        server = make_test_server(
+            name="stream-tool-agent", model=model, memory=memory, instructions="Test"
+        )
 
-        @agent._agent.tool_plain(name="lookup", description="Lookup a key")
+        @server._agent.tool_plain(name="lookup", description="Lookup a key")
         async def lookup(key: str) -> str:
             return f"value_for_{key}"
 
-        async for _ in agent.process_message("Lookup test", session_id="stream-tool", stream=True):
+        async for _ in server._process_message(
+            "Lookup test", session_id="stream-tool", stream=True
+        ):
             pass
 
         events = await memory.get_session_events("stream-tool")
@@ -651,14 +664,16 @@ class TestStreamingResponses:
             return PydanticModelResponse(parts=[TextPart(content="Echo said hello")])
 
         model = FunctionModel(function=mock_handler)
-        agent = Agent(name="progress-agent", model=model, instructions="Test", max_steps=5)
+        server = make_test_server(
+            name="progress-agent", model=model, instructions="Test", max_steps=5
+        )
 
-        @agent._agent.tool_plain(name="echo", description="Echo a message")
+        @server._agent.tool_plain(name="echo", description="Echo a message")
         async def echo(message: str) -> str:
             return f"echoed: {message}"
 
         chunks = []
-        async for chunk in agent.process_message("Use echo", stream=True):
+        async for chunk in server._process_message("Use echo", stream=True):
             chunks.append(chunk)
 
         # First chunk should be progress event for tool call with step info
@@ -693,15 +708,15 @@ class TestStreamingResponses:
             return PydanticModelResponse(parts=[TextPart(content="Worker finished")])
 
         model = FunctionModel(function=mock_handler)
-        agent = Agent(name="delegator", model=model, instructions="Test", max_steps=5)
+        server = make_test_server(name="delegator", model=model, instructions="Test", max_steps=5)
 
         # Register a delegation tool matching the delegate_to_ prefix
-        @agent._agent.tool_plain(name="delegate_to_worker", description="Delegate to worker")
+        @server._agent.tool_plain(name="delegate_to_worker", description="Delegate to worker")
         async def delegate_to_worker(task: str) -> str:
             return "done"
 
         chunks = []
-        async for chunk in agent.process_message("Delegate", stream=True):
+        async for chunk in server._process_message("Delegate", stream=True):
             chunks.append(chunk)
 
         assert len(chunks) >= 2
@@ -718,10 +733,10 @@ class TestNoToolsAgent:
     async def test_agent_without_tools_responds_directly(self):
         """Test agent with no tools goes directly to final response."""
         model = TestModel(custom_output_text="Direct response")
-        agent = Agent(name="simple-agent", model=model, instructions="Test agent")
+        server = make_test_server(name="simple-agent", model=model, instructions="Test agent")
 
         response = ""
-        async for chunk in agent.process_message("Hello"):
+        async for chunk in server._process_message("Hello"):
             response += chunk
 
         assert "Direct response" in response
@@ -731,14 +746,14 @@ class TestNoToolsAgent:
         """Test simple agent still stores memory events."""
         model = TestModel(custom_output_text="Simple response")
         memory = LocalMemory()
-        agent = Agent(
+        server = make_test_server(
             name="simple-mem-agent",
             model=model,
             memory=memory,
             instructions="Test agent",
         )
 
-        async for _ in agent.process_message("Hello", session_id="simple-session"):
+        async for _ in server._process_message("Hello", session_id="simple-session"):
             pass
 
         events = await memory.get_session_events("simple-session")
@@ -761,14 +776,16 @@ class TestMessageHistoryBridge:
 
         model = FunctionModel(mock_handler)
         memory = LocalMemory()
-        agent = Agent(name="history-agent", model=model, memory=memory, instructions="Test agent")
+        server = make_test_server(
+            name="history-agent", model=model, memory=memory, instructions="Test agent"
+        )
 
         # First message
-        async for _ in agent.process_message("Hello", session_id="h-session"):
+        async for _ in server._process_message("Hello", session_id="h-session"):
             pass
 
         # Second message should include history
-        async for _ in agent.process_message("Follow up", session_id="h-session"):
+        async for _ in server._process_message("Follow up", session_id="h-session"):
             pass
 
         # The second call should have received message_history
@@ -785,16 +802,16 @@ class TestMessageHistoryBridge:
 
         model = FunctionModel(mock_handler)
         null_memory = NullMemory()
-        agent = Agent(
+        server = make_test_server(
             name="null-hist-agent",
             model=model,
             memory=null_memory,
             instructions="Test agent",
         )
 
-        async for _ in agent.process_message("First"):
+        async for _ in server._process_message("First"):
             pass
-        async for _ in agent.process_message("Second"):
+        async for _ in server._process_message("Second"):
             pass
 
         # Both calls should have similar message count (no history buildup)
@@ -812,10 +829,10 @@ class TestErrorHandling:
             raise RuntimeError("Model crashed")
 
         model = FunctionModel(broken_handler)
-        agent = Agent(name="error-agent", model=model, instructions="Test agent")
+        server = make_test_server(name="error-agent", model=model, instructions="Test agent")
 
         response = ""
-        async for chunk in agent.process_message("Break please"):
+        async for chunk in server._process_message("Break please"):
             response += chunk
 
         assert "error" in response.lower()
@@ -829,14 +846,14 @@ class TestErrorHandling:
 
         model = FunctionModel(broken_handler)
         memory = LocalMemory()
-        agent = Agent(
+        server = make_test_server(
             name="error-mem-agent",
             model=model,
             memory=memory,
             instructions="Test agent",
         )
 
-        async for _ in agent.process_message("Break", session_id="err-session"):
+        async for _ in server._process_message("Break", session_id="err-session"):
             pass
 
         events = await memory.get_session_events("err-session")
@@ -850,46 +867,49 @@ class TestAgentConfiguration:
     def test_default_max_steps(self):
         """Test default max_steps value."""
         model = TestModel(custom_output_text="test")
-        agent = Agent(name="default-agent", model=model)
-        assert agent.max_steps == 5
+        server = make_test_server(name="default-agent", model=model)
+        assert server._max_steps == 5
 
     def test_custom_max_steps(self):
         """Test custom max_steps value."""
         model = TestModel(custom_output_text="test")
-        agent = Agent(name="custom-agent", model=model, max_steps=10)
-        assert agent.max_steps == 10
+        server = make_test_server(name="custom-agent", model=model, max_steps=10)
+        assert server._max_steps == 10
 
     def test_default_memory_context_limit(self):
         """Test default memory context limit."""
         model = TestModel(custom_output_text="test")
-        agent = Agent(name="mem-limit-agent", model=model)
-        assert agent.memory_context_limit == 6
+        server = make_test_server(name="mem-limit-agent", model=model)
+        assert server._memory_context_limit == 6
 
     def test_custom_memory_context_limit(self):
         """Test custom memory context limit."""
         model = TestModel(custom_output_text="test")
-        agent = Agent(name="mem-limit-agent", model=model, memory_context_limit=20)
-        assert agent.memory_context_limit == 20
+        server = make_test_server(name="mem-limit-agent", model=model, memory_context_limit=20)
+        assert server._memory_context_limit == 20
 
     def test_model_from_url_and_name(self):
-        """Test creating agent from model_api_url and model_name."""
-        agent = Agent(
-            name="url-agent",
-            model_api_url="http://localhost:11434/v1",
-            model_name="test-model",
+        """Test creating model from model_api_url and model_name."""
+        from agent.server import _resolve_model
+
+        model, mock_state = _resolve_model(
+            "url-agent", None, "http://localhost:11434/v1", "test-model", "auto"
         )
-        assert agent.name == "url-agent"
+        assert model is not None
+        assert mock_state is None
 
     def test_agent_requires_model_source(self):
         """Test agent creation without model source raises error."""
         with pytest.raises(ValueError, match="Agent requires"):
-            Agent(name="no-model-agent")
+            from agent.server import _resolve_model
+
+            _resolve_model("no-model-agent", None, None, None, "auto")
 
     def test_memory_type_flag(self):
         """Test memory type detection."""
         model = TestModel(custom_output_text="test")
-        agent = Agent(name="no-mem-agent", model=model, memory=NullMemory())
-        assert isinstance(agent.memory, NullMemory)
+        server = make_test_server(name="no-mem-agent", model=model, memory=NullMemory())
+        assert isinstance(server.memory, NullMemory)
 
 
 class TestUserPromptExtraction:
@@ -899,10 +919,10 @@ class TestUserPromptExtraction:
     async def test_string_message(self):
         """Test extracting prompt from string."""
         model = TestModel(custom_output_text="Got it")
-        agent = Agent(name="extract-agent", model=model, instructions="Test agent")
+        server = make_test_server(name="extract-agent", model=model, instructions="Test agent")
 
         response = ""
-        async for chunk in agent.process_message("Hello world"):
+        async for chunk in server._process_message("Hello world"):
             response += chunk
 
         assert len(response) > 0
@@ -911,7 +931,7 @@ class TestUserPromptExtraction:
     async def test_message_array(self):
         """Test extracting prompt from OpenAI-style message array."""
         model = TestModel(custom_output_text="Got it")
-        agent = Agent(name="extract-agent", model=model, instructions="Test agent")
+        server = make_test_server(name="extract-agent", model=model, instructions="Test agent")
 
         messages = [
             {"role": "system", "content": "You are helpful"},
@@ -919,7 +939,7 @@ class TestUserPromptExtraction:
         ]
 
         response = ""
-        async for chunk in agent.process_message(messages):
+        async for chunk in server._process_message(messages):
             response += chunk
 
         assert len(response) > 0
@@ -928,14 +948,14 @@ class TestUserPromptExtraction:
     async def test_task_delegation_role(self):
         """Test extracting prompt from task-delegation role."""
         model = TestModel(custom_output_text="Task received")
-        agent = Agent(name="task-agent", model=model, instructions="Test agent")
+        server = make_test_server(name="task-agent", model=model, instructions="Test agent")
 
         messages = [
             {"role": "task-delegation", "content": "Process this task"},
         ]
 
         response = ""
-        async for chunk in agent.process_message(messages):
+        async for chunk in server._process_message(messages):
             response += chunk
 
         assert len(response) > 0

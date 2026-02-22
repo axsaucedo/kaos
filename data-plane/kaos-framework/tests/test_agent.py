@@ -12,8 +12,10 @@ from typing import List, Dict, Optional
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.models.function import FunctionModel, AgentInfo
 from pydantic_ai.messages import ModelResponse as PydanticModelResponse, TextPart, ToolCallPart
+from pydantic_ai import Agent as PydanticAgent
 
-from agent.client import Agent, AgentCard, RemoteAgent
+from tests.helpers import make_test_server
+from agent.server import AgentCard, RemoteAgent
 from agent.memory import LocalMemory, NullMemory, RedisMemory
 
 logger = logging.getLogger(__name__)
@@ -28,7 +30,7 @@ class TestAgentCreationAndCard:
         model = TestModel(custom_output_text="Hello from test")
         memory = LocalMemory()
 
-        agent = Agent(
+        server = make_test_server(
             name="test-agent",
             description="Test Agent Description",
             instructions="You are a test assistant.",
@@ -36,22 +38,22 @@ class TestAgentCreationAndCard:
             memory=memory,
         )
 
-        assert agent.name == "test-agent"
-        assert agent.description == "Test Agent Description"
-        assert agent.memory == memory
+        assert server.name == "test-agent"
+        assert server.description == "Test Agent Description"
+        assert server.memory == memory
 
     @pytest.mark.asyncio
     async def test_agent_card_generation(self):
         """Test AgentCard generation."""
         model = TestModel(custom_output_text="test")
-        agent = Agent(
+        server = make_test_server(
             name="test-agent",
             description="Test Agent Description",
             instructions="You are a test assistant.",
             model=model,
         )
 
-        card = await agent.get_agent_card("http://localhost:8000")
+        card = await server._get_agent_card("http://localhost:8000")
         assert card.name == "test-agent"
         assert card.description == "Test Agent Description"
         assert card.url == "http://localhost:8000"
@@ -66,9 +68,11 @@ class TestAgentCreationAndCard:
 
     @pytest.mark.asyncio
     async def test_agent_creation_requires_model_source(self):
-        """Test Agent raises ValueError when no model source is provided."""
+        """Test _resolve_model raises ValueError when no model source is provided."""
+        from agent.server import _resolve_model
+
         with pytest.raises(ValueError, match="Agent requires either"):
-            Agent(name="test-agent", instructions="test")
+            _resolve_model("test-agent", None, None, None, "auto")
 
 
 class TestAgentMessageProcessing:
@@ -78,14 +82,14 @@ class TestAgentMessageProcessing:
     async def test_simple_message_processing(self):
         """Test simple non-streaming message processing."""
         model = TestModel(custom_output_text="Hello, world!")
-        agent = Agent(
+        server = make_test_server(
             name="test-agent",
             model=model,
             instructions="You are a test assistant.",
         )
 
         response = ""
-        async for chunk in agent.process_message("Hi there"):
+        async for chunk in server._process_message("Hi there"):
             response += chunk
 
         assert "Hello, world!" in response
@@ -95,7 +99,7 @@ class TestAgentMessageProcessing:
         """Test message processing with session ID."""
         model = TestModel(custom_output_text="Session response")
         memory = LocalMemory()
-        agent = Agent(
+        server = make_test_server(
             name="test-agent",
             model=model,
             memory=memory,
@@ -103,7 +107,7 @@ class TestAgentMessageProcessing:
         )
 
         response = ""
-        async for chunk in agent.process_message("Hello", session_id="test-session"):
+        async for chunk in server._process_message("Hello", session_id="test-session"):
             response += chunk
 
         assert "Session response" in response
@@ -116,7 +120,7 @@ class TestAgentMessageProcessing:
     async def test_message_processing_with_message_array(self):
         """Test processing message as array format."""
         model = TestModel(custom_output_text="Array response")
-        agent = Agent(
+        server = make_test_server(
             name="test-agent",
             model=model,
             instructions="You are a test assistant.",
@@ -127,7 +131,7 @@ class TestAgentMessageProcessing:
         ]
 
         response = ""
-        async for chunk in agent.process_message(messages):
+        async for chunk in server._process_message(messages):
             response += chunk
 
         assert "Array response" in response
@@ -136,14 +140,14 @@ class TestAgentMessageProcessing:
     async def test_streaming_message_processing(self):
         """Test streaming message processing."""
         model = TestModel(custom_output_text="Streaming response")
-        agent = Agent(
+        server = make_test_server(
             name="test-agent",
             model=model,
             instructions="You are a test assistant.",
         )
 
         chunks = []
-        async for chunk in agent.process_message("Hi", stream=True):
+        async for chunk in server._process_message("Hi", stream=True):
             chunks.append(chunk)
 
         full_response = "".join(chunks)
@@ -157,7 +161,7 @@ class TestAgentMemory:
     async def test_null_memory(self):
         """Test agent with NullMemory (disabled)."""
         model = TestModel(custom_output_text="No memory")
-        agent = Agent(
+        server = make_test_server(
             name="test-agent",
             model=model,
             memory=NullMemory(),
@@ -165,7 +169,7 @@ class TestAgentMemory:
         )
 
         response = ""
-        async for chunk in agent.process_message("Hello"):
+        async for chunk in server._process_message("Hello"):
             response += chunk
 
         assert "No memory" in response
@@ -175,7 +179,7 @@ class TestAgentMemory:
         """Test that memory events are stored correctly."""
         model = TestModel(custom_output_text="Memory test")
         memory = LocalMemory()
-        agent = Agent(
+        server = make_test_server(
             name="test-agent",
             model=model,
             memory=memory,
@@ -183,7 +187,7 @@ class TestAgentMemory:
         )
 
         response = ""
-        async for chunk in agent.process_message("Hello", session_id="mem-test"):
+        async for chunk in server._process_message("Hello", session_id="mem-test"):
             response += chunk
 
         # Check events were stored
@@ -204,13 +208,13 @@ class TestMockModel:
         """Test mock model with plain text responses."""
         os.environ["DEBUG_MOCK_RESPONSES"] = '["Hello from mock"]'
         try:
-            agent = Agent(
+            server = make_test_server(
                 name="mock-agent",
                 instructions="You are a test assistant.",
             )
 
             response = ""
-            async for chunk in agent.process_message("Test"):
+            async for chunk in server._process_message("Test"):
                 response += chunk
 
             assert "Hello from mock" in response
@@ -246,19 +250,19 @@ class TestMockModel:
                 return PydanticModelResponse(parts=[TextPart(content="Done with tools.")])
 
             model = FunctionModel(mock_fn)
-            agent = Agent(
+            server = make_test_server(
                 name="tool-agent",
                 model=model,
                 instructions="You are a test assistant.",
             )
 
-            @agent._agent.tool_plain
+            @server._agent.tool_plain
             def echo(message: str) -> str:
                 """Echo a message."""
                 return f"Echo: {message}"
 
             response = ""
-            async for chunk in agent.process_message("Test tools"):
+            async for chunk in server._process_message("Test tools"):
                 response += chunk
 
             assert "Done with tools" in response
@@ -293,20 +297,20 @@ class TestAgentCard:
         sub_agent1 = RemoteAgent(name="worker-1", card_url="http://localhost:8001")
         sub_agent2 = RemoteAgent(name="worker-2", card_url="http://localhost:8002")
 
-        agent = Agent(
+        server = make_test_server(
             name="coordinator",
             model=model,
             sub_agents=[sub_agent1, sub_agent2],
         )
 
-        assert isinstance(agent.sub_agents, dict)
-        assert len(agent.sub_agents) == 2
-        assert "worker-1" in agent.sub_agents
-        assert "worker-2" in agent.sub_agents
-        assert agent.sub_agents["worker-1"] is sub_agent1
-        assert agent.sub_agents["worker-2"] is sub_agent2
+        assert isinstance(server._sub_agents, dict)
+        assert len(server._sub_agents) == 2
+        assert "worker-1" in server._sub_agents
+        assert "worker-2" in server._sub_agents
+        assert server._sub_agents["worker-1"] is sub_agent1
+        assert server._sub_agents["worker-2"] is sub_agent2
 
-        card = await agent.get_agent_card("http://localhost:8000")
+        card = await server._get_agent_card("http://localhost:8000")
         assert "task_delegation" in card.capabilities
 
         await sub_agent1.close()
@@ -406,7 +410,7 @@ class TestNullMemory:
         model = TestModel(custom_output_text="No memory response")
         null_memory = NullMemory()
 
-        agent = Agent(
+        server = make_test_server(
             name="null-memory-agent",
             instructions="Test agent with disabled memory.",
             model=model,
@@ -414,7 +418,7 @@ class TestNullMemory:
         )
 
         response_chunks = []
-        async for chunk in agent.process_message("Hello!"):
+        async for chunk in server._process_message("Hello!"):
             response_chunks.append(chunk)
 
         response = "".join(response_chunks)
@@ -471,7 +475,7 @@ class TestMessageProcessing:
         model = TestModel(custom_output_text="Test response")
         memory = LocalMemory()
 
-        agent = Agent(
+        server = make_test_server(
             name="test-agent",
             model=model,
             memory=memory,
@@ -479,7 +483,7 @@ class TestMessageProcessing:
         )
 
         response = ""
-        async for chunk in agent.process_message("Hello agent!"):
+        async for chunk in server._process_message("Hello agent!"):
             response += chunk
 
         assert "Test response" in response
@@ -498,7 +502,7 @@ class TestMessageProcessing:
         model = TestModel(custom_output_text="Session response")
         memory = LocalMemory()
 
-        agent = Agent(
+        server = make_test_server(
             name="test-agent",
             model=model,
             memory=memory,
@@ -506,7 +510,7 @@ class TestMessageProcessing:
         )
 
         response = ""
-        async for chunk in agent.process_message("Hello", session_id="my-session"):
+        async for chunk in server._process_message("Hello", session_id="my-session"):
             response += chunk
 
         sessions = await memory.list_sessions()
@@ -519,26 +523,31 @@ class TestRemoteAgent:
     @pytest.mark.asyncio
     async def test_remote_agent_creation_and_close(self):
         """Test RemoteAgent can be created and closed."""
-        agent = RemoteAgent(name="test-remote", card_url="http://localhost:9999")
-        assert agent.name == "test-remote"
-        assert agent.card_url == "http://localhost:9999"
-        assert not agent._active
-        await agent.close()
+        remote = RemoteAgent(name="test-remote", card_url="http://localhost:9999")
+        assert remote.name == "test-remote"
+        assert remote.card_url == "http://localhost:9999"
+        assert not remote._active
+        await remote.close()
 
 
 class TestAgentServer:
     """Tests for AgentServer creation."""
 
     def test_agent_server_creation(self):
-        """Test AgentServer can be created with an Agent."""
-        from agent.server import AgentServer as ServerClass
+        """Test AgentServer can be created with a PydanticAgent."""
+        from agent.server import AgentServer as ServerClass, AgentDeps
 
         model = TestModel(custom_output_text="server test")
-        agent = Agent(
-            name="server-test-agent",
+        pydantic_agent = PydanticAgent(
             model=model,
             instructions="Test server agent.",
+            name="server-test-agent",
+            defer_model_check=True,
+            deps_type=AgentDeps,
         )
-        server = ServerClass(agent=agent)
-        assert server._wrapped_agent == agent
+        server = ServerClass(
+            pydantic_agent=pydantic_agent,
+            name="server-test-agent",
+        )
+        assert server.name == "server-test-agent"
         assert server.app is not None
