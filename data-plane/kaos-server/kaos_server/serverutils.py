@@ -182,10 +182,11 @@ def _build_mock_model_function():
 
 def _resolve_model(
     name: str,
-    model: Any,
-    model_api_url: Optional[str],
-    model_name: Optional[str],
-    tool_call_mode: str,
+    *,
+    model: Any = None,
+    model_api_url: Optional[str] = None,
+    model_name: Optional[str] = None,
+    tool_call_mode: str = "auto",
 ) -> tuple:
     """Resolve the Pydantic AI model from configuration. Returns (model, mock_state)."""
     if model is not None:

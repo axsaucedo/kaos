@@ -37,7 +37,7 @@ def make_test_server(
     mock_state: Optional[_MockResponseState] = None
     if model is None:
         try:
-            model, mock_state = _resolve_model(name, None, None, None, "auto")
+            model, mock_state = _resolve_model(name)
         except ValueError:
             pass
 

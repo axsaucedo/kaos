@@ -72,7 +72,7 @@ class TestAgentCreationAndCard:
         from kaos_server.serverutils import _resolve_model
 
         with pytest.raises(ValueError, match="Agent requires either"):
-            _resolve_model("test-agent", None, None, None, "auto")
+            _resolve_model("test-agent")
 
 
 class TestAgentMessageProcessing:

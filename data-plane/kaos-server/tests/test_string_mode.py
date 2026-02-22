@@ -186,10 +186,9 @@ class TestStringModeAgentIntegration:
 
         model, _ = _resolve_model(
             "test-agent",
-            None,
-            "http://localhost:11434",
-            "test-model",
-            "string",
+            model_api_url="http://localhost:11434",
+            model_name="test-model",
+            tool_call_mode="string",
         )
         assert isinstance(model, FunctionModel)
 
@@ -200,10 +199,9 @@ class TestStringModeAgentIntegration:
 
         model, _ = _resolve_model(
             "test-agent",
-            None,
-            "http://localhost:11434",
-            "test-model",
-            "native",
+            model_api_url="http://localhost:11434",
+            model_name="test-model",
+            tool_call_mode="native",
         )
         assert isinstance(model, OpenAIChatModel)
 
@@ -216,7 +214,7 @@ class TestStringModeAgentIntegration:
         try:
             from kaos_server.serverutils import _resolve_model
 
-            model, mock_state = _resolve_model("test-agent", None, None, None, "string")
+            model, mock_state = _resolve_model("test-agent", tool_call_mode="string")
             server = make_test_server(name="test-agent", model=model)
             server._mock_state = mock_state
             chunks = []

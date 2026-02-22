@@ -893,7 +893,9 @@ class TestAgentConfiguration:
         from kaos_server.serverutils import _resolve_model
 
         model, mock_state = _resolve_model(
-            "url-agent", None, "http://localhost:11434/v1", "test-model", "auto"
+            "url-agent",
+            model_api_url="http://localhost:11434/v1",
+            model_name="test-model",
         )
         assert model is not None
         assert mock_state is None
@@ -903,7 +905,7 @@ class TestAgentConfiguration:
         with pytest.raises(ValueError, match="Agent requires"):
             from kaos_server.serverutils import _resolve_model
 
-            _resolve_model("no-model-agent", None, None, None, "auto")
+            _resolve_model("no-model-agent")
 
     def test_memory_type_flag(self):
         """Test memory type detection."""

@@ -633,10 +633,9 @@ def create_agent_server(
     # Resolve model
     model, mock_state = _resolve_model(
         settings.agent_name,
-        None,
-        settings.model_api_url,
-        settings.model_name,
-        settings.tool_call_mode,
+        model_api_url=settings.model_api_url,
+        model_name=settings.model_name,
+        tool_call_mode=settings.tool_call_mode,
     )
 
     # Build toolsets
