@@ -39,7 +39,8 @@ from kaos_server.serverutils import (
     _build_mock_model_function,
     _resolve_model,
     _extract_user_prompt,
-    _format_sse_chunk,
+    _build_streaming_chunk,
+    _build_chat_response,
 )
 
 if TYPE_CHECKING:
@@ -87,24 +88,6 @@ def configure_logging(level: str = "INFO", otel_correlation: bool = False) -> No
 
 
 logger = logging.getLogger(__name__)
-
-
-def _build_chat_response(model_name: str, content: str) -> dict:
-    """Build OpenAI-compatible chat completion response dict."""
-    return {
-        "id": f"chatcmpl-{uuid.uuid4().hex}",
-        "object": "chat.completion",
-        "created": int(time.time()),
-        "model": model_name,
-        "choices": [
-            {
-                "index": 0,
-                "message": {"role": "assistant", "content": content},
-                "finish_reason": "stop",
-            }
-        ],
-        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
-    }
 
 
 class AgentServer:
@@ -473,17 +456,13 @@ class AgentServer:
                         messages, stream=True, session_id=session_id
                     ):
                         if chunk:
-                            yield _format_sse_chunk(chat_id, created_at, model_name, chunk)
+                            yield _build_streaming_chunk(
+                                chat_id, created_at, model_name, content=chunk
+                            )
 
-                    # Final stop chunk
-                    final_data = {
-                        "id": chat_id,
-                        "object": "chat.completion.chunk",
-                        "created": created_at,
-                        "model": model_name,
-                        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
-                    }
-                    yield f"data: {json.dumps(final_data)}\n\n"
+                    yield _build_streaming_chunk(
+                        chat_id, created_at, model_name, finish_reason="stop"
+                    )
                     yield "data: [DONE]\n\n"
 
                 except Exception as e:

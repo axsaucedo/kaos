@@ -2,6 +2,8 @@
 
 import os
 import json
+import time
+import uuid
 import logging
 from typing import Dict, Any, List, Literal, Optional, Union, TYPE_CHECKING
 from dataclasses import dataclass, asdict
@@ -229,15 +231,41 @@ def _extract_user_prompt(message: Union[str, List[Dict[str, str]]]) -> str:
     return ""
 
 
-def _format_sse_chunk(chat_id: str, created_at: int, model_name: str, content: str) -> str:
+def _build_streaming_chunk(
+    chat_id: str,
+    created_at: int,
+    model_name: str,
+    content: Optional[str] = None,
+    finish_reason: Optional[str] = None,
+) -> str:
+    """Build an SSE data line for a streaming chat completion chunk."""
+    delta = {"content": content} if content is not None else {}
     data = {
         "id": chat_id,
         "object": "chat.completion.chunk",
         "created": created_at,
         "model": model_name,
-        "choices": [{"index": 0, "delta": {"content": content}, "finish_reason": None}],
+        "choices": [{"index": 0, "delta": delta, "finish_reason": finish_reason}],
     }
     return f"data: {json.dumps(data)}\n\n"
+
+
+def _build_chat_response(model_name: str, content: str) -> dict:
+    """Build OpenAI-compatible non-streaming chat completion response dict."""
+    return {
+        "id": f"chatcmpl-{uuid.uuid4().hex}",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": model_name,
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": content},
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+    }
 
 
 class AgentServerSettings(BaseSettings):
