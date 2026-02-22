@@ -107,6 +107,7 @@ class AgentServer:
         port: int = 8000,
         access_log: bool = False,
         settings: Optional["AgentServerSettings"] = None,
+        custom_tools: Optional[list] = None,
     ):
         from agent.memory import NullMemory
 
@@ -120,6 +121,7 @@ class AgentServer:
         self._sub_agents = sub_agents or {}
         self._mcp_servers = mcp_servers or []
         self._model = model
+        self._custom_tools = custom_tools or []
 
         self.port = port
         self.access_log = access_log
@@ -345,15 +347,10 @@ class AgentServer:
             except Exception as e:
                 logger.warning(f"Failed to list tools from MCP server: {e}")
 
-        if hasattr(self._agent, "_function_toolset"):
-            toolset = self._agent._function_toolset
-            if hasattr(toolset, "tools") and isinstance(toolset.tools, dict):
-                for tool_name, tool in toolset.tools.items():
-                    if not tool_name.startswith(DELEGATION_TOOL_PREFIX):
-                        desc = getattr(tool, "description", "") or ""
-                        skills.append({"name": tool_name, "description": desc})
-                if skills:
-                    capabilities.append("tool_execution")
+        if self._custom_tools and not self._mcp_servers:
+            capabilities.append("tool_execution")
+        for tool_info in self._custom_tools:
+            skills.append(tool_info)
 
         for agent_name in self._sub_agents:
             skills.append(
@@ -696,11 +693,21 @@ def create_agent_server(
         toolsets.append(DelegationToolset(sub_agents_dict, settings.memory_context_limit))
 
     # Create or augment Pydantic AI agent
+    custom_tools = []
     if custom_agent:
         pydantic_agent = custom_agent
         pydantic_agent.model = model
         for ts in toolsets:
             pydantic_agent._toolsets.append(ts)
+        # Extract custom tool names from agent's existing toolsets (before KAOS additions)
+        if hasattr(custom_agent, "_function_toolset"):
+            ft = custom_agent._function_toolset
+            if hasattr(ft, "tools") and isinstance(ft.tools, dict):
+                for name, tool in ft.tools.items():
+                    if not name.startswith(DELEGATION_TOOL_PREFIX):
+                        custom_tools.append(
+                            {"name": name, "description": getattr(tool, "description", "") or ""}
+                        )
         logger.info(f"Agent {settings.agent_name}: using custom Pydantic AI agent")
     else:
         pydantic_agent = PydanticAgent(
@@ -733,6 +740,7 @@ def create_agent_server(
         port=settings.agent_port,
         access_log=settings.agent_access_log,
         settings=settings,
+        custom_tools=custom_tools,
     )
 
 
