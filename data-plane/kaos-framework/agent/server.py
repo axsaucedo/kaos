@@ -50,25 +50,21 @@ def configure_logging(level: str = "INFO", otel_correlation: bool = False) -> No
     """Configure stdout logging with optional OTel trace correlation."""
     log_level = getattr(logging, level.upper(), logging.INFO)
 
-    # Log format with optional OTel correlation
-    if otel_correlation:
-        log_format = (
-            "%(asctime)s - %(name)s - %(levelname)s - "
-            "[trace_id=%(otelTraceID)s span_id=%(otelSpanID)s] - %(message)s"
-        )
-    else:
-        log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    log_format = (
+        "%(asctime)s - %(name)s - %(levelname)s - "
+        "[trace_id=%(otelTraceID)s span_id=%(otelSpanID)s] - %(message)s"
+        if otel_correlation
+        else "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
 
-    # Configure root logger
     logging.basicConfig(
         level=log_level,
         format=log_format,
         datefmt="%Y-%m-%d %H:%M:%S",
         stream=sys.stdout,
-        force=True,  # Override any existing configuration
+        force=True,
     )
 
-    # If OTel correlation is enabled, add the LoggingInstrumentor
     if otel_correlation:
         try:
             from opentelemetry.instrumentation.logging import LoggingInstrumentor
@@ -77,29 +73,17 @@ def configure_logging(level: str = "INFO", otel_correlation: bool = False) -> No
         except Exception as e:
             logging.getLogger(__name__).warning(f"Failed to enable OTel log correlation: {e}")
 
-    # Ensure our application loggers are at the right level
-    for logger_name in [
-        "agent",
-        "agent.server",
-        "agent.client",
-        "agent.memory",
-    ]:
-        logging.getLogger(logger_name).setLevel(log_level)
-
-    # Reduce noise from third-party libraries
-    # HTTPX/HTTPCORE: set to WARNING by default, or log_level if OTEL_INCLUDE_HTTP_CLIENT=true
+    # Suppress noisy third-party loggers
     include_http_client = getenv_bool("OTEL_INCLUDE_HTTP_CLIENT", False)
     http_log_level = log_level if include_http_client else logging.WARNING
-    logging.getLogger("httpx").setLevel(http_log_level)
-    logging.getLogger("httpcore").setLevel(http_log_level)
-    logging.getLogger("mcp.client.streamable_http").setLevel(http_log_level)
+    for name in ("httpx", "httpcore", "mcp.client.streamable_http"):
+        logging.getLogger(name).setLevel(http_log_level)
 
-    # Uvicorn access logs: disabled by default, enable with OTEL_INCLUDE_HTTP_SERVER=true
     include_http_server = getenv_bool("OTEL_INCLUDE_HTTP_SERVER", False)
     logging.getLogger("uvicorn.error").setLevel(log_level)
-    # Access logger at CRITICAL effectively disables it; at log_level enables it
-    uvicorn_access_level = log_level if include_http_server else logging.CRITICAL
-    logging.getLogger("uvicorn.access").setLevel(uvicorn_access_level)
+    logging.getLogger("uvicorn.access").setLevel(
+        log_level if include_http_server else logging.CRITICAL
+    )
 
 
 logger = logging.getLogger(__name__)
