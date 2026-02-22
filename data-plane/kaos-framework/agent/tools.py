@@ -70,8 +70,7 @@ class DelegationToolset(AbstractToolset["AgentDeps"]):
     async def get_tools(self, ctx: RunContext["AgentDeps"]) -> dict[str, ToolsetTool["AgentDeps"]]:
         tools: dict[str, ToolsetTool["AgentDeps"]] = {}
         for name, remote in self._sub_agents.items():
-            if not remote._active:
-                continue
+            # Always expose tools — RemoteAgent lazy-inits on first call
             desc = f"Delegate a task to the {name} agent."
             if remote.agent_card:
                 desc = (
