@@ -26,7 +26,7 @@ from kaos_server.telemetry import (
     should_enable_otel,
     get_log_level,
     getenv_bool,
-    get_tracer,
+    SERVICE_NAME,
 )
 from opentelemetry.propagate import extract
 from kaos_server.tools import format_progress_event, DELEGATION_TOOL_PREFIX, DelegationToolset
@@ -431,7 +431,7 @@ class AgentServer:
         session_id: Optional[str] = None,
         parent_ctx: Optional[Any] = None,
     ) -> JSONResponse:
-        tracer = get_tracer()
+        tracer = trace_api.get_tracer(SERVICE_NAME)
 
         with tracer.start_as_current_span(
             "server-run",
@@ -457,7 +457,7 @@ class AgentServer:
         async def generate_stream():
             # Span is created inside the generator so it stays active
             # for the entire duration (not closed before FastAPI consumes it)
-            tracer = get_tracer()
+            tracer = trace_api.get_tracer(SERVICE_NAME)
 
             with tracer.start_as_current_span(
                 "server-run",

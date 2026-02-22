@@ -211,14 +211,8 @@ def init_otel(service_name: Optional[str] = None) -> bool:
     return True
 
 
-def _get_service_name() -> str:
-    return os.getenv("OTEL_SERVICE_NAME", os.getenv("AGENT_NAME", "kaos-service"))
-
-
-def get_tracer() -> trace.Tracer:
-    """Get KAOS tracer (no-op when OTel not initialized)."""
-    service_name = _get_service_name()
-    return trace.get_tracer(f"kaos.{service_name}")
+# Module-level service name: computed once, used everywhere for tracers and meters
+SERVICE_NAME = f"kaos.{os.getenv('OTEL_SERVICE_NAME', os.getenv('AGENT_NAME', 'kaos-service'))}"
 
 
 def get_delegation_metrics() -> Tuple[Optional[metrics.Counter], Optional[metrics.Histogram]]:
@@ -229,8 +223,7 @@ def get_delegation_metrics() -> Tuple[Optional[metrics.Counter], Optional[metric
         return None, None
 
     if _delegation_counter is None:
-        service_name = _get_service_name()
-        meter = metrics.get_meter(f"kaos.{service_name}")
+        meter = metrics.get_meter(SERVICE_NAME)
         _delegation_counter = meter.create_counter(
             "kaos.delegations", description="Delegation count", unit="1"
         )

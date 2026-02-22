@@ -30,10 +30,11 @@ from pydantic_ai import RunContext
 from pydantic_core import SchemaValidator, core_schema
 
 from kaos_server.telemetry import (
-    get_tracer,
+    SERVICE_NAME,
     get_delegation_metrics,
     ATTR_DELEGATION_TARGET,
 )
+from opentelemetry import trace as trace_api
 
 if TYPE_CHECKING:
     from kaos_server.serverutils import AgentDeps, RemoteAgent
@@ -116,7 +117,7 @@ async def execute_delegation(
     memory_context_limit: int = 6,
 ) -> str:
     """Execute delegation to a sub-agent, forwarding conversation context."""
-    tracer = get_tracer()
+    tracer = trace_api.get_tracer(SERVICE_NAME)
     delegation_counter, delegation_duration = get_delegation_metrics()
     start_time = time.perf_counter()
     success = False

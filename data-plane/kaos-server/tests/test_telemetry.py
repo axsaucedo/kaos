@@ -122,14 +122,14 @@ class TestOtelConfig:
 
 
 class TestTracerAndMetrics:
-    """Tests for get_tracer and get_delegation_metrics helpers."""
+    """Tests for SERVICE_NAME and get_delegation_metrics helpers."""
 
-    def test_get_tracer(self):
-        """Test getting a tracer."""
-        from kaos_server.telemetry import get_tracer
+    def test_service_name(self):
+        """Test SERVICE_NAME is set."""
+        from kaos_server.telemetry import SERVICE_NAME
 
-        tracer = get_tracer()
-        assert tracer is not None
+        assert SERVICE_NAME is not None
+        assert SERVICE_NAME.startswith("kaos.")
 
     def test_get_delegation_metrics_when_not_initialized(self):
         """Test get_delegation_metrics returns (None, None) when not initialized."""
@@ -146,9 +146,10 @@ class TestTracerAndMetrics:
 
     def test_tracer_start_as_current_span(self):
         """Test using tracer context manager for spans."""
-        from kaos_server.telemetry import get_tracer
+        from opentelemetry import trace
+        from kaos_server.telemetry import SERVICE_NAME
 
-        tracer = get_tracer()
+        tracer = trace.get_tracer(SERVICE_NAME)
         with tracer.start_as_current_span("test-span") as span:
             assert span is not None
 
