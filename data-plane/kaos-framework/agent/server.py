@@ -183,32 +183,16 @@ class AgentServer:
         """Log agent config at INFO (summary) and DEBUG (full dump)."""
         sub_agents = list(self._sub_agents.keys()) if self._sub_agents else []
         mcp_count = len(self._mcp_servers)
-
-        # --- INFO: compact summary ---
+        otel = "enabled" if is_otel_enabled() else "disabled"
         logger.info(
             f"AgentServer starting: name={self.name} port={self.port} "
             f"model={self._model} memory={type(self.memory).__name__} "
             f"max_steps={self._max_steps} mcp_servers={mcp_count} "
-            f"sub_agents={sub_agents}"
+            f"sub_agents={sub_agents} otel={otel} "
+            f"custom_tools={len(self._custom_tools)}"
         )
-
-        otel_status = "disabled"
-        if is_otel_enabled():
-            endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "N/A")
-            otel_status = f"enabled (endpoint={endpoint})"
-        logger.info(f"OpenTelemetry: {otel_status}")
-
-        # --- DEBUG: detailed startup info ---
-        if logger.isEnabledFor(logging.DEBUG):
-            if settings:
-                logger.debug(f"AgentServerSettings: {settings.model_dump()}")
-            for name, sa in (self._sub_agents or {}).items():
-                status = "active" if sa._active else "inactive"
-                desc = sa.agent_card.description if sa.agent_card else "N/A"
-                logger.debug(f"  sub-agent: {name} [{status}] {desc}")
-            for i, mcp in enumerate(self._mcp_servers):
-                logger.debug(f"  mcp-server[{i}]: {mcp}")
-            logger.debug(f"  access_log={self.access_log}")
+        if logger.isEnabledFor(logging.DEBUG) and settings:
+            logger.debug(f"AgentServerSettings: {settings.model_dump()}")
 
     def _setup_routes(self):
 
