@@ -14,7 +14,7 @@ import json
 from multiprocessing import Process
 
 from agent.server import create_agent_server
-from agent.models import AgentServerSettings, RemoteAgent
+from agent.config import AgentServerSettings, RemoteAgent
 
 logger = logging.getLogger(__name__)
 

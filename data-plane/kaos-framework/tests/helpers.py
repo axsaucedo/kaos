@@ -7,7 +7,7 @@ from pydantic_ai import Agent as PydanticAgent
 from agent.server import (
     AgentServer,
 )
-from agent.models import (
+from agent.config import (
     AgentDeps,
     RemoteAgent,
     _resolve_model,

@@ -30,7 +30,7 @@ from telemetry.manager import (
     get_tracer,
 )
 from agent.tools import format_progress_event, DELEGATION_TOOL_PREFIX, DelegationToolset
-from agent.models import (
+from agent.config import (
     AgentDeps,
     AgentCard,
     RemoteAgent,
