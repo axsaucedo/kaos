@@ -86,6 +86,9 @@ jobs:
           - name: example-redis-memory
             files: "e2e/test_examples_e2e.py"
             pytest_filter: "test_redis_memory_example"
+          - name: example-custom-agent
+            files: "e2e/test_examples_e2e.py"
+            pytest_filter: "test_custom_agent_example"
     name: E2E (${{ matrix.shard.name }})
     steps:
       - name: Checkout
@@ -179,7 +182,7 @@ jobs:
           github-token: ${{ github.token }}
 
       - name: Build custom agent example image
-        if: matrix.shard.name == 'core'
+        if: matrix.shard.name == 'example-custom-agent'
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -204,7 +207,7 @@ jobs:
           wait
 
       - name: Load custom agent image into KIND
-        if: matrix.shard.name == 'core'
+        if: matrix.shard.name == 'example-custom-agent'
         run: kind load docker-image custom-agent:test --name ${{ env.KIND_CLUSTER_NAME }}
 
       - name: Install KAOS operator
