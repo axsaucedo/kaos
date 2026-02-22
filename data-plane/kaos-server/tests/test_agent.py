@@ -15,7 +15,7 @@ from pydantic_ai.messages import ModelResponse as PydanticModelResponse, TextPar
 from pydantic_ai import Agent as PydanticAgent
 
 from tests.helpers import make_test_server
-from kaos_server.config import AgentCard, RemoteAgent
+from kaos_server.serverutils import AgentCard, RemoteAgent
 from kaos_server.memory import LocalMemory, NullMemory, RedisMemory
 
 logger = logging.getLogger(__name__)
@@ -69,7 +69,7 @@ class TestAgentCreationAndCard:
     @pytest.mark.asyncio
     async def test_agent_creation_requires_model_source(self):
         """Test _resolve_model raises ValueError when no model source is provided."""
-        from kaos_server.config import _resolve_model
+        from kaos_server.serverutils import _resolve_model
 
         with pytest.raises(ValueError, match="Agent requires either"):
             _resolve_model("test-agent", None, None, None, "auto")
@@ -536,7 +536,7 @@ class TestAgentServer:
     def test_agent_server_creation(self):
         """Test AgentServer can be created with a PydanticAgent."""
         from kaos_server.server import AgentServer as ServerClass
-        from kaos_server.config import AgentDeps, AgentServerSettings
+        from kaos_server.serverutils import AgentDeps, AgentServerSettings
 
         model = TestModel(custom_output_text="server test")
         pydantic_agent = PydanticAgent(

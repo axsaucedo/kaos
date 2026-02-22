@@ -37,7 +37,7 @@ from kaos_server.telemetry import (
 )
 
 if TYPE_CHECKING:
-    from kaos_server.config import AgentDeps, RemoteAgent
+    from kaos_server.serverutils import AgentDeps, RemoteAgent
     from kaos_server.memory import Memory
 
 logger = logging.getLogger(__name__)

@@ -30,7 +30,7 @@ from kaos_server.telemetry import (
     get_tracer,
 )
 from kaos_server.tools import format_progress_event, DELEGATION_TOOL_PREFIX, DelegationToolset
-from kaos_server.config import (
+from kaos_server.serverutils import (
     AgentDeps,
     AgentCard,
     RemoteAgent,

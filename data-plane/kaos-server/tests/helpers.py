@@ -7,7 +7,7 @@ from pydantic_ai import Agent as PydanticAgent
 from kaos_server.server import (
     AgentServer,
 )
-from kaos_server.config import (
+from kaos_server.serverutils import (
     AgentDeps,
     RemoteAgent,
     AgentServerSettings,
