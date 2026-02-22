@@ -303,33 +303,26 @@ class AgentServer:
 
     async def _get_agent_card(self, base_url: str) -> AgentCard:
         capabilities = ["message_processing", "task_execution"]
-        if self._mcp_servers:
+        if self._mcp_servers or self._custom_tools:
             capabilities.append("tool_execution")
         if self._sub_agents:
             capabilities.append("task_delegation")
 
-        skills: list = []
+        skills: list = list(self._custom_tools)
         for mcp_server in self._mcp_servers:
             try:
                 async with mcp_server:
                     tools = await mcp_server.list_tools()
-                    for tool in tools:
-                        skills.append({"name": tool.name, "description": tool.description or ""})
+                    skills.extend(
+                        {"name": t.name, "description": t.description or ""} for t in tools
+                    )
             except Exception as e:
                 logger.warning(f"Failed to list tools from MCP server: {e}")
 
-        if self._custom_tools and not self._mcp_servers:
-            capabilities.append("tool_execution")
-        for tool_info in self._custom_tools:
-            skills.append(tool_info)
-
-        for agent_name in self._sub_agents:
-            skills.append(
-                {
-                    "name": f"{DELEGATION_TOOL_PREFIX}{agent_name}",
-                    "description": f"Delegate task to {agent_name}",
-                }
-            )
+        skills.extend(
+            {"name": f"{DELEGATION_TOOL_PREFIX}{n}", "description": f"Delegate task to {n}"}
+            for n in self._sub_agents
+        )
 
         return AgentCard(
             name=self.settings.agent_name,
