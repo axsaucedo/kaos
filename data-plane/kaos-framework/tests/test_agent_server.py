@@ -13,7 +13,8 @@ import logging
 import json
 from multiprocessing import Process
 
-from agent.server import AgentServerSettings, create_agent_server, RemoteAgent
+from agent.server import create_agent_server
+from agent.models import AgentServerSettings, RemoteAgent
 
 logger = logging.getLogger(__name__)
 
