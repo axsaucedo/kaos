@@ -540,5 +540,5 @@ class TestAgentServer:
             instructions="Test server agent.",
         )
         server = ServerClass(agent=agent)
-        assert server.agent == agent
+        assert server._wrapped_agent == agent
         assert server.app is not None

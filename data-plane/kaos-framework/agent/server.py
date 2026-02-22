@@ -13,7 +13,7 @@ import uuid
 import json
 import logging
 import sys
-from typing import Dict, Any, List, Literal, Optional, Union, TYPE_CHECKING
+from typing import Dict, Any, AsyncIterator, List, Literal, Optional, Union, TYPE_CHECKING
 from dataclasses import dataclass, asdict
 from contextlib import asynccontextmanager
 
@@ -35,6 +35,9 @@ from pydantic_ai.messages import (
     TextPart,
     ToolCallPart,
 )
+from pydantic_ai.usage import UsageLimits
+from pydantic_ai._agent_graph import CallToolsNode
+from pydantic_graph import End
 from telemetry.manager import (
     init_otel,
     is_otel_enabled,
@@ -45,6 +48,7 @@ from telemetry.manager import (
     get_tracer,
     inject_trace_context,
 )
+from agent.tools import format_progress_event, DELEGATION_TOOL_PREFIX
 
 if TYPE_CHECKING:
     from agent.memory import Memory
@@ -406,26 +410,40 @@ class AgentServer:
         """Initialize AgentServer with an agent.
 
         Args:
-            agent: Agent instance to serve
+            agent: Agent instance (KAOS wrapper) to serve
             port: Port to serve on
             access_log: Whether to enable uvicorn access logs (default: False)
             settings: Optional settings for DEBUG-level config dump
         """
-        self.agent = agent
+        # Extract fields from Agent wrapper for direct access
+        self.name = agent.name
+        self.description = agent.description
+        self.memory: "Memory" = agent.memory
+        self._agent: PydanticAgent[AgentDeps] = agent._agent
+        self._max_steps = agent.max_steps
+        self._memory_context_limit = agent.memory_context_limit
+        self._mock_state = agent._mock_state
+        self._sub_agents = agent.sub_agents
+        self._mcp_servers = agent._mcp_servers
+        self._model = agent._model
+
+        # Keep reference for lifecycle (close) and startup logging
+        self._wrapped_agent = agent
+
         self.port = port
         self.access_log = access_log
         self._settings = settings
 
         # Create FastAPI app
         self.app = FastAPI(
-            title=f"Agent: {agent.name}",
-            description=agent.description,
+            title=f"Agent: {self.name}",
+            description=self.description,
             lifespan=self._lifespan,
         )
 
         self._setup_routes()
         self._setup_telemetry()
-        logger.info(f"AgentServer initialized for {agent.name} on port {port}")
+        logger.info(f"AgentServer initialized for {self.name} on port {port}")
 
     def _setup_telemetry(self):
         """Setup OpenTelemetry instrumentation for FastAPI.
@@ -469,7 +487,7 @@ class AgentServer:
         self._log_startup_config(self._settings)
         yield
         logger.info("AgentServer shutdown")
-        await self.agent.close()
+        await self._wrapped_agent.close()
 
     def _log_startup_config(self, settings: Optional["AgentServerSettings"] = None):
         """Log server configuration on startup for debugging.
@@ -477,14 +495,14 @@ class AgentServer:
         INFO level: compact summary of agent, model, tools, sub-agents, memory, otel.
         DEBUG level: full settings dump and detailed tool/sub-agent info.
         """
-        sub_agents = list(self.agent.sub_agents.keys()) if self.agent.sub_agents else []
-        mcp_count = len(self.agent._mcp_servers)
+        sub_agents = list(self._sub_agents.keys()) if self._sub_agents else []
+        mcp_count = len(self._mcp_servers)
 
         # --- INFO: compact summary ---
         logger.info(
-            f"AgentServer starting: name={self.agent.name} port={self.port} "
-            f"model={self.agent._model} memory={type(self.agent.memory).__name__} "
-            f"max_steps={self.agent.max_steps} mcp_servers={mcp_count} "
+            f"AgentServer starting: name={self.name} port={self.port} "
+            f"model={self._model} memory={type(self.memory).__name__} "
+            f"max_steps={self._max_steps} mcp_servers={mcp_count} "
             f"sub_agents={sub_agents}"
         )
 
@@ -498,11 +516,11 @@ class AgentServer:
         if logger.isEnabledFor(logging.DEBUG):
             if settings:
                 logger.debug(f"AgentServerSettings: {settings.model_dump()}")
-            for name, sa in (self.agent.sub_agents or {}).items():
+            for name, sa in (self._sub_agents or {}).items():
                 status = "active" if sa._active else "inactive"
                 desc = sa.agent_card.description if sa.agent_card else "N/A"
                 logger.debug(f"  sub-agent: {name} [{status}] {desc}")
-            for i, mcp in enumerate(self.agent._mcp_servers):
+            for i, mcp in enumerate(self._mcp_servers):
                 logger.debug(f"  mcp-server[{i}]: {mcp}")
             logger.debug(f"  access_log={self.access_log}")
 
@@ -515,7 +533,7 @@ class AgentServer:
             return JSONResponse(
                 {
                     "status": "healthy",
-                    "name": self.agent.name,
+                    "name": self.name,
                     "timestamp": int(time.time()),
                 }
             )
@@ -526,7 +544,7 @@ class AgentServer:
             return JSONResponse(
                 {
                     "status": "ready",
-                    "name": self.agent.name,
+                    "name": self.name,
                     "timestamp": int(time.time()),
                 }
             )
@@ -535,7 +553,7 @@ class AgentServer:
         async def agent_card():
             """A2A agent discovery endpoint."""
             base_url = f"http://localhost:{self.port}"
-            card = await self.agent.get_agent_card(base_url)
+            card = await self._get_agent_card(base_url)
             return JSONResponse(card.to_dict())
 
         # Memory endpoints (always enabled - used by UI and debugging)
@@ -544,29 +562,23 @@ class AgentServer:
             limit: int = 100,
             session_id: Optional[str] = None,
         ):
-            """Get memory events with optional filtering.
-
-            Args:
-                limit: Maximum number of events to return (default: 100, max: 1000)
-                session_id: Filter to specific session (optional)
-            """
-            limit = min(limit, 1000)  # Cap at 1000
+            """Get memory events with optional filtering."""
+            limit = min(limit, 1000)
 
             if session_id:
-                events = await self.agent.memory.get_session_events(session_id)
+                events = await self.memory.get_session_events(session_id)
             else:
-                sessions = await self.agent.memory.list_sessions()
+                sessions = await self.memory.list_sessions()
                 events = []
                 for sid in sessions:
-                    sid_events = await self.agent.memory.get_session_events(sid)
+                    sid_events = await self.memory.get_session_events(sid)
                     events.extend(sid_events)
 
-            # Get most recent events up to limit
             events = events[-limit:] if len(events) > limit else events
 
             return JSONResponse(
                 {
-                    "agent": self.agent.name,
+                    "agent": self.name,
                     "events": [e.to_dict() for e in events],
                     "total": len(events),
                 }
@@ -575,10 +587,10 @@ class AgentServer:
         @self.app.get("/memory/sessions")
         async def get_memory_sessions():
             """Get list of memory sessions."""
-            sessions = await self.agent.memory.list_sessions()
+            sessions = await self.memory.list_sessions()
             return JSONResponse(
                 {
-                    "agent": self.agent.name,
+                    "agent": self.name,
                     "sessions": sessions,
                     "total": len(sessions),
                 }
@@ -640,10 +652,141 @@ class AgentServer:
 
     def _build_span_attrs(self, session_id: Optional[str] = None) -> dict:
         """Build span attributes for server-run tracing."""
-        attrs: dict = {"agent.name": self.agent.name}
+        attrs: dict = {"agent.name": self.name}
         if session_id:
             attrs["session.id"] = session_id
         return attrs
+
+    async def _get_agent_card(self, base_url: str) -> AgentCard:
+        """Generate agent card for A2A discovery."""
+        capabilities = ["message_processing", "task_execution"]
+        if self._mcp_servers:
+            capabilities.append("tool_execution")
+        if self._sub_agents:
+            capabilities.append("task_delegation")
+
+        skills: list = []
+        for mcp_server in self._mcp_servers:
+            try:
+                async with mcp_server:
+                    tools = await mcp_server.list_tools()
+                    for tool in tools:
+                        skills.append({"name": tool.name, "description": tool.description or ""})
+            except Exception as e:
+                logger.warning(f"Failed to list tools from MCP server: {e}")
+
+        if hasattr(self._agent, "_function_toolset"):
+            toolset = self._agent._function_toolset
+            if hasattr(toolset, "tools") and isinstance(toolset.tools, dict):
+                for tool_name, tool in toolset.tools.items():
+                    if not tool_name.startswith(DELEGATION_TOOL_PREFIX):
+                        desc = getattr(tool, "description", "") or ""
+                        skills.append({"name": tool_name, "description": desc})
+                if skills:
+                    capabilities.append("tool_execution")
+
+        for agent_name in self._sub_agents:
+            skills.append(
+                {
+                    "name": f"{DELEGATION_TOOL_PREFIX}{agent_name}",
+                    "description": f"Delegate task to {agent_name}",
+                }
+            )
+
+        return AgentCard(
+            name=self.name,
+            description=self.description,
+            url=base_url,
+            skills=skills,
+            capabilities=capabilities,
+        )
+
+    async def _process_message(
+        self,
+        message: Union[str, List[Dict[str, str]]],
+        session_id: Optional[str] = None,
+        stream: bool = False,
+    ) -> AsyncIterator[str]:
+        """Process a message using Pydantic AI agent.
+
+        Yields content chunks (streaming) or single complete response.
+        """
+        if self._mock_state:
+            self._mock_state.reset()
+
+        # Get or create session
+        if session_id:
+            session_id = await self.memory.get_or_create_session(session_id, "agent", "user")
+        else:
+            session_id = await self.memory.create_session("agent", "user")
+
+        logger.debug(f"Processing message for session {session_id}, streaming={stream}")
+
+        try:
+            user_prompt = _extract_user_prompt(message)
+
+            # Detect delegation
+            is_delegation = isinstance(message, list) and any(
+                msg.get("role") == "task-delegation" for msg in message
+            )
+            event_type = "task_delegation_received" if is_delegation else "user_message"
+            await self.memory.add_event(session_id, event_type, user_prompt)
+
+            # Build message history from memory
+            message_history = await self.memory.build_message_history(
+                session_id, self._memory_context_limit
+            )
+
+            deps = AgentDeps(session_id=session_id, memory=self.memory)
+            usage_limits = UsageLimits(request_limit=self._max_steps)
+
+            if stream:
+                full_response = ""
+                step = 0
+                async with self._agent.iter(
+                    user_prompt,
+                    message_history=message_history,
+                    usage_limits=usage_limits,
+                    deps=deps,
+                ) as run:
+                    node = run.next_node
+                    while not isinstance(node, End):
+                        if isinstance(node, CallToolsNode):
+                            has_tools = any(
+                                isinstance(p, ToolCallPart) for p in node.model_response.parts
+                            )
+                            if has_tools:
+                                step += 1
+                            for part in node.model_response.parts:
+                                if isinstance(part, ToolCallPart):
+                                    yield format_progress_event(part, step, self._max_steps)
+                        node = await run.next(node)
+
+                if run.result:
+                    full_response = str(run.result.output)
+                    yield full_response
+
+                await self.memory.add_event(session_id, "agent_response", full_response)
+                new_msgs = run.result.new_messages() if run.result else []
+                for msg in new_msgs:
+                    await self.memory.store_pydantic_message(session_id, msg)
+            else:
+                result = await self._agent.run(
+                    user_prompt,
+                    message_history=message_history,
+                    usage_limits=usage_limits,
+                    deps=deps,
+                )
+                content = str(result.output) if result.output else ""
+                await self.memory.add_event(session_id, "agent_response", content)
+                for msg in result.new_messages():
+                    await self.memory.store_pydantic_message(session_id, msg)
+                yield content
+
+        except Exception as e:
+            logger.error(f"Error processing message: {str(e)}")
+            await self.memory.add_event(session_id, "error", str(e))
+            yield f"Sorry, I encountered an error: {str(e)}"
 
     async def _complete_chat_completion(
         self,
@@ -662,9 +805,7 @@ class AgentServer:
             attributes=self._build_span_attrs(session_id),
         ):
             response_content = ""
-            async for chunk in self.agent.process_message(
-                messages, stream=False, session_id=session_id
-            ):
+            async for chunk in self._process_message(messages, stream=False, session_id=session_id):
                 response_content += chunk
 
             return JSONResponse(
@@ -713,7 +854,7 @@ class AgentServer:
                     chat_id = f"chatcmpl-{uuid.uuid4().hex}"
                     created_at = int(time.time())
 
-                    async for chunk in self.agent.process_message(
+                    async for chunk in self._process_message(
                         messages, stream=True, session_id=session_id
                     ):
                         if chunk:
