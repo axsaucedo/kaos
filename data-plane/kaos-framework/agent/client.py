@@ -16,7 +16,13 @@ import os
 from typing import List, Dict, Any, Optional, AsyncIterator, Union
 from dataclasses import dataclass, asdict
 
-from agent.string_mode import build_string_mode_handler
+from agent.tools import (
+    build_string_mode_handler,
+    execute_delegation,
+    format_progress_event,
+    DELEGATION_TOOL_PREFIX,
+    DelegationToolset,
+)
 
 import httpx
 from pydantic_ai import Agent as PydanticAgent, RunContext
@@ -44,8 +50,6 @@ from telemetry.manager import (
 )
 
 logger = logging.getLogger(__name__)
-
-DELEGATION_TOOL_PREFIX = "delegate_to_"
 
 
 @dataclass
@@ -327,79 +331,23 @@ class Agent:
         self, tool_name: str, description: str, agent_name: str, sub_agent: "RemoteAgent"
     ):
         """Register a single delegation tool, capturing agent_name/sub_agent via closure scope."""
+        memory = self.memory
+        ctx_limit = self.memory_context_limit
 
         @self._agent.tool(name=tool_name, description=description)
         async def _delegate(ctx: RunContext[AgentDeps], task: str) -> str:
-            return await self._execute_delegation(
-                agent_name, task, sub_agent, ctx.deps.session_id, ctx.deps.memory
+            return await execute_delegation(
+                agent_name,
+                task,
+                sub_agent,
+                ctx.deps.session_id,
+                ctx.deps.memory or memory,
+                ctx_limit,
             )
-
-    async def _execute_delegation(
-        self,
-        agent_name: str,
-        task: str,
-        sub_agent: RemoteAgent,
-        session_id: str = "",
-        memory: Optional[Memory] = None,
-    ) -> str:
-        """Execute delegation to a sub-agent, forwarding conversation context."""
-        import time
-
-        tracer = get_tracer()
-        delegation_counter, delegation_duration = get_delegation_metrics()
-        start_time = time.perf_counter()
-        success = False
-        mem = memory or self.memory
-
-        with tracer.start_as_current_span(
-            f"delegate.{agent_name}",
-            attributes={ATTR_DELEGATION_TARGET: agent_name},
-        ) as span:
-            try:
-                messages: List[Dict[str, str]] = []
-
-                # Forward recent conversation context from memory
-                if session_id:
-                    events = await mem.get_session_events(session_id)
-                    context_events = events[-self.memory_context_limit :] if events else []
-                    for event in context_events:
-                        if event.event_type in ("user_message", "task_delegation_received"):
-                            messages.append({"role": "user", "content": str(event.content)})
-                        elif event.event_type == "agent_response":
-                            messages.append({"role": "assistant", "content": str(event.content)})
-
-                messages.append({"role": "task-delegation", "content": task})
-                result = await sub_agent.process_message(messages)
-                success = True
-                return result
-            except Exception as e:
-                logger.error(f"Delegation to {agent_name} failed: {type(e).__name__}: {e}")
-                from opentelemetry.trace import StatusCode, Status
-
-                span.set_status(Status(StatusCode.ERROR, str(e)))
-                span.record_exception(e)
-                return f"[Delegation failed: {e}]"
-            finally:
-                duration_ms = (time.perf_counter() - start_time) * 1000
-                if delegation_counter and delegation_duration:
-                    labels = {"target": agent_name, "success": str(success).lower()}
-                    delegation_counter.add(1, labels)
-                    delegation_duration.record(duration_ms, labels)
 
     def _format_progress_event(self, part: ToolCallPart, step: int) -> str:
         """Format a tool call as a JSON progress event for streaming."""
-        is_deleg = part.tool_name.startswith(DELEGATION_TOOL_PREFIX)
-        return json.dumps(
-            {
-                "type": "progress",
-                "step": step,
-                "max_steps": self.max_steps,
-                "action": "delegate" if is_deleg else "tool_call",
-                "target": (
-                    part.tool_name[len(DELEGATION_TOOL_PREFIX) :] if is_deleg else part.tool_name
-                ),
-            }
-        )
+        return format_progress_event(part, step, self.max_steps)
 
     async def process_message(
         self,

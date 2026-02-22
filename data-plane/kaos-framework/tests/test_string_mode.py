@@ -4,7 +4,7 @@ import json
 import os
 import pytest
 
-from agent.string_mode import (
+from agent.tools import (
     build_tool_descriptions,
     parse_tool_calls_from_text,
     build_string_mode_handler,

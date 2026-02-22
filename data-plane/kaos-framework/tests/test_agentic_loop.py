@@ -27,7 +27,8 @@ from pydantic_ai.messages import (
     UserPromptPart,
 )
 
-from agent.client import Agent, RemoteAgent, DELEGATION_TOOL_PREFIX
+from agent.client import Agent, RemoteAgent
+from agent.tools import DELEGATION_TOOL_PREFIX
 from agent.memory import LocalMemory, NullMemory
 
 logger = logging.getLogger(__name__)
