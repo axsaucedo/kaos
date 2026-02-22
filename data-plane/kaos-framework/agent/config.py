@@ -244,8 +244,8 @@ class AgentServerSettings(BaseSettings):
 
     # Required settings
     agent_name: str
-    model_api_url: str
-    model_name: str  # Required - no default, must be provided
+    model_api_url: str = ""
+    model_name: str = ""
 
     # Optional settings with defaults
     agent_description: str = "AI Agent"

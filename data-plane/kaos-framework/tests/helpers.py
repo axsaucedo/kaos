@@ -10,6 +10,7 @@ from agent.server import (
 from agent.config import (
     AgentDeps,
     RemoteAgent,
+    AgentServerSettings,
     _resolve_model,
     _MockResponseState,
 )
@@ -27,18 +28,12 @@ def make_test_server(
     max_steps: int = 5,
     memory_context_limit: int = 6,
 ) -> AgentServer:
-    """Create an AgentServer for testing.
-
-    If no model is provided, attempts to resolve from DEBUG_MOCK_RESPONSES env var.
-    Tools can be registered via server._agent.tool_plain(...).
-    Messages processed via server._process_message(...).
-    """
+    """Create an AgentServer for testing."""
     if memory is None:
         memory = LocalMemory()
 
     sub_agents_dict: Dict[str, RemoteAgent] = {a.name: a for a in (sub_agents or [])}
 
-    # Resolve model (handles DEBUG_MOCK_RESPONSES env var)
     mock_state: Optional[_MockResponseState] = None
     if model is None:
         try:
@@ -46,7 +41,6 @@ def make_test_server(
         except ValueError:
             pass
 
-    # Build toolsets
     toolsets: list = []
     if sub_agents_dict:
         toolsets.append(DelegationToolset(sub_agents_dict, memory_context_limit))
@@ -60,13 +54,17 @@ def make_test_server(
         toolsets=toolsets if toolsets else None,
     )
 
+    settings = AgentServerSettings(
+        agent_name=name,
+        agent_description=description,
+        agentic_loop_max_steps=max_steps,
+        memory_context_limit=memory_context_limit,
+    )
+
     return AgentServer(
         pydantic_agent=pydantic_agent,
-        name=name,
-        description=description,
+        settings=settings,
         memory=memory,
-        max_steps=max_steps,
-        memory_context_limit=memory_context_limit,
         mock_state=mock_state,
         sub_agents=sub_agents_dict,
         model=model,

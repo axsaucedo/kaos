@@ -95,48 +95,36 @@ class AgentServer:
     def __init__(
         self,
         pydantic_agent: PydanticAgent[AgentDeps],
-        name: str,
-        description: str = "Agent",
+        settings: "AgentServerSettings",
         memory: Optional["Memory"] = None,
-        max_steps: int = 5,
-        memory_context_limit: int = 6,
         mock_state: Optional[_MockResponseState] = None,
         sub_agents: Optional[Dict[str, RemoteAgent]] = None,
         mcp_servers: Optional[list] = None,
         model: Any = None,
-        port: int = 8000,
-        access_log: bool = False,
-        settings: Optional["AgentServerSettings"] = None,
         custom_tools: Optional[list] = None,
     ):
         from agent.memory import NullMemory
 
-        self.name = name
-        self.description = description
+        self.settings = settings
         self.memory: "Memory" = memory or NullMemory()
         self._agent = pydantic_agent
-        self._max_steps = max_steps
-        self._memory_context_limit = memory_context_limit
         self._mock_state = mock_state
         self._sub_agents = sub_agents or {}
         self._mcp_servers = mcp_servers or []
         self._model = model
         self._custom_tools = custom_tools or []
 
-        self.port = port
-        self.access_log = access_log
-        self._settings = settings
-
-        # Create FastAPI app
         self.app = FastAPI(
-            title=f"Agent: {self.name}",
-            description=self.description,
+            title=f"Agent: {self.settings.agent_name}",
+            description=self.settings.agent_description,
             lifespan=self._lifespan,
         )
 
         self._setup_routes()
         self._setup_telemetry()
-        logger.info(f"AgentServer initialized for {self.name} on port {port}")
+        logger.info(
+            f"AgentServer initialized for {self.settings.agent_name} on port {self.settings.agent_port}"
+        )
 
     def _setup_telemetry(self):
         """Setup OTel HTTP instrumentation (opt-in to reduce noise)."""
@@ -160,27 +148,27 @@ class AgentServer:
 
     @asynccontextmanager
     async def _lifespan(self, app: FastAPI):
-        self._log_startup_config(self._settings)
+        self._log_startup_config()
         yield
         logger.info("AgentServer shutdown")
         for sub_agent in self._sub_agents.values():
             await sub_agent.close()
         await self.memory.close()
 
-    def _log_startup_config(self, settings: Optional["AgentServerSettings"] = None):
+    def _log_startup_config(self):
         """Log agent config at INFO (summary) and DEBUG (full dump)."""
         sub_agents = list(self._sub_agents.keys()) if self._sub_agents else []
         mcp_count = len(self._mcp_servers)
         otel = "enabled" if is_otel_enabled() else "disabled"
         logger.info(
-            f"AgentServer starting: name={self.name} port={self.port} "
+            f"AgentServer starting: name={self.settings.agent_name} port={self.settings.agent_port} "
             f"model={self._model} memory={type(self.memory).__name__} "
-            f"max_steps={self._max_steps} mcp_servers={mcp_count} "
+            f"max_steps={self.settings.agentic_loop_max_steps} mcp_servers={mcp_count} "
             f"sub_agents={sub_agents} otel={otel} "
             f"custom_tools={len(self._custom_tools)}"
         )
-        if logger.isEnabledFor(logging.DEBUG) and settings:
-            logger.debug(f"AgentServerSettings: {settings.model_dump()}")
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"AgentServerSettings: {self.settings.model_dump()}")
 
     def _setup_routes(self):
 
@@ -189,7 +177,7 @@ class AgentServer:
             return JSONResponse(
                 {
                     "status": "healthy",
-                    "name": self.name,
+                    "name": self.settings.agent_name,
                     "timestamp": int(time.time()),
                 }
             )
@@ -199,14 +187,14 @@ class AgentServer:
             return JSONResponse(
                 {
                     "status": "ready",
-                    "name": self.name,
+                    "name": self.settings.agent_name,
                     "timestamp": int(time.time()),
                 }
             )
 
         @self.app.get("/.well-known/agent")
         async def agent_card():
-            base_url = f"http://localhost:{self.port}"
+            base_url = f"http://localhost:{self.settings.agent_port}"
             card = await self._get_agent_card(base_url)
             return JSONResponse(card.to_dict())
 
@@ -231,7 +219,7 @@ class AgentServer:
 
             return JSONResponse(
                 {
-                    "agent": self.name,
+                    "agent": self.settings.agent_name,
                     "events": [e.to_dict() for e in events],
                     "total": len(events),
                 }
@@ -242,7 +230,7 @@ class AgentServer:
             sessions = await self.memory.list_sessions()
             return JSONResponse(
                 {
-                    "agent": self.name,
+                    "agent": self.settings.agent_name,
                     "sessions": sessions,
                     "total": len(sessions),
                 }
@@ -297,7 +285,7 @@ class AgentServer:
                 raise HTTPException(status_code=500, detail=str(e))
 
     def _build_span_attrs(self, session_id: Optional[str] = None) -> dict:
-        attrs: dict = {"agent.name": self.name}
+        attrs: dict = {"agent.name": self.settings.agent_name}
         if session_id:
             attrs["session.id"] = session_id
         return attrs
@@ -333,8 +321,8 @@ class AgentServer:
             )
 
         return AgentCard(
-            name=self.name,
-            description=self.description,
+            name=self.settings.agent_name,
+            description=self.settings.agent_description,
             url=base_url,
             skills=skills,
             capabilities=capabilities,
@@ -363,10 +351,10 @@ class AgentServer:
         )
 
         message_history = await self.memory.build_message_history(
-            session_id, self._memory_context_limit
+            session_id, self.settings.memory_context_limit
         )
         deps = AgentDeps(session_id=session_id, memory=self.memory)
-        usage_limits = UsageLimits(request_limit=self._max_steps)
+        usage_limits = UsageLimits(request_limit=self.settings.agentic_loop_max_steps)
         return session_id, user_prompt, message_history, deps, usage_limits
 
     async def _process_message(
@@ -401,7 +389,9 @@ class AgentServer:
                                 step += 1
                             for part in node.model_response.parts:
                                 if isinstance(part, ToolCallPart):
-                                    yield format_progress_event(part, step, self._max_steps)
+                                    yield format_progress_event(
+                                        part, step, self.settings.agentic_loop_max_steps
+                                    )
                         node = await run.next(node)
 
                 if run.result:
@@ -529,8 +519,13 @@ class AgentServer:
         )
 
     def run(self, host: str = "0.0.0.0"):
-        logger.info(f"Starting AgentServer on {host}:{self.port}")
-        uvicorn.run(self.app, host=host, port=self.port, access_log=self.access_log)
+        logger.info(f"Starting AgentServer on {host}:{self.settings.agent_port}")
+        uvicorn.run(
+            self.app,
+            host=host,
+            port=self.settings.agent_port,
+            access_log=self.settings.agent_access_log,
+        )
 
 
 def _parse_mcp_servers(settings: AgentServerSettings) -> list:
@@ -700,18 +695,12 @@ def create_agent_server(
 
     return AgentServer(
         pydantic_agent=pydantic_agent,
-        name=settings.agent_name,
-        description=settings.agent_description,
+        settings=settings,
         memory=memory,
-        max_steps=settings.agentic_loop_max_steps,
-        memory_context_limit=settings.memory_context_limit,
         mock_state=mock_state,
         sub_agents=sub_agents_dict,
         mcp_servers=mcp_servers,
         model=model,
-        port=settings.agent_port,
-        access_log=settings.agent_access_log,
-        settings=settings,
         custom_tools=custom_tools,
     )
 

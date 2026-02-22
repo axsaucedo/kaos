@@ -38,8 +38,8 @@ class TestAgentCreationAndCard:
             memory=memory,
         )
 
-        assert server.name == "test-agent"
-        assert server.description == "Test Agent Description"
+        assert server.settings.agent_name == "test-agent"
+        assert server.settings.agent_description == "Test Agent Description"
         assert server.memory == memory
 
     @pytest.mark.asyncio
@@ -536,7 +536,7 @@ class TestAgentServer:
     def test_agent_server_creation(self):
         """Test AgentServer can be created with a PydanticAgent."""
         from agent.server import AgentServer as ServerClass
-        from agent.config import AgentDeps
+        from agent.config import AgentDeps, AgentServerSettings
 
         model = TestModel(custom_output_text="server test")
         pydantic_agent = PydanticAgent(
@@ -546,9 +546,10 @@ class TestAgentServer:
             defer_model_check=True,
             deps_type=AgentDeps,
         )
+        settings = AgentServerSettings(agent_name="server-test-agent")
         server = ServerClass(
             pydantic_agent=pydantic_agent,
-            name="server-test-agent",
+            settings=settings,
         )
-        assert server.name == "server-test-agent"
+        assert server.settings.agent_name == "server-test-agent"
         assert server.app is not None

@@ -493,7 +493,7 @@ class TestMemoryWithToolCalls:
 
         # History should be capped at 2 events (most recent)
         history = await server.memory.build_message_history(
-            "limit-sess", server._memory_context_limit
+            "limit-sess", server.settings.memory_context_limit
         )
         assert history is not None
         assert len(history) <= 2, f"Expected at most 2 history items, got {len(history)}"
@@ -868,25 +868,25 @@ class TestAgentConfiguration:
         """Test default max_steps value."""
         model = TestModel(custom_output_text="test")
         server = make_test_server(name="default-agent", model=model)
-        assert server._max_steps == 5
+        assert server.settings.agentic_loop_max_steps == 5
 
     def test_custom_max_steps(self):
         """Test custom max_steps value."""
         model = TestModel(custom_output_text="test")
         server = make_test_server(name="custom-agent", model=model, max_steps=10)
-        assert server._max_steps == 10
+        assert server.settings.agentic_loop_max_steps == 10
 
     def test_default_memory_context_limit(self):
         """Test default memory context limit."""
         model = TestModel(custom_output_text="test")
         server = make_test_server(name="mem-limit-agent", model=model)
-        assert server._memory_context_limit == 6
+        assert server.settings.memory_context_limit == 6
 
     def test_custom_memory_context_limit(self):
         """Test custom memory context limit."""
         model = TestModel(custom_output_text="test")
         server = make_test_server(name="mem-limit-agent", model=model, memory_context_limit=20)
-        assert server._memory_context_limit == 20
+        assert server.settings.memory_context_limit == 20
 
     def test_model_from_url_and_name(self):
         """Test creating model from model_api_url and model_name."""
