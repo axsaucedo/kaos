@@ -21,7 +21,7 @@ make format                     # Auto-format code
 - `agent/string_mode.py`: String-mode FunctionModel wrapper for models without native function calling
 - `agent/memory.py`: LocalMemory, RedisMemory, NullMemory for session/event management (unchanged)
 - `agent/telemetry/`: OpenTelemetry instrumentation (tracing, metrics)
-- `pyproject.toml`: Dependencies — `pydantic-ai`, `fasta2a`, `opentelemetry-*`
+- `pyproject.toml`: Dependencies — `pydantic-ai`, `opentelemetry-*`
 
 **Removed modules** (replaced by Pydantic AI native support):
 - `mcptools/` — MCP handled via `pydantic_ai.mcp.MCPServerStreamableHTTP`
