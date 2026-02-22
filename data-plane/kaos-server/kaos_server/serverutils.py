@@ -251,7 +251,10 @@ def _build_streaming_chunk(
 
 
 def _build_chat_response(model_name: str, content: str) -> dict:
-    """Build OpenAI-compatible non-streaming chat completion response dict."""
+    """Build OpenAI-compatible non-streaming chat completion response dict.
+
+    The 'id' field is a per-completion identifier (OpenAI spec), separate from
+    the KAOS session_id which tracks cross-request memory."""
     return {
         "id": f"chatcmpl-{uuid.uuid4().hex}",
         "object": "chat.completion",

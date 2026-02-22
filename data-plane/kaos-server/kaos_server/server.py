@@ -449,6 +449,7 @@ class AgentServer:
                 attributes=span_attrs,
             ):
                 try:
+                    # chat_id: per-completion ID (OpenAI spec), distinct from session_id (cross-request memory)
                     chat_id = f"chatcmpl-{uuid.uuid4().hex}"
                     created_at = int(time.time())
 
