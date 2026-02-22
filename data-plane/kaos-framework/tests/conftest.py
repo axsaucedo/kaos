@@ -1,8 +1,4 @@
-"""
-Pytest configuration and fixtures for agent integration tests.
-
-Provides fixtures for starting/stopping agent server instances and MCP servers.
-"""
+"""Pytest fixtures for agent and MCP server integration tests."""
 
 import os
 import subprocess
@@ -21,12 +17,6 @@ class AgentServer:
     """Manages an agent server subprocess."""
 
     def __init__(self, port: int, env_vars: Dict[str, str]):
-        """Initialize agent server manager.
-
-        Args:
-            port: Port to run server on
-            env_vars: Environment variables to pass to server
-        """
         self.port = port
         self.env_vars = env_vars
         self.process = None
@@ -116,24 +106,11 @@ class MultiAgentCluster:
     """Manages multiple agent server subprocesses using AgentServer."""
 
     def __init__(self, agents_config: Dict[str, Dict[str, str]]):
-        """Initialize multi-agent cluster manager.
-
-        Args:
-            agents_config: Dict of agent_name -> env_vars for each agent
-        """
         self.agents_config = agents_config
         self.servers = {}  # agent_name -> AgentServer
         self.urls = {}
 
     def start(self, timeout: int = 10) -> bool:
-        """Start all configured agent servers.
-
-        Args:
-            timeout: Maximum seconds to wait for all servers to be ready
-
-        Returns:
-            True if all servers started successfully
-        """
         logger.info(f"Starting {len(self.agents_config)} agent servers...")
 
         for agent_name, env_vars in self.agents_config.items():
@@ -158,20 +135,17 @@ class MultiAgentCluster:
         return True
 
     def stop(self):
-        """Stop all agent servers."""
         for agent_name, server in self.servers.items():
             logger.info(f"Stopping {agent_name}...")
             server.stop()
 
     def get_url(self, agent_name: str) -> str:
-        """Get the URL for an agent."""
         return self.urls[agent_name]
 
 
 @pytest.fixture
 def multi_agent_cluster():
-    """Fixture that provides multiple running agent servers."""
-    # Configure three agents for multi-agent testing
+    """Provides multiple running agent servers for multi-agent testing."""
     # NOTE: Workers are started first (no peer agents), then coordinator with peers
     agents_config = {
         "worker-1": {
@@ -218,24 +192,11 @@ class MCPServer:
     """Manages test-mcp-echo-server subprocess."""
 
     def __init__(self, port: int = 8002):
-        """Initialize MCP server manager.
-
-        Args:
-            port: Port to run server on
-        """
         self.port = port
         self.process = None
         self.url = f"http://localhost:{port}"
 
     def start(self, timeout: int = 10) -> bool:
-        """Start the MCP server as a subprocess.
-
-        Args:
-            timeout: Maximum seconds to wait for server to be ready
-
-        Returns:
-            True if server started and became ready
-        """
         logger.info(f"Starting MCP echo server on port {self.port}...")
 
         env = os.environ.copy()
@@ -265,14 +226,6 @@ class MCPServer:
             return False
 
     def _wait_for_readiness(self, timeout: int) -> bool:
-        """Wait for MCP server to be ready.
-
-        Args:
-            timeout: Maximum seconds to wait
-
-        Returns:
-            True if server is ready
-        """
         start_time = time.time()
 
         while time.time() - start_time < timeout:
@@ -292,7 +245,6 @@ class MCPServer:
         return False
 
     def stop(self):
-        """Stop the MCP server."""
         if self.process:
             logger.info("Stopping MCP server...")
             self.process.terminate()
@@ -306,10 +258,7 @@ class MCPServer:
 
 @pytest.fixture
 def mcp_server():
-    """Fixture that provides a started MCP echo server.
-
-    Yields the server instance. Server is stopped after test completes.
-    """
+    """Provides a started MCP echo server, stopped after test."""
     server = MCPServer(port=8002)
     if not server.start():
         raise RuntimeError("Failed to start MCP server")
@@ -319,11 +268,7 @@ def mcp_server():
 
 @pytest.fixture
 def agent_server(mcp_server):
-    """Fixture that provides a started agent server with MCP configured.
-
-    Depends on mcp_server fixture to ensure MCP is available.
-    Yields the server instance. Server is stopped after test completes.
-    """
+    """Provides a started agent server with MCP configured."""
     server = None
     try:
         server = AgentServer(
@@ -351,10 +296,7 @@ def agent_server(mcp_server):
 
 @pytest.fixture
 def agent_server_no_mcp():
-    """Fixture that provides an agent server without MCP configuration.
-
-    Useful for testing basic agent functionality without MCP tools.
-    """
+    """Provides an agent server without MCP tools."""
     server = None
     try:
         server = AgentServer(

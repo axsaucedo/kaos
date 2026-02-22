@@ -1,17 +1,6 @@
-"""
-OpenTelemetry setup for KAOS.
+"""OpenTelemetry setup for KAOS.
 
-Provides SDK initialization using standard OTEL_* environment variables and
-lightweight helpers for trace context propagation and delegation metrics.
-
-Span management is handled by:
-- Pydantic AI instrumentation (agent run, model call, tool execution spans)
-- Standard OTEL context managers (tracer.start_as_current_span) in KAOS code
-
-Key design:
-- Process-global SDK initialization via module-level _initialized flag
-- Direct OTEL API usage — no custom span stack or context manipulation
-- OtelConfig uses pydantic BaseSettings with OTEL-compliant env var names
+Process-global SDK initialization, trace context propagation, and delegation metrics.
 """
 
 import logging
@@ -41,21 +30,12 @@ logger = logging.getLogger(__name__)
 
 
 def get_log_level() -> str:
-    """Get the configured log level as a string.
-
-    Reads from LOG_LEVEL env var (with AGENT_LOG_LEVEL as fallback for backwards
-    compatibility) and returns the normalized level string.
-    Defaults to INFO if not set.
-    """
+    """Return LOG_LEVEL env var (falls back to AGENT_LOG_LEVEL, then INFO)."""
     return os.getenv("LOG_LEVEL", os.getenv("AGENT_LOG_LEVEL", "INFO")).upper()
 
 
 def get_log_level_int() -> int:
-    """Get the configured log level as a logging constant.
-
-    Converts the LOG_LEVEL string to logging.DEBUG/INFO/etc.
-    Defaults to INFO if not set or invalid.
-    """
+    """Convert LOG_LEVEL string to logging constant (defaults to INFO)."""
     level_str = get_log_level()
     level_map = {
         "TRACE": logging.DEBUG,  # Python doesn't have TRACE
@@ -69,17 +49,7 @@ def get_log_level_int() -> int:
 
 
 def getenv_bool(name: str, default: bool = False) -> bool:
-    """Get a boolean value from an environment variable.
-
-    Args:
-        name: Environment variable name
-        default: Default value if not set (default: False)
-
-    Returns:
-        True if the env var is set to 'true', '1', or 'yes' (case-insensitive)
-        False if set to 'false', '0', or 'no'
-        default if not set or unrecognized value
-    """
+    """Parse boolean from env var (true/1/yes → True, false/0/no → False)."""
     value = os.getenv(name)
     if value is None:
         return default
@@ -92,15 +62,9 @@ def getenv_bool(name: str, default: bool = False) -> bool:
 
 
 class KaosLoggingHandler(LoggingHandler):
-    """Custom LoggingHandler that adds logger name as an explicit attribute.
-
-    The standard LoggingHandler uses logger name for InstrumentationScope but
-    excludes it from log record attributes. This subclass adds it back as
-    'logger.name' for better visibility in log viewers like SigNoz.
-    """
+    """Adds logger.name as explicit attribute for log viewers like SigNoz."""
 
     def emit(self, record: logging.LogRecord) -> None:
-        """Emit a log record with logger name as attribute."""
         # Add logger name as attribute before translation
         # This is safe because we're adding to the record, not modifying reserved attrs
         if not hasattr(record, "logger_name"):
@@ -120,11 +84,7 @@ _delegation_duration: Optional[metrics.Histogram] = None
 
 
 class OtelConfig(BaseSettings):
-    """OpenTelemetry configuration from standard OTEL_* environment variables.
-
-    Uses pydantic BaseSettings for automatic env var parsing.
-    OTEL_SDK_DISABLED=true disables telemetry (standard OTel env var).
-    """
+    """OTel configuration from standard OTEL_* env vars via pydantic BaseSettings."""
 
     model_config = SettingsConfigDict(env_prefix="", case_sensitive=False)
 
@@ -140,24 +100,16 @@ class OtelConfig(BaseSettings):
 
     @property
     def enabled(self) -> bool:
-        """Check if OTel is enabled (not disabled)."""
         return not self.otel_sdk_disabled
 
 
 def is_otel_enabled() -> bool:
-    """Check if OTel is initialized and enabled.
-
-    Returns True only if init_otel() was successfully called and OTel is active.
-    """
+    """Return True only if init_otel() was successfully called."""
     return _initialized
 
 
 def get_current_trace_context() -> Optional[Dict[str, str]]:
-    """Get current trace context (trace_id, span_id) if available.
-
-    Returns:
-        Dictionary with trace_id and span_id, or None if no active span.
-    """
+    """Return dict with trace_id and span_id, or None if no active span."""
     if not _initialized:
         return None
 
@@ -176,14 +128,7 @@ def get_current_trace_context() -> Optional[Dict[str, str]]:
 
 
 def should_enable_otel() -> bool:
-    """Check if OTel should be enabled based on environment variables.
-
-    This checks env vars BEFORE init_otel() is called, useful for deciding
-    whether to enable log correlation before the SDK is initialized.
-
-    Returns True if OTEL_SDK_DISABLED is not set to true AND required env vars
-    (OTEL_SERVICE_NAME, OTEL_EXPORTER_OTLP_ENDPOINT) are configured.
-    """
+    """Check env vars before init_otel() — True if OTEL_SDK_DISABLED!=true and required vars set."""
     disabled = os.getenv("OTEL_SDK_DISABLED", "false").lower() in ("true", "1", "yes")
     if disabled:
         return False
@@ -195,16 +140,7 @@ def should_enable_otel() -> bool:
 
 
 def init_otel(service_name: Optional[str] = None) -> bool:
-    """Initialize OpenTelemetry with standard OTEL_* env vars.
-
-    Should be called once at process startup. Idempotent - safe to call multiple times.
-
-    Args:
-        service_name: Default service name if OTEL_SERVICE_NAME not set (for backward compat)
-
-    Returns:
-        True if OTel was initialized, False if disabled or already initialized
-    """
+    """Initialize OTel SDK once at process startup. Idempotent."""
     global _initialized
 
     if _initialized:
@@ -276,26 +212,17 @@ def init_otel(service_name: Optional[str] = None) -> bool:
 
 
 def _get_service_name() -> str:
-    """Get service name from environment variables."""
     return os.getenv("OTEL_SERVICE_NAME", os.getenv("AGENT_NAME", "kaos-service"))
 
 
 def get_tracer() -> trace.Tracer:
-    """Get the KAOS tracer instance.
-
-    Returns the global tracer using the service name. When OTel is not
-    initialized, the returned tracer is a no-op tracer.
-    """
+    """Get KAOS tracer (no-op when OTel not initialized)."""
     service_name = _get_service_name()
     return trace.get_tracer(f"kaos.{service_name}")
 
 
 def get_delegation_metrics() -> Tuple[Optional[metrics.Counter], Optional[metrics.Histogram]]:
-    """Get delegation counter and duration histogram.
-
-    Lazily initializes metrics on first call. Returns (None, None) when
-    OTel is not initialized.
-    """
+    """Lazily initialize and return (delegation_counter, delegation_duration). (None, None) when disabled."""
     global _delegation_counter, _delegation_duration
 
     if not _initialized:
@@ -321,13 +248,6 @@ def inject_trace_context(carrier: Dict[str, str]) -> Dict[str, str]:
 
 
 def extract_trace_context(headers: Any) -> Context:
-    """Extract trace context from HTTP headers.
-
-    Args:
-        headers: HTTP headers (dict, Starlette Headers, or any mapping)
-
-    Returns:
-        Context with extracted trace information (use as parent for new spans)
-    """
+    """Extract W3C trace context from HTTP headers."""
     carrier = dict(headers) if not isinstance(headers, dict) else headers
     return extract(carrier)

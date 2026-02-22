@@ -1,14 +1,4 @@
-"""
-Agent memory and session management.
-
-Simple, clean implementation similar to Google ADK's InMemorySessionService.
-Provides session management, event logging, and context building for agents.
-
-Three implementations:
-- LocalMemory: Full in-memory storage with session/event limits
-- RedisMemory: Distributed storage backed by Redis
-- NullMemory: No-op implementation when memory is disabled
-"""
+"""Agent memory and session management with Local, Redis, and Null backends."""
 
 import json
 import uuid
@@ -33,7 +23,6 @@ class MemoryEvent:
     metadata: Dict[str, Any]
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert event to dictionary for serialization."""
         return {
             "event_id": self.event_id,
             "timestamp": self.timestamp.isoformat(),
@@ -44,7 +33,6 @@ class MemoryEvent:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "MemoryEvent":
-        """Create event from dictionary."""
         return cls(
             event_id=data["event_id"],
             timestamp=datetime.fromisoformat(data["timestamp"]),
@@ -56,11 +44,7 @@ class MemoryEvent:
 
 @dataclass
 class SessionMemory:
-    """Represents a complete session with all its events.
-
-    Uses deque for automatic bounded storage - oldest events are automatically
-    evicted when max_events is reached.
-    """
+    """Complete session with bounded event storage (deque with maxlen)."""
 
     session_id: str
     user_id: str
@@ -70,7 +54,6 @@ class SessionMemory:
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert session to dictionary for serialization."""
         return {
             "session_id": self.session_id,
             "user_id": self.user_id,
@@ -160,8 +143,7 @@ class Memory(ABC):
     ) -> Optional[list]:
         """Build Pydantic AI message_history from stored KAOS events.
 
-        Returns None if no history. Excludes the latest prompt event
-        (the current user message) and respects context_limit.
+        Excludes the latest prompt event (current user message) and respects context_limit.
         """
         from pydantic_ai.messages import (
             ModelRequest,
@@ -193,11 +175,7 @@ class Memory(ABC):
         return history or None
 
     async def store_pydantic_message(self, session_id: str, msg: Any) -> None:
-        """Store a Pydantic AI message as KAOS memory events.
-
-        Converts ModelResponse tool calls and ModelRequest tool returns
-        into structured KAOS events for the REST API.
-        """
+        """Convert Pydantic AI messages (tool calls/returns) into KAOS memory events."""
         from pydantic_ai.messages import (
             ModelRequest,
             ModelResponse as PydanticModelResponse,
@@ -252,12 +230,6 @@ class LocalMemory(Memory):
     """Local in-memory session storage similar to Google ADK's InMemorySessionService."""
 
     def __init__(self, max_sessions: int = 1000, max_events_per_session: int = 500):
-        """Initialize local memory storage.
-
-        Args:
-            max_sessions: Maximum number of sessions to keep in memory
-            max_events_per_session: Maximum events per session before cleanup
-        """
         self._sessions: Dict[str, SessionMemory] = {}
         self.max_sessions = max_sessions
         self.max_events_per_session = max_events_per_session
@@ -269,16 +241,6 @@ class LocalMemory(Memory):
     async def create_session(
         self, app_name: str, user_id: str, session_id: Optional[str] = None
     ) -> str:
-        """Create a new session.
-
-        Args:
-            app_name: Name of the application
-            user_id: User identifier
-            session_id: Optional custom session ID
-
-        Returns:
-            The session ID
-        """
         if not session_id:
             session_id = f"session_{uuid.uuid4().hex[:12]}"
 
@@ -301,29 +263,11 @@ class LocalMemory(Memory):
         return session_id
 
     async def get_session(self, session_id: str) -> Optional[SessionMemory]:
-        """Retrieve a session by ID.
-
-        Args:
-            session_id: The session ID
-
-        Returns:
-            SessionMemory or None if not found
-        """
         return self._sessions.get(session_id)
 
     async def get_or_create_session(
         self, session_id: str, app_name: str = "agent", user_id: str = "user"
     ) -> str:
-        """Get existing session or create a new one with the given ID.
-
-        Args:
-            session_id: The session ID to get or create
-            app_name: Name of the application (used if creating)
-            user_id: User identifier (used if creating)
-
-        Returns:
-            The session ID (same as input)
-        """
         if session_id not in self._sessions:
             await self.create_session(app_name, user_id, session_id)
             logger.debug(f"Created new session for provided ID: {session_id}")
@@ -336,23 +280,9 @@ class LocalMemory(Memory):
         content: Any = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> bool:
-        """Add an event to a session.
-
-        Supports two call patterns:
-        1. add_event(session_id, event)  - Pass a MemoryEvent object
-        2. add_event(session_id, event_type, content, metadata)  - Create and add in one call
+        """Accepts either a MemoryEvent or (event_type, content, metadata) args.
 
         Uses deque with maxlen for automatic O(1) bounded storage.
-        Oldest events are automatically evicted when limit is reached.
-
-        Args:
-            session_id: The session ID
-            event_or_type: Either a MemoryEvent or event type string
-            content: Event content (required if event_or_type is a string)
-            metadata: Optional metadata dictionary
-
-        Returns:
-            True if added successfully, False if session not found
         """
         session = self._sessions.get(session_id)
         if not session:
@@ -374,15 +304,6 @@ class LocalMemory(Memory):
     async def get_session_events(
         self, session_id: str, event_types: Optional[List[str]] = None
     ) -> List[MemoryEvent]:
-        """Get events for a session, optionally filtered by type.
-
-        Args:
-            session_id: The session ID
-            event_types: Optional list of event types to filter by
-
-        Returns:
-            List of events, filtered by type if specified
-        """
         session = await self.get_session(session_id)
         if not session:
             return []
@@ -395,27 +316,11 @@ class LocalMemory(Memory):
         return events
 
     async def list_sessions(self, user_id: Optional[str] = None) -> List[str]:
-        """Get list of session IDs, optionally filtered by user.
-
-        Args:
-            user_id: Optional user ID to filter sessions
-
-        Returns:
-            List of session IDs
-        """
         if user_id:
             return [sid for sid, session in self._sessions.items() if session.user_id == user_id]
         return list(self._sessions.keys())
 
     async def delete_session(self, session_id: str) -> bool:
-        """Delete a session.
-
-        Args:
-            session_id: The session ID
-
-        Returns:
-            True if deleted, False if not found
-        """
         if session_id in self._sessions:
             del self._sessions[session_id]
             logger.debug(f"Deleted session: {session_id}")
@@ -423,11 +328,6 @@ class LocalMemory(Memory):
         return False
 
     async def get_memory_stats(self) -> Dict[str, int]:
-        """Get memory usage statistics.
-
-        Returns:
-            Dictionary with memory statistics
-        """
         total_events = sum(len(session.events) for session in self._sessions.values())
         return {
             "total_sessions": len(self._sessions),
@@ -438,14 +338,6 @@ class LocalMemory(Memory):
         }
 
     async def cleanup_old_sessions(self, max_age_hours: int = 24) -> int:
-        """Clean up sessions older than specified age.
-
-        Args:
-            max_age_hours: Maximum session age in hours
-
-        Returns:
-            Number of sessions cleaned up
-        """
         cutoff_time = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
         sessions_to_delete = []
 
@@ -477,14 +369,9 @@ class LocalMemory(Memory):
 
 
 class NullMemory(Memory):
-    """No-op memory implementation for when memory is disabled.
-
-    All methods succeed silently without storing any data.
-    Inherits create_event and build_conversation_context from Memory base.
-    """
+    """No-op memory — all methods succeed silently without storing data."""
 
     def __init__(self, *args, **kwargs):
-        """Accept any arguments for compatibility with LocalMemory signature."""
         logger.info("NullMemory initialized (memory disabled)")
 
     async def create_session(
@@ -563,7 +450,6 @@ class RedisMemory(Memory):
         return f"{self._prefix}:sessions"
 
     async def close(self):
-        """Close the Redis connection pool."""
         try:
             await self._redis.aclose()
             logger.debug("RedisMemory connection closed")

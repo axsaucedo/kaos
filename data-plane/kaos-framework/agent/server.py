@@ -1,11 +1,4 @@
-"""
-AgentServer implementation for OpenAI-compatible API.
-
-FastAPI server with health probes, agent discovery, and chat completions endpoint.
-Supports both streaming and non-streaming responses.
-Includes OpenTelemetry instrumentation for tracing, metrics, and log correlation.
-Uses Pydantic AI as the core agent framework.
-"""
+"""AgentServer: FastAPI server with health probes, A2A discovery, and OpenAI-compatible chat completions."""
 
 import os
 import time
@@ -55,15 +48,7 @@ if TYPE_CHECKING:
 
 
 def configure_logging(level: str = "INFO", otel_correlation: bool = False) -> None:
-    """Configure logging for the application.
-
-    Sets up a consistent logging format and ensures all application loggers
-    are properly configured to output to stdout.
-
-    Args:
-        level: Log level (DEBUG, INFO, WARNING, ERROR)
-        otel_correlation: If True, include trace_id and span_id in log format
-    """
+    """Configure stdout logging with optional OTel trace correlation."""
     log_level = getattr(logging, level.upper(), logging.INFO)
 
     # Log format with optional OTel correlation
@@ -200,7 +185,6 @@ class RemoteAgent:
             return False
 
     async def process_message(self, messages: List[Dict[str, str]]) -> str:
-        """Process messages via remote agent's /v1/chat/completions."""
         if not self._active:
             if not await self._init():
                 raise RuntimeError(f"Agent {self.name} unavailable at {self.card_url}")
@@ -229,10 +213,7 @@ class RemoteAgent:
 
 
 def _build_mock_model_function():
-    """Build a FunctionModel handler from DEBUG_MOCK_RESPONSES env var.
-
-    Returns (handler, state) tuple where state is used to reset per-request.
-    """
+    """Build a FunctionModel handler from DEBUG_MOCK_RESPONSES. Returns (handler, state)."""
     raw = os.environ.get("DEBUG_MOCK_RESPONSES", "")
     if not raw:
         return None, None
@@ -289,10 +270,7 @@ def _resolve_model(
     model_name: Optional[str],
     tool_call_mode: str,
 ) -> tuple:
-    """Resolve the Pydantic AI model from configuration.
-
-    Returns (model, mock_state) tuple.
-    """
+    """Resolve the Pydantic AI model from configuration. Returns (model, mock_state)."""
     if model is not None:
         return model, None
 
@@ -324,7 +302,6 @@ def _resolve_model(
 
 
 def _extract_user_prompt(message: Union[str, List[Dict[str, str]]]) -> str:
-    """Extract user prompt from string or message array."""
     if isinstance(message, str):
         return message
     for msg in reversed(message):
@@ -335,7 +312,6 @@ def _extract_user_prompt(message: Union[str, List[Dict[str, str]]]) -> str:
 
 
 def _format_sse_chunk(chat_id: str, created_at: int, model_name: str, content: str) -> str:
-    """Format a content chunk as an SSE data line."""
     data = {
         "id": chat_id,
         "object": "chat.completion.chunk",
@@ -416,23 +392,6 @@ class AgentServer:
         access_log: bool = False,
         settings: Optional["AgentServerSettings"] = None,
     ):
-        """Initialize AgentServer.
-
-        Args:
-            pydantic_agent: Standard pydantic_ai.Agent instance
-            name: Agent name
-            description: Agent description
-            memory: Memory backend
-            max_steps: Maximum agentic loop steps
-            memory_context_limit: History context limit
-            mock_state: Mock response state (testing)
-            sub_agents: Dict of remote sub-agents
-            mcp_servers: List of MCP server instances
-            model: Resolved model reference (for logging)
-            port: Port to serve on
-            access_log: Enable uvicorn access logs
-            settings: Optional settings for DEBUG-level config dump
-        """
         from agent.memory import NullMemory
 
         self.name = name
@@ -462,11 +421,7 @@ class AgentServer:
         logger.info(f"AgentServer initialized for {self.name} on port {port}")
 
     def _setup_telemetry(self):
-        """Setup OpenTelemetry instrumentation for FastAPI.
-
-        HTTP server/client tracing is disabled by default to reduce noise.
-        Enable with OTEL_INCLUDE_HTTP_SERVER=true (FastAPI) or OTEL_INCLUDE_HTTP_CLIENT=true (HTTPX).
-        """
+        """Setup OTel instrumentation (FastAPI/HTTPX opt-in to reduce noise)."""
         if is_otel_enabled():
             try:
                 # FastAPI instrumentation is opt-in (noisy with health probes)
@@ -499,7 +454,6 @@ class AgentServer:
 
     @asynccontextmanager
     async def _lifespan(self, app: FastAPI):
-        """Manage agent lifecycle."""
         self._log_startup_config(self._settings)
         yield
         logger.info("AgentServer shutdown")
@@ -508,11 +462,7 @@ class AgentServer:
         await self.memory.close()
 
     def _log_startup_config(self, settings: Optional["AgentServerSettings"] = None):
-        """Log server configuration on startup for debugging.
-
-        INFO level: compact summary of agent, model, tools, sub-agents, memory, otel.
-        DEBUG level: full settings dump and detailed tool/sub-agent info.
-        """
+        """Log agent config at INFO (summary) and DEBUG (full dump)."""
         sub_agents = list(self._sub_agents.keys()) if self._sub_agents else []
         mcp_count = len(self._mcp_servers)
 
@@ -543,11 +493,9 @@ class AgentServer:
             logger.debug(f"  access_log={self.access_log}")
 
     def _setup_routes(self):
-        """Setup HTTP routes for health, A2A, and OpenAI endpoints."""
 
         @self.app.get("/health")
         async def health():
-            """Health check endpoint for Kubernetes liveness probes."""
             return JSONResponse(
                 {
                     "status": "healthy",
@@ -558,7 +506,6 @@ class AgentServer:
 
         @self.app.get("/ready")
         async def ready():
-            """Readiness check endpoint for Kubernetes readiness probes."""
             return JSONResponse(
                 {
                     "status": "ready",
@@ -569,7 +516,6 @@ class AgentServer:
 
         @self.app.get("/.well-known/agent")
         async def agent_card():
-            """A2A agent discovery endpoint."""
             base_url = f"http://localhost:{self.port}"
             card = await self._get_agent_card(base_url)
             return JSONResponse(card.to_dict())
@@ -580,7 +526,6 @@ class AgentServer:
             limit: int = 100,
             session_id: Optional[str] = None,
         ):
-            """Get memory events with optional filtering."""
             limit = min(limit, 1000)
 
             if session_id:
@@ -604,7 +549,6 @@ class AgentServer:
 
         @self.app.get("/memory/sessions")
         async def get_memory_sessions():
-            """Get list of memory sessions."""
             sessions = await self.memory.list_sessions()
             return JSONResponse(
                 {
@@ -616,15 +560,9 @@ class AgentServer:
 
         @self.app.post("/v1/chat/completions")
         async def chat_completions(request: Request):
-            """OpenAI-compatible chat completions endpoint (streaming + non-streaming).
+            """OpenAI-compatible chat completions (streaming + non-streaming).
 
-            The agent decides when to delegate or call tools based on model response.
-            Server only routes requests to the agent for processing.
-            Extracts trace context from incoming headers for distributed tracing.
-
-            Session ID can be provided via:
-            - X-Session-ID header
-            - session_id field in request body
+            Session ID via X-Session-ID header or session_id body field.
             """
             try:
                 body = await request.json()
@@ -669,14 +607,12 @@ class AgentServer:
                 raise HTTPException(status_code=500, detail=str(e))
 
     def _build_span_attrs(self, session_id: Optional[str] = None) -> dict:
-        """Build span attributes for server-run tracing."""
         attrs: dict = {"agent.name": self.name}
         if session_id:
             attrs["session.id"] = session_id
         return attrs
 
     async def _get_agent_card(self, base_url: str) -> AgentCard:
-        """Generate agent card for A2A discovery."""
         capabilities = ["message_processing", "task_execution"]
         if self._mcp_servers:
             capabilities.append("tool_execution")
@@ -725,10 +661,7 @@ class AgentServer:
         session_id: Optional[str] = None,
         stream: bool = False,
     ) -> AsyncIterator[str]:
-        """Process a message using Pydantic AI agent.
-
-        Yields content chunks (streaming) or single complete response.
-        """
+        """Yields content chunks (streaming) or single complete response."""
         if self._mock_state:
             self._mock_state.reset()
 
@@ -813,7 +746,6 @@ class AgentServer:
         session_id: Optional[str] = None,
         parent_ctx: Optional[Any] = None,
     ) -> JSONResponse:
-        """Handle non-streaming chat completion."""
         tracer = get_tracer()
 
         with tracer.start_as_current_span(
@@ -854,7 +786,6 @@ class AgentServer:
         session_id: Optional[str] = None,
         parent_ctx: Optional[Any] = None,
     ) -> StreamingResponse:
-        """Handle streaming chat completion with SSE."""
         span_attrs = self._build_span_attrs(session_id)
 
         async def generate_stream():
@@ -907,11 +838,6 @@ class AgentServer:
         )
 
     def run(self, host: str = "0.0.0.0"):
-        """Run the server.
-
-        Args:
-            host: Host to bind to
-        """
         logger.info(f"Starting AgentServer on {host}:{self.port}")
         uvicorn.run(self.app, host=host, port=self.port, access_log=self.access_log)
 
@@ -921,16 +847,7 @@ def create_agent_server(
     sub_agents: Optional[List[RemoteAgent]] = None,
     custom_agent: Any = None,
 ) -> AgentServer:
-    """Create an AgentServer with optional sub-agents and MCP clients.
-
-    Args:
-        settings: Server settings (loaded from env if not provided)
-        sub_agents: List of RemoteAgent instances (overrides settings.agent_sub_agents)
-        custom_agent: Pre-built Pydantic AI agent with custom tools (custom image pattern)
-
-    Returns:
-        AgentServer instance
-    """
+    """Create an AgentServer with optional sub-agents and MCP clients."""
     if not settings:
         settings = AgentServerSettings()  # type: ignore[call-arg]
 
@@ -1092,14 +1009,12 @@ def create_agent_server(
 
 
 def create_app(settings: Optional[AgentServerSettings] = None) -> FastAPI:
-    """Create FastAPI app for uvicorn deployment."""
     server = create_agent_server(settings)
     logger.info("Created Agent FastAPI App")
     return server.app
 
 
 def get_app() -> FastAPI:
-    """Lazy app factory for uvicorn. Only creates app when called."""
     return create_app()
 
 
