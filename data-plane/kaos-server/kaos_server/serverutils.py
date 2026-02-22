@@ -18,7 +18,7 @@ from pydantic_ai.messages import (
     TextPart,
     ToolCallPart,
 )
-from kaos_server.telemetry import inject_trace_context
+from opentelemetry.propagate import inject
 
 if TYPE_CHECKING:
     from kaos_server.memory import Memory
@@ -108,7 +108,7 @@ class RemoteAgent:
 
         try:
             headers: Dict[str, str] = {}
-            inject_trace_context(headers)
+            inject(headers)
             response = await self._client.post(
                 f"{self.card_url}/v1/chat/completions",
                 json={"model": self.name, "messages": messages, "stream": False},

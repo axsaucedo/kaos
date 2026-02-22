@@ -32,7 +32,6 @@ from pydantic_core import SchemaValidator, core_schema
 from kaos_server.telemetry import (
     get_tracer,
     get_delegation_metrics,
-    inject_trace_context,
     ATTR_DELEGATION_TARGET,
 )
 

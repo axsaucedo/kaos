@@ -26,9 +26,9 @@ from kaos_server.telemetry import (
     should_enable_otel,
     get_log_level,
     getenv_bool,
-    extract_trace_context,
     get_tracer,
 )
+from opentelemetry.propagate import extract
 from kaos_server.tools import format_progress_event, DELEGATION_TOOL_PREFIX, DelegationToolset
 from kaos_server.serverutils import (
     AgentDeps,
@@ -273,7 +273,7 @@ class AgentServer:
 
                 # Extract parent trace context for distributed tracing
                 # Span is created inside each method so it stays active during processing
-                parent_ctx = extract_trace_context(request.headers)
+                parent_ctx = extract(dict(request.headers))
 
                 if stream_requested:
                     return await self._stream_chat_completion(

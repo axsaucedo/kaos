@@ -154,20 +154,20 @@ class TestTracerAndMetrics:
 
 
 class TestContextPropagation:
-    """Tests for trace context propagation."""
+    """Tests for trace context propagation via opentelemetry."""
 
     def test_inject_context(self):
         """Test context injection into headers."""
-        from kaos_server.telemetry import inject_trace_context
+        from opentelemetry.propagate import inject
 
         carrier: dict = {}
-        result = inject_trace_context(carrier)
-        assert isinstance(result, dict)
+        inject(carrier)
+        assert isinstance(carrier, dict)
 
     def test_extract_context(self):
         """Test context extraction from headers."""
-        from kaos_server.telemetry import extract_trace_context
+        from opentelemetry.propagate import extract
 
         carrier: dict = {}
-        context = extract_trace_context(carrier)
+        context = extract(carrier)
         assert context is not None

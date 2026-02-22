@@ -10,7 +10,7 @@ from typing import Any, Dict, Optional, Tuple
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from opentelemetry import trace, metrics
 from opentelemetry import _logs as otel_logs
-from opentelemetry.context import Context
+
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.sdk.metrics import MeterProvider
@@ -21,7 +21,7 @@ from opentelemetry.sdk.resources import Resource, SERVICE_NAME
 from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import OTLPSpanExporter
 from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
 from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter
-from opentelemetry.propagate import set_global_textmap, inject, extract
+from opentelemetry.propagate import set_global_textmap
 from opentelemetry.propagators.composite import CompositePropagator
 from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
 from opentelemetry.baggage.propagation import W3CBaggagePropagator
@@ -239,15 +239,3 @@ def get_delegation_metrics() -> Tuple[Optional[metrics.Counter], Optional[metric
         )
 
     return _delegation_counter, _delegation_duration
-
-
-def inject_trace_context(carrier: Dict[str, str]) -> Dict[str, str]:
-    """Inject trace context into headers for propagation (e.g., A2A delegation)."""
-    inject(carrier)
-    return carrier
-
-
-def extract_trace_context(headers: Any) -> Context:
-    """Extract W3C trace context from HTTP headers."""
-    carrier = dict(headers) if not isinstance(headers, dict) else headers
-    return extract(carrier)
