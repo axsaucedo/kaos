@@ -37,7 +37,7 @@ from telemetry.manager import (
 )
 
 if TYPE_CHECKING:
-    from agent.client import AgentDeps, RemoteAgent
+    from agent.server import AgentDeps, RemoteAgent
     from agent.memory import Memory
 
 logger = logging.getLogger(__name__)
