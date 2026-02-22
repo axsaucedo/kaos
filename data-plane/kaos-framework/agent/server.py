@@ -174,6 +174,7 @@ class AgentServer:
         agent: Agent,
         port: int = 8000,
         access_log: bool = False,
+        settings: Optional["AgentServerSettings"] = None,
     ):
         """Initialize AgentServer with an agent.
 
@@ -181,10 +182,12 @@ class AgentServer:
             agent: Agent instance to serve
             port: Port to serve on
             access_log: Whether to enable uvicorn access logs (default: False)
+            settings: Optional settings for DEBUG-level config dump
         """
         self.agent = agent
         self.port = port
         self.access_log = access_log
+        self._settings = settings
 
         # Create FastAPI app
         self.app = FastAPI(
@@ -236,31 +239,45 @@ class AgentServer:
     @asynccontextmanager
     async def _lifespan(self, app: FastAPI):
         """Manage agent lifecycle."""
-        self._log_startup_config()
+        self._log_startup_config(self._settings)
         yield
         logger.info("AgentServer shutdown")
         await self.agent.close()
 
-    def _log_startup_config(self):
-        """Log server configuration on startup for debugging."""
+    def _log_startup_config(self, settings: Optional["AgentServerSettings"] = None):
+        """Log server configuration on startup for debugging.
+
+        INFO level: compact summary of agent, model, tools, sub-agents, memory, otel.
+        DEBUG level: full settings dump and detailed tool/sub-agent info.
+        """
         sub_agents = list(self.agent.sub_agents.keys()) if self.agent.sub_agents else []
+        mcp_count = len(self.agent._mcp_servers)
+
+        # --- INFO: compact summary ---
         logger.info(
             f"AgentServer starting: name={self.agent.name} port={self.port} "
-            f"memory={type(self.agent.memory).__name__} max_steps={self.agent.max_steps} "
-            f"mcp_servers={len(self.agent._mcp_servers)} sub_agents={sub_agents}"
+            f"model={self.agent._model} memory={type(self.agent.memory).__name__} "
+            f"max_steps={self.agent.max_steps} mcp_servers={mcp_count} "
+            f"sub_agents={sub_agents}"
         )
-        logger.info(f"Model: {self.agent._model}")
 
+        otel_status = "disabled"
         if is_otel_enabled():
-            logger.info(
-                f"OpenTelemetry: endpoint={os.getenv('OTEL_EXPORTER_OTLP_ENDPOINT', 'N/A')} "
-                f"service={os.getenv('OTEL_SERVICE_NAME', 'N/A')}"
-            )
-        else:
-            logger.info("OpenTelemetry: disabled")
+            endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT", "N/A")
+            otel_status = f"enabled (endpoint={endpoint})"
+        logger.info(f"OpenTelemetry: {otel_status}")
 
-        logger.info(f"Access Log: {self.access_log}")
-        logger.info("=" * 60)
+        # --- DEBUG: detailed startup info ---
+        if logger.isEnabledFor(logging.DEBUG):
+            if settings:
+                logger.debug(f"AgentServerSettings: {settings.model_dump()}")
+            for name, sa in (self.agent.sub_agents or {}).items():
+                status = "active" if sa._active else "inactive"
+                desc = sa.agent_card.description if sa.agent_card else "N/A"
+                logger.debug(f"  sub-agent: {name} [{status}] {desc}")
+            for i, mcp in enumerate(self.agent._mcp_servers):
+                logger.debug(f"  mcp-server[{i}]: {mcp}")
+            logger.debug(f"  access_log={self.access_log}")
 
     def _setup_routes(self):
         """Setup HTTP routes for health, A2A, and OpenAI endpoints."""
@@ -647,6 +664,7 @@ def create_agent_server(
         agent,
         port=settings.agent_port,
         access_log=settings.agent_access_log,
+        settings=settings,
     )
 
     return server
