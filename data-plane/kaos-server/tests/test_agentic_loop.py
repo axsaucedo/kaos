@@ -28,9 +28,9 @@ from pydantic_ai.messages import (
 )
 
 from tests.helpers import make_test_server
-from agent.config import RemoteAgent
-from agent.tools import DELEGATION_TOOL_PREFIX
-from agent.memory import LocalMemory, NullMemory
+from kaos_server.config import RemoteAgent
+from kaos_server.tools import DELEGATION_TOOL_PREFIX
+from kaos_server.memory import LocalMemory, NullMemory
 
 logger = logging.getLogger(__name__)
 
@@ -890,7 +890,7 @@ class TestAgentConfiguration:
 
     def test_model_from_url_and_name(self):
         """Test creating model from model_api_url and model_name."""
-        from agent.config import _resolve_model
+        from kaos_server.config import _resolve_model
 
         model, mock_state = _resolve_model(
             "url-agent", None, "http://localhost:11434/v1", "test-model", "auto"
@@ -901,7 +901,7 @@ class TestAgentConfiguration:
     def test_agent_requires_model_source(self):
         """Test agent creation without model source raises error."""
         with pytest.raises(ValueError, match="Agent requires"):
-            from agent.config import _resolve_model
+            from kaos_server.config import _resolve_model
 
             _resolve_model("no-model-agent", None, None, None, "auto")
 

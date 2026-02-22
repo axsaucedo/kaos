@@ -65,7 +65,7 @@ Create a `server.py` with your custom Pydantic AI agent and tools:
 
 import random
 from pydantic_ai import Agent as PydanticAgent
-from agent.server import create_agent_server
+from kaos_server.server import create_agent_server
 
 
 def create_custom_agent():
@@ -143,15 +143,15 @@ WORKDIR /app
 RUN --mount=type=cache,target=/root/.cache/pip pip install uv
 
 # Install KAOS framework dependencies
-COPY data-plane/kaos-framework/pyproject.toml /tmp/kaos-framework/pyproject.toml
+COPY data-plane/kaos-server/pyproject.toml /tmp/kaos-server/pyproject.toml
 RUN --mount=type=cache,target=/root/.cache/uv \
-    cd /tmp/kaos-framework && \
+    cd /tmp/kaos-server && \
     uv pip compile pyproject.toml -o requirements.txt && \
     uv pip install --system -r requirements.txt
 
 # Copy framework source
-COPY data-plane/kaos-framework/agent/ /app/agent/
-COPY data-plane/kaos-framework/telemetry/ /app/telemetry/
+COPY data-plane/kaos-server/kaos_server/ /app/kaos_server/
+COPY data-plane/kaos-server
 
 # Copy custom agent
 COPY docs/examples/custom_server.py /app/custom_server.py

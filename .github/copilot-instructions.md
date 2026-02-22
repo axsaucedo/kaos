@@ -23,7 +23,7 @@ Running local tests for python and golang operator is possible, and running indi
 
 ```bash
 # Python (agent framework)
-cd data-plane/kaos-framework && source .venv/bin/activate
+cd data-plane/kaos-server && source .venv/bin/activate
 python -m pytest tests/ -v      # Tests
 make lint                       # Linting (required for CI)
 
@@ -49,8 +49,8 @@ kaos system install --gateway-enabled --metallb-enabled --wait
 ## Project Structure
 ```
 data-plane/
-├── kaos-framework/        # Agent runtime (Pydantic AI, pytest, black, ty)
-│   ├── agent/             # AgentServer, tools, memory
+├── kaos-server/        # Agent runtime (Pydantic AI, pytest, black, ty)
+│   ├── kaos_server/             # AgentServer, tools, memory
 │   │   ├── server.py      # AgentServer, create_agent_server, routes, model resolution, RemoteAgent
 │   │   ├── tools.py       # DelegationToolset, string-mode handler
 │   │   └── memory.py      # Memory ABC, LocalMemory, RedisMemory, NullMemory
@@ -87,9 +87,9 @@ tmp/                       # Local work files (gitignored)
 - `operator/api/v1alpha1/*_types.go`: CRD schemas
 - `operator/controllers/*_controller.go`: Reconciliation logic
 - `operator/chart/`: Helm chart (generated from kustomize)
-- `data-plane/kaos-framework/agent/server.py`: AgentServer, create_agent_server, routes, model resolution, RemoteAgent, AgentDeps
-- `data-plane/kaos-framework/agent/tools.py`: DelegationToolset (AbstractToolset), string-mode handler
-- `data-plane/kaos-framework/agent/memory.py`: Memory ABC + backends + build_message_history/store_pydantic_message
+- `data-plane/kaos-server/kaos_server/server.py`: AgentServer, create_agent_server, routes, model resolution, RemoteAgent, AgentDeps
+- `data-plane/kaos-server/kaos_server/tools.py`: DelegationToolset (AbstractToolset), string-mode handler
+- `data-plane/kaos-server/kaos_server/memory.py`: Memory ABC + backends + build_message_history/store_pydantic_message
 
 ## Testing Notes
 

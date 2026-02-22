@@ -29,7 +29,7 @@ from pydantic_ai.messages import (
 from pydantic_ai import RunContext
 from pydantic_core import SchemaValidator, core_schema
 
-from agent.telemetry import (
+from kaos_server.telemetry import (
     get_tracer,
     get_delegation_metrics,
     inject_trace_context,
@@ -37,8 +37,8 @@ from agent.telemetry import (
 )
 
 if TYPE_CHECKING:
-    from agent.config import AgentDeps, RemoteAgent
-    from agent.memory import Memory
+    from kaos_server.config import AgentDeps, RemoteAgent
+    from kaos_server.memory import Memory
 
 logger = logging.getLogger(__name__)
 

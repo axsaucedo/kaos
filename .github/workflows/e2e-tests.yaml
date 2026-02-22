@@ -5,7 +5,7 @@ on:
     branches: [main]
     paths:
       - 'operator/**'
-      - 'data-plane/kaos-framework/**'
+      - 'data-plane/kaos-server/**'
       - 'kaos-cli/**'
       - 'docs/examples/**'
       - '.github/workflows/e2e-tests.yaml'
@@ -14,7 +14,7 @@ on:
     branches: [main]
     paths:
       - 'operator/**'
-      - 'data-plane/kaos-framework/**'
+      - 'data-plane/kaos-server/**'
       - 'kaos-cli/**'
       - 'docs/examples/**'
       - '.github/workflows/e2e-tests.yaml'

@@ -4,18 +4,18 @@ from typing import Any, Optional, List, Dict
 
 from pydantic_ai import Agent as PydanticAgent
 
-from agent.server import (
+from kaos_server.server import (
     AgentServer,
 )
-from agent.config import (
+from kaos_server.config import (
     AgentDeps,
     RemoteAgent,
     AgentServerSettings,
     _resolve_model,
     _MockResponseState,
 )
-from agent.tools import DelegationToolset
-from agent.memory import Memory, LocalMemory, NullMemory
+from kaos_server.tools import DelegationToolset
+from kaos_server.memory import Memory, LocalMemory, NullMemory
 
 
 def make_test_server(

@@ -7,14 +7,14 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     pip install uv
 
 # Install kaos-runtime from the base framework
-COPY data-plane/kaos-framework/pyproject.toml /tmp/kaos-framework/pyproject.toml
+COPY data-plane/kaos-server/pyproject.toml /tmp/kaos-server/pyproject.toml
 RUN --mount=type=cache,target=/root/.cache/uv \
-    cd /tmp/kaos-framework && \
+    cd /tmp/kaos-server && \
     uv pip compile pyproject.toml -o requirements.txt && \
     uv pip install --system -r requirements.txt
 
 # Copy the kaos framework source
-COPY data-plane/kaos-framework/agent/ /app/agent/
+COPY data-plane/kaos-server/kaos_server/ /app/kaos_server/
 
 # Copy custom agent server
 COPY examples/custom-agent/server.py /app/custom_server.py

@@ -18,10 +18,10 @@ from pydantic_ai.messages import (
     TextPart,
     ToolCallPart,
 )
-from agent.telemetry import inject_trace_context
+from kaos_server.telemetry import inject_trace_context
 
 if TYPE_CHECKING:
-    from agent.memory import Memory
+    from kaos_server.memory import Memory
 
 logger = logging.getLogger(__name__)
 
@@ -202,7 +202,7 @@ def _resolve_model(
             base_url = f"{base_url}/v1"
 
         if tool_call_mode == "string":
-            from agent.tools import build_string_mode_handler
+            from kaos_server.tools import build_string_mode_handler
 
             handler = build_string_mode_handler(base_url, model_name)
             logger.info(f"Agent {name}: using string-mode model {model_name} at {base_url}")

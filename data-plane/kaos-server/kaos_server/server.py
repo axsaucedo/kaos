@@ -20,7 +20,7 @@ from pydantic_ai.messages import ToolCallPart
 from pydantic_ai.usage import UsageLimits
 from pydantic_ai._agent_graph import CallToolsNode
 from pydantic_graph import End
-from agent.telemetry import (
+from kaos_server.telemetry import (
     init_otel,
     is_otel_enabled,
     should_enable_otel,
@@ -29,8 +29,8 @@ from agent.telemetry import (
     extract_trace_context,
     get_tracer,
 )
-from agent.tools import format_progress_event, DELEGATION_TOOL_PREFIX, DelegationToolset
-from agent.config import (
+from kaos_server.tools import format_progress_event, DELEGATION_TOOL_PREFIX, DelegationToolset
+from kaos_server.config import (
     AgentDeps,
     AgentCard,
     RemoteAgent,
@@ -43,7 +43,7 @@ from agent.config import (
 )
 
 if TYPE_CHECKING:
-    from agent.memory import Memory
+    from kaos_server.memory import Memory
 
 
 def configure_logging(level: str = "INFO", otel_correlation: bool = False) -> None:
@@ -121,7 +121,7 @@ class AgentServer:
         model: Any = None,
         custom_tools: Optional[list] = None,
     ):
-        from agent.memory import NullMemory
+        from kaos_server.memory import NullMemory
 
         self.settings = settings
         self.memory: "Memory" = memory or NullMemory()
@@ -569,7 +569,7 @@ def _parse_sub_agents(settings: AgentServerSettings) -> List[RemoteAgent]:
 
 def _create_memory(settings: AgentServerSettings) -> "Memory":
     """Create memory backend from settings."""
-    from agent.memory import LocalMemory, RedisMemory, NullMemory
+    from kaos_server.memory import LocalMemory, RedisMemory, NullMemory
 
     if not settings.memory_enabled:
         return NullMemory()

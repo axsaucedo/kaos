@@ -1,5 +1,5 @@
 ---
-applyTo: "data-plane/kaos-framework/**"
+applyTo: "data-plane/kaos-server/**"
 ---
 
 # Python Agent Framework Instructions
@@ -8,7 +8,7 @@ Built on **Pydantic AI** — `AgentServer` is the central orchestration componen
 
 ## Quick Reference
 ```bash
-cd data-plane/kaos-framework
+cd data-plane/kaos-server
 source .venv/bin/activate
 python -m pytest tests/ -v      # Run all tests
 make lint                       # Run linting (black + ty check)
@@ -16,10 +16,10 @@ make format                     # Auto-format code
 ```
 
 ## Project Structure
-- `agent/server.py`: AgentServer, create_agent_server(), routes, _process_message(), AgentDeps, AgentCard, RemoteAgent, model resolution
-- `agent/tools.py`: DelegationToolset (AbstractToolset), execute_delegation, format_progress_event, build_string_mode_handler
-- `agent/memory.py`: Memory ABC, LocalMemory, RedisMemory, NullMemory + build_message_history/store_pydantic_message utilities
-- `agent/telemetry/`: OpenTelemetry instrumentation (tracing, metrics)
+- `kaos_server/server.py`: AgentServer, create_agent_server(), routes, _process_message(), AgentDeps, AgentCard, RemoteAgent, model resolution
+- `kaos_server/tools.py`: DelegationToolset (AbstractToolset), execute_delegation, format_progress_event, build_string_mode_handler
+- `kaos_server/memory.py`: Memory ABC, LocalMemory, RedisMemory, NullMemory + build_message_history/store_pydantic_message utilities
+- `kaos_server/telemetry/`: OpenTelemetry instrumentation (tracing, metrics)
 - `pyproject.toml`: Dependencies — `pydantic-ai`, `opentelemetry-*`
 
 **Module layout rationale:**
@@ -84,7 +84,7 @@ make format                     # Auto-format code
 - Use `create_agent_server(custom_agent=my_agent)` to wrap with KAOS endpoints
 - KAOS overrides the model and adds DelegationToolset to custom agents
 - Deploy via Agent CRD with `container.image` override
-- Example: `examples/custom-agent/server.py`
+- Example: `examples/custom-kaos_server/server.py`
 
 ### Memory (memory.py)
 - KAOS memory (Local/Redis/Null) persists across sessions — Pydantic AI has no built-in persistence

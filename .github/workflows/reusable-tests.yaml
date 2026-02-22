@@ -50,13 +50,13 @@ jobs:
         run: make test-unit
 
       - name: Install Python dependencies
-        working-directory: data-plane/kaos-framework
+        working-directory: data-plane/kaos-server
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
       - name: Run Python tests
-        working-directory: data-plane/kaos-framework
+        working-directory: data-plane/kaos-server
         run: python -m pytest tests/ -v
 
   # E2E tests (sharded)
@@ -133,7 +133,7 @@ jobs:
       - name: Build agent image
         uses: docker/build-push-action@v6
         with:
-          context: ./data-plane/kaos-framework
+          context: ./data-plane/kaos-server
           load: true
           tags: ${{ env.REGISTRY }}/kaos-agent:${{ env.AGENT_TAG }}
           cache-from: type=gha,scope=agent-e2e
