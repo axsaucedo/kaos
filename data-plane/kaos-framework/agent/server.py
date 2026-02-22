@@ -89,6 +89,24 @@ def configure_logging(level: str = "INFO", otel_correlation: bool = False) -> No
 logger = logging.getLogger(__name__)
 
 
+def _build_chat_response(model_name: str, content: str) -> dict:
+    """Build OpenAI-compatible chat completion response dict."""
+    return {
+        "id": f"chatcmpl-{uuid.uuid4().hex}",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": model_name,
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": content},
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+    }
+
+
 class AgentServer:
     """AgentServer exposing OpenAI-compatible chat completions API."""
 
@@ -439,26 +457,7 @@ class AgentServer:
             async for chunk in self._process_message(messages, stream=False, session_id=session_id):
                 response_content += chunk
 
-            return JSONResponse(
-                {
-                    "id": f"chatcmpl-{uuid.uuid4().hex}",
-                    "object": "chat.completion",
-                    "created": int(time.time()),
-                    "model": model_name,
-                    "choices": [
-                        {
-                            "index": 0,
-                            "message": {"role": "assistant", "content": response_content},
-                            "finish_reason": "stop",
-                        }
-                    ],
-                    "usage": {
-                        "prompt_tokens": 0,
-                        "completion_tokens": 0,
-                        "total_tokens": 0,
-                    },
-                }
-            )
+            return JSONResponse(_build_chat_response(model_name, response_content))
 
     async def _stream_chat_completion(
         self,
