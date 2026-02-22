@@ -4,7 +4,7 @@ applyTo: "data-plane/kaos-framework/**"
 
 # Python Agent Framework Instructions
 
-Built on **Pydantic AI** — the framework wraps `pydantic_ai.Agent` with KAOS-specific functionality (env-var config, memory, delegation, telemetry).
+Built on **Pydantic AI** — `AgentServer` is the central orchestration component. Pydantic AI is the core agent runtime; KAOS adds server/enterprise capabilities (env-var config, memory, delegation, telemetry, A2A discovery).
 
 ## Quick Reference
 ```bash
@@ -16,16 +16,16 @@ make format                     # Auto-format code
 ```
 
 ## Project Structure
-- `agent/client.py`: Agent (wraps pydantic_ai.Agent), RemoteAgent, AgentCard, _MockResponseState
-- `agent/server.py`: FastAPI HTTP server with health probes, memory endpoints, chat completions, A2A discovery
-- `agent/string_mode.py`: String-mode FunctionModel wrapper for models without native function calling
-- `agent/memory.py`: LocalMemory, RedisMemory, NullMemory for session/event management (unchanged)
+- `agent/server.py`: AgentServer, create_agent_server(), routes, _process_message(), AgentDeps, AgentCard, RemoteAgent, model resolution
+- `agent/tools.py`: DelegationToolset (AbstractToolset), execute_delegation, format_progress_event, build_string_mode_handler
+- `agent/memory.py`: Memory ABC, LocalMemory, RedisMemory, NullMemory + build_message_history/store_pydantic_message utilities
 - `agent/telemetry/`: OpenTelemetry instrumentation (tracing, metrics)
 - `pyproject.toml`: Dependencies — `pydantic-ai`, `opentelemetry-*`
 
-**Removed modules** (replaced by Pydantic AI native support):
-- `mcptools/` — MCP handled via `pydantic_ai.mcp.MCPServerStreamableHTTP`
-- `modelapi/` — Model API handled via `pydantic_ai.models.openai.OpenAIChatModel`
+**Module layout rationale:**
+- `server.py` owns everything that creates/runs agents: AgentServer, create_agent_server(), RemoteAgent (HTTP client for sub-agents), model resolution, request lifecycle
+- `tools.py` owns tool extensions: DelegationToolset (AbstractToolset subclass), string-mode model handler, progress event formatting
+- `memory.py` owns persistence: Memory ABC + all backends, plus build_message_history/store_pydantic_message utilities on the base class
 
 ## Key Environment Variables
 | Variable | Description |
@@ -49,26 +49,29 @@ make format                     # Auto-format code
 
 ## Architecture
 
-### Core: Pydantic AI Agent Wrapper
-The KAOS `Agent` class wraps `pydantic_ai.Agent`:
+### Core: AgentServer + create_agent_server()
+`AgentServer` is the central component — it owns a `pydantic_ai.Agent` instance and provides KAOS enterprise capabilities:
+- `create_agent_server(settings, custom_agent)` is the main factory: resolves model, memory, delegation, MCP, OTEL
 - Model configured via `OpenAIChatModel(model_name, provider=OpenAIProvider(base_url=MODEL_API_URL + "/v1"))`
 - `/v1` is auto-appended to `MODEL_API_URL` if not present (required for Ollama OpenAI-compat endpoint)
 - MCP servers passed as `toolsets=[MCPServerStreamableHTTP(url)]` to Pydantic AI
-- Sub-agent delegation registered as `@agent.tool` functions with `delegate_to_` prefix (receive RunContext)
+- Sub-agent delegation via `DelegationToolset` (AbstractToolset subclass) in `toolsets=[...]`
 - Agentic loop handled entirely by Pydantic AI (no custom loop code)
+
+### Delegation via DelegationToolset (tools.py)
+- `DelegationToolset` extends `AbstractToolset[AgentDeps]` — the same pattern as `MCPServerStreamableHTTP`
+- Exposes sub-agents as `delegate_to_{agent_name}` tools dynamically (inactive agents excluded per-run)
+- `execute_delegation()` calls `RemoteAgent.process_message()` with conversation context
+- Progress events emitted via `format_progress_event()` during tool execution
 
 ### Tool Calling
 - Pydantic AI uses native function calling by default
 - `TOOL_CALL_MODE=string`: FunctionModel wrapper injects tool descriptions into system prompt, parses JSON tool calls from text
 - `TOOL_CALL_MODE=auto|native`: Standard Pydantic AI native function calling (default)
 - MCP tools: `MCPServerStreamableHTTP(url + "/mcp")` — `/mcp` path appended for FastMCP servers
-- Delegation tools: `delegate_to_{agent_name}` registered as plain tool functions
-- Delegation forwards recent conversation context from memory to sub-agents
-- Tool discovery for agent card: connects to MCP servers via `list_tools()` on card requests
-- Native Pydantic AI tools (from custom_pydantic_agent) also exposed in agent card via `_function_toolset`
 - `max_steps` controls model call limit via `UsageLimits(request_limit=max_steps)` (not `retries`)
 
-### String Mode (`agent/string_mode.py`)
+### String Mode (tools.py)
 - For models without native function calling support (e.g., small Ollama models)
 - `build_string_mode_handler(base_url, model_name)` → FunctionModel handler
 - Injects tool descriptions + JSON format instructions into system prompt
@@ -79,31 +82,31 @@ The KAOS `Agent` class wraps `pydantic_ai.Agent`:
 ### Custom Agent Image Pattern
 - Users create custom Pydantic AI agents with their own tools
 - Use `create_agent_server(custom_agent=my_agent)` to wrap with KAOS endpoints
+- KAOS overrides the model and adds DelegationToolset to custom agents
 - Deploy via Agent CRD with `container.image` override
 - Example: `examples/custom-agent/server.py`
 
-### Memory Bridge
+### Memory (memory.py)
 - KAOS memory (Local/Redis/Null) persists across sessions — Pydantic AI has no built-in persistence
-- All memory implementations extend `Memory` ABC (`agent/memory.py`) with shared `create_event()` and `build_conversation_context()`
-- NullMemory is a no-op — use it for stateless agents instead of disabling memory
-- `_build_message_history()`: KAOS events → Pydantic AI `ModelRequest`/`ModelResponse` messages
-- `_store_pydantic_message()`: Pydantic AI messages → KAOS memory events
+- All implementations extend `Memory` ABC with `build_message_history()` and `store_pydantic_message()` as concrete methods
+- NullMemory is a no-op — always call memory methods regardless (no branching needed)
+- `build_message_history(session_id, context_limit)`: KAOS events → Pydantic AI `ModelRequest`/`ModelResponse` messages
+- `store_pydantic_message(session_id, msg)`: Pydantic AI messages → KAOS memory events
 - Memory event types for delegation: `delegation_request`/`delegation_response` (not `tool_call`/`tool_result`)
 - Incoming task-delegation: detected via `task-delegation` role → stored as `task_delegation_received`
 - `memory_context_limit` caps history size passed to model (default 6)
 - Streaming and non-streaming paths both persist tool/delegation events via `result.new_messages()`
-- History exclusion: latest prompt event explicitly excluded (not fragile `events[:-1]`)
 
 ### Dependency Injection
 - `AgentDeps(session_id, memory)` passed via Pydantic AI `RunContext` to tools
-- Delegation tools use `ctx: RunContext[AgentDeps]` for concurrency-safe access
-- `ctx.deps.memory` provides memory access without relying on Agent instance closure
-- Custom tools registered on the Pydantic AI agent can also use `ctx.deps.memory`
+- DelegationToolset uses `ctx.deps` for concurrency-safe session and memory access
+- Custom tools registered on the Pydantic AI agent can also use `ctx: RunContext[AgentDeps]`
 
 ### Key Classes
-- `Agent`: Main wrapper — `process_message()`, `get_agent_card()`
+- `AgentServer`: Central server — owns pydantic_ai.Agent, memory, routes, `_process_message()`
 - `AgentDeps`: Per-run dependencies (session_id, memory) injected via RunContext
-- `RemoteAgent`: Represents a peer agent for delegation (stores URL, optional AgentCard)
+- `DelegationToolset`: AbstractToolset that exposes sub-agents as delegate_to_ tools
+- `RemoteAgent`: HTTP client for sub-agent delegation (stores URL, optional AgentCard)
 - `AgentCard`: A2A discovery card (uses `asdict()` for serialization)
 - `Memory`: ABC interface for LocalMemory, RedisMemory, NullMemory (includes `close()`)
 - `_MockResponseState`: Mutable mock response state shared via closure (workaround for ContextVar + FunctionModel issue)
@@ -132,9 +135,10 @@ Pydantic AI runs `FunctionModel` handlers in a copied context — `ContextVar` s
 - Tests use `pytest-asyncio` for async test functions
 - `FunctionModel` from `pydantic_ai.models.function` for custom mock behavior
 - `TestModel` from `pydantic_ai.models.test` for simple predetermined responses
+- `make_test_server()` in `tests/helpers.py` creates AgentServer instances for tests
 - Agents with tools: 2 mock responses (tool call + final answer)
 - Agents without tools: 1 mock response (final answer only)
-- String-mode tests in `tests/test_string_mode.py` — tool description generation, JSON parsing, agent integration
+- String-mode tests in `tests/test_string_mode.py` — tool description generation, JSON parsing
 
 ## Code Style
 - Use `black` for formatting

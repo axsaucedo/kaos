@@ -50,10 +50,10 @@ kaos system install --gateway-enabled --metallb-enabled --wait
 ```
 data-plane/
 ├── kaos-framework/        # Agent runtime (Pydantic AI, pytest, black, ty)
-│   ├── agent/             # Agent (pydantic_ai wrapper), RemoteAgent, AgentServer
-│   │   ├── client.py      # Core agent — wraps pydantic_ai.Agent
-│   │   ├── server.py      # FastAPI HTTP server, health probes, memory endpoints
-│   │   └── memory.py      # LocalMemory, RedisMemory, NullMemory
+│   ├── agent/             # AgentServer, tools, memory
+│   │   ├── server.py      # AgentServer, create_agent_server, routes, model resolution, RemoteAgent
+│   │   ├── tools.py       # DelegationToolset, string-mode handler
+│   │   └── memory.py      # Memory ABC, LocalMemory, RedisMemory, NullMemory
 │   └── telemetry/         # OpenTelemetry instrumentation
 └── mcp-servers/           # Standalone MCP server implementations
     └── python-string/     # Python code execution runtime
@@ -87,10 +87,9 @@ tmp/                       # Local work files (gitignored)
 - `operator/api/v1alpha1/*_types.go`: CRD schemas
 - `operator/controllers/*_controller.go`: Reconciliation logic
 - `operator/chart/`: Helm chart (generated from kustomize)
-- `data-plane/kaos-framework/agent/client.py`: Agent runtime core (Pydantic AI wrapper with delegation, memory bridge, mock model)
-- `data-plane/kaos-framework/agent/server.py`: FastAPI HTTP server (health, memory, chat completions, A2A)
-- `data-plane/kaos-framework/agent/string_mode.py`: String-mode FunctionModel wrapper for models without native function calling
-- `data-plane/kaos-framework/agent/memory.py`: Memory backends (LocalMemory, RedisMemory, NullMemory)
+- `data-plane/kaos-framework/agent/server.py`: AgentServer, create_agent_server, routes, model resolution, RemoteAgent, AgentDeps
+- `data-plane/kaos-framework/agent/tools.py`: DelegationToolset (AbstractToolset), string-mode handler
+- `data-plane/kaos-framework/agent/memory.py`: Memory ABC + backends + build_message_history/store_pydantic_message
 
 ## Testing Notes
 
