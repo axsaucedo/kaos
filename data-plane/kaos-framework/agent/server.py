@@ -574,97 +574,86 @@ class AgentServer:
         uvicorn.run(self.app, host=host, port=self.port, access_log=self.access_log)
 
 
-def create_agent_server(
-    settings: Optional[AgentServerSettings] = None,
-    sub_agents: Optional[List[RemoteAgent]] = None,
-    custom_agent: Any = None,
-) -> AgentServer:
-    """Create an AgentServer with optional sub-agents and MCP clients."""
-    if not settings:
-        settings = AgentServerSettings()  # type: ignore[call-arg]
-
-    # Check if OTel should be enabled based on env vars
-    otel_should_enable = should_enable_otel()
-
-    # Configure logging
-    log_level = get_log_level()
-    configure_logging(log_level, otel_correlation=otel_should_enable)
-
-    # Parse MCP servers from settings -> Pydantic AI MCPServerStreamableHTTP
+def _parse_mcp_servers(settings: AgentServerSettings) -> list:
+    """Parse MCP server env vars into MCPServerStreamableHTTP instances."""
     mcp_servers: list = []
-    if settings.mcp_servers:
-        mcp_servers_str = settings.mcp_servers.strip()
-        if mcp_servers_str.startswith("[") and mcp_servers_str.endswith("]"):
-            mcp_servers_str = mcp_servers_str[1:-1]
+    if not settings.mcp_servers:
+        return mcp_servers
 
-        for server_name in mcp_servers_str.split(","):
-            server_name = server_name.strip()
-            if server_name:
-                env_name = f"MCP_SERVER_{server_name}_URL"
-                server_url = os.environ.get(env_name)
-                if server_url:
-                    # Append /mcp for Streamable HTTP MCP endpoint
-                    mcp_url = server_url.rstrip("/")
-                    if not mcp_url.endswith("/mcp"):
-                        mcp_url = f"{mcp_url}/mcp"
-                    mcp_servers.append(MCPServerStreamableHTTP(mcp_url))
-                    logger.info(f"Configured MCP server: {server_name} -> {mcp_url}")
-                else:
-                    logger.warning(
-                        f"No URL found for MCP server {server_name} (expected {env_name})"
-                    )
+    mcp_servers_str = settings.mcp_servers.strip()
+    if mcp_servers_str.startswith("[") and mcp_servers_str.endswith("]"):
+        mcp_servers_str = mcp_servers_str[1:-1]
 
-    # Parse sub-agents from settings if not provided directly
-    if sub_agents is None:
-        sub_agents = []
-
-        if settings.agent_sub_agents:
-            for agent_spec in settings.agent_sub_agents.split(","):
-                agent_spec = agent_spec.strip()
-                if ":" in agent_spec:
-                    name, url = agent_spec.split(":", 1)
-                    sub_agents.append(RemoteAgent(name=name.strip(), card_url=url.strip()))
-                    logger.info(f"Configured sub-agent (direct): {name} -> {url}")
-
-        elif settings.peer_agents:
-            for peer_name in settings.peer_agents.split(","):
-                peer_name = peer_name.strip()
-                if peer_name:
-                    env_name = f"PEER_AGENT_{peer_name.upper().replace('-', '_')}_CARD_URL"
-                    card_url = os.environ.get(env_name)
-                    if card_url:
-                        sub_agents.append(RemoteAgent(name=peer_name, card_url=card_url))
-                        logger.info(f"Configured sub-agent (k8s): {peer_name} -> {card_url}")
-                    else:
-                        logger.warning(
-                            f"No URL found for peer agent {peer_name} (expected {env_name})"
-                        )
-
-    # Create memory
-    from agent.memory import LocalMemory, RedisMemory, NullMemory, Memory
-
-    memory: Memory
-    if settings.memory_enabled:
-        if settings.memory_type == "redis" and settings.memory_redis_url:
-            memory = RedisMemory(
-                redis_url=settings.memory_redis_url,
-                max_sessions=settings.memory_max_sessions,
-                max_events_per_session=settings.memory_max_session_events,
-            )
+    for server_name in mcp_servers_str.split(","):
+        server_name = server_name.strip()
+        if not server_name:
+            continue
+        env_name = f"MCP_SERVER_{server_name}_URL"
+        server_url = os.environ.get(env_name)
+        if server_url:
+            mcp_url = server_url.rstrip("/")
+            if not mcp_url.endswith("/mcp"):
+                mcp_url = f"{mcp_url}/mcp"
+            mcp_servers.append(MCPServerStreamableHTTP(mcp_url))
+            logger.info(f"Configured MCP server: {server_name} -> {mcp_url}")
         else:
-            if settings.memory_type == "redis":
-                logger.warning("MEMORY_REDIS_URL not set, falling back to LocalMemory")
-            memory = LocalMemory(
-                max_sessions=settings.memory_max_sessions,
-                max_events_per_session=settings.memory_max_session_events,
-            )
-    else:
-        memory = NullMemory()
+            logger.warning(f"No URL found for MCP server {server_name} (expected {env_name})")
+    return mcp_servers
 
-    # Initialize OpenTelemetry
+
+def _parse_sub_agents(settings: AgentServerSettings) -> List[RemoteAgent]:
+    """Parse sub-agent env vars into RemoteAgent instances."""
+    sub_agents: List[RemoteAgent] = []
+
+    if settings.agent_sub_agents:
+        for agent_spec in settings.agent_sub_agents.split(","):
+            agent_spec = agent_spec.strip()
+            if ":" in agent_spec:
+                name, url = agent_spec.split(":", 1)
+                sub_agents.append(RemoteAgent(name=name.strip(), card_url=url.strip()))
+                logger.info(f"Configured sub-agent (direct): {name} -> {url}")
+
+    elif settings.peer_agents:
+        for peer_name in settings.peer_agents.split(","):
+            peer_name = peer_name.strip()
+            if not peer_name:
+                continue
+            env_name = f"PEER_AGENT_{peer_name.upper().replace('-', '_')}_CARD_URL"
+            card_url = os.environ.get(env_name)
+            if card_url:
+                sub_agents.append(RemoteAgent(name=peer_name, card_url=card_url))
+                logger.info(f"Configured sub-agent (k8s): {peer_name} -> {card_url}")
+            else:
+                logger.warning(f"No URL found for peer agent {peer_name} (expected {env_name})")
+    return sub_agents
+
+
+def _create_memory(settings: AgentServerSettings) -> "Memory":
+    """Create memory backend from settings."""
+    from agent.memory import LocalMemory, RedisMemory, NullMemory
+
+    if not settings.memory_enabled:
+        return NullMemory()
+
+    if settings.memory_type == "redis" and settings.memory_redis_url:
+        return RedisMemory(
+            redis_url=settings.memory_redis_url,
+            max_sessions=settings.memory_max_sessions,
+            max_events_per_session=settings.memory_max_session_events,
+        )
+
+    if settings.memory_type == "redis":
+        logger.warning("MEMORY_REDIS_URL not set, falling back to LocalMemory")
+    return LocalMemory(
+        max_sessions=settings.memory_max_sessions,
+        max_events_per_session=settings.memory_max_session_events,
+    )
+
+
+def _setup_otel_instrumentation(settings: AgentServerSettings) -> None:
+    """Initialize OTel SDK and Pydantic AI instrumentation."""
     init_otel(settings.agent_name)
 
-    # Enable Pydantic AI instrumentation with explicit KAOS OTEL providers
     if is_otel_enabled():
         from pydantic_ai.models.instrumented import InstrumentationSettings
         from opentelemetry.trace import get_tracer_provider
@@ -680,10 +669,29 @@ def create_agent_server(
         )
         PydanticAgent.instrument_all(instrumentation)
 
-    # Build sub-agents dict
+
+def create_agent_server(
+    settings: Optional[AgentServerSettings] = None,
+    sub_agents: Optional[List[RemoteAgent]] = None,
+    custom_agent: Any = None,
+) -> AgentServer:
+    """Create an AgentServer with optional sub-agents and MCP clients."""
+    if not settings:
+        settings = AgentServerSettings()  # type: ignore[call-arg]
+
+    # Logging + OTel
+    configure_logging(get_log_level(), otel_correlation=should_enable_otel())
+    _setup_otel_instrumentation(settings)
+
+    # Parse env-var resources
+    mcp_servers = _parse_mcp_servers(settings)
+    if sub_agents is None:
+        sub_agents = _parse_sub_agents(settings)
+    memory = _create_memory(settings)
+
     sub_agents_dict: Dict[str, RemoteAgent] = {a.name: a for a in sub_agents}
 
-    # Resolve the model
+    # Resolve model
     model, mock_state = _resolve_model(
         settings.agent_name,
         None,
@@ -692,13 +700,13 @@ def create_agent_server(
         settings.tool_call_mode,
     )
 
-    # Build toolsets list
+    # Build toolsets
     toolsets: list = list(mcp_servers)
     if sub_agents_dict:
         toolsets.append(DelegationToolset(sub_agents_dict, settings.memory_context_limit))
 
+    # Create or augment Pydantic AI agent
     if custom_agent:
-        # Custom agent: override model and add KAOS toolsets
         pydantic_agent = custom_agent
         pydantic_agent.model = model
         for ts in toolsets:
@@ -721,7 +729,7 @@ def create_agent_server(
         f"tool_call_mode={settings.tool_call_mode})"
     )
 
-    server = AgentServer(
+    return AgentServer(
         pydantic_agent=pydantic_agent,
         name=settings.agent_name,
         description=settings.agent_description,
@@ -736,8 +744,6 @@ def create_agent_server(
         access_log=settings.agent_access_log,
         settings=settings,
     )
-
-    return server
 
 
 def create_app(settings: Optional[AgentServerSettings] = None) -> FastAPI:
