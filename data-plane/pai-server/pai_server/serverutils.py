@@ -3,7 +3,6 @@
 import os
 import json
 import time
-import uuid
 import logging
 from typing import Dict, Any, List, Literal, Optional, Union, TYPE_CHECKING
 from dataclasses import dataclass, asdict
@@ -232,7 +231,7 @@ def _extract_user_prompt(message: Union[str, List[Dict[str, str]]]) -> str:
 
 
 def _build_streaming_chunk(
-    chat_id: str,
+    session_id: str,
     created_at: int,
     model_name: str,
     content: Optional[str] = None,
@@ -241,7 +240,7 @@ def _build_streaming_chunk(
     """Build an SSE data line for a streaming chat completion chunk."""
     delta = {"content": content} if content is not None else {}
     data = {
-        "id": chat_id,
+        "id": session_id,
         "object": "chat.completion.chunk",
         "created": created_at,
         "model": model_name,
@@ -250,13 +249,10 @@ def _build_streaming_chunk(
     return f"data: {json.dumps(data)}\n\n"
 
 
-def _build_chat_response(model_name: str, content: str) -> dict:
-    """Build OpenAI-compatible non-streaming chat completion response dict.
-
-    The 'id' field is a per-completion identifier (OpenAI spec), separate from
-    the KAOS session_id which tracks cross-request memory."""
+def _build_chat_response(model_name: str, content: str, *, session_id: str) -> dict:
+    """Build OpenAI-compatible non-streaming chat completion response dict."""
     return {
-        "id": f"chatcmpl-{uuid.uuid4().hex}",
+        "id": session_id,
         "object": "chat.completion",
         "created": int(time.time()),
         "model": model_name,

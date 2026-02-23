@@ -2,7 +2,6 @@
 
 import os
 import time
-import uuid
 import json
 import logging
 import sys
@@ -241,8 +240,14 @@ class AgentServer:
                 model_name = body.get("model", "agent")
                 stream_requested = body.get("stream", False)
 
-                # Extract session_id from header (preferred) or body
+                # Resolve session: client-provided or auto-generated
                 session_id = request.headers.get("X-Session-ID") or body.get("session_id")
+                if session_id:
+                    session_id = await self.memory.get_or_create_session(
+                        session_id, "agent", "user"
+                    )
+                else:
+                    session_id = await self.memory.create_session("agent", "user")
 
                 # Validate at least one user or task-delegation message exists
                 has_valid_message = any(
@@ -278,11 +283,8 @@ class AgentServer:
             {"status": status, "name": self.settings.agent_name, "timestamp": int(time.time())}
         )
 
-    def _build_span_attrs(self, session_id: Optional[str] = None) -> dict:
-        attrs: dict = {"agent.name": self.settings.agent_name}
-        if session_id:
-            attrs["session.id"] = session_id
-        return attrs
+    def _build_span_attrs(self, session_id: str) -> dict:
+        return {"agent.name": self.settings.agent_name, "session.id": session_id}
 
     async def _get_agent_card(self, base_url: str) -> AgentCard:
         capabilities = ["message_processing", "task_execution"]
@@ -318,16 +320,14 @@ class AgentServer:
     async def _prepare_run(
         self,
         message: Union[str, List[Dict[str, str]]],
-        session_id: Optional[str] = None,
+        session_id: str,
     ) -> tuple:
-        """Setup for agent run: session, memory event, history, deps. Returns (session_id, user_prompt, message_history, deps, usage_limits)."""
+        """Setup for agent run: memory event, history, deps. Returns (user_prompt, message_history, deps, usage_limits)."""
         if self._mock_state:
             self._mock_state.reset()
 
-        if session_id:
-            session_id = await self.memory.get_or_create_session(session_id, "agent", "user")
-        else:
-            session_id = await self.memory.create_session("agent", "user")
+        # Ensure session exists in memory (idempotent)
+        session_id = await self.memory.get_or_create_session(session_id, "agent", "user")
 
         user_prompt = _extract_user_prompt(message)
         is_delegation = isinstance(message, list) and any(
@@ -342,16 +342,16 @@ class AgentServer:
         )
         deps = AgentDeps(session_id=session_id, memory=self.memory)
         usage_limits = UsageLimits(request_limit=self.settings.agentic_loop_max_steps)
-        return session_id, user_prompt, message_history, deps, usage_limits
+        return user_prompt, message_history, deps, usage_limits
 
     async def _process_message(
         self,
         message: Union[str, List[Dict[str, str]]],
-        session_id: Optional[str] = None,
+        session_id: str,
         stream: bool = False,
     ) -> AsyncIterator[str]:
         """Yields content chunks (streaming) or single complete response."""
-        session_id, user_prompt, message_history, deps, usage_limits = await self._prepare_run(
+        user_prompt, message_history, deps, usage_limits = await self._prepare_run(
             message, session_id
         )
         logger.debug(f"Processing message for session {session_id}, streaming={stream}")
@@ -411,7 +411,7 @@ class AgentServer:
         self,
         messages: list,
         model_name: str,
-        session_id: Optional[str] = None,
+        session_id: str,
         parent_ctx: Optional[Any] = None,
     ) -> JSONResponse:
         tracer = trace_api.get_tracer(SERVICE_NAME)
@@ -426,13 +426,15 @@ class AgentServer:
             async for chunk in self._process_message(messages, stream=False, session_id=session_id):
                 response_content += chunk
 
-            return JSONResponse(_build_chat_response(model_name, response_content))
+            return JSONResponse(
+                _build_chat_response(model_name, response_content, session_id=session_id)
+            )
 
     async def _stream_chat_completion(
         self,
         messages: list,
         model_name: str,
-        session_id: Optional[str] = None,
+        session_id: str,
         parent_ctx: Optional[Any] = None,
     ) -> StreamingResponse:
         span_attrs = self._build_span_attrs(session_id)
@@ -449,8 +451,6 @@ class AgentServer:
                 attributes=span_attrs,
             ):
                 try:
-                    # chat_id: per-completion ID (OpenAI spec), distinct from session_id (cross-request memory)
-                    chat_id = f"chatcmpl-{uuid.uuid4().hex}"
                     created_at = int(time.time())
 
                     async for chunk in self._process_message(
@@ -458,11 +458,11 @@ class AgentServer:
                     ):
                         if chunk:
                             yield _build_streaming_chunk(
-                                chat_id, created_at, model_name, content=chunk
+                                session_id, created_at, model_name, content=chunk
                             )
 
                     yield _build_streaming_chunk(
-                        chat_id, created_at, model_name, finish_reason="stop"
+                        session_id, created_at, model_name, finish_reason="stop"
                     )
                     yield "data: [DONE]\n\n"
 

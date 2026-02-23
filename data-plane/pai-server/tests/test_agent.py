@@ -89,7 +89,7 @@ class TestAgentMessageProcessing:
         )
 
         response = ""
-        async for chunk in server._process_message("Hi there"):
+        async for chunk in server._process_message("Hi there", session_id="test"):
             response += chunk
 
         assert "Hello, world!" in response
@@ -131,7 +131,7 @@ class TestAgentMessageProcessing:
         ]
 
         response = ""
-        async for chunk in server._process_message(messages):
+        async for chunk in server._process_message(messages, session_id="test"):
             response += chunk
 
         assert "Array response" in response
@@ -147,7 +147,7 @@ class TestAgentMessageProcessing:
         )
 
         chunks = []
-        async for chunk in server._process_message("Hi", stream=True):
+        async for chunk in server._process_message("Hi", session_id="test", stream=True):
             chunks.append(chunk)
 
         full_response = "".join(chunks)
@@ -169,7 +169,7 @@ class TestAgentMemory:
         )
 
         response = ""
-        async for chunk in server._process_message("Hello"):
+        async for chunk in server._process_message("Hello", session_id="test"):
             response += chunk
 
         assert "No memory" in response
@@ -214,7 +214,7 @@ class TestMockModel:
             )
 
             response = ""
-            async for chunk in server._process_message("Test"):
+            async for chunk in server._process_message("Test", session_id="test"):
                 response += chunk
 
             assert "Hello from mock" in response
@@ -262,7 +262,7 @@ class TestMockModel:
                 return f"Echo: {message}"
 
             response = ""
-            async for chunk in server._process_message("Test tools"):
+            async for chunk in server._process_message("Test tools", session_id="test"):
                 response += chunk
 
             assert "Done with tools" in response
@@ -418,7 +418,7 @@ class TestNullMemory:
         )
 
         response_chunks = []
-        async for chunk in server._process_message("Hello!"):
+        async for chunk in server._process_message("Hello!", session_id="test"):
             response_chunks.append(chunk)
 
         response = "".join(response_chunks)
@@ -483,7 +483,7 @@ class TestMessageProcessing:
         )
 
         response = ""
-        async for chunk in server._process_message("Hello agent!"):
+        async for chunk in server._process_message("Hello agent!", session_id="test"):
             response += chunk
 
         assert "Test response" in response

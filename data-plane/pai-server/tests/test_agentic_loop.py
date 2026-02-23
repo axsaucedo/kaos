@@ -67,7 +67,7 @@ class TestToolCallExecution:
             return f"echo: {message}"
 
         response = ""
-        async for chunk in server._process_message("Say hello"):
+        async for chunk in server._process_message("Say hello", session_id="test"):
             response += chunk
 
         assert "Tool returned: hello" in response
@@ -104,7 +104,7 @@ class TestToolCallExecution:
             return str(a + b)
 
         response = ""
-        async for chunk in server._process_message("Add 5 and 3"):
+        async for chunk in server._process_message("Add 5 and 3", session_id="test"):
             response += chunk
 
         assert received_args["a"] == 5
@@ -157,7 +157,7 @@ class TestToolCallExecution:
             return "step two done"
 
         response = ""
-        async for chunk in server._process_message("Do both steps"):
+        async for chunk in server._process_message("Do both steps", session_id="test"):
             response += chunk
 
         assert steps_executed == ["one", "two"]
@@ -192,7 +192,7 @@ class TestToolCallExecution:
             return "again"
 
         response = ""
-        async for chunk in server._process_message("Go"):
+        async for chunk in server._process_message("Go", session_id="test"):
             response += chunk
 
         # Should have been stopped — call_count limited by max_steps
@@ -250,7 +250,7 @@ class TestDelegation:
         mock_process = AsyncMock(return_value="Processed data successfully")
         with patch.object(sub, "process_message", mock_process):
             response = ""
-            async for chunk in server._process_message("Delegate to worker"):
+            async for chunk in server._process_message("Delegate to worker", session_id="test"):
                 response += chunk
 
             assert "Worker processed the data" in response
@@ -510,7 +510,7 @@ class TestMockModelEnvVar:
         server = make_test_server(name="mock-agent", instructions="Test agent")
 
         response = ""
-        async for chunk in server._process_message("Hi"):
+        async for chunk in server._process_message("Hi", session_id="test"):
             response += chunk
 
         assert "Hello from mock!" in response
@@ -541,7 +541,7 @@ class TestMockModelEnvVar:
             return f"echo: {message}"
 
         response = ""
-        async for chunk in server._process_message("Use echo tool"):
+        async for chunk in server._process_message("Use echo tool", session_id="test"):
             response += chunk
 
         assert "Tool executed successfully" in response
@@ -555,13 +555,13 @@ class TestMockModelEnvVar:
 
         # First request
         r1 = ""
-        async for chunk in server._process_message("First"):
+        async for chunk in server._process_message("First", session_id="test"):
             r1 += chunk
         assert "Response A" in r1
 
         # Second request should also get the same mock response
         r2 = ""
-        async for chunk in server._process_message("Second"):
+        async for chunk in server._process_message("Second", session_id="test"):
             r2 += chunk
         assert "Response A" in r2
 
@@ -576,7 +576,7 @@ class TestStreamingResponses:
         server = make_test_server(name="stream-agent", model=model, instructions="Test agent")
 
         chunks = []
-        async for chunk in server._process_message("Stream please", stream=True):
+        async for chunk in server._process_message("Stream please", session_id="test", stream=True):
             chunks.append(chunk)
 
         full_response = "".join(chunks)
@@ -673,7 +673,7 @@ class TestStreamingResponses:
             return f"echoed: {message}"
 
         chunks = []
-        async for chunk in server._process_message("Use echo", stream=True):
+        async for chunk in server._process_message("Use echo", session_id="test", stream=True):
             chunks.append(chunk)
 
         # First chunk should be progress event for tool call with step info
@@ -716,7 +716,7 @@ class TestStreamingResponses:
             return "done"
 
         chunks = []
-        async for chunk in server._process_message("Delegate", stream=True):
+        async for chunk in server._process_message("Delegate", session_id="test", stream=True):
             chunks.append(chunk)
 
         assert len(chunks) >= 2
@@ -736,7 +736,7 @@ class TestNoToolsAgent:
         server = make_test_server(name="simple-agent", model=model, instructions="Test agent")
 
         response = ""
-        async for chunk in server._process_message("Hello"):
+        async for chunk in server._process_message("Hello", session_id="test"):
             response += chunk
 
         assert "Direct response" in response
@@ -809,9 +809,9 @@ class TestMessageHistoryBridge:
             instructions="Test agent",
         )
 
-        async for _ in server._process_message("First"):
+        async for _ in server._process_message("First", session_id="test"):
             pass
-        async for _ in server._process_message("Second"):
+        async for _ in server._process_message("Second", session_id="test"):
             pass
 
         # Both calls should have similar message count (no history buildup)
@@ -832,7 +832,7 @@ class TestErrorHandling:
         server = make_test_server(name="error-agent", model=model, instructions="Test agent")
 
         response = ""
-        async for chunk in server._process_message("Break please"):
+        async for chunk in server._process_message("Break please", session_id="test"):
             response += chunk
 
         assert "error" in response.lower()
@@ -924,7 +924,7 @@ class TestUserPromptExtraction:
         server = make_test_server(name="extract-agent", model=model, instructions="Test agent")
 
         response = ""
-        async for chunk in server._process_message("Hello world"):
+        async for chunk in server._process_message("Hello world", session_id="test"):
             response += chunk
 
         assert len(response) > 0
@@ -941,7 +941,7 @@ class TestUserPromptExtraction:
         ]
 
         response = ""
-        async for chunk in server._process_message(messages):
+        async for chunk in server._process_message(messages, session_id="test"):
             response += chunk
 
         assert len(response) > 0
@@ -957,7 +957,7 @@ class TestUserPromptExtraction:
         ]
 
         response = ""
-        async for chunk in server._process_message(messages):
+        async for chunk in server._process_message(messages, session_id="test"):
             response += chunk
 
         assert len(response) > 0

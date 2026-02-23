@@ -218,7 +218,7 @@ class TestStringModeAgentIntegration:
             server = make_test_server(name="test-agent", model=model)
             server._mock_state = mock_state
             chunks = []
-            async for chunk in server._process_message("hello"):
+            async for chunk in server._process_message("hello", session_id="test"):
                 chunks.append(chunk)
             assert "Mock response" in "".join(chunks)
         finally:
