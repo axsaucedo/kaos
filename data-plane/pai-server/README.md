@@ -1,11 +1,11 @@
-<p align="center">
-  <img src="../../docs/public/pais.jpg" alt="PAIS Logo — A pie with a π symbol on top of a rocket" width="200">
-</p>
-
 # 🥧 PAIS: Pydantic AI Server
 
 <p align="center">
   <strong>Enterprise server wrapper for Pydantic AI agents on Kubernetes</strong>
+</p>
+
+<p align="center">
+  <img src="../../docs/public/pais-horizontal.jpg" alt="PAIS Logo — A pie with a π symbol on top of a rocket" width="300">
 </p>
 
 <p align="center">
