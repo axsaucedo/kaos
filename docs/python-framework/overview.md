@@ -1,6 +1,10 @@
-# Python Agent Framework Overview
+<p align="center">
+  <img src="/pais.jpg" alt="PAIS — Pydantic AI Server" width="180">
+</p>
 
-The Python agent framework provides the runtime components for AI agents, built on [Pydantic AI](https://ai.pydantic.dev/) as the core agent runtime.
+# PAIS: Pydantic AI Server
+
+The Python agent framework (**PAIS**) provides the runtime components for AI agents, built on [Pydantic AI](https://ai.pydantic.dev/) as the core agent runtime.
 
 ## Design Principles
 

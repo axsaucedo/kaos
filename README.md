@@ -204,6 +204,14 @@ flowchart TB
     agent --> model
 ```
 
+## Agent Runtime: Pydantic AI Server (PAIS)
+
+<p align="center">
+  <img src="docs/public/pais.jpg" alt="PAIS — Pydantic AI Server" width="150">
+</p>
+
+KAOS agents are powered by [**PAIS**](data-plane/pai-server/) — an enterprise server wrapper for [Pydantic AI](https://ai.pydantic.dev). PAIS adds OpenAI-compatible HTTP API, distributed memory, multi-agent delegation, A2A discovery, health probes, and OpenTelemetry instrumentation on top of Pydantic AI agents.
+
 ## Documentation
 
 | Resource | Link |
