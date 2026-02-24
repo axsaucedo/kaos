@@ -15,7 +15,7 @@ class AgentServer:
 |------|--------|-------------|
 | `/health` | GET | Kubernetes liveness probe |
 | `/ready` | GET | Kubernetes readiness probe |
-| `/.well-known/agent` | GET | A2A agent card discovery |
+| `/.well-known/agent.json` | GET | A2A agent card discovery |
 | `/v1/chat/completions` | POST | OpenAI-compatible chat (streaming + non-streaming) |
 | `/memory/events` | GET | List memory events |
 | `/memory/sessions` | GET | List memory sessions |
@@ -36,12 +36,12 @@ curl -X POST http://localhost:8000/v1/chat/completions \
   -d '{"model": "agent", "messages": [{"role": "user", "content": "Hello!"}], "stream": true}'
 ```
 
-### GET /.well-known/agent
+### GET /.well-known/agent.json
 
-A2A agent card with name, description, skills (discovered from MCP tools), and capabilities:
+A2A-compliant agent card (v0.3.0) with name, description, skills (discovered from MCP tools), capabilities, and version:
 
 ```bash
-curl http://localhost:8000/.well-known/agent
+curl http://localhost:8000/.well-known/agent.json
 ```
 
 ### GET /memory/events

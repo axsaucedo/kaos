@@ -233,7 +233,7 @@ async def test_health_endpoint(test_client):
     assert response.json()["status"] == "healthy"
 
 async def test_agent_card(test_client):
-    response = await test_client.get("/.well-known/agent")
+    response = await test_client.get("/.well-known/agent.json")
     assert response.status_code == 200
     card = response.json()
     assert "name" in card

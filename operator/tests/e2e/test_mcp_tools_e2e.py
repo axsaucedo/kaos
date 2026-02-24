@@ -190,13 +190,13 @@ async def test_agent_with_mcp_tools_discovery(
         response = await client.get(f"{agent_url}/health")
         assert response.status_code == 200
 
-        # Verify agent card has tool_execution capability
-        response = await client.get(f"{agent_url}/.well-known/agent")
+        # Verify agent card has A2A-compliant format with skills
+        response = await client.get(f"{agent_url}/.well-known/agent.json")
         assert response.status_code == 200
         card = response.json()
-        assert (
-            "tool_execution" in card["capabilities"]
-        ), f"Expected tool_execution capability, got: {card['capabilities']}"
+        assert isinstance(
+            card["capabilities"], dict
+        ), f"Expected capabilities dict, got: {card['capabilities']}"
 
         # Verify agent discovered tools (shown in skills)
         skills = card.get("skills", [])
@@ -371,11 +371,11 @@ async def test_agent_multiple_mcp_servers(test_namespace: str, shared_modelapi: 
     assert response.status_code == 200
 
     async with httpx.AsyncClient(timeout=30.0) as client:
-        # Verify agent card has tool_execution capability
-        response = await client.get(f"{agent_url}/.well-known/agent")
+        # Verify agent card has A2A-compliant format
+        response = await client.get(f"{agent_url}/.well-known/agent.json")
         assert response.status_code == 200
         card = response.json()
-        assert "tool_execution" in card["capabilities"]
+        assert isinstance(card["capabilities"], dict)
 
         # Verify agent discovered tools from both servers
         skills = card.get("skills", [])

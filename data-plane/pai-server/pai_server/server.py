@@ -180,7 +180,7 @@ class AgentServer:
         async def ready():
             return self._probe_response("ready")
 
-        @self.app.get("/.well-known/agent")
+        @self.app.get("/.well-known/agent.json")
         async def agent_card():
             base_url = f"http://localhost:{self.settings.agent_port}"
             card = await self._get_agent_card(base_url)
@@ -287,32 +287,43 @@ class AgentServer:
         return {"agent.name": self.settings.agent_name, "session.id": session_id}
 
     async def _get_agent_card(self, base_url: str) -> AgentCard:
-        capabilities = ["message_processing", "task_execution"]
-        if self._mcp_servers or self._custom_tools:
-            capabilities.append("tool_execution")
-        if self._sub_agents:
-            capabilities.append("task_delegation")
+        from pai_server import __version__
+        from pai_server.serverutils import AgentCardSkill, AgentCardCapabilities
 
-        skills: list = list(self._custom_tools)
+        skills: list[AgentCardSkill] = [
+            AgentCardSkill(id=t["name"], **t) for t in self._custom_tools
+        ]
         for mcp_server in self._mcp_servers:
             try:
                 async with mcp_server:
                     tools = await mcp_server.list_tools()
                     skills.extend(
-                        {"name": t.name, "description": t.description or ""} for t in tools
+                        AgentCardSkill(id=t.name, name=t.name, description=t.description or "")
+                        for t in tools
                     )
             except Exception as e:
                 logger.warning(f"Failed to list tools from MCP server: {e}")
 
         skills.extend(
-            {"name": f"{DELEGATION_TOOL_PREFIX}{n}", "description": f"Delegate task to {n}"}
+            AgentCardSkill(
+                id=f"{DELEGATION_TOOL_PREFIX}{n}",
+                name=f"{DELEGATION_TOOL_PREFIX}{n}",
+                description=f"Delegate task to {n}",
+            )
             for n in self._sub_agents
+        )
+
+        capabilities = AgentCardCapabilities(
+            streaming=True,
+            push_notifications=False,
+            state_transition_history=False,
         )
 
         return AgentCard(
             name=self.settings.agent_name,
             description=self.settings.agent_description,
             url=base_url,
+            version=__version__,
             skills=skills,
             capabilities=capabilities,
         )

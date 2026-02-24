@@ -174,8 +174,8 @@ def multi_agent_cluster():
             "MODEL_API_URL": os.getenv("MODEL_API_URL", "http://localhost:11434/v1"),
             "MODEL_NAME": os.getenv("MODEL_NAME", "smollm2:135m"),
             "PEER_AGENTS": "worker-1,worker-2",
-            "PEER_AGENT_WORKER_1_CARD_URL": "http://localhost:8012/.well-known/agent",
-            "PEER_AGENT_WORKER_2_CARD_URL": "http://localhost:8013/.well-known/agent",
+            "PEER_AGENT_WORKER_1_CARD_URL": "http://localhost:8012",
+            "PEER_AGENT_WORKER_2_CARD_URL": "http://localhost:8013",
             "AGENT_LOG_LEVEL": "INFO",
         },
     }

@@ -2,7 +2,7 @@
 
 Tests the agent server running in Kubernetes via Gateway API:
 - Health/Ready endpoints
-- Agent card at /.well-known/agent
+- Agent card at /.well-known/agent.json
 - Task invocation with memory verification
 - Chat completions
 """
@@ -65,12 +65,13 @@ async def test_agent_health_discovery_and_invocation(test_namespace: str):
         assert response.json()["status"] == "ready"
 
         # 3. Agent card
-        response = await client.get(f"{agent_base}/.well-known/agent")
+        response = await client.get(f"{agent_base}/.well-known/agent.json")
         assert response.status_code == 200
         card = response.json()
         assert "name" in card
         assert "capabilities" in card
-        assert "message_processing" in card["capabilities"]
+        assert isinstance(card["capabilities"], dict)
+        assert card["capabilities"]["streaming"] is True
 
         # 4. Chat completions (OpenAI-compatible)
         response = await client.post(

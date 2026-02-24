@@ -5,8 +5,10 @@ import json
 import time
 import logging
 from typing import Dict, Any, List, Literal, Optional, Union, TYPE_CHECKING
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 
+from pydantic import BaseModel, ConfigDict
+from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
 import httpx
 
@@ -46,18 +48,43 @@ class _MockResponseState:
         self.responses = list(self.template)
 
 
-@dataclass
-class AgentCard:
-    """Agent discovery card for A2A protocol."""
+class AgentCardCapabilities(BaseModel):
+    """A2A agent card capabilities."""
 
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+    streaming: bool = True
+    push_notifications: bool = False
+    state_transition_history: bool = False
+
+
+class AgentCardSkill(BaseModel):
+    """A2A agent card skill."""
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+    id: str
+    name: str
+    description: str
+    tags: list[str] = []
+    input_modes: list[str] = ["application/json"]
+    output_modes: list[str] = ["application/json"]
+
+
+class AgentCard(BaseModel):
+    """A2A-compliant agent discovery card."""
+
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
     name: str
     description: str
     url: str
-    skills: List[Dict[str, Any]]
-    capabilities: List[str]
+    version: str
+    protocol_version: str = "0.3.0"
+    skills: list[AgentCardSkill] = []
+    capabilities: AgentCardCapabilities = AgentCardCapabilities()
+    default_input_modes: list[str] = ["application/json"]
+    default_output_modes: list[str] = ["application/json"]
 
-    def to_dict(self) -> Dict[str, Any]:
-        return asdict(self)
+    def to_dict(self) -> dict:
+        return self.model_dump(by_alias=True)
 
 
 class RemoteAgent:
@@ -84,15 +111,16 @@ class RemoteAgent:
     async def _init(self) -> bool:
         """Fetch agent card and activate. Returns True if successful."""
         try:
-            response = await self._client.get(f"{self.card_url}/.well-known/agent")
+            response = await self._client.get(f"{self.card_url}/.well-known/agent.json")
             response.raise_for_status()
             data = response.json()
             self.agent_card = AgentCard(
                 name=data.get("name", self.name),
                 description=data.get("description", ""),
                 url=self.card_url,
-                skills=data.get("skills", []),
-                capabilities=data.get("capabilities", []),
+                version=data.get("version", "unknown"),
+                skills=[AgentCardSkill(**s) for s in data.get("skills", [])],
+                capabilities=AgentCardCapabilities(**data.get("capabilities", {})),
             )
             self._active = True
             logger.info(f"RemoteAgent {self.name} active: {self.agent_card.description}")

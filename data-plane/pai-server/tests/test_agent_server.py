@@ -174,10 +174,12 @@ class TestSingleAgentServer:
         assert ready["status"] == "ready"
 
         # 2. Agent card discovery
-        card = httpx.get(f"{url}/.well-known/agent").json()
+        card = httpx.get(f"{url}/.well-known/agent.json").json()
         assert card["name"] == "test-agent"
-        assert "message_processing" in card["capabilities"]
+        assert isinstance(card["capabilities"], dict)
+        assert card["capabilities"]["streaming"] is True
         assert "skills" in card
+        assert "protocolVersion" in card
 
         # 3. Chat completions (OpenAI-compatible)
         invoke_resp = httpx.post(
@@ -303,15 +305,16 @@ class TestMultiAgentCluster:
             assert health["name"] == name
 
             # Agent card
-            card = httpx.get(f"{url}/.well-known/agent").json()
+            card = httpx.get(f"{url}/.well-known/agent.json").json()
             assert card["name"] == name
-            assert "message_processing" in card["capabilities"]
+            assert isinstance(card["capabilities"], dict)
 
-        # Coordinator should have delegation capability
+        # Coordinator should have delegation skills
         coord_card = httpx.get(
-            f"{multi_agent_cluster['urls']['coordinator']}/.well-known/agent"
+            f"{multi_agent_cluster['urls']['coordinator']}/.well-known/agent.json"
         ).json()
-        assert "task_delegation" in coord_card["capabilities"]
+        delegation_skills = [s for s in coord_card["skills"] if "delegate_to_" in s["name"]]
+        assert len(delegation_skills) > 0
 
         logger.info("✓ All agents discoverable")
 
@@ -439,7 +442,7 @@ class TestMultiAgentCluster:
         assert success
         assert remote.agent_card is not None
         assert remote.agent_card.name == "worker-1"
-        assert "message_processing" in remote.agent_card.capabilities
+        assert remote.agent_card.capabilities.streaming is True
 
         # process_message - now takes messages list with task-delegation role
         response = await remote.process_message(

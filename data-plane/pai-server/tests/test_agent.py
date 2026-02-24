@@ -15,7 +15,7 @@ from pydantic_ai.messages import ModelResponse as PydanticModelResponse, TextPar
 from pydantic_ai import Agent as PydanticAgent
 
 from tests.helpers import make_test_server
-from pai_server.serverutils import AgentCard, RemoteAgent
+from pai_server.serverutils import AgentCard, AgentCardSkill, AgentCardCapabilities, RemoteAgent
 from pai_server.memory import LocalMemory, NullMemory, RedisMemory
 
 logger = logging.getLogger(__name__)
@@ -57,14 +57,20 @@ class TestAgentCreationAndCard:
         assert card.name == "test-agent"
         assert card.description == "Test Agent Description"
         assert card.url == "http://localhost:8000"
-        assert "message_processing" in card.capabilities
-        assert "task_execution" in card.capabilities
+        assert card.version is not None
+        assert card.protocol_version == "0.3.0"
+        assert isinstance(card.capabilities, AgentCardCapabilities)
+        assert card.capabilities.streaming is True
 
         card_dict = card.to_dict()
         assert "name" in card_dict
         assert "description" in card_dict
         assert "url" in card_dict
         assert "skills" in card_dict
+        assert "protocolVersion" in card_dict
+        assert "capabilities" in card_dict
+        assert isinstance(card_dict["capabilities"], dict)
+        assert card_dict["capabilities"]["streaming"] is True
 
     @pytest.mark.asyncio
     async def test_agent_creation_requires_model_source(self):
@@ -279,15 +285,23 @@ class TestAgentCard:
             name="test",
             description="Test agent",
             url="http://localhost:8000",
-            skills=[{"name": "echo", "description": "Echo tool"}],
-            capabilities=["message_processing"],
+            version="0.1.0",
+            skills=[AgentCardSkill(id="echo", name="echo", description="Echo tool")],
+            capabilities=AgentCardCapabilities(streaming=True),
         )
         d = card.to_dict()
         assert d["name"] == "test"
         assert d["description"] == "Test agent"
         assert d["url"] == "http://localhost:8000"
+        assert d["version"] == "0.1.0"
+        assert d["protocolVersion"] == "0.3.0"
         assert len(d["skills"]) == 1
-        assert d["capabilities"] == ["message_processing"]
+        assert d["skills"][0]["id"] == "echo"
+        assert d["skills"][0]["name"] == "echo"
+        assert d["capabilities"]["streaming"] is True
+        assert d["capabilities"]["pushNotifications"] is False
+        assert "defaultInputModes" in d
+        assert "defaultOutputModes" in d
 
     @pytest.mark.asyncio
     async def test_agent_with_sub_agents(self):
@@ -311,7 +325,8 @@ class TestAgentCard:
         assert server._sub_agents["worker-2"] is sub_agent2
 
         card = await server._get_agent_card("http://localhost:8000")
-        assert "task_delegation" in card.capabilities
+        delegation_skills = [s for s in card.skills if "delegate_to_" in s.name]
+        assert len(delegation_skills) == 2
 
         await sub_agent1.close()
         await sub_agent2.close()

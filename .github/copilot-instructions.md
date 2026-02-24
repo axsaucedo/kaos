@@ -52,7 +52,7 @@ data-plane/
 ├── pai-server/        # Agent runtime (Pydantic AI, pytest, black, ty)
 │   ├── pai_server/             # AgentServer, tools, memory
 │   │   ├── server.py      # AgentServer, create_agent_server, routes
-│   │   ├── serverutils.py # AgentDeps, AgentCard, RemoteAgent, AgentServerSettings, model resolution
+│   │   ├── serverutils.py # AgentDeps, AgentCard (Pydantic), RemoteAgent, AgentServerSettings, model resolution
 │   │   ├── tools.py       # DelegationToolset, string-mode handler
 │   │   ├── memory.py      # Memory ABC, LocalMemory, RedisMemory, NullMemory
 │   │   └── telemetry.py   # OpenTelemetry instrumentation
@@ -89,7 +89,7 @@ tmp/                       # Local work files (gitignored)
 - `operator/controllers/*_controller.go`: Reconciliation logic
 - `operator/chart/`: Helm chart (generated from kustomize)
 - `data-plane/pai-server/pai_server/server.py`: AgentServer, create_agent_server, routes
-- `data-plane/pai-server/pai_server/serverutils.py`: AgentDeps, AgentCard, RemoteAgent, AgentServerSettings, model resolution
+- `data-plane/pai-server/pai_server/serverutils.py`: AgentDeps, AgentCard (Pydantic BaseModel, A2A-compliant), RemoteAgent, AgentServerSettings, model resolution
 - `data-plane/pai-server/pai_server/tools.py`: DelegationToolset (AbstractToolset), string-mode handler
 - `data-plane/pai-server/pai_server/memory.py`: Memory ABC + backends + build_message_history/store_pydantic_message
 

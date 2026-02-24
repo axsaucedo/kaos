@@ -29,7 +29,7 @@ data-plane/pai-server/
 flowchart TB
     subgraph server["AgentServer (FastAPI)"]
         health["GET /health, /ready"]
-        a2a["GET /.well-known/agent"]
+        a2a["GET /.well-known/agent.json"]
         chat["POST /v1/chat/completions"]
         mem_ep["GET /memory/events, /sessions"]
     end

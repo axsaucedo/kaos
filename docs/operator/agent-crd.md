@@ -293,7 +293,7 @@ agentNetwork:
 
 When `true`, creates a Service that exposes:
 - Port 8000
-- Endpoints: `/health`, `/ready`, `/.well-known/agent`, `/agent/invoke`, `/v1/chat/completions`
+- Endpoints: `/health`, `/ready`, `/.well-known/agent.json`, `/v1/chat/completions`
 
 #### agentNetwork.access
 

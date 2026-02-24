@@ -280,7 +280,7 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			return ctrl.Result{}, err
 		}
 
-		// Set endpoint for A2A (base URL only - clients append paths like /.well-known/agent)
+		// Set endpoint for A2A (base URL only - clients append paths like /.well-known/agent.json)
 		agent.Status.Endpoint = fmt.Sprintf("http://%s.%s.svc.cluster.local:8000", serviceName, agent.Namespace)
 
 		// Create HTTPRoute if Gateway API is enabled

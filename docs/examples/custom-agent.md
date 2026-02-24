@@ -281,7 +281,7 @@ for _ in range(30):
     time.sleep(1)
 
 # Check agent card
-response = httpx.get(f"{agent_url}/.well-known/agent", timeout=10.0)
+response = httpx.get(f"{agent_url}/.well-known/agent.json", timeout=10.0)
 assert response.status_code == 200, f"Agent card failed: {response.status_code}"
 card = response.json()
 skill_names = [s.get("name") for s in card.get("skills", [])]
@@ -327,7 +327,7 @@ print("SUCCESS: Tool events recorded in memory!")
 
 Custom agent images automatically include:
 - **Health/Ready probes** — `GET /health`, `GET /ready`
-- **A2A agent card** — `GET /.well-known/agent` with custom tool discovery
+- **A2A agent card** — `GET /.well-known/agent.json` with custom tool discovery
 - **Memory endpoints** — `GET /memory/events`, `GET /memory/sessions`
 - **OpenAI-compatible API** — `POST /v1/chat/completions`
 - **Session management** — `X-Session-ID` header support

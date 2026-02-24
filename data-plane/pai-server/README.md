@@ -26,7 +26,7 @@ PAIS wraps [Pydantic AI](https://ai.pydantic.dev) agents with production server 
 | **Distributed Memory** | Local, Redis, or NullMemory backends with session persistence |
 | **Multi-Agent Delegation** | Sub-agent orchestration via `DelegationToolset` |
 | **MCP Tool Integration** | Connect to MCP servers via Streamable HTTP |
-| **A2A Discovery** | `/.well-known/agent` card for agent-to-agent communication |
+| **A2A Discovery** | `/.well-known/agent.json` A2A-compliant card for agent-to-agent communication |
 | **Health Probes** | `/health` and `/ready` endpoints for Kubernetes |
 | **OpenTelemetry** | Tracing, metrics, and log correlation out of the box |
 | **String Mode** | Tool calling for models without native function calling |
@@ -104,7 +104,7 @@ All settings are environment variables (via `pydantic-settings`):
 │                                         │
 │  Routes: /v1/chat/completions           │
 │          /health  /ready                │
-│          /.well-known/agent             │
+│          /.well-known/agent.json        │
 │          /memory/events  /memory/sessions│
 └─────────────────────────────────────────┘
 ```

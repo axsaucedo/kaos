@@ -17,7 +17,7 @@ make format                     # Auto-format code
 
 ## Project Structure
 - `pai_server/server.py`: AgentServer, create_agent_server(), routes, _process_message(), logging
-- `pai_server/serverutils.py`: AgentDeps, AgentCard, RemoteAgent, AgentServerSettings, _resolve_model, response builders
+- `pai_server/serverutils.py`: AgentDeps, AgentCard (Pydantic BaseModel), AgentCardSkill, AgentCardCapabilities, RemoteAgent, AgentServerSettings, _resolve_model, response builders
 - `pai_server/tools.py`: DelegationToolset (AbstractToolset), execute_delegation, format_progress_event, build_string_mode_handler
 - `pai_server/memory.py`: Memory ABC, LocalMemory, RedisMemory, NullMemory + build_message_history/store_pydantic_message utilities
 - `pai_server/telemetry.py`: OpenTelemetry instrumentation (tracing, metrics, SERVICE_NAME)
@@ -109,7 +109,9 @@ make format                     # Auto-format code
 - `AgentDeps`: Per-run dependencies (session_id, memory) injected via RunContext
 - `DelegationToolset`: AbstractToolset that exposes sub-agents as delegate_to_ tools
 - `RemoteAgent`: HTTP client for sub-agent delegation (stores URL, optional AgentCard)
-- `AgentCard`: A2A discovery card (uses `asdict()` for serialization)
+- `AgentCard`: A2A-compliant discovery card (Pydantic BaseModel with `alias_generator=to_camel`, `.to_dict()` uses `model_dump(by_alias=True)`)
+- `AgentCardSkill`: A2A skill with id, name, description, tags, inputModes, outputModes
+- `AgentCardCapabilities`: A2A capabilities (streaming, pushNotifications, stateTransitionHistory)
 - `Memory`: ABC interface for LocalMemory, RedisMemory, NullMemory (includes `close()`)
 - `_MockResponseState`: Mutable mock response state shared via closure (workaround for ContextVar + FunctionModel issue)
 
@@ -163,7 +165,7 @@ Pydantic AI runs `FunctionModel` handlers in a copied context — `ContextVar` s
 ## API Endpoints
 - `GET /health`: Health probe
 - `GET /ready`: Readiness probe
-- `GET /.well-known/agent`: A2A agent card (discovers tools from MCP servers)
+- `GET /.well-known/agent.json`: A2A-compliant agent card (discovers tools from MCP servers)
 - `POST /v1/chat/completions`: OpenAI-compatible chat endpoint
 - `GET /memory/events?session_id=X`: Memory events for a session
 - `GET /memory/sessions`: List all memory sessions

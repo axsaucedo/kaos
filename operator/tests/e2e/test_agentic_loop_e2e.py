@@ -126,7 +126,7 @@ async def test_agentic_loop_config_applied(test_namespace: str, shared_modelapi:
         response = await client.get(f"{worker_url}/health")
         assert response.status_code == 200
 
-        response = await client.get(f"{worker_url}/.well-known/agent")
+        response = await client.get(f"{worker_url}/.well-known/agent.json")
         assert response.status_code == 200
         card = response.json()
         assert card["name"] == worker_name
@@ -375,14 +375,15 @@ async def test_coordinator_has_delegation_capability(
     await async_wait_for_healthy(coord_url)
 
     async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.get(f"{coord_url}/.well-known/agent")
+        response = await client.get(f"{coord_url}/.well-known/agent.json")
         assert response.status_code == 200
         card = response.json()
 
-        # Verify delegation capability
+        # Verify delegation skills
+        delegation_skills = [s for s in card.get("skills", []) if "delegate_to_" in s["name"]]
         assert (
-            "task_delegation" in card["capabilities"]
-        ), f"Expected task_delegation in capabilities: {card['capabilities']}"
+            len(delegation_skills) > 0
+        ), f"Expected delegation skills in card: {card['skills']}"
 
 
 @pytest.mark.asyncio
