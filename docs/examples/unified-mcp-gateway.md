@@ -238,10 +238,10 @@ Check that the agent has discovered tools from the pctx gateway:
 kaos agent status gateway-agent
 ```
 
-Verify the output shows `tool_execution` capability:
+Verify the output shows A2A capabilities and skills:
 
 ```bash
-kaos agent status gateway-agent --json | grep -q "tool_execution" || exit 1
+kaos agent status gateway-agent --json | grep -q "streaming" || exit 1
 ```
 
 ## Step 7: Verify Memory Events
