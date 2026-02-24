@@ -151,7 +151,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # Copy framework source
 COPY data-plane/pai-server/pai_server/ /app/pai_server/
-COPY data-plane/pai-server
 
 # Copy custom agent
 COPY docs/examples/custom_server.py /app/custom_server.py

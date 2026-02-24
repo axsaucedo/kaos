@@ -124,7 +124,7 @@ The agent container image must be available in your cluster:
 ### Build Locally
 
 ```bash
-cd python
+cd data-plane/pai-server
 docker build -t kaos-agent:latest .
 ```
 

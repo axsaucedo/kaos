@@ -18,13 +18,13 @@ The Python agent framework (**PAIS**) provides the runtime components for AI age
 ```
 data-plane/pai-server/
 ├── pai_server/
-│   ├── client.py      # Agent (wraps pydantic_ai.Agent), RemoteAgent, AgentCard
-│   ├── server.py      # AgentServer, HTTP endpoints, env-var configuration
-│   └── memory.py      # LocalMemory, RedisMemory, NullMemory
-├── telemetry/
-│   └── manager.py     # OpenTelemetry tracing, metrics, context propagation
-├── tests/             # Test suite (75+ unit tests)
-└── Dockerfile         # Container image
+│   ├── server.py       # AgentServer, create_agent_server(), HTTP routes
+│   ├── serverutils.py  # AgentDeps, AgentCard, RemoteAgent, AgentServerSettings
+│   ├── tools.py        # DelegationToolset, string-mode handler
+│   ├── memory.py       # LocalMemory, RedisMemory, NullMemory
+│   └── telemetry.py    # OpenTelemetry tracing, metrics, context propagation
+├── tests/              # Test suite (96+ unit tests)
+└── Dockerfile          # Container image
 ```
 
 ## Component Relationships

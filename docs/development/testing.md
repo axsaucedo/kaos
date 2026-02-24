@@ -5,13 +5,14 @@ How to run and write tests for the KAOS.
 ## Test Structure
 
 ```
-python/tests/               # Python framework tests (34 tests)
-├── conftest.py             # Pytest fixtures
-├── mock_model_server.py    # Mock LLM server for testing
-├── test_agent.py           # Agent class tests
-├── test_agent_server.py    # Server endpoint tests
-├── test_agentic_loop.py    # Agentic loop tests
-└── test_mcptools.py        # MCP server/client tests
+data-plane/pai-server/tests/   # Python framework tests (96+ tests)
+├── conftest.py                # Pytest fixtures
+├── helpers.py                 # Test helpers (make_test_server)
+├── test_agent.py              # Agent class tests
+├── test_agent_server.py       # Server endpoint tests
+├── test_agentic_loop.py       # Agentic loop tests
+├── test_string_mode.py        # String-mode tool calling tests
+└── test_telemetry.py          # OpenTelemetry tests
 
 operator/controllers/integration/  # Go integration tests (8 tests with envtest)
 ├── suite_test.go               # Test suite setup with envtest
@@ -29,7 +30,7 @@ operator/tests/e2e/         # Kubernetes E2E tests (14 tests)
 
 ```bash
 # Python tests
-cd python && source .venv/bin/activate && python -m pytest tests/ -v
+cd data-plane/pai-server && source .venv/bin/activate && python -m pytest tests/ -v
 
 # Go integration tests
 cd operator && make test
@@ -41,7 +42,7 @@ cd operator/tests && source .venv/bin/activate && make test
 ## Running Python Tests
 
 ```bash
-cd python
+cd data-plane/pai-server
 source .venv/bin/activate
 
 # Run all tests
@@ -161,54 +162,49 @@ async def test_tool_call():
 
 ```python
 import pytest
-from pai_server.client import Agent
-from modelapi.client import ModelAPI
+from tests.helpers import make_test_server
 
 @pytest.fixture
-def agent():
-    model_api = ModelAPI(
-        model="test",
-        api_base="http://localhost:8099"
-    )
-    return Agent(
-        name="test-agent",
-        model_api=model_api,
-        max_steps=3,
+def server():
+    return make_test_server(
+        mock_responses=["Hello!"],
+        agent_name="test-agent",
     )
 
-async def test_max_steps_reached(agent):
-    # Mock that always returns tool call (infinite loop)
-    mock = '{"tool_calls": [{"name": "echo", "arguments": {"text": "test"}}]}'
-    
-    responses = []
-    async for chunk in agent.process_message("test"):
-        responses.append(chunk)
-    
-    # Should hit max steps
-    assert "maximum reasoning steps" in "".join(responses).lower()
+async def test_basic_response(server):
+    """Use DEBUG_MOCK_RESPONSES for deterministic testing."""
+    from httpx import AsyncClient
+    async with AsyncClient(app=server.app, base_url="http://test") as client:
+        response = await client.post("/v1/chat/completions", json={
+            "model": "test",
+            "messages": [{"role": "user", "content": "Hello"}],
+        })
+        assert response.status_code == 200
+        assert "Hello!" in response.json()["choices"][0]["message"]["content"]
 ```
 
 ### Testing Memory Events
 
 ```python
-async def test_memory_events():
-    agent = Agent(name="test", model_api=model_api)
-    
-    # Process a message
-    session_id = None
-    async for _ in agent.process_message("Hello"):
-        pass
-    
-    # Get session ID from memory
-    sessions = await agent.memory.list_sessions()
-    session_id = sessions[0]
-    
-    # Verify events
-    events = await agent.memory.get_session_events(session_id)
-    
-    event_types = [e.event_type for e in events]
-    assert "user_message" in event_types
-    assert "agent_response" in event_types
+async def test_memory_events(server):
+    from httpx import AsyncClient
+    async with AsyncClient(app=server.app, base_url="http://test") as client:
+        await client.post("/v1/chat/completions", json={
+            "model": "test",
+            "messages": [{"role": "user", "content": "Hello"}],
+        })
+
+        # Verify sessions
+        sessions = await client.get("/memory/sessions")
+        session_list = sessions.json()["sessions"]
+        assert len(session_list) > 0
+
+        # Verify events
+        sid = session_list[0]
+        events = await client.get(f"/memory/events?session_id={sid}")
+        event_types = [e["event_type"] for e in events.json()["events"]]
+        assert "user_message" in event_types
+        assert "agent_response" in event_types
 ```
 
 ### Testing HTTP Endpoints
@@ -216,14 +212,11 @@ async def test_memory_events():
 ```python
 import pytest
 from httpx import AsyncClient
-from pai_server.server import AgentServer
-from pai_server.client import Agent
+from pai_server.server import create_agent_server
 
 @pytest.fixture
 async def test_client():
-    agent = Agent(name="test", model_api=model_api)
-    server = AgentServer(agent, port=8000)
-    
+    server = create_agent_server()
     async with AsyncClient(app=server.app, base_url="http://test") as client:
         yield client
 
@@ -402,11 +395,11 @@ jobs:
         python-version: '3.12'
     - name: Install dependencies
       run: |
-        cd python
+        cd data-plane/pai-server
         pip install -e ".[dev]"
     - name: Run tests
       run: |
-        cd python
+        cd data-plane/pai-server
         pytest tests/ -v
 ```
 

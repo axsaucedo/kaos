@@ -46,7 +46,7 @@ pip install pai-server
 from pai_server.server import create_agent_server
 
 server = create_agent_server()
-app = server.build_app()
+app = server.app
 ```
 
 ```bash
@@ -67,7 +67,7 @@ def greet(name: str) -> str:
     return f"Hello, {name}!"
 
 server = create_agent_server(custom_agent=agent)
-app = server.build_app()
+app = server.app
 ```
 
 ## Configuration
@@ -79,7 +79,7 @@ All settings are environment variables (via `pydantic-settings`):
 | `AGENT_NAME` | ✅ | Agent name |
 | `MODEL_API_URL` | ✅ | LLM API base URL |
 | `MODEL_NAME` | ✅ | Model identifier |
-| `AGENT_SYSTEM_PROMPT` | | System prompt |
+| `AGENT_INSTRUCTIONS` | | System prompt |
 | `AGENT_SUB_AGENTS` | | Sub-agents: `name:url,name:url` |
 | `MCP_SERVERS` | | Comma-separated MCP server names |
 | `MCP_SERVER_<NAME>_URL` | | URL for each MCP server |

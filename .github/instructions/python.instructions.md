@@ -35,7 +35,7 @@ make format                     # Auto-format code
 | `AGENT_NAME` | Agent name (required) |
 | `MODEL_API_URL` | LLM API base URL (required) |
 | `MODEL_NAME` | Model name (required) |
-| `AGENT_SYSTEM_PROMPT` | System prompt for the agent |
+| `AGENT_INSTRUCTIONS` | System prompt for the agent |
 | `AGENT_SUB_AGENTS` | Direct format: `"name:url,name:url"` |
 | `AGENT_DESCRIPTION` | Agent description for A2A card |
 | `MCP_SERVERS` | Comma-separated MCP server names |

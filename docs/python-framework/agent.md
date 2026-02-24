@@ -89,16 +89,13 @@ await agent.close()
 Sub-agents are registered as `delegate_to_{name}` tool functions on the Pydantic AI agent. The LLM decides when to delegate.
 
 ```python
-from pai_server.client import Agent, RemoteAgent
+# Delegation is configured via environment variables, not code imports.
+# The operator sets AGENT_SUB_AGENTS="worker:http://worker:8000" automatically.
+# In code, RemoteAgent handles sub-agent HTTP communication:
+from pai_server.serverutils import RemoteAgent
 
 worker = RemoteAgent(name="worker", card_url="http://worker:8000")
-coordinator = Agent(
-    name="coordinator",
-    model_api_url="http://ollama:11434",
-    model_name="llama3.2",
-    sub_agents=[worker],
-    instructions="Delegate tasks to worker when appropriate."
-)
+# AgentServer auto-registers delegate_to_worker tool via DelegationToolset
 ```
 
 ### Context Forwarding

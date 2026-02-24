@@ -153,6 +153,7 @@ class AgentServer:
         logger.info("AgentServer shutdown")
         for sub_agent in self._sub_agents.values():
             await sub_agent.close()
+        # TODO: Close MCP server connections (MCPServerStreamableHTTP) on shutdown
         await self.memory.close()
 
     def _log_startup_config(self):
@@ -182,6 +183,7 @@ class AgentServer:
 
         @self.app.get("/.well-known/agent.json")
         async def agent_card():
+            # TODO: Derive base_url from request.headers["host"] or make configurable
             base_url = f"http://localhost:{self.settings.agent_port}"
             card = await self._get_agent_card(base_url)
             return JSONResponse(card.to_dict())

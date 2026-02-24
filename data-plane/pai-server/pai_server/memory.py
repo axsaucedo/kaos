@@ -268,6 +268,7 @@ class LocalMemory(Memory):
     async def get_or_create_session(
         self, session_id: str, app_name: str = "agent", user_id: str = "user"
     ) -> str:
+        # TODO: Add asyncio.Lock to prevent race condition in concurrent requests
         if session_id not in self._sessions:
             await self.create_session(app_name, user_id, session_id)
             logger.debug(f"Created new session for provided ID: {session_id}")
@@ -500,6 +501,7 @@ class RedisMemory(Memory):
     async def get_or_create_session(
         self, session_id: str, app_name: str = "agent", user_id: str = "user"
     ) -> str:
+        # TODO: Use Redis SETNX for atomic check-and-create to prevent race condition
         exists = await self._redis.exists(self._session_key(session_id))
         if not exists:
             await self.create_session(app_name, user_id, session_id)
