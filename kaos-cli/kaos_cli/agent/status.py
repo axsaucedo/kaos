@@ -64,7 +64,7 @@ def status_command(
         for attempt in range(5):
             try:
                 response = httpx.get(
-                    f"http://localhost:{port}/.well-known/agent",
+                    f"http://localhost:{port}/.well-known/agent.json",
                     timeout=10.0,
                 )
                 if response.status_code == 200:
@@ -87,8 +87,12 @@ def status_command(
             typer.echo(f"Agent: {card.get('name', name)}")
             typer.echo(f"Version: {card.get('version', 'unknown')}")
             
-            capabilities = card.get("capabilities", [])
-            typer.echo(f"Capabilities: {', '.join(capabilities) if capabilities else 'none'}")
+            capabilities = card.get("capabilities", {})
+            if isinstance(capabilities, dict):
+                enabled = [k for k, v in capabilities.items() if v]
+                typer.echo(f"Capabilities: {', '.join(enabled) if enabled else 'none'}")
+            else:
+                typer.echo(f"Capabilities: {', '.join(capabilities) if capabilities else 'none'}")
             
             skills = card.get("skills", [])
             typer.echo(f"Skills: {len(skills)} discovered")

@@ -51,7 +51,7 @@ docker build -t "${REGISTRY}/kaos-operator:${OPERATOR_TAG}" "${OPERATOR_ROOT}/"
 
 # Build agent runtime
 echo "Building agent runtime image..."
-docker build -t "${REGISTRY}/kaos-agent:${AGENT_TAG}" "${PROJECT_ROOT}/data-plane/kaos-framework/"
+docker build -t "${REGISTRY}/kaos-agent:${AGENT_TAG}" "${PROJECT_ROOT}/data-plane/pai-server/"
 
 # Tag same image for MCP server (they use the same base)
 docker tag "${REGISTRY}/kaos-agent:${AGENT_TAG}" "${REGISTRY}/kaos-mcp-server:${AGENT_TAG}"

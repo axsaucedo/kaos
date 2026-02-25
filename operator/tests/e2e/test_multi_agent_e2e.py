@@ -146,17 +146,20 @@ async def test_multi_agent_deployment_and_discovery(
             assert response.json()["status"] == "healthy"
 
             # Agent card
-            response = await client.get(f"{url}/.well-known/agent")
+            response = await client.get(f"{url}/.well-known/agent.json")
             assert response.status_code == 200
             card = response.json()
             assert card["name"] == name
-            assert "message_processing" in card["capabilities"]
+            assert isinstance(card["capabilities"], dict)
+            assert card["capabilities"]["streaming"] is True
+            assert "protocolVersion" in card
 
-        # Coordinator should have delegation capability
+        # Coordinator should have delegation skills
         coord_url = gateway_url(test_namespace, "agent", coord_name)
-        response = await client.get(f"{coord_url}/.well-known/agent")
+        response = await client.get(f"{coord_url}/.well-known/agent.json")
         card = response.json()
-        assert "task_delegation" in card["capabilities"]
+        delegation_skills = [s for s in card["skills"] if "delegate_to_" in s["name"]]
+        assert len(delegation_skills) > 0
 
 
 @pytest.mark.asyncio

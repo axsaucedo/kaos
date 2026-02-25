@@ -1,238 +1,128 @@
 # AgentServer
 
-The AgentServer class provides a FastAPI server that exposes agent functionality via HTTP endpoints.
+The AgentServer wraps a KAOS Agent in a FastAPI application with OpenAI-compatible chat API, A2A discovery, memory endpoints, and Kubernetes probes.
 
 ## Class Definition
 
 ```python
 class AgentServer:
-    def __init__(
-        self,
-        agent: Agent,
-        port: int = 8000,
-        debug_memory_endpoints: bool = False
-    )
+    def __init__(self, agent: Agent, settings: AgentServerSettings)
 ```
-
-### Parameters
-
-| Parameter | Type | Required | Default | Description |
-|-----------|------|----------|---------|-------------|
-| `agent` | Agent | Yes | - | Agent instance to serve |
-| `port` | int | No | 8000 | Server port |
-| `debug_memory_endpoints` | bool | No | False | Enable `/memory/*` endpoints |
 
 ## Endpoints
 
-### Health Probes
+| Path | Method | Description |
+|------|--------|-------------|
+| `/health` | GET | Kubernetes liveness probe |
+| `/ready` | GET | Kubernetes readiness probe |
+| `/.well-known/agent.json` | GET | A2A agent card discovery |
+| `/v1/chat/completions` | POST | OpenAI-compatible chat (streaming + non-streaming) |
+| `/memory/events` | GET | List memory events |
+| `/memory/sessions` | GET | List memory sessions |
 
-#### GET /health
+### POST /v1/chat/completions
 
-Kubernetes liveness probe.
-
-```bash
-curl http://localhost:8000/health
-```
-
-```json
-{
-  "status": "healthy",
-  "name": "my-agent",
-  "timestamp": 1704067200
-}
-```
-
-#### GET /ready
-
-Kubernetes readiness probe.
+OpenAI-compatible chat endpoint. Supports both streaming and non-streaming:
 
 ```bash
-curl http://localhost:8000/ready
-```
-
-```json
-{
-  "status": "ready",
-  "name": "my-agent",
-  "timestamp": 1704067200
-}
-```
-
-### A2A Protocol
-
-#### GET /.well-known/agent
-
-Agent discovery endpoint (A2A protocol).
-
-```bash
-curl http://localhost:8000/.well-known/agent
-```
-
-```json
-{
-  "name": "my-agent",
-  "description": "A helpful assistant",
-  "url": "http://localhost:8000",
-  "skills": [
-    {
-      "name": "echo",
-      "description": "Echo the input text",
-      "parameters": {"text": {"type": "string"}}
-    }
-  ],
-  "capabilities": [
-    "message_processing",
-    "task_execution",
-    "tool_execution"
-  ]
-}
-```
-
-#### POST /agent/invoke
-
-Task invocation endpoint (A2A protocol).
-
-```bash
-curl -X POST http://localhost:8000/agent/invoke \
-  -H "Content-Type: application/json" \
-  -d '{"task": "Echo hello world"}'
-```
-
-```json
-{
-  "response": "Echo: hello world",
-  "status": "completed"
-}
-```
-
-### OpenAI-Compatible API
-
-#### POST /v1/chat/completions
-
-OpenAI-compatible chat completions endpoint.
-
-**Non-Streaming:**
-
-```bash
+# Non-streaming
 curl -X POST http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{
-    "model": "my-agent",
-    "messages": [{"role": "user", "content": "Hello!"}],
-    "stream": false
-  }'
-```
+  -d '{"model": "agent", "messages": [{"role": "user", "content": "Hello!"}]}'
 
-```json
-{
-  "id": "chatcmpl-abc123",
-  "object": "chat.completion",
-  "created": 1704067200,
-  "model": "my-agent",
-  "choices": [
-    {
-      "index": 0,
-      "message": {
-        "role": "assistant",
-        "content": "Hello! How can I help you?"
-      },
-      "finish_reason": "stop"
-    }
-  ],
-  "usage": {
-    "prompt_tokens": 0,
-    "completion_tokens": 0,
-    "total_tokens": 0
-  }
-}
-```
-
-**Streaming:**
-
-```bash
+# Streaming
 curl -X POST http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{
-    "model": "my-agent",
-    "messages": [{"role": "user", "content": "Hello!"}],
-    "stream": true
-  }'
+  -d '{"model": "agent", "messages": [{"role": "user", "content": "Hello!"}], "stream": true}'
 ```
 
-Returns Server-Sent Events (SSE):
+### GET /.well-known/agent.json
 
-```
-data: {"id":"chatcmpl-abc123","object":"chat.completion.chunk","choices":[{"delta":{"content":"Hello"},"finish_reason":null}]}
-
-data: {"id":"chatcmpl-abc123","object":"chat.completion.chunk","choices":[{"delta":{"content":"!"},"finish_reason":null}]}
-
-data: {"id":"chatcmpl-abc123","object":"chat.completion.chunk","choices":[{"delta":{},"finish_reason":"stop"}]}
-
-data: [DONE]
-```
-
-### Agent Delegation
-
-Delegation happens automatically via the agentic loop when the model triggers a `delegate_to_` tool call. The agent extracts the target agent name and invokes it via A2A protocol:
-
-```json
-{"tool_calls": [{"name": "delegate_to_worker-1", "arguments": {"task": "Process this data"}}]}
-```
-
-For deterministic testing, use `DEBUG_MOCK_RESPONSES` environment variable to control model responses.
-
-### Debug Endpoints
-
-Only available when `debug_memory_endpoints=True`.
-
-#### GET /memory/events
-
-List all memory events across sessions.
+A2A-compliant agent card (v0.3.0) with name, description, skills (discovered from MCP tools), capabilities, and version:
 
 ```bash
-curl http://localhost:8000/memory/events
+curl http://localhost:8000/.well-known/agent.json
 ```
 
-```json
-{
-  "agent": "my-agent",
-  "events": [
-    {
-      "event_id": "event_abc123",
-      "timestamp": "2024-12-31T12:00:00",
-      "event_type": "user_message",
-      "content": "Hello!",
-      "metadata": {}
-    }
-  ],
-  "total": 1
-}
-```
-
-#### GET /memory/sessions
-
-List all session IDs.
+### GET /memory/events
 
 ```bash
-curl http://localhost:8000/memory/sessions
+curl http://localhost:8000/memory/events?session_id=abc&limit=50
 ```
 
-```json
-{
-  "agent": "my-agent",
-  "sessions": ["session_abc123"],
-  "total": 1
-}
+## AgentServerSettings
+
+All configuration via environment variables:
+
+```python
+class AgentServerSettings(BaseSettings):
+    agent_name: str                    # AGENT_NAME (required)
+    model_api_url: str                 # MODEL_API_URL (required)
+    model_name: str                    # MODEL_NAME (required)
+    agent_description: str = "AI Agent"
+    agent_instructions: str = "You are a helpful assistant."
+    agent_port: int = 8000
+    agent_log_level: str = "INFO"
+    agent_access_log: bool = False
+
+    # Sub-agents
+    agent_sub_agents: str = ""         # "name:url,name:url"
+    peer_agents: str = ""              # "worker-1,worker-2" (K8s format)
+
+    # MCP servers
+    mcp_servers: str = ""              # "echo,calc"
+    # + MCP_SERVER_ECHO_URL, MCP_SERVER_CALC_URL
+
+    # Agentic loop
+    agentic_loop_max_steps: int = 5
+
+    # Memory
+    memory_enabled: bool = True
+    memory_type: str = "local"
+    memory_context_limit: int = 6
+    memory_max_sessions: int = 1000
+    memory_max_session_events: int = 500
+    memory_redis_url: str = ""
 ```
+
+### Sub-Agent Formats
+
+**Direct format** (`AGENT_SUB_AGENTS`):
+```bash
+export AGENT_SUB_AGENTS="worker-1:http://worker-1:8000,worker-2:http://worker-2:8000"
+```
+
+**Kubernetes format** (`PEER_AGENTS` + individual URLs):
+```bash
+export PEER_AGENTS="worker-1,worker-2"
+export PEER_AGENT_WORKER_1_CARD_URL="http://worker-1:8000"
+export PEER_AGENT_WORKER_2_CARD_URL="http://worker-2:8000"
+```
+
+### MCP Server Configuration
+
+```bash
+export MCP_SERVERS="echo,calc"
+export MCP_SERVER_ECHO_URL="http://echo-mcp:8000"
+export MCP_SERVER_CALC_URL="http://calc-mcp:8000"
+```
+
+URLs have `/mcp` auto-appended for Streamable HTTP transport.
 
 ## Factory Functions
 
+### get_app
+
+Lazy factory for uvicorn with `--factory`:
+
+```bash
+uvicorn pai_server.server:get_app --factory --host 0.0.0.0 --port 8000
+```
+
 ### create_agent_server
 
-Create server from settings with automatic sub-agent parsing.
-
 ```python
-from agent.server import create_agent_server, AgentServerSettings
+from pai_server.server import create_agent_server, AgentServerSettings
 
 # From environment variables
 server = create_agent_server()
@@ -240,129 +130,31 @@ server = create_agent_server()
 # With explicit settings
 settings = AgentServerSettings(
     agent_name="my-agent",
-    model_api_url="http://localhost:8000",
-    model_name="smollm2:135m"
+    model_api_url="http://ollama:11434",
+    model_name="llama3.2",
 )
 server = create_agent_server(settings)
 ```
 
-### create_app
-
-Create FastAPI app for uvicorn deployment.
-
-```python
-from agent.server import create_app
-
-app = create_app()
-```
-
-### get_app
-
-Lazy app factory for uvicorn with `--factory` flag.
-
-```bash
-uvicorn agent.server:get_app --factory --host 0.0.0.0 --port 8000
-```
-
-## AgentServerSettings
-
-Configuration via environment variables.
-
-```python
-class AgentServerSettings(BaseSettings):
-    # Required
-    agent_name: str
-    model_api_url: str
-    
-    # Optional with defaults
-    model_name: str = "smollm2:135m"
-    agent_description: str = "AI Agent"
-    agent_instructions: str = "You are a helpful assistant."
-    agent_port: int = 8000
-    agent_log_level: str = "INFO"
-    
-    # Sub-agents (direct format)
-    agent_sub_agents: str = ""  # "name:url,name:url"
-    
-    # Sub-agents (Kubernetes format)
-    peer_agents: str = ""  # "worker-1,worker-2"
-    # + PEER_AGENT_WORKER_1_CARD_URL env var
-    
-    # Agentic loop
-    agentic_loop_max_steps: int = 5
-    agentic_loop_enable_tools: bool = True
-    agentic_loop_enable_delegation: bool = True
-    
-    # Debug
-    agent_debug_memory_endpoints: bool = False
-```
-
-## Running the Server
-
-### Programmatic
-
-```python
-from agent.client import Agent
-from agent.server import AgentServer
-from modelapi.client import ModelAPI
-
-model_api = ModelAPI(model="smollm2:135m", api_base="http://localhost:8000")
-agent = Agent(name="my-agent", model_api=model_api)
-server = AgentServer(agent, port=8080)
-
-server.run(host="0.0.0.0")
-```
-
-### Via Environment Variables
-
-```bash
-export AGENT_NAME="my-agent"
-export MODEL_API_URL="http://localhost:8000"
-export AGENT_INSTRUCTIONS="You are helpful."
-
-uvicorn agent.server:get_app --factory --host 0.0.0.0 --port 8000
-```
-
-### Docker
-
-```dockerfile
-FROM python:3.12-slim
-
-WORKDIR /app
-COPY . .
-RUN pip install -e .
-
-CMD ["uvicorn", "agent.server:get_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
-```
-
 ## Lifecycle
 
-The server manages agent lifecycle:
+The server manages agent lifecycle via FastAPI lifespan:
 
 ```python
 @asynccontextmanager
 async def _lifespan(self, app: FastAPI):
-    logger.info("AgentServer startup")
     yield
-    logger.info("AgentServer shutdown")
-    await self.agent.close()  # Cleanup on shutdown
+    await self.agent.close()
 ```
 
-## Error Handling
+## OpenTelemetry
 
-All endpoints return appropriate HTTP status codes:
+When `OTEL_EXPORTER_OTLP_ENDPOINT` is set, the server automatically instruments:
+- HTTP server spans (FastAPI)
+- HTTP client spans (outgoing requests)
+- Custom agent spans (tool calls, delegation)
 
-| Status | Description |
-|--------|-------------|
-| 200 | Success |
-| 400 | Bad request (missing/invalid parameters) |
-| 404 | Not found (sub-agent not found for delegation) |
-| 500 | Internal error (processing failed) |
-
-Error response format:
-
-```json
-{
-  "detail": "Error message here"
-}
+```bash
+export OTEL_SERVICE_NAME="my-agent"
+export OTEL_EXPORTER_OTLP_ENDPOINT="http://jaeger:4318"
 ```

@@ -50,13 +50,13 @@ jobs:
         run: make test-unit
 
       - name: Install Python dependencies
-        working-directory: data-plane/kaos-framework
+        working-directory: data-plane/pai-server
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
       - name: Run Python tests
-        working-directory: data-plane/kaos-framework
+        working-directory: data-plane/pai-server
         run: python -m pytest tests/ -v
 
   # E2E tests (sharded)
@@ -86,6 +86,9 @@ jobs:
           - name: example-redis-memory
             files: "e2e/test_examples_e2e.py"
             pytest_filter: "test_redis_memory_example"
+          - name: example-custom-agent
+            files: "e2e/test_examples_e2e.py"
+            pytest_filter: "test_custom_agent_example"
     name: E2E (${{ matrix.shard.name }})
     steps:
       - name: Checkout
@@ -130,7 +133,7 @@ jobs:
       - name: Build agent image
         uses: docker/build-push-action@v6
         with:
-          context: ./data-plane/kaos-framework
+          context: ./data-plane/pai-server
           load: true
           tags: ${{ env.REGISTRY }}/kaos-agent:${{ env.AGENT_TAG }}
           cache-from: type=gha,scope=agent-e2e
@@ -178,6 +181,18 @@ jobs:
           cache-to: type=gha,scope=mcp-pctx-e2e,mode=max
           github-token: ${{ github.token }}
 
+      - name: Build custom agent example image
+        if: matrix.shard.name == 'example-custom-agent'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./examples/custom-agent/Dockerfile
+          load: true
+          tags: custom-agent:test
+          cache-from: type=gha,scope=custom-agent-e2e
+          cache-to: type=gha,scope=custom-agent-e2e,mode=max
+          github-token: ${{ github.token }}
+
       - name: Load images into KIND
         run: |
           # Load images in parallel for faster execution
@@ -190,6 +205,10 @@ jobs:
           kind load docker-image alpine/ollama:latest --name ${{ env.KIND_CLUSTER_NAME }} &
           kind load docker-image redis:7-alpine --name ${{ env.KIND_CLUSTER_NAME }} &
           wait
+
+      - name: Load custom agent image into KIND
+        if: matrix.shard.name == 'example-custom-agent'
+        run: kind load docker-image custom-agent:test --name ${{ env.KIND_CLUSTER_NAME }}
 
       - name: Install KAOS operator
         run: make -C operator kind-e2e-install-kaos IMAGE_TAG=${{ env.OPERATOR_TAG }} REGISTRY=${{ env.REGISTRY }}

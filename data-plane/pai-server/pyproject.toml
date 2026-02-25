@@ -1,15 +1,14 @@
 [project]
-name = "kaos-runtime"
+name = "pai-server"
 version = "0.2.8.dev0"
-description = "KAOS Runtime - K8s Agent Orchestration System"
+description = "PAIS - Pydantic AI Server for Kubernetes Agent Orchestration"
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
+    "pydantic-ai>=0.2.0",
     "fastapi>=0.104.0",
     "uvicorn>=0.24.0",
-    "litellm>=1.0.0",
-    "fastmcp>=1.0.0",
     "httpx>=0.25.0",
     "sse-starlette>=1.6.0",
     "redis>=5.0.0",
@@ -40,7 +39,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["server", "mcptools", "modelapi", "agent", "tests"]
+packages = ["pai_server"]
 
 [tool.black]
 line-length = 100

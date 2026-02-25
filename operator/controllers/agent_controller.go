@@ -280,7 +280,7 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			return ctrl.Result{}, err
 		}
 
-		// Set endpoint for A2A (base URL only - clients append paths like /.well-known/agent)
+		// Set endpoint for A2A (base URL only - clients append paths like /.well-known/agent.json)
 		agent.Status.Endpoint = fmt.Sprintf("http://%s.%s.svc.cluster.local:8000", serviceName, agent.Namespace)
 
 		// Create HTTPRoute if Gateway API is enabled
@@ -389,11 +389,18 @@ func (r *AgentReconciler) constructDeployment(agent *kaosv1alpha1.Agent, modelap
 		Containers: []corev1.Container{container},
 	}
 
-	// Apply podSpec override using strategic merge patch if provided
+	// Apply spec.container override using strategic merge patch
+	if agent.Spec.Container != nil {
+		containerPatch := containerOverrideToPodSpecPatch(*agent.Spec.Container)
+		if merged, err := util.MergePodSpec(basePodSpec, containerPatch); err == nil {
+			basePodSpec = merged
+		}
+	}
+
+	// Apply spec.podSpec override using strategic merge patch
 	finalPodSpec := basePodSpec
 	if agent.Spec.PodSpec != nil {
-		merged, err := util.MergePodSpec(basePodSpec, *agent.Spec.PodSpec)
-		if err == nil {
+		if merged, err := util.MergePodSpec(basePodSpec, *agent.Spec.PodSpec); err == nil {
 			finalPodSpec = merged
 		}
 	}
@@ -451,11 +458,6 @@ func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *
 				Value: agent.Spec.Config.Instructions,
 			})
 		}
-	}
-
-	// Add user-provided container env vars
-	if agent.Spec.Container != nil {
-		env = append(env, agent.Spec.Container.Env...)
 	}
 
 	// ModelAPI configuration
@@ -643,6 +645,30 @@ func (r *AgentReconciler) constructService(agent *kaosv1alpha1.Agent) *corev1.Se
 	}
 
 	return service
+}
+
+// containerOverrideToPodSpecPatch converts a ContainerOverride to a PodSpec patch
+// for strategic merge with the base container named "agent".
+func containerOverrideToPodSpecPatch(override kaosv1alpha1.ContainerOverride) corev1.PodSpec {
+	c := corev1.Container{Name: "agent"}
+	if override.Image != "" {
+		c.Image = override.Image
+	}
+	if len(override.Command) > 0 {
+		c.Command = override.Command
+	}
+	if len(override.Args) > 0 {
+		c.Args = override.Args
+	}
+	if override.Resources != nil {
+		c.Resources = *override.Resources
+	}
+	if len(override.Env) > 0 {
+		c.Env = override.Env
+	}
+	return corev1.PodSpec{
+		Containers: []corev1.Container{c},
+	}
 }
 
 // SetupWithManager sets up the controller with the Manager.

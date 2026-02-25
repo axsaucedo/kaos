@@ -113,7 +113,6 @@ kaos agent deploy coordinator \
     --instructions "You are a coordinator that delegates to specialist agents." \
     --mock-response '{"tool_calls": [{"id": "call_1", "name": "delegate_to_researcher", "arguments": {"task": "Research AI adoption trends in enterprises"}}]}' \
     --mock-response '{"tool_calls": [{"id": "call_2", "name": "delegate_to_analyst", "arguments": {"task": "Analyze the growth patterns from the research"}}]}' \
-    --mock-response "No more actions needed." \
     --mock-response "Based on input from my team: AI is growing with 40% YoY growth, especially in customer service automation." \
     --sub-agent researcher \
     --sub-agent analyst \

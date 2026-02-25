@@ -94,6 +94,7 @@ export default withMermaid(defineConfig({
         text: 'Examples',
         items: [
           { text: 'Custom MCP Server', link: '/examples/custom-mcp-server' },
+          { text: 'Custom Agent Image', link: '/examples/custom-agent' },
           { text: 'KAOS Monkey', link: '/examples/kaos-monkey' },
           { text: 'Redis Distributed Memory', link: '/examples/redis-memory' },
           { text: 'Unified MCP Code Mode', link: '/examples/unified-mcp-gateway' },
@@ -123,8 +124,7 @@ export default withMermaid(defineConfig({
               { text: 'Memory', link: '/python-framework/memory' }
             ]
           },
-          { text: 'MCP Tools', link: '/python-framework/mcp-tools' },
-          { text: 'Model API Client', link: '/python-framework/model-api' }
+          { text: 'MCP Tools', link: '/python-framework/mcp-tools' }
         ]
       },
       {

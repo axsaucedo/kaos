@@ -190,13 +190,13 @@ async def test_agent_with_mcp_tools_discovery(
         response = await client.get(f"{agent_url}/health")
         assert response.status_code == 200
 
-        # Verify agent card has tool_execution capability
-        response = await client.get(f"{agent_url}/.well-known/agent")
+        # Verify agent card has A2A-compliant format with skills
+        response = await client.get(f"{agent_url}/.well-known/agent.json")
         assert response.status_code == 200
         card = response.json()
-        assert (
-            "tool_execution" in card["capabilities"]
-        ), f"Expected tool_execution capability, got: {card['capabilities']}"
+        assert isinstance(
+            card["capabilities"], dict
+        ), f"Expected capabilities dict, got: {card['capabilities']}"
 
         # Verify agent discovered tools (shown in skills)
         skills = card.get("skills", [])
@@ -371,11 +371,11 @@ async def test_agent_multiple_mcp_servers(test_namespace: str, shared_modelapi: 
     assert response.status_code == 200
 
     async with httpx.AsyncClient(timeout=30.0) as client:
-        # Verify agent card has tool_execution capability
-        response = await client.get(f"{agent_url}/.well-known/agent")
+        # Verify agent card has A2A-compliant format
+        response = await client.get(f"{agent_url}/.well-known/agent.json")
         assert response.status_code == 200
         card = response.json()
-        assert "tool_execution" in card["capabilities"]
+        assert isinstance(card["capabilities"], dict)
 
         # Verify agent discovered tools from both servers
         skills = card.get("skills", [])
@@ -388,10 +388,10 @@ async def test_agent_multiple_mcp_servers(test_namespace: str, shared_modelapi: 
 async def test_agent_string_mode_tool_calling(
     test_namespace: str, shared_modelapi: str
 ):
-    """Test Agent with auto-detected string-mode calls MCP tools via text-based JSON.
+    """Test Agent calls MCP tools using string-mode tool calling.
 
-    Uses a model name that litellm recognizes as not supporting native function calling,
-    triggering string-mode tool calling with JSON action in content text.
+    String mode injects tool descriptions into the system prompt and parses
+    JSON tool calls from text responses instead of using native function calling.
     """
     task_id = f"STR_{int(time.time())}"
     mcp_name = "mcp-str-mode"
@@ -405,10 +405,19 @@ async def test_agent_string_mode_tool_calling(
     mcp_url = gateway_url(test_namespace, "mcp", mcp_name)
     await wait_for_mcp_server_ready(mcp_url)
 
-    # String-mode mock responses: tool call JSON, no-action text, final response
+    # String-mode mock: model returns tool call JSON as plain text
     mock_responses = [
-        json.dumps({"tool": "echo", "arguments": {"message": f"Task {task_id}"}}),
-        "No more actions needed.",
+        json.dumps(
+            {
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "name": "echo",
+                        "arguments": {"message": f"Task {task_id}"},
+                    }
+                ]
+            }
+        ),
         f"The echo tool returned result for task {task_id}.",
     ]
 
@@ -424,6 +433,7 @@ async def test_agent_string_mode_tool_calling(
                 "description": "String mode tool agent",
                 "instructions": "You have access to echo tool.",
                 "reasoningLoopMaxSteps": 5,
+                "toolCallMode": "string",
             },
             "container": {
                 "env": [
@@ -445,7 +455,7 @@ async def test_agent_string_mode_tool_calling(
     await async_wait_for_healthy(agent_url)
 
     async with httpx.AsyncClient(timeout=60.0) as client:
-        # Send user message - string-mode mock will trigger tool call via JSON in content
+        # Send user message - mock responses will trigger tool call
         response = await client.post(
             f"{agent_url}/v1/chat/completions",
             json={

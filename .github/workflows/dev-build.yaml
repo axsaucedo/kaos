@@ -5,7 +5,7 @@ on:
     branches: [main]
     paths:
       - 'operator/**'
-      - 'data-plane/kaos-framework/**'
+      - 'data-plane/pai-server/**'
       - 'data-plane/mcp-servers/**'
       - 'VERSION'
       - '.github/workflows/dev-build.yaml'

@@ -72,3 +72,9 @@ PROGRESS.md
 
 # Samples data (copied at build time from operator/config/samples)
 kaos-cli/kaos_cli/samples/data/*.yaml
+.obsidian/
+.planning/
+ROADMAP.md
+tmp/
+REPORT*
+PLAN*

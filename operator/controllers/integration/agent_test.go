@@ -105,7 +105,163 @@ var _ = Describe("Agent Controller", func() {
 		}, timeout, interval).Should(Succeed())
 	})
 
-	It("should apply podSpec overrides to agent deployment", func() {
+	It("should apply container override fields using strategic merge", func() {
+		modelAPIName := uniqueAgentName("merge-modelapi")
+		agentName := uniqueAgentName("merge-agent")
+
+		// Create ModelAPI first
+		modelAPI := &kaosv1alpha1.ModelAPI{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      modelAPIName,
+				Namespace: namespace,
+			},
+			Spec: kaosv1alpha1.ModelAPISpec{
+				Mode: kaosv1alpha1.ModelAPIModeProxy,
+				ProxyConfig: &kaosv1alpha1.ProxyConfig{
+					Models: []string{"mock-model"},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, modelAPI)).To(Succeed())
+		defer func() {
+			k8sClient.Delete(ctx, modelAPI)
+		}()
+
+		agent := &kaosv1alpha1.Agent{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      agentName,
+				Namespace: namespace,
+			},
+			Spec: kaosv1alpha1.AgentSpec{
+				ModelAPI:            modelAPIName,
+				Model:               "mock-model",
+				WaitForDependencies: boolPtr(false),
+				Config: &kaosv1alpha1.AgentConfig{
+					Description: "Agent with container override",
+				},
+				Container: &kaosv1alpha1.ContainerOverride{
+					Image:   "custom-agent:test",
+					Command: []string{"python", "main.py"},
+					Args:    []string{"--port", "8000"},
+					Resources: &corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("200m"),
+							corev1.ResourceMemory: resource.MustParse("256Mi"),
+						},
+					},
+					Env: []corev1.EnvVar{
+						{Name: "CUSTOM_VAR", Value: "custom-value"},
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, agent)).To(Succeed())
+		defer func() {
+			k8sClient.Delete(ctx, agent)
+		}()
+
+		// Verify Deployment is created with merged overrides
+		deployment := &appsv1.Deployment{}
+		Eventually(func() error {
+			return k8sClient.Get(ctx, types.NamespacedName{
+				Name:      fmt.Sprintf("agent-%s", agentName),
+				Namespace: namespace,
+			}, deployment)
+		}, timeout, interval).Should(Succeed())
+
+		container := deployment.Spec.Template.Spec.Containers[0]
+
+		// Image override
+		Expect(container.Image).To(Equal("custom-agent:test"))
+
+		// Command override
+		Expect(container.Command).To(Equal([]string{"python", "main.py"}))
+
+		// Args override
+		Expect(container.Args).To(Equal([]string{"--port", "8000"}))
+
+		// Resources override
+		Expect(container.Resources.Requests.Cpu().String()).To(Equal("200m"))
+		Expect(container.Resources.Requests.Memory().String()).To(Equal("256Mi"))
+
+		// Env: user env merged with operator env
+		envMap := make(map[string]string)
+		for _, env := range container.Env {
+			envMap[env.Name] = env.Value
+		}
+		Expect(envMap["CUSTOM_VAR"]).To(Equal("custom-value"))
+		Expect(envMap["AGENT_NAME"]).To(Equal(agentName))
+		Expect(envMap["MODEL_NAME"]).To(Equal("mock-model"))
+
+		// Probes preserved from base
+		Expect(container.LivenessProbe).NotTo(BeNil())
+		Expect(container.ReadinessProbe).NotTo(BeNil())
+
+		// Ports preserved from base
+		Expect(container.Ports).To(HaveLen(1))
+		Expect(container.Ports[0].ContainerPort).To(Equal(int32(8000)))
+	})
+
+	It("should allow container env to override operator env via strategic merge", func() {
+		modelAPIName := uniqueAgentName("envmerge-modelapi")
+		agentName := uniqueAgentName("envmerge-agent")
+
+		modelAPI := &kaosv1alpha1.ModelAPI{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      modelAPIName,
+				Namespace: namespace,
+			},
+			Spec: kaosv1alpha1.ModelAPISpec{
+				Mode: kaosv1alpha1.ModelAPIModeProxy,
+				ProxyConfig: &kaosv1alpha1.ProxyConfig{
+					Models: []string{"mock-model"},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, modelAPI)).To(Succeed())
+		defer func() {
+			k8sClient.Delete(ctx, modelAPI)
+		}()
+
+		agent := &kaosv1alpha1.Agent{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      agentName,
+				Namespace: namespace,
+			},
+			Spec: kaosv1alpha1.AgentSpec{
+				ModelAPI:            modelAPIName,
+				Model:               "mock-model",
+				WaitForDependencies: boolPtr(false),
+				Container: &kaosv1alpha1.ContainerOverride{
+					Env: []corev1.EnvVar{
+						{Name: "MODEL_API_URL", Value: "http://custom-endpoint:8080"},
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, agent)).To(Succeed())
+		defer func() {
+			k8sClient.Delete(ctx, agent)
+		}()
+
+		deployment := &appsv1.Deployment{}
+		Eventually(func() error {
+			return k8sClient.Get(ctx, types.NamespacedName{
+				Name:      fmt.Sprintf("agent-%s", agentName),
+				Namespace: namespace,
+			}, deployment)
+		}, timeout, interval).Should(Succeed())
+
+		container := deployment.Spec.Template.Spec.Containers[0]
+		envMap := make(map[string]string)
+		for _, env := range container.Env {
+			envMap[env.Name] = env.Value
+		}
+		// User's override should win via strategic merge
+		Expect(envMap["MODEL_API_URL"]).To(Equal("http://custom-endpoint:8080"))
+	})
+
+	It("should apply podSpec override after container override", func() {
 		modelAPIName := uniqueAgentName("podspec-modelapi")
 		agentName := uniqueAgentName("podspec-agent")
 

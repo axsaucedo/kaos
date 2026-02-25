@@ -1,14 +1,4 @@
-"""
-Agent memory and session management.
-
-Simple, clean implementation similar to Google ADK's InMemorySessionService.
-Provides session management, event logging, and context building for agents.
-
-Three implementations:
-- LocalMemory: Full in-memory storage with session/event limits
-- RedisMemory: Distributed storage backed by Redis
-- NullMemory: No-op implementation when memory is disabled
-"""
+"""Agent memory and session management with Local, Redis, and Null backends."""
 
 import json
 import uuid
@@ -33,7 +23,6 @@ class MemoryEvent:
     metadata: Dict[str, Any]
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert event to dictionary for serialization."""
         return {
             "event_id": self.event_id,
             "timestamp": self.timestamp.isoformat(),
@@ -44,7 +33,6 @@ class MemoryEvent:
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "MemoryEvent":
-        """Create event from dictionary."""
         return cls(
             event_id=data["event_id"],
             timestamp=datetime.fromisoformat(data["timestamp"]),
@@ -56,11 +44,7 @@ class MemoryEvent:
 
 @dataclass
 class SessionMemory:
-    """Represents a complete session with all its events.
-
-    Uses deque for automatic bounded storage - oldest events are automatically
-    evicted when max_events is reached.
-    """
+    """Complete session with bounded event storage (deque with maxlen)."""
 
     session_id: str
     user_id: str
@@ -70,7 +54,6 @@ class SessionMemory:
     updated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def to_dict(self) -> Dict[str, Any]:
-        """Convert session to dictionary for serialization."""
         return {
             "session_id": self.session_id,
             "user_id": self.user_id,
@@ -81,16 +64,172 @@ class SessionMemory:
         }
 
 
-class LocalMemory:
+class Memory(ABC):
+    """Abstract interface for all memory implementations."""
+
+    @abstractmethod
+    async def create_session(
+        self, app_name: str, user_id: str, session_id: Optional[str] = None
+    ) -> str: ...
+
+    @abstractmethod
+    async def get_session(self, session_id: str) -> Optional[SessionMemory]: ...
+
+    @abstractmethod
+    async def get_or_create_session(
+        self, session_id: str, app_name: str = "agent", user_id: str = "user"
+    ) -> str: ...
+
+    @abstractmethod
+    async def add_event(
+        self,
+        session_id: str,
+        event_or_type: Union[MemoryEvent, str],
+        content: Any = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> bool: ...
+
+    @abstractmethod
+    async def get_session_events(
+        self, session_id: str, event_types: Optional[List[str]] = None
+    ) -> List[MemoryEvent]: ...
+
+    @abstractmethod
+    async def list_sessions(self, user_id: Optional[str] = None) -> List[str]: ...
+
+    @abstractmethod
+    async def delete_session(self, session_id: str) -> bool: ...
+
+    def create_event(
+        self, event_type: str, content: Any, metadata: Optional[Dict[str, Any]] = None
+    ) -> MemoryEvent:
+        """Create a MemoryEvent with optional OTEL trace context."""
+        from pai_server.telemetry import is_otel_enabled, get_current_trace_context
+
+        event_metadata = metadata.copy() if metadata else {}
+
+        if is_otel_enabled():
+            trace_ctx = get_current_trace_context()
+            if trace_ctx:
+                event_metadata.update(trace_ctx)
+
+        return MemoryEvent(
+            event_id=f"event_{uuid.uuid4().hex[:8]}",
+            timestamp=datetime.now(timezone.utc),
+            event_type=event_type,
+            content=content,
+            metadata=event_metadata,
+        )
+
+    async def build_conversation_context(self, session_id: str, max_events: int = 20) -> str:
+        """Build a text conversation context from memory events."""
+        events = await self.get_session_events(session_id, ["user_message", "agent_response"])
+        recent_events = events[-max_events:] if len(events) > max_events else events
+
+        if not recent_events:
+            return ""
+
+        context_lines = []
+        for event in recent_events:
+            if event.event_type == "user_message":
+                context_lines.append(f"User: {event.content}")
+            elif event.event_type == "agent_response":
+                context_lines.append(f"Assistant: {event.content}")
+
+        return "\n".join(context_lines)
+
+    async def build_message_history(
+        self, session_id: str, context_limit: int = 6
+    ) -> Optional[list]:
+        """Build Pydantic AI message_history from stored KAOS events.
+
+        Excludes the latest prompt event (current user message) and respects context_limit.
+        """
+        from pydantic_ai.messages import (
+            ModelRequest,
+            ModelResponse as PydanticModelResponse,
+            TextPart,
+            UserPromptPart,
+        )
+
+        events = await self.get_session_events(session_id)
+        if not events or len(events) <= 1:
+            return None
+
+        prompt_types = ("user_message", "task_delegation_received")
+        exclude_idx = next(
+            (i for i in range(len(events) - 1, -1, -1) if events[i].event_type in prompt_types),
+            None,
+        )
+        replayable = [e for i, e in enumerate(events) if i != exclude_idx]
+
+        if context_limit and len(replayable) > context_limit:
+            replayable = replayable[-context_limit:]
+
+        history: list = []
+        for event in replayable:
+            if event.event_type in prompt_types:
+                history.append(ModelRequest(parts=[UserPromptPart(content=str(event.content))]))
+            elif event.event_type == "agent_response":
+                history.append(PydanticModelResponse(parts=[TextPart(content=str(event.content))]))
+        return history or None
+
+    async def store_pydantic_message(self, session_id: str, msg: Any) -> None:
+        """Convert Pydantic AI messages (tool calls/returns) into KAOS memory events."""
+        from pydantic_ai.messages import (
+            ModelRequest,
+            ModelResponse as PydanticModelResponse,
+            TextPart,
+            ToolCallPart,
+            ToolReturnPart,
+        )
+
+        if isinstance(msg, PydanticModelResponse):
+            for part in msg.parts:
+                if isinstance(part, ToolCallPart):
+                    is_deleg = part.tool_name.startswith("delegate_to_")
+                    await self.add_event(
+                        session_id,
+                        "delegation_request" if is_deleg else "tool_call",
+                        {"tool": part.tool_name, "arguments": part.args},
+                    )
+        elif isinstance(msg, ModelRequest):
+            for part in msg.parts:
+                if isinstance(part, ToolReturnPart):
+                    is_deleg = part.tool_name.startswith("delegate_to_")
+                    result = part.content
+                    if isinstance(result, (dict, list)):
+                        result_value = result
+                    elif isinstance(result, str):
+                        try:
+                            result_value = json.loads(result)
+                        except (json.JSONDecodeError, ValueError):
+                            result_value = result
+                    else:
+                        result_value = str(result)
+                    await self.add_event(
+                        session_id,
+                        "delegation_response" if is_deleg else "tool_result",
+                        {"tool": part.tool_name, "result": result_value},
+                    )
+
+    async def get_memory_stats(self) -> Dict[str, int]:
+        """Get memory usage statistics. Override for real implementations."""
+        return {"total_sessions": 0, "total_events": 0, "avg_events_per_session": 0}
+
+    async def cleanup_old_sessions(self, max_age_hours: int = 24) -> int:
+        """Clean up old sessions. Override for real implementations."""
+        return 0
+
+    async def close(self) -> None:
+        """Close the memory backend. Override for backends with connections."""
+        pass
+
+
+class LocalMemory(Memory):
     """Local in-memory session storage similar to Google ADK's InMemorySessionService."""
 
     def __init__(self, max_sessions: int = 1000, max_events_per_session: int = 500):
-        """Initialize local memory storage.
-
-        Args:
-            max_sessions: Maximum number of sessions to keep in memory
-            max_events_per_session: Maximum events per session before cleanup
-        """
         self._sessions: Dict[str, SessionMemory] = {}
         self.max_sessions = max_sessions
         self.max_events_per_session = max_events_per_session
@@ -102,16 +241,6 @@ class LocalMemory:
     async def create_session(
         self, app_name: str, user_id: str, session_id: Optional[str] = None
     ) -> str:
-        """Create a new session.
-
-        Args:
-            app_name: Name of the application
-            user_id: User identifier
-            session_id: Optional custom session ID
-
-        Returns:
-            The session ID
-        """
         if not session_id:
             session_id = f"session_{uuid.uuid4().hex[:12]}"
 
@@ -134,29 +263,12 @@ class LocalMemory:
         return session_id
 
     async def get_session(self, session_id: str) -> Optional[SessionMemory]:
-        """Retrieve a session by ID.
-
-        Args:
-            session_id: The session ID
-
-        Returns:
-            SessionMemory or None if not found
-        """
         return self._sessions.get(session_id)
 
     async def get_or_create_session(
         self, session_id: str, app_name: str = "agent", user_id: str = "user"
     ) -> str:
-        """Get existing session or create a new one with the given ID.
-
-        Args:
-            session_id: The session ID to get or create
-            app_name: Name of the application (used if creating)
-            user_id: User identifier (used if creating)
-
-        Returns:
-            The session ID (same as input)
-        """
+        # TODO: Add asyncio.Lock to prevent race condition in concurrent requests
         if session_id not in self._sessions:
             await self.create_session(app_name, user_id, session_id)
             logger.debug(f"Created new session for provided ID: {session_id}")
@@ -169,23 +281,9 @@ class LocalMemory:
         content: Any = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> bool:
-        """Add an event to a session.
-
-        Supports two call patterns:
-        1. add_event(session_id, event)  - Pass a MemoryEvent object
-        2. add_event(session_id, event_type, content, metadata)  - Create and add in one call
+        """Accepts either a MemoryEvent or (event_type, content, metadata) args.
 
         Uses deque with maxlen for automatic O(1) bounded storage.
-        Oldest events are automatically evicted when limit is reached.
-
-        Args:
-            session_id: The session ID
-            event_or_type: Either a MemoryEvent or event type string
-            content: Event content (required if event_or_type is a string)
-            metadata: Optional metadata dictionary
-
-        Returns:
-            True if added successfully, False if session not found
         """
         session = self._sessions.get(session_id)
         if not session:
@@ -207,15 +305,6 @@ class LocalMemory:
     async def get_session_events(
         self, session_id: str, event_types: Optional[List[str]] = None
     ) -> List[MemoryEvent]:
-        """Get events for a session, optionally filtered by type.
-
-        Args:
-            session_id: The session ID
-            event_types: Optional list of event types to filter by
-
-        Returns:
-            List of events, filtered by type if specified
-        """
         session = await self.get_session(session_id)
         if not session:
             return []
@@ -227,80 +316,12 @@ class LocalMemory:
 
         return events
 
-    async def build_conversation_context(self, session_id: str, max_events: int = 20) -> str:
-        events = await self.get_session_events(session_id, ["user_message", "agent_response"])
-
-        # Get most recent events
-        recent_events = events[-max_events:] if len(events) > max_events else events
-
-        if not recent_events:
-            return ""
-
-        context_lines = []
-        for event in recent_events:
-            if event.event_type == "user_message":
-                context_lines.append(f"User: {event.content}")
-            elif event.event_type == "agent_response":
-                context_lines.append(f"Assistant: {event.content}")
-
-        return "\n".join(context_lines)
-
-    def create_event(
-        self, event_type: str, content: Any, metadata: Optional[Dict[str, Any]] = None
-    ) -> MemoryEvent:
-        """Create a memory event.
-
-        Args:
-            event_type: Type of event (e.g., "user_message", "agent_response")
-            content: Event content/data
-            metadata: Optional metadata dictionary
-
-        Returns:
-            MemoryEvent instance
-
-        If OpenTelemetry is enabled, automatically includes trace_id and span_id
-        in the metadata for log correlation.
-        """
-        from telemetry.manager import is_otel_enabled, get_current_trace_context
-
-        event_metadata = metadata.copy() if metadata else {}
-
-        # Add trace context if OTel is enabled
-        if is_otel_enabled():
-            trace_ctx = get_current_trace_context()
-            if trace_ctx:
-                event_metadata.update(trace_ctx)
-
-        return MemoryEvent(
-            event_id=f"event_{uuid.uuid4().hex[:8]}",
-            timestamp=datetime.now(timezone.utc),
-            event_type=event_type,
-            content=content,
-            metadata=event_metadata,
-        )
-
     async def list_sessions(self, user_id: Optional[str] = None) -> List[str]:
-        """Get list of session IDs, optionally filtered by user.
-
-        Args:
-            user_id: Optional user ID to filter sessions
-
-        Returns:
-            List of session IDs
-        """
         if user_id:
             return [sid for sid, session in self._sessions.items() if session.user_id == user_id]
         return list(self._sessions.keys())
 
     async def delete_session(self, session_id: str) -> bool:
-        """Delete a session.
-
-        Args:
-            session_id: The session ID
-
-        Returns:
-            True if deleted, False if not found
-        """
         if session_id in self._sessions:
             del self._sessions[session_id]
             logger.debug(f"Deleted session: {session_id}")
@@ -308,11 +329,6 @@ class LocalMemory:
         return False
 
     async def get_memory_stats(self) -> Dict[str, int]:
-        """Get memory usage statistics.
-
-        Returns:
-            Dictionary with memory statistics
-        """
         total_events = sum(len(session.events) for session in self._sessions.values())
         return {
             "total_sessions": len(self._sessions),
@@ -323,14 +339,6 @@ class LocalMemory:
         }
 
     async def cleanup_old_sessions(self, max_age_hours: int = 24) -> int:
-        """Clean up sessions older than specified age.
-
-        Args:
-            max_age_hours: Maximum session age in hours
-
-        Returns:
-            Number of sessions cleaned up
-        """
         cutoff_time = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
         sessions_to_delete = []
 
@@ -361,87 +369,47 @@ class LocalMemory:
             logger.info(f"Cleaned up {sessions_to_remove} oldest sessions to stay under limit")
 
 
-class NullMemory:
-    """No-op memory implementation for when memory is disabled.
-
-    All methods succeed silently without storing any data.
-    This avoids adding conditional checks throughout the agent code.
-    """
+class NullMemory(Memory):
+    """No-op memory — all methods succeed silently without storing data."""
 
     def __init__(self, *args, **kwargs):
-        """Accept any arguments for compatibility with LocalMemory signature."""
         logger.info("NullMemory initialized (memory disabled)")
 
     async def create_session(
         self, app_name: str = "", user_id: str = "", session_id: Optional[str] = None
     ) -> str:
-        """Return a constant session ID."""
         return session_id or "null-session"
 
     async def get_session(self, session_id: str) -> Optional[SessionMemory]:
-        """Always returns None."""
         return None
 
     async def get_or_create_session(
         self, session_id: str, app_name: str = "agent", user_id: str = "user"
     ) -> str:
-        """Return the provided session ID."""
         return session_id
 
     async def add_event(
         self,
         session_id: str,
-        event_or_type: Union[Optional[MemoryEvent], str] = None,
+        event_or_type: Union[MemoryEvent, str] = "",
         content: Any = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> bool:
-        """Silently accept and discard events."""
         return True
 
     async def get_session_events(
         self, session_id: str, event_types: Optional[List[str]] = None
     ) -> List[MemoryEvent]:
-        """Always returns empty list."""
         return []
 
-    async def build_conversation_context(self, session_id: str, max_events: int = 20) -> str:
-        """Always returns empty string."""
-        return ""
-
-    def create_event(
-        self, event_type: str, content: Any, metadata: Optional[Dict[str, Any]] = None
-    ) -> MemoryEvent:
-        """Create a memory event (even though it won't be stored)."""
-        return MemoryEvent(
-            event_id=f"null_{uuid.uuid4().hex[:8]}",
-            timestamp=datetime.now(timezone.utc),
-            event_type=event_type,
-            content=content,
-            metadata=metadata or {},
-        )
-
     async def list_sessions(self, user_id: Optional[str] = None) -> List[str]:
-        """Always returns empty list."""
         return []
 
     async def delete_session(self, session_id: str) -> bool:
-        """Always returns True."""
         return True
 
-    async def get_memory_stats(self) -> Dict[str, int]:
-        """Return zero stats."""
-        return {
-            "total_sessions": 0,
-            "total_events": 0,
-            "avg_events_per_session": 0,
-        }
 
-    async def cleanup_old_sessions(self, max_age_hours: int = 24) -> int:
-        """No-op cleanup."""
-        return 0
-
-
-class RedisMemory:
+class RedisMemory(Memory):
     """Distributed memory backed by Redis.
 
     Storage model:
@@ -483,7 +451,6 @@ class RedisMemory:
         return f"{self._prefix}:sessions"
 
     async def close(self):
-        """Close the Redis connection pool."""
         try:
             await self._redis.aclose()
             logger.debug("RedisMemory connection closed")
@@ -534,6 +501,7 @@ class RedisMemory:
     async def get_or_create_session(
         self, session_id: str, app_name: str = "agent", user_id: str = "user"
     ) -> str:
+        # TODO: Use Redis SETNX for atomic check-and-create to prevent race condition
         exists = await self._redis.exists(self._session_key(session_id))
         if not exists:
             await self.create_session(app_name, user_id, session_id)
@@ -599,42 +567,6 @@ class RedisMemory:
             except (json.JSONDecodeError, KeyError, TypeError):
                 logger.warning(f"Skipping malformed event in session {session_id}")
         return events
-
-    async def build_conversation_context(self, session_id: str, max_events: int = 20) -> str:
-        events = await self.get_session_events(session_id, ["user_message", "agent_response"])
-        recent_events = events[-max_events:] if len(events) > max_events else events
-
-        if not recent_events:
-            return ""
-
-        context_lines = []
-        for event in recent_events:
-            if event.event_type == "user_message":
-                context_lines.append(f"User: {event.content}")
-            elif event.event_type == "agent_response":
-                context_lines.append(f"Assistant: {event.content}")
-
-        return "\n".join(context_lines)
-
-    def create_event(
-        self, event_type: str, content: Any, metadata: Optional[Dict[str, Any]] = None
-    ) -> MemoryEvent:
-        from telemetry.manager import is_otel_enabled, get_current_trace_context
-
-        event_metadata = metadata.copy() if metadata else {}
-
-        if is_otel_enabled():
-            trace_ctx = get_current_trace_context()
-            if trace_ctx:
-                event_metadata.update(trace_ctx)
-
-        return MemoryEvent(
-            event_id=f"event_{uuid.uuid4().hex[:8]}",
-            timestamp=datetime.now(timezone.utc),
-            event_type=event_type,
-            content=content,
-            metadata=event_metadata,
-        )
 
     async def list_sessions(self, user_id: Optional[str] = None) -> List[str]:
         session_ids = await self._redis.zrange(self._sessions_index_key(), 0, -1)
@@ -720,7 +652,3 @@ class RedisMemory:
             for sid in oldest:
                 await self.delete_session(sid)
             logger.info(f"Cleaned up {len(oldest)} oldest sessions to stay under limit")
-
-
-# Backwards compatibility - this is the main class to use
-InMemorySessionService = LocalMemory

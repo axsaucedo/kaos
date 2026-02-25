@@ -13,7 +13,7 @@ class TestIsOtelEnabled:
     def test_returns_false_before_init(self):
         """Test that is_otel_enabled returns False before initialization."""
         # Import fresh module - is_otel_enabled checks _initialized flag, not env var
-        import telemetry.manager as tm
+        import pai_server.telemetry as tm
 
         # Reset module state for testing
         original = tm._initialized
@@ -38,7 +38,7 @@ class TestShouldEnableOtel:
             },
             clear=True,
         ):
-            from telemetry.manager import should_enable_otel
+            from pai_server.telemetry import should_enable_otel
 
             assert should_enable_otel() is False
 
@@ -49,14 +49,14 @@ class TestShouldEnableOtel:
             {"OTEL_EXPORTER_OTLP_ENDPOINT": "http://collector:4317"},
             clear=True,
         ):
-            from telemetry.manager import should_enable_otel
+            from pai_server.telemetry import should_enable_otel
 
             assert should_enable_otel() is False
 
     def test_returns_false_without_endpoint(self):
         """Test should_enable_otel returns False without OTEL_EXPORTER_OTLP_ENDPOINT."""
         with patch.dict(os.environ, {"OTEL_SERVICE_NAME": "test-agent"}, clear=True):
-            from telemetry.manager import should_enable_otel
+            from pai_server.telemetry import should_enable_otel
 
             assert should_enable_otel() is False
 
@@ -70,7 +70,7 @@ class TestShouldEnableOtel:
             },
             clear=True,
         ):
-            from telemetry.manager import should_enable_otel
+            from pai_server.telemetry import should_enable_otel
 
             assert should_enable_otel() is True
 
@@ -81,7 +81,7 @@ class TestOtelConfig:
     def test_config_requires_service_name_and_endpoint(self):
         """Test that config requires OTEL_SERVICE_NAME and OTEL_EXPORTER_OTLP_ENDPOINT."""
         with patch.dict(os.environ, {}, clear=True):
-            from telemetry.manager import OtelConfig
+            from pai_server.telemetry import OtelConfig
             from pydantic import ValidationError
 
             with pytest.raises(ValidationError):
@@ -97,7 +97,7 @@ class TestOtelConfig:
             },
             clear=True,
         ):
-            from telemetry.manager import OtelConfig
+            from pai_server.telemetry import OtelConfig
 
             config = OtelConfig()  # type: ignore[call-arg]
             assert config.otel_service_name == "test-agent"
@@ -115,130 +115,60 @@ class TestOtelConfig:
             },
             clear=True,
         ):
-            from telemetry.manager import OtelConfig
+            from pai_server.telemetry import OtelConfig
 
             config = OtelConfig()  # type: ignore[call-arg]
             assert config.enabled is False
 
 
-class TestKaosOtelManager:
-    """Tests for KaosOtelManager class."""
+class TestTracerAndMetrics:
+    """Tests for SERVICE_NAME and get_delegation_metrics helpers."""
 
-    def setup_method(self):
-        """Reset singleton before each test."""
-        from telemetry.manager import KaosOtelManager
+    def test_service_name(self):
+        """Test SERVICE_NAME is set."""
+        from pai_server.telemetry import SERVICE_NAME
 
-        KaosOtelManager._reset_for_testing()
+        assert SERVICE_NAME is not None
+        assert SERVICE_NAME.startswith("kaos.")
 
-    def teardown_method(self):
-        """Reset singleton after each test."""
-        from telemetry.manager import KaosOtelManager
+    def test_get_delegation_metrics_when_not_initialized(self):
+        """Test get_delegation_metrics returns (None, None) when not initialized."""
+        import pai_server.telemetry as tm
 
-        KaosOtelManager._reset_for_testing()
-
-    def test_manager_creation(self):
-        """Test creating a KaosOtelManager."""
-        from telemetry.manager import KaosOtelManager
-
-        manager = KaosOtelManager("test-agent")
-        assert manager.service_name == "test-agent"
-
-    def test_tracer_available(self):
-        """Test getting a tracer from manager."""
-        from telemetry.manager import KaosOtelManager
-
-        manager = KaosOtelManager("test-agent")
-        assert manager._tracer is not None
-
-    def test_meter_available(self):
-        """Test getting a meter from manager."""
-        from telemetry.manager import KaosOtelManager
-
-        manager = KaosOtelManager("test-agent")
-        assert manager._meter is not None
-
-    def test_span_begin_success_pattern(self):
-        """Test span_begin/span_success pattern (no-op when not initialized)."""
-        from telemetry.manager import KaosOtelManager
-
-        manager = KaosOtelManager("test-agent")
-        manager.span_begin("test-operation")
+        original = tm._initialized
+        tm._initialized = False
         try:
-            pass  # do work
-        except Exception as e:
-            manager.span_failure(e)
-            raise
-        else:
-            manager.span_success()
+            counter, histogram = tm.get_delegation_metrics()
+            assert counter is None
+            assert histogram is None
+        finally:
+            tm._initialized = original
 
-    def test_span_begin_failure_pattern(self):
-        """Test span_begin/span_failure pattern."""
-        from telemetry.manager import KaosOtelManager
+    def test_tracer_start_as_current_span(self):
+        """Test using tracer context manager for spans."""
+        from opentelemetry import trace
+        from pai_server.telemetry import SERVICE_NAME
 
-        manager = KaosOtelManager("test-agent")
-        manager.span_begin("test-operation")
-        try:
-            raise ValueError("test error")
-        except ValueError as e:
-            manager.span_failure(e)
-        else:
-            manager.span_success()
-
-    def test_nested_spans(self):
-        """Test nested span_begin calls."""
-        from telemetry.manager import KaosOtelManager
-
-        manager = KaosOtelManager("test-agent")
-        manager.span_begin("outer")
-        try:
-            manager.span_begin("inner")
-            try:
-                pass
-            except Exception as e:
-                manager.span_failure(e)
-                raise
-            else:
-                manager.span_success()
-        except Exception as e:
-            manager.span_failure(e)
-            raise
-        else:
-            manager.span_success()
-
-    def test_span_with_metric_kind(self):
-        """Test span_begin with metric_kind parameter."""
-        from telemetry.manager import KaosOtelManager
-
-        manager = KaosOtelManager("test-agent")
-        manager.span_begin(
-            "model.inference",
-            metric_kind="model",
-            metric_attrs={"model": "gpt-4"},
-        )
-        try:
-            pass
-        except Exception as e:
-            manager.span_failure(e)
-            raise
-        else:
-            manager.span_success()
+        tracer = trace.get_tracer(SERVICE_NAME)
+        with tracer.start_as_current_span("test-span") as span:
+            assert span is not None
 
 
 class TestContextPropagation:
-    """Tests for trace context propagation."""
+    """Tests for trace context propagation via opentelemetry."""
 
     def test_inject_context(self):
         """Test context injection into headers."""
-        from telemetry.manager import KaosOtelManager
+        from opentelemetry.propagate import inject
 
         carrier: dict = {}
-        result = KaosOtelManager.inject_context(carrier)
-        assert isinstance(result, dict)
+        inject(carrier)
+        assert isinstance(carrier, dict)
 
     def test_extract_context(self):
         """Test context extraction from headers."""
-        from telemetry.manager import KaosOtelManager
+        from opentelemetry.propagate import extract
 
         carrier: dict = {}
-        context = KaosOtelManager.extract_context(carrier)
+        context = extract(carrier)
         assert context is not None
