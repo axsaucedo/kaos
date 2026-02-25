@@ -4,18 +4,42 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - 'docs/examples/**'
+      - 'docs/**'
       - 'examples/**'
       - '.github/workflows/docs-lint.yaml'
   push:
     branches: [main]
     paths:
-      - 'docs/examples/**'
+      - 'docs/**'
       - 'examples/**'
       - '.github/workflows/docs-lint.yaml'
   workflow_dispatch:
 
 jobs:
+  docs-build:
+    name: VitePress Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        working-directory: docs
+        run: npm install
+
+      - name: Build docs
+        working-directory: docs
+        env:
+          DOCS_VERSION: lint
+          DOCS_BASE: /kaos/lint/
+        run: npm run build
+
   notebook-sync:
     name: Check Notebook Sync
     runs-on: ubuntu-latest
