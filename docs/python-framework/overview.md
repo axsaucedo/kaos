@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="/pais.jpg" alt="PAIS — Pydantic AI Server" width="180">
+  <img src="/pais-horizontal.jpg" alt="PAIS — Pydantic AI Server" width="300">
 </p>
 
 # PAIS: Pydantic AI Server
