@@ -123,7 +123,7 @@ pai_server/
 ## Development
 
 ```bash
-cd data-plane/pai-server
+cd pydantic-ai-server
 source .venv/bin/activate
 make format          # black .
 make lint            # black --check . && ty check

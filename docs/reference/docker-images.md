@@ -79,7 +79,7 @@ cd operator
 docker build -t kaos-operator:${VERSION} .
 
 # Build agent
-cd data-plane/pai-server
+cd pydantic-ai-server
 docker build -t kaos-agent:${VERSION} .
 ```
 

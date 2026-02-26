@@ -1,5 +1,5 @@
 ---
-applyTo: "data-plane/pai-server/**"
+applyTo: "pydantic-ai-server/**"
 ---
 
 # Python Agent Framework Instructions
@@ -8,7 +8,7 @@ Built on **Pydantic AI** — `AgentServer` is the central orchestration componen
 
 ## Quick Reference
 ```bash
-cd data-plane/pai-server
+cd pydantic-ai-server
 source .venv/bin/activate
 python -m pytest tests/ -v      # Run all tests
 make lint                       # Run linting (black + ty check)

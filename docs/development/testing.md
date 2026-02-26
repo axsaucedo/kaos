@@ -5,7 +5,7 @@ How to run and write tests for the KAOS.
 ## Test Structure
 
 ```
-data-plane/pai-server/tests/   # Python framework tests (96+ tests)
+pydantic-ai-server/tests/   # Python framework tests (96+ tests)
 ├── conftest.py                # Pytest fixtures
 ├── helpers.py                 # Test helpers (make_test_server)
 ├── test_agent.py              # Agent class tests
@@ -30,7 +30,7 @@ operator/tests/e2e/         # Kubernetes E2E tests (14 tests)
 
 ```bash
 # Python tests
-cd data-plane/pai-server && source .venv/bin/activate && python -m pytest tests/ -v
+cd pydantic-ai-server && source .venv/bin/activate && python -m pytest tests/ -v
 
 # Go integration tests
 cd operator && make test
@@ -42,7 +42,7 @@ cd operator/tests && source .venv/bin/activate && make test
 ## Running Python Tests
 
 ```bash
-cd data-plane/pai-server
+cd pydantic-ai-server
 source .venv/bin/activate
 
 # Run all tests
@@ -395,11 +395,11 @@ jobs:
         python-version: '3.12'
     - name: Install dependencies
       run: |
-        cd data-plane/pai-server
+        cd pydantic-ai-server
         pip install -e ".[dev]"
     - name: Run tests
       run: |
-        cd data-plane/pai-server
+        cd pydantic-ai-server
         pytest tests/ -v
 ```
 

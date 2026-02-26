@@ -143,14 +143,14 @@ WORKDIR /app
 RUN --mount=type=cache,target=/root/.cache/pip pip install uv
 
 # Install KAOS framework dependencies
-COPY data-plane/pai-server/pyproject.toml /tmp/pai-server/pyproject.toml
+COPY pydantic-ai-server/pyproject.toml /tmp/pai-server/pyproject.toml
 RUN --mount=type=cache,target=/root/.cache/uv \
     cd /tmp/pai-server && \
     uv pip compile pyproject.toml -o requirements.txt && \
     uv pip install --system -r requirements.txt
 
 # Copy framework source
-COPY data-plane/pai-server/pai_server/ /app/pai_server/
+COPY pydantic-ai-server/pai_server/ /app/pai_server/
 
 # Copy custom agent
 COPY docs/examples/custom_server.py /app/custom_server.py
