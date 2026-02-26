@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img src="../../docs/public/pais-horizontal.jpg" alt="PAIS Logo — A pie with a π symbol on top of a rocket" width="300">
+  <img src="pais-horizontal.jpg" alt="PAIS Logo — A pie with a π symbol on top of a rocket" width="300">
 </p>
 
 <p align="center">
