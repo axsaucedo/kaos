@@ -142,7 +142,7 @@ curl http://localhost:8000/memory/sessions
 Distributed memory backend for multi-replica deployments:
 
 ```python
-from pai_server.memory import RedisMemory
+from pais.memory import RedisMemory
 
 memory = RedisMemory(redis_url="redis://localhost:6379")
 ```

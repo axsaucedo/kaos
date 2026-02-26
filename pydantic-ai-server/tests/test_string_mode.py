@@ -4,7 +4,7 @@ import json
 import os
 import pytest
 
-from pai_server.tools import (
+from pais.tools import (
     build_tool_descriptions,
     parse_tool_calls_from_text,
     build_string_mode_handler,
@@ -181,7 +181,7 @@ class TestStringModeAgentIntegration:
 
     def test_string_mode_model_resolution(self):
         """String mode creates FunctionModel."""
-        from pai_server.serverutils import _resolve_model
+        from pais.serverutils import _resolve_model
         from pydantic_ai.models.function import FunctionModel
 
         model, _ = _resolve_model(
@@ -194,7 +194,7 @@ class TestStringModeAgentIntegration:
 
     def test_native_mode_model_resolution(self):
         """Native mode creates OpenAIChatModel."""
-        from pai_server.serverutils import _resolve_model
+        from pais.serverutils import _resolve_model
         from pydantic_ai.models.openai import OpenAIChatModel
 
         model, _ = _resolve_model(
@@ -212,7 +212,7 @@ class TestStringModeAgentIntegration:
 
         os.environ["DEBUG_MOCK_RESPONSES"] = json.dumps(["Mock response"])
         try:
-            from pai_server.serverutils import _resolve_model
+            from pais.serverutils import _resolve_model
 
             model, mock_state = _resolve_model("test-agent", tool_call_mode="string")
             server = make_test_server(name="test-agent", model=model)
@@ -226,14 +226,14 @@ class TestStringModeAgentIntegration:
 
     def test_default_tool_call_mode_setting(self):
         """Default tool_call_mode is 'auto'."""
-        from pai_server.serverutils import AgentServerSettings
+        from pais.serverutils import AgentServerSettings
 
         settings = AgentServerSettings(agent_name="test", model_api_url="http://x", model_name="m")
         assert settings.tool_call_mode == "auto"
 
     def test_string_tool_call_mode_setting(self):
         """tool_call_mode can be set to 'string'."""
-        from pai_server.serverutils import AgentServerSettings
+        from pais.serverutils import AgentServerSettings
 
         settings = AgentServerSettings(
             agent_name="test",
@@ -248,13 +248,13 @@ class TestServerSettingsToolCallMode:
     """Tests for tool_call_mode in AgentServerSettings."""
 
     def test_default_tool_call_mode(self):
-        from pai_server.serverutils import AgentServerSettings
+        from pais.serverutils import AgentServerSettings
 
         settings = AgentServerSettings(agent_name="test", model_api_url="http://x", model_name="m")
         assert settings.tool_call_mode == "auto"
 
     def test_string_tool_call_mode(self):
-        from pai_server.serverutils import AgentServerSettings
+        from pais.serverutils import AgentServerSettings
 
         os.environ["TOOL_CALL_MODE"] = "string"
         try:

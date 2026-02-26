@@ -43,7 +43,7 @@ pip install pai-server
 ### Minimal Agent
 
 ```python
-from pai_server.server import create_agent_server
+from pais.server import create_agent_server
 
 server = create_agent_server()
 app = server.app
@@ -51,14 +51,14 @@ app = server.app
 
 ```bash
 AGENT_NAME=my-agent MODEL_API_URL=http://localhost:11434 MODEL_NAME=llama3.2 \
-  uvicorn pai_server.server:get_app --factory --host 0.0.0.0 --port 8000
+  uvicorn pais.server:get_app --factory --host 0.0.0.0 --port 8000
 ```
 
 ### Custom Pydantic AI Agent
 
 ```python
 from pydantic_ai import Agent
-from pai_server.server import create_agent_server
+from pais.server import create_agent_server
 
 agent = Agent(system_prompt="You are a helpful assistant.")
 
@@ -112,7 +112,7 @@ All settings are environment variables (via `pydantic-settings`):
 ## Module Structure
 
 ```
-pai_server/
+pais/
 ├── server.py       # AgentServer, create_agent_server(), routes, logging
 ├── serverutils.py  # AgentDeps, AgentCard, RemoteAgent, AgentServerSettings, model resolution
 ├── tools.py        # DelegationToolset, string-mode handler, progress events

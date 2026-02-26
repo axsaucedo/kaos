@@ -16,11 +16,11 @@ make format                     # Auto-format code
 ```
 
 ## Project Structure
-- `pai_server/server.py`: AgentServer, create_agent_server(), routes, _process_message(), logging
-- `pai_server/serverutils.py`: AgentDeps, AgentCard (Pydantic BaseModel), AgentCardSkill, AgentCardCapabilities, RemoteAgent, AgentServerSettings, _resolve_model, response builders
-- `pai_server/tools.py`: DelegationToolset (AbstractToolset), execute_delegation, format_progress_event, build_string_mode_handler
-- `pai_server/memory.py`: Memory ABC, LocalMemory, RedisMemory, NullMemory + build_message_history/store_pydantic_message utilities
-- `pai_server/telemetry.py`: OpenTelemetry instrumentation (tracing, metrics, SERVICE_NAME)
+- `pais/server.py`: AgentServer, create_agent_server(), routes, _process_message(), logging
+- `pais/serverutils.py`: AgentDeps, AgentCard (Pydantic BaseModel), AgentCardSkill, AgentCardCapabilities, RemoteAgent, AgentServerSettings, _resolve_model, response builders
+- `pais/tools.py`: DelegationToolset (AbstractToolset), execute_delegation, format_progress_event, build_string_mode_handler
+- `pais/memory.py`: Memory ABC, LocalMemory, RedisMemory, NullMemory + build_message_history/store_pydantic_message utilities
+- `pais/telemetry.py`: OpenTelemetry instrumentation (tracing, metrics, SERVICE_NAME)
 - `pyproject.toml`: Dependencies — `pydantic-ai`, `opentelemetry-*`
 
 **Module layout rationale:**

@@ -13,8 +13,8 @@ import logging
 import json
 from multiprocessing import Process
 
-from pai_server.server import create_agent_server
-from pai_server.serverutils import AgentServerSettings, RemoteAgent
+from pais.server import create_agent_server
+from pais.serverutils import AgentServerSettings, RemoteAgent
 
 logger = logging.getLogger(__name__)
 

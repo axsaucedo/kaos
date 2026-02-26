@@ -65,7 +65,7 @@ Create a `server.py` with your custom Pydantic AI agent and tools:
 
 import random
 from pydantic_ai import Agent as PydanticAgent
-from pai_server.server import create_agent_server
+from pais.server import create_agent_server
 
 
 def create_custom_agent():
@@ -150,7 +150,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system -r requirements.txt
 
 # Copy framework source
-COPY pydantic-ai-server/pai_server/ /app/pai_server/
+COPY pydantic-ai-server/pais/ /app/pais/
 
 # Copy custom agent
 COPY docs/examples/custom_server.py /app/custom_server.py

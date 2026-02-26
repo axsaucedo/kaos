@@ -49,7 +49,7 @@ kaos system install --gateway-enabled --metallb-enabled --wait
 ## Project Structure
 ```
 pydantic-ai-server/        # Agent runtime (Pydantic AI, pytest, black, ty) — git subtree
-├── pai_server/             # AgentServer, tools, memory
+├── pais/             # AgentServer, tools, memory
 │   ├── server.py      # AgentServer, create_agent_server, routes
 │   ├── serverutils.py # AgentDeps, AgentCard (Pydantic), RemoteAgent, AgentServerSettings, model resolution
 │   ├── tools.py       # DelegationToolset, string-mode handler
@@ -88,10 +88,10 @@ tmp/                       # Local work files (gitignored)
 - `operator/api/v1alpha1/*_types.go`: CRD schemas
 - `operator/controllers/*_controller.go`: Reconciliation logic
 - `operator/chart/`: Helm chart (generated from kustomize)
-- `pydantic-ai-server/pai_server/server.py`: AgentServer, create_agent_server, routes
-- `pydantic-ai-server/pai_server/serverutils.py`: AgentDeps, AgentCard (Pydantic BaseModel, A2A-compliant), RemoteAgent, AgentServerSettings, model resolution
-- `pydantic-ai-server/pai_server/tools.py`: DelegationToolset (AbstractToolset), string-mode handler
-- `pydantic-ai-server/pai_server/memory.py`: Memory ABC + backends + build_message_history/store_pydantic_message
+- `pydantic-ai-server/pais/server.py`: AgentServer, create_agent_server, routes
+- `pydantic-ai-server/pais/serverutils.py`: AgentDeps, AgentCard (Pydantic BaseModel, A2A-compliant), RemoteAgent, AgentServerSettings, model resolution
+- `pydantic-ai-server/pais/tools.py`: DelegationToolset (AbstractToolset), string-mode handler
+- `pydantic-ai-server/pais/memory.py`: Memory ABC + backends + build_message_history/store_pydantic_message
 
 ## Testing Notes
 

@@ -13,7 +13,7 @@ class TestIsOtelEnabled:
     def test_returns_false_before_init(self):
         """Test that is_otel_enabled returns False before initialization."""
         # Import fresh module - is_otel_enabled checks _initialized flag, not env var
-        import pai_server.telemetry as tm
+        import pais.telemetry as tm
 
         # Reset module state for testing
         original = tm._initialized
@@ -38,7 +38,7 @@ class TestShouldEnableOtel:
             },
             clear=True,
         ):
-            from pai_server.telemetry import should_enable_otel
+            from pais.telemetry import should_enable_otel
 
             assert should_enable_otel() is False
 
@@ -49,14 +49,14 @@ class TestShouldEnableOtel:
             {"OTEL_EXPORTER_OTLP_ENDPOINT": "http://collector:4317"},
             clear=True,
         ):
-            from pai_server.telemetry import should_enable_otel
+            from pais.telemetry import should_enable_otel
 
             assert should_enable_otel() is False
 
     def test_returns_false_without_endpoint(self):
         """Test should_enable_otel returns False without OTEL_EXPORTER_OTLP_ENDPOINT."""
         with patch.dict(os.environ, {"OTEL_SERVICE_NAME": "test-agent"}, clear=True):
-            from pai_server.telemetry import should_enable_otel
+            from pais.telemetry import should_enable_otel
 
             assert should_enable_otel() is False
 
@@ -70,7 +70,7 @@ class TestShouldEnableOtel:
             },
             clear=True,
         ):
-            from pai_server.telemetry import should_enable_otel
+            from pais.telemetry import should_enable_otel
 
             assert should_enable_otel() is True
 
@@ -81,7 +81,7 @@ class TestOtelConfig:
     def test_config_requires_service_name_and_endpoint(self):
         """Test that config requires OTEL_SERVICE_NAME and OTEL_EXPORTER_OTLP_ENDPOINT."""
         with patch.dict(os.environ, {}, clear=True):
-            from pai_server.telemetry import OtelConfig
+            from pais.telemetry import OtelConfig
             from pydantic import ValidationError
 
             with pytest.raises(ValidationError):
@@ -97,7 +97,7 @@ class TestOtelConfig:
             },
             clear=True,
         ):
-            from pai_server.telemetry import OtelConfig
+            from pais.telemetry import OtelConfig
 
             config = OtelConfig()  # type: ignore[call-arg]
             assert config.otel_service_name == "test-agent"
@@ -115,7 +115,7 @@ class TestOtelConfig:
             },
             clear=True,
         ):
-            from pai_server.telemetry import OtelConfig
+            from pais.telemetry import OtelConfig
 
             config = OtelConfig()  # type: ignore[call-arg]
             assert config.enabled is False
@@ -126,14 +126,14 @@ class TestTracerAndMetrics:
 
     def test_service_name(self):
         """Test SERVICE_NAME is set."""
-        from pai_server.telemetry import SERVICE_NAME
+        from pais.telemetry import SERVICE_NAME
 
         assert SERVICE_NAME is not None
         assert SERVICE_NAME.startswith("kaos.")
 
     def test_get_delegation_metrics_when_not_initialized(self):
         """Test get_delegation_metrics returns (None, None) when not initialized."""
-        import pai_server.telemetry as tm
+        import pais.telemetry as tm
 
         original = tm._initialized
         tm._initialized = False
@@ -147,7 +147,7 @@ class TestTracerAndMetrics:
     def test_tracer_start_as_current_span(self):
         """Test using tracer context manager for spans."""
         from opentelemetry import trace
-        from pai_server.telemetry import SERVICE_NAME
+        from pais.telemetry import SERVICE_NAME
 
         tracer = trace.get_tracer(SERVICE_NAME)
         with tracer.start_as_current_span("test-span") as span:

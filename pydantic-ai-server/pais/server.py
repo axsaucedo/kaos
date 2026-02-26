@@ -19,7 +19,7 @@ from pydantic_ai.messages import ToolCallPart
 from pydantic_ai.usage import UsageLimits
 from pydantic_ai._agent_graph import CallToolsNode
 from pydantic_graph import End
-from pai_server.telemetry import (
+from pais.telemetry import (
     init_otel,
     is_otel_enabled,
     should_enable_otel,
@@ -28,8 +28,8 @@ from pai_server.telemetry import (
     SERVICE_NAME,
 )
 from opentelemetry.propagate import extract
-from pai_server.tools import format_progress_event, DELEGATION_TOOL_PREFIX, DelegationToolset
-from pai_server.serverutils import (
+from pais.tools import format_progress_event, DELEGATION_TOOL_PREFIX, DelegationToolset
+from pais.serverutils import (
     AgentDeps,
     AgentCard,
     RemoteAgent,
@@ -43,7 +43,7 @@ from pai_server.serverutils import (
 )
 
 if TYPE_CHECKING:
-    from pai_server.memory import Memory
+    from pais.memory import Memory
 
 
 def configure_logging(level: str = "INFO", otel_correlation: bool = False) -> None:
@@ -103,7 +103,7 @@ class AgentServer:
         model: Any = None,
         custom_tools: Optional[list] = None,
     ):
-        from pai_server.memory import NullMemory
+        from pais.memory import NullMemory
 
         self.settings = settings
         self.memory: "Memory" = memory or NullMemory()
@@ -289,8 +289,8 @@ class AgentServer:
         return {"agent.name": self.settings.agent_name, "session.id": session_id}
 
     async def _get_agent_card(self, base_url: str) -> AgentCard:
-        from pai_server import __version__
-        from pai_server.serverutils import AgentCardSkill, AgentCardCapabilities
+        from pais import __version__
+        from pais.serverutils import AgentCardSkill, AgentCardCapabilities
 
         skills: list[AgentCardSkill] = [
             AgentCardSkill(id=t["name"], **t) for t in self._custom_tools
@@ -562,7 +562,7 @@ def _parse_sub_agents(settings: AgentServerSettings) -> List[RemoteAgent]:
 
 def _create_memory(settings: AgentServerSettings) -> "Memory":
     """Create memory backend from settings."""
-    from pai_server.memory import LocalMemory, RedisMemory, NullMemory
+    from pais.memory import LocalMemory, RedisMemory, NullMemory
 
     if not settings.memory_enabled:
         return NullMemory()

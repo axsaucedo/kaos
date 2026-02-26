@@ -29,7 +29,7 @@ from pydantic_ai.messages import (
 from pydantic_ai import RunContext
 from pydantic_core import SchemaValidator, core_schema
 
-from pai_server.telemetry import (
+from pais.telemetry import (
     SERVICE_NAME,
     get_delegation_metrics,
     ATTR_DELEGATION_TARGET,
@@ -37,8 +37,8 @@ from pai_server.telemetry import (
 from opentelemetry import trace as trace_api
 
 if TYPE_CHECKING:
-    from pai_server.serverutils import AgentDeps, RemoteAgent
-    from pai_server.memory import Memory
+    from pais.serverutils import AgentDeps, RemoteAgent
+    from pais.memory import Memory
 
 logger = logging.getLogger(__name__)
 

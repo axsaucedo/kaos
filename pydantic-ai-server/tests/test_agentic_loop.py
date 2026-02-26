@@ -28,9 +28,9 @@ from pydantic_ai.messages import (
 )
 
 from tests.helpers import make_test_server
-from pai_server.serverutils import RemoteAgent
-from pai_server.tools import DELEGATION_TOOL_PREFIX
-from pai_server.memory import LocalMemory, NullMemory
+from pais.serverutils import RemoteAgent
+from pais.tools import DELEGATION_TOOL_PREFIX
+from pais.memory import LocalMemory, NullMemory
 
 logger = logging.getLogger(__name__)
 
@@ -890,7 +890,7 @@ class TestAgentConfiguration:
 
     def test_model_from_url_and_name(self):
         """Test creating model from model_api_url and model_name."""
-        from pai_server.serverutils import _resolve_model
+        from pais.serverutils import _resolve_model
 
         model, mock_state = _resolve_model(
             "url-agent",
@@ -903,7 +903,7 @@ class TestAgentConfiguration:
     def test_agent_requires_model_source(self):
         """Test agent creation without model source raises error."""
         with pytest.raises(ValueError, match="Agent requires"):
-            from pai_server.serverutils import _resolve_model
+            from pais.serverutils import _resolve_model
 
             _resolve_model("no-model-agent")
 

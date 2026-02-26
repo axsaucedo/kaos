@@ -116,13 +116,13 @@ URLs have `/mcp` auto-appended for Streamable HTTP transport.
 Lazy factory for uvicorn with `--factory`:
 
 ```bash
-uvicorn pai_server.server:get_app --factory --host 0.0.0.0 --port 8000
+uvicorn pais.server:get_app --factory --host 0.0.0.0 --port 8000
 ```
 
 ### create_agent_server
 
 ```python
-from pai_server.server import create_agent_server, AgentServerSettings
+from pais.server import create_agent_server, AgentServerSettings
 
 # From environment variables
 server = create_agent_server()

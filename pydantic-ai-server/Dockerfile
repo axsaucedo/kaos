@@ -16,7 +16,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system -r requirements.txt
 
 # Copy source code (changes frequently, so copied last)
-COPY pai_server/ pai_server/
+COPY pais/ pais/
 
 # Install package (no deps - already installed above) for importlib.metadata
 RUN uv pip install --system --no-deps .
@@ -34,4 +34,4 @@ EXPOSE 8000
 
 # Run the agent server using factory pattern
 # Access logs are controlled by OTEL_INCLUDE_HTTP_SERVER env var in Python code
-CMD ["python", "-m", "uvicorn", "pai_server.server:get_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "uvicorn", "pais.server:get_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]

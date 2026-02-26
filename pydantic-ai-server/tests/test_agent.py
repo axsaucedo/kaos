@@ -15,8 +15,8 @@ from pydantic_ai.messages import ModelResponse as PydanticModelResponse, TextPar
 from pydantic_ai import Agent as PydanticAgent
 
 from tests.helpers import make_test_server
-from pai_server.serverutils import AgentCard, AgentCardSkill, AgentCardCapabilities, RemoteAgent
-from pai_server.memory import LocalMemory, NullMemory, RedisMemory
+from pais.serverutils import AgentCard, AgentCardSkill, AgentCardCapabilities, RemoteAgent
+from pais.memory import LocalMemory, NullMemory, RedisMemory
 
 logger = logging.getLogger(__name__)
 
@@ -75,7 +75,7 @@ class TestAgentCreationAndCard:
     @pytest.mark.asyncio
     async def test_agent_creation_requires_model_source(self):
         """Test _resolve_model raises ValueError when no model source is provided."""
-        from pai_server.serverutils import _resolve_model
+        from pais.serverutils import _resolve_model
 
         with pytest.raises(ValueError, match="Agent requires either"):
             _resolve_model("test-agent")
@@ -448,7 +448,7 @@ class TestRedisMemory:
 
     def _make_redis_memory(self, mock_redis):
         from unittest.mock import patch
-        from pai_server.memory import RedisMemory
+        from pais.memory import RedisMemory
 
         with patch("redis.asyncio.from_url", return_value=mock_redis):
             return RedisMemory(redis_url="redis://localhost:6379", max_events_per_session=10)
@@ -456,7 +456,7 @@ class TestRedisMemory:
     @pytest.mark.asyncio
     async def test_create_session_issues_hset_and_zadd(self):
         from unittest.mock import AsyncMock, MagicMock
-        from pai_server.memory import RedisMemory
+        from pais.memory import RedisMemory
 
         mock_redis = AsyncMock()
         mock_pipe = MagicMock()
@@ -550,8 +550,8 @@ class TestAgentServer:
 
     def test_agent_server_creation(self):
         """Test AgentServer can be created with a PydanticAgent."""
-        from pai_server.server import AgentServer as ServerClass
-        from pai_server.serverutils import AgentDeps, AgentServerSettings
+        from pais.server import AgentServer as ServerClass
+        from pais.serverutils import AgentDeps, AgentServerSettings
 
         model = TestModel(custom_output_text="server test")
         pydantic_agent = PydanticAgent(

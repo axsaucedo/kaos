@@ -104,7 +104,7 @@ class Memory(ABC):
         self, event_type: str, content: Any, metadata: Optional[Dict[str, Any]] = None
     ) -> MemoryEvent:
         """Create a MemoryEvent with optional OTEL trace context."""
-        from pai_server.telemetry import is_otel_enabled, get_current_trace_context
+        from pais.telemetry import is_otel_enabled, get_current_trace_context
 
         event_metadata = metadata.copy() if metadata else {}
 

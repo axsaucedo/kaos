@@ -92,7 +92,7 @@ Sub-agents are registered as `delegate_to_{name}` tool functions on the Pydantic
 # Delegation is configured via environment variables, not code imports.
 # The operator sets AGENT_SUB_AGENTS="worker:http://worker:8000" automatically.
 # In code, RemoteAgent handles sub-agent HTTP communication:
-from pai_server.serverutils import RemoteAgent
+from pais.serverutils import RemoteAgent
 
 worker = RemoteAgent(name="worker", card_url="http://worker:8000")
 # AgentServer auto-registers delegate_to_worker tool via DelegationToolset

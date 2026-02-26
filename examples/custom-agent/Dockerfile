@@ -14,7 +14,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system -r requirements.txt
 
 # Copy the kaos framework source
-COPY pydantic-ai-server/pai_server/ /app/pai_server/
+COPY pydantic-ai-server/pais/ /app/pais/
 
 # Copy custom agent server
 COPY examples/custom-agent/server.py /app/custom_server.py

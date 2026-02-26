@@ -212,7 +212,7 @@ async def test_memory_events(server):
 ```python
 import pytest
 from httpx import AsyncClient
-from pai_server.server import create_agent_server
+from pais.server import create_agent_server
 
 @pytest.fixture
 async def test_client():
