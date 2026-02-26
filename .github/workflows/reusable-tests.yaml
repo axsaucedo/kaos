@@ -50,13 +50,13 @@ jobs:
         run: make test-unit
 
       - name: Install Python dependencies
-        working-directory: data-plane/pai-server
+        working-directory: pydantic-ai-server
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
 
       - name: Run Python tests
-        working-directory: data-plane/pai-server
+        working-directory: pydantic-ai-server
         run: python -m pytest tests/ -v
 
   # E2E tests (sharded)
@@ -133,7 +133,7 @@ jobs:
       - name: Build agent image
         uses: docker/build-push-action@v6
         with:
-          context: ./data-plane/pai-server
+          context: ./pydantic-ai-server
           load: true
           tags: ${{ env.REGISTRY }}/kaos-agent:${{ env.AGENT_TAG }}
           cache-from: type=gha,scope=agent-e2e
@@ -164,7 +164,7 @@ jobs:
       - name: Build MCP python-string image
         uses: docker/build-push-action@v6
         with:
-          context: ./data-plane/mcp-servers/python-string
+          context: ./mcp-servers/python-string
           load: true
           tags: ${{ env.REGISTRY }}/kaos-mcp-python-string:${{ env.AGENT_TAG }}
           cache-from: type=gha,scope=mcp-python-string-e2e
@@ -174,7 +174,7 @@ jobs:
       - name: Build MCP pctx image
         uses: docker/build-push-action@v6
         with:
-          context: ./data-plane/mcp-servers/pctx
+          context: ./mcp-servers/pctx
           load: true
           tags: ${{ env.REGISTRY }}/kaos-mcp-pctx:${{ env.AGENT_TAG }}
           cache-from: type=gha,scope=mcp-pctx-e2e

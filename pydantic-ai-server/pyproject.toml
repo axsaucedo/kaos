@@ -1,5 +1,5 @@
 [project]
-name = "pai-server"
+name = "pydantic-ai-server"
 version = "0.2.8.dev0"
 description = "PAIS - Pydantic AI Server for Kubernetes Agent Orchestration"
 requires-python = ">=3.12"

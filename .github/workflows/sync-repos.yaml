@@ -1,0 +1,57 @@
+name: Sync Standalone Repos
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      repo:
+        description: 'Which repo to sync'
+        type: choice
+        options:
+          - all
+          - pydantic-ai-server
+          - kaos-ui
+        default: 'all'
+
+permissions:
+  contents: read
+
+jobs:
+  sync-pydantic-ai-server:
+    if: >-
+      github.event_name == 'push' ||
+      github.event.inputs.repo == 'all' ||
+      github.event.inputs.repo == 'pydantic-ai-server'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push subtree to pydantic-ai-server
+        env:
+          CROSS_REPO_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
+        run: |
+          git remote add pydantic-ai-server https://x-access-token:${CROSS_REPO_TOKEN}@github.com/axsaucedo/pydantic-ai-server.git || true
+          git subtree push --prefix=pydantic-ai-server pydantic-ai-server main || echo "Already up to date"
+
+  sync-kaos-ui:
+    if: >-
+      github.event_name == 'push' ||
+      github.event.inputs.repo == 'all' ||
+      github.event.inputs.repo == 'kaos-ui'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push subtree to kaos-ui
+        env:
+          CROSS_REPO_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
+        run: |
+          git remote add kaos-ui https://x-access-token:${CROSS_REPO_TOKEN}@github.com/axsaucedo/kaos-ui.git || true
+          git subtree push --prefix=kaos-ui kaos-ui main || echo "Already up to date"
