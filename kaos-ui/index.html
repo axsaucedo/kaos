@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>KAOS UI - K8s Agent Orchestration System</title>
+    <meta name="description" content="KAOS UI - Kubernetes Agent Orchestration System for managing AI agents, MCP servers, and model APIs" />
+    <meta name="author" content="axsaucedo" />
+    <link rel="icon" type="image/png" href="/favicon.png" />
+
+    <meta property="og:title" content="KAOS UI - K8s Agent Orchestration System" />
+    <meta property="og:description" content="Kubernetes Agent Orchestration System for managing AI agents, MCP servers, and model APIs" />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content="https://axsaucedo.github.io/kaos-ui/" />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@axsaucedo" />
+
+    <!-- GitHub Pages SPA redirect handling -->
+    <script>
+      (function() {
+        const redirect = sessionStorage.redirect;
+        delete sessionStorage.redirect;
+        if (redirect && redirect !== location.href) {
+          history.replaceState(null, null, redirect);
+        }
+      })();
+    </script>
+  </head>
+
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,304 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Light Theme - KAOS Documentation Style */
+    --background: 0 0% 100%;
+    --foreground: 224 71% 4%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 224 71% 4%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 224 71% 4%;
+
+    --primary: 221 83% 53%;
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 220 14% 96%;
+    --secondary-foreground: 220 9% 46%;
+
+    --muted: 220 14% 96%;
+    --muted-foreground: 220 9% 46%;
+
+    --accent: 220 14% 96%;
+    --accent-foreground: 224 71% 4%;
+
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 210 40% 98%;
+
+    --success: 142 72% 45%;
+    --success-foreground: 210 40% 98%;
+
+    --warning: 38 92% 55%;
+    --warning-foreground: 224 71% 4%;
+
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 221 83% 53%;
+
+    --radius: 0.5rem;
+
+    /* Custom tokens for the dashboard */
+    --canvas-bg: 220 14% 98%;
+    --canvas-grid: 220 13% 91%;
+    --node-bg: 0 0% 100%;
+    --node-border: 220 13% 91%;
+    --node-selected: 221 83% 53%;
+    --connection-line: 221 83% 53%;
+    
+    /* Resource type colors */
+    --modelapi-color: 220 10% 50%;
+    --mcpserver-color: 200 80% 55%;
+    --agent-color: 270 70% 60%;
+    --pod-color: 210 80% 55%;
+    --deployment-color: 340 75% 55%;
+    --volume-color: 25 85% 55%;
+
+    /* Glow effects - subtle for light theme */
+    --glow-primary: 0 0 20px hsl(221 83% 53% / 0.15);
+    --glow-success: 0 0 15px hsl(142 72% 45% / 0.15);
+    --glow-warning: 0 0 15px hsl(38 92% 55% / 0.15);
+    --glow-error: 0 0 15px hsl(0 84% 60% / 0.15);
+
+    --sidebar-background: 220 14% 98%;
+    --sidebar-foreground: 224 71% 4%;
+    --sidebar-primary: 221 83% 53%;
+    --sidebar-primary-foreground: 210 40% 98%;
+    --sidebar-accent: 220 14% 96%;
+    --sidebar-accent-foreground: 224 71% 4%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 221 83% 53%;
+  }
+
+  .dark {
+    /* Dark Theme - KAOS Documentation Style */
+    --background: 222 47% 7%;
+    --foreground: 210 20% 92%;
+
+    --card: 222 47% 9%;
+    --card-foreground: 210 20% 92%;
+
+    --popover: 222 47% 11%;
+    --popover-foreground: 210 20% 92%;
+
+    --primary: 221 83% 60%;
+    --primary-foreground: 222 47% 7%;
+
+    --secondary: 222 30% 14%;
+    --secondary-foreground: 210 20% 85%;
+
+    --muted: 222 30% 12%;
+    --muted-foreground: 215 15% 55%;
+
+    --accent: 222 30% 16%;
+    --accent-foreground: 210 20% 98%;
+
+    --destructive: 0 72% 55%;
+    --destructive-foreground: 210 40% 98%;
+
+    --success: 142 72% 45%;
+    --success-foreground: 210 40% 98%;
+
+    --warning: 38 92% 55%;
+    --warning-foreground: 222 47% 7%;
+
+    --border: 222 30% 18%;
+    --input: 222 30% 14%;
+    --ring: 221 83% 60%;
+
+    /* Custom tokens for the dashboard */
+    --canvas-bg: 222 47% 5%;
+    --canvas-grid: 222 30% 12%;
+    --node-bg: 222 47% 10%;
+    --node-border: 222 30% 20%;
+    --node-selected: 221 83% 60%;
+    --connection-line: 221 83% 60%;
+
+    /* Glow effects */
+    --glow-primary: 0 0 20px hsl(221 83% 60% / 0.3);
+    --glow-success: 0 0 15px hsl(142 72% 45% / 0.3);
+    --glow-warning: 0 0 15px hsl(38 92% 55% / 0.3);
+    --glow-error: 0 0 15px hsl(0 72% 55% / 0.3);
+
+    --sidebar-background: 222 47% 8%;
+    --sidebar-foreground: 210 20% 85%;
+    --sidebar-primary: 221 83% 60%;
+    --sidebar-primary-foreground: 222 47% 7%;
+    --sidebar-accent: 222 30% 14%;
+    --sidebar-accent-foreground: 210 20% 92%;
+    --sidebar-border: 222 30% 16%;
+    --sidebar-ring: 221 83% 60%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+
+  code, pre, .font-mono {
+    font-family: 'JetBrains Mono', monospace;
+  }
+}
+
+@layer components {
+  /* Resource node styles for canvas */
+  .resource-node {
+    @apply relative rounded-lg border transition-all duration-200;
+    background: hsl(var(--node-bg));
+    border-color: hsl(var(--node-border));
+  }
+
+  .resource-node:hover {
+    border-color: hsl(var(--primary) / 0.5);
+    box-shadow: var(--glow-primary);
+  }
+
+  .resource-node.selected {
+    border-color: hsl(var(--node-selected));
+    box-shadow: var(--glow-primary);
+  }
+
+  /* Canvas grid pattern */
+  .canvas-grid {
+    background-image: 
+      linear-gradient(hsl(var(--canvas-grid)) 1px, transparent 1px),
+      linear-gradient(90deg, hsl(var(--canvas-grid)) 1px, transparent 1px);
+    background-size: 20px 20px;
+  }
+
+  /* Status indicators */
+  .status-running {
+    @apply bg-success;
+    box-shadow: var(--glow-success);
+  }
+
+  .status-pending {
+    @apply bg-warning;
+    box-shadow: var(--glow-warning);
+  }
+
+  .status-error {
+    @apply bg-destructive;
+    box-shadow: var(--glow-error);
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: hsl(var(--muted));
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--primary) / 0.5);
+  }
+
+  /* Connection lines animation */
+  @keyframes flow {
+    0% {
+      stroke-dashoffset: 24;
+    }
+    100% {
+      stroke-dashoffset: 0;
+    }
+  }
+
+  .connection-line {
+    stroke: hsl(var(--connection-line));
+    stroke-width: 2;
+    fill: none;
+    stroke-dasharray: 8 4;
+    animation: flow 1s linear infinite;
+  }
+
+  /* Pulse animation for status */
+  @keyframes pulse-glow {
+    0%, 100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.5;
+    }
+  }
+
+  .pulse-status {
+    animation: pulse-glow 2s ease-in-out infinite;
+  }
+
+  /* Fade in animation (used on detail pages, not tab content) */
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .animate-fade-in {
+    animation: fade-in 0.3s ease-out forwards;
+  }
+
+  /* Tab switch — instant opacity, no translateY flash */
+  @keyframes tab-switch {
+    from { opacity: 0.6; }
+    to { opacity: 1; }
+  }
+
+  .animate-tab-switch {
+    animation: tab-switch 0.15s ease-out forwards;
+  }
+
+  /* Slide in from right */
+  @keyframes slide-in-right {
+    from {
+      opacity: 0;
+      transform: translateX(20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+
+  .animate-slide-in {
+    animation: slide-in-right 0.3s ease-out forwards;
+  }
+}
+
+@layer utilities {
+  .text-gradient-primary {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--accent)));
+  }
+
+  .bg-gradient-card {
+    background: linear-gradient(135deg, hsl(var(--card)) 0%, hsl(var(--muted)) 100%);
+  }
+
+  .border-gradient {
+    border-image: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--accent))) 1;
+  }
+}
