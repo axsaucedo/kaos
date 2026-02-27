@@ -18,26 +18,19 @@
 
 PAIS wraps [Pydantic AI](https://ai.pydantic.dev) agents with production server capabilities: OpenAI-compatible HTTP API, distributed memory, multi-agent delegation, health probes, A2A discovery, and OpenTelemetry instrumentation.
 
-## Architecture
+## Features
 
-```mermaid
-graph TD
-    Client([Client]) -->|POST /v1/chat/completions| Server[AgentServer]
-
-    subgraph PAIS["🥧 PAIS"]
-        Server --> Agent[Pydantic AI Agent]
-        Server --> Memory[(Memory<br/>Local / Redis)]
-        Agent --> Delegation[DelegationToolset]
-        Agent --> MCP[MCP Servers]
-    end
-
-    Agent -->|LLM calls| ModelAPI[Model API]
-    Delegation -->|HTTP| SubAgent([Sub-Agents])
-    MCP -->|Streamable HTTP| MCPSrv([MCP Tool Servers])
-
-    Server -->|GET /health /ready| K8s([Kubernetes])
-    Server -->|GET /.well-known/agent.json| A2A([A2A Discovery])
-```
+| Feature | Description |
+|---------|-------------|
+| **OpenAI-Compatible API** | `/v1/chat/completions` endpoint (streaming + non-streaming) |
+| **Distributed Memory** | Local, Redis, or NullMemory backends with session persistence |
+| **Multi-Agent Delegation** | Sub-agent orchestration via `DelegationToolset` |
+| **MCP Tool Integration** | Connect to MCP servers via Streamable HTTP |
+| **A2A Discovery** | `/.well-known/agent.json` A2A-compliant card for agent-to-agent communication |
+| **Health Probes** | `/health` and `/ready` endpoints for Kubernetes |
+| **OpenTelemetry** | Tracing, metrics, and log correlation out of the box |
+| **String Mode** | Tool calling for models without native function calling |
+| **Custom Agents** | Wrap your own Pydantic AI agent with `pais run` — zero KAOS imports |
 
 ## Quick Start
 
@@ -45,7 +38,7 @@ graph TD
 
 ```bash
 pip install pydantic-ai-server         # Library only
-pip install pydantic-ai-server[cli]    # With CLI (includes kaos-cli)
+pip install pydantic-ai-server[cli]    # With CLI
 ```
 
 ### SDK Usage
@@ -71,8 +64,12 @@ def greet(name: str) -> str:
 Run it locally:
 
 ```bash
+# Default: discovers Agent in server.py
 AGENT_NAME=my-agent MODEL_API_URL=http://localhost:11434 MODEL_NAME=llama3.2 \
   pais run
+
+# With flags
+pais run server.py --host 127.0.0.1 --port 9000 --reload
 ```
 
 The `pais run` CLI auto-discovers your `Agent` and wraps it with PAIS (health probes, A2A card, memory, OpenAI-compatible API).
@@ -84,43 +81,64 @@ from pais import serve
 app = serve(agent)  # Returns FastAPI ASGI app
 ```
 
-### CLI Quick Start
+### Deploy and Scale to Kubernetes
 
-Scaffold, build, and deploy a custom agent:
-
-```bash
-# 1. Scaffold a new agent project
-pais init my-agent    # or: kaos agent init my-agent
-cd my-agent
-
-# 2. Edit server.py — add your tools and logic
-
-# 3. Run locally
-pais run              # or: kaos agent run
-
-# 4. Build the Docker image
-pais build --name my-agent --tag v1    # or: kaos agent build ...
-
-# 5. Deploy to Kubernetes
-kaos agent deploy my-agent --modelapi my-api --model llama3.2
-```
-
-For KIND clusters, add `--kind-load` to load the image directly:
+Use [KAOS](https://github.com/axsaucedo/kaos) to deploy agents to any Kubernetes cluster:
 
 ```bash
-kaos agent build --name my-agent --tag v1 --kind-load
+# 1. Install the KAOS operator
+kaos system install --wait
+
+# 2. Deploy a Model API (LLM backend)
+kaos modelapi deploy my-api --mode Hosted -m smollm2:135m --wait
+
+# 3. Scaffold and build a custom agent
+pais init my-agent && cd my-agent
+pais build --name my-agent --tag v1
+
+# 4. Deploy the agent to Kubernetes
+kaos agent deploy my-agent --modelapi my-api --model smollm2:135m --expose --wait
+
+# 5. Invoke the agent
+kaos agent invoke my-agent --message "Say hello!"
 ```
 
-## Module Structure
+For KIND clusters, add `--kind-load` when building:
 
+```bash
+pais build --name my-agent --tag v1 --kind-load
 ```
-pais/
-├── server.py       # AgentServer, create_agent_server(), routes, logging
-├── serverutils.py  # AgentDeps, AgentCard, RemoteAgent, AgentServerSettings, model resolution
-├── tools.py        # DelegationToolset, string-mode handler, progress events
-├── memory.py       # Memory ABC, LocalMemory, RedisMemory, NullMemory
-└── telemetry.py    # OpenTelemetry setup, SERVICE_NAME, metrics
+
+## Architecture
+
+PAIS wraps a standard Pydantic AI `Agent` with enterprise server capabilities. The `AgentServer` is the central component — it owns the agent instance and provides HTTP routing, memory persistence, delegation, and observability.
+
+```mermaid
+graph TD
+    Client([Client]) -->|POST /v1/chat/completions| Server[AgentServer]
+
+    subgraph PAIS["🥧 PAIS"]
+        Server --> Agent[Pydantic AI Agent]
+        Server --> Memory[(Memory<br/>Local / Redis)]
+        Agent --> Delegation[DelegationToolset]
+        Agent --> MCP[MCP Toolsets]
+    end
+
+    Agent -->|LLM calls| ModelAPI[Model API]
+    Delegation -->|HTTP| SubAgent([Sub-Agents])
+    MCP -->|Streamable HTTP| MCPSrv([MCP Tool Servers])
+
+    Server -->|GET /health /ready| K8s([Kubernetes])
+    Server -->|GET /.well-known/agent.json| A2A([A2A Discovery])
 ```
+
+**Key components:**
+
+- **`AgentServer`** (`server.py`): Central server — owns the Pydantic AI agent, FastAPI routes, request processing, and streaming. Created via `create_agent_server()` factory.
+- **`DelegationToolset`** (`tools.py`): Exposes sub-agents as `delegate_to_{name}` tools via Pydantic AI's `AbstractToolset`. Enables multi-agent orchestration without custom loop code.
+- **`Memory`** (`memory.py`): ABC with `LocalMemory`, `RedisMemory`, and `NullMemory` backends. Persists conversation history across sessions — Pydantic AI has no built-in persistence.
+- **`AgentCard`** (`serverutils.py`): A2A-compliant discovery card served at `/.well-known/agent.json`. Automatically discovers tools from connected MCP servers.
+- **`telemetry.py`**: OpenTelemetry setup — Pydantic AI instrumentation + KAOS delegation spans, metrics, and log correlation.
 
 ## Development
 
@@ -134,7 +152,7 @@ python -m pytest tests/ -v
 
 ## Configuration Reference
 
-All settings are environment variables (via `pydantic-settings`):
+All settings are environment variables:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
@@ -149,20 +167,6 @@ All settings are environment variables (via `pydantic-settings`):
 | `MEMORY_REDIS_URL` | | Redis URL (when `MEMORY_TYPE=redis`) |
 | `TOOL_CALL_MODE` | | `auto` (default), `native`, `string` |
 | `OTEL_ENABLED` | | Enable OpenTelemetry |
-
-## Features
-
-| Feature | Description |
-|---------|-------------|
-| **OpenAI-Compatible API** | `/v1/chat/completions` endpoint (streaming + non-streaming) |
-| **Distributed Memory** | Local, Redis, or NullMemory backends with session persistence |
-| **Multi-Agent Delegation** | Sub-agent orchestration via `DelegationToolset` |
-| **MCP Tool Integration** | Connect to MCP servers via Streamable HTTP |
-| **A2A Discovery** | `/.well-known/agent.json` A2A-compliant card for agent-to-agent communication |
-| **Health Probes** | `/health` and `/ready` endpoints for Kubernetes |
-| **OpenTelemetry** | Tracing, metrics, and log correlation out of the box |
-| **String Mode** | Tool calling for models without native function calling |
-| **Custom Agents** | Wrap your own Pydantic AI agent with `create_agent_server()` |
 
 ## License
 
