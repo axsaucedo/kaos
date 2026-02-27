@@ -181,17 +181,6 @@ jobs:
           cache-to: type=gha,scope=mcp-pctx-e2e,mode=max
           github-token: ${{ github.token }}
 
-      - name: Build custom agent example image
-        if: matrix.shard.name == 'example-custom-agent'
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./examples/custom-agent/Dockerfile
-          load: true
-          tags: custom-agent:test
-          cache-from: type=gha,scope=custom-agent-e2e
-          cache-to: type=gha,scope=custom-agent-e2e,mode=max
-          github-token: ${{ github.token }}
 
       - name: Load images into KIND
         run: |
@@ -206,9 +195,6 @@ jobs:
           kind load docker-image redis:7-alpine --name ${{ env.KIND_CLUSTER_NAME }} &
           wait
 
-      - name: Load custom agent image into KIND
-        if: matrix.shard.name == 'example-custom-agent'
-        run: kind load docker-image custom-agent:test --name ${{ env.KIND_CLUSTER_NAME }}
 
       - name: Install KAOS operator
         run: make -C operator kind-e2e-install-kaos IMAGE_TAG=${{ env.OPERATOR_TAG }} REGISTRY=${{ env.REGISTRY }}

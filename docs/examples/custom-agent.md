@@ -17,7 +17,7 @@ jupyter:
 
 > 📓 **Try it yourself!** This example is available as an executable [Jupyter notebook](/examples/custom-agent.ipynb).
 
-This example walks through creating a custom Pydantic AI agent with custom tools, packaging it as a Docker image, and deploying it to KAOS using the `container.image` CRD override.
+This example walks through creating a custom Pydantic AI agent with custom tools, packaging it as a Docker image, and deploying it to KAOS.
 
 ```mermaid
 sequenceDiagram
@@ -55,13 +55,23 @@ kubectl create namespace $NAMESPACE 2>/dev/null || true
 kubectl config set-context --current --namespace=$NAMESPACE
 ```
 
-## Step 1: Create the Custom Agent
+## Step 1: Initialize the Agent Project
 
-Create a `server.py` with your custom Pydantic AI agent and tools:
+Use the KAOS CLI to scaffold a new custom agent project:
 
 ```python
-%%writefile custom_server.py
-"""Custom Agent — Pydantic AI agent with custom tools and logic."""
+!kaos agent init custom-math-agent
+```
+
+This creates `server.py`, `pyproject.toml`, and `README.md` with a template Pydantic AI agent.
+
+## Step 2: Customize the Agent
+
+Replace the template server with a math agent that has custom tools:
+
+```python
+%%writefile custom-math-agent/server.py
+"""Custom Agent — Pydantic AI agent with math tools."""
 
 import random
 from pydantic_ai import Agent as PydanticAgent
@@ -127,59 +137,15 @@ def get_app():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("custom_server:get_app", factory=True, host="0.0.0.0", port=8000)
+    uvicorn.run("server:get_app", factory=True, host="0.0.0.0", port=8000)
 ```
 
-## Step 2: Create the Dockerfile
+## Step 3: Build the Docker Image
 
-The Dockerfile installs the KAOS framework and copies your custom agent code:
-
-```python
-%%writefile Dockerfile.custom-agent
-FROM python:3.12-slim
-
-WORKDIR /app
-
-RUN --mount=type=cache,target=/root/.cache/pip pip install uv
-
-# Install KAOS framework dependencies
-COPY pydantic-ai-server/pyproject.toml /tmp/pai-server/pyproject.toml
-RUN --mount=type=cache,target=/root/.cache/uv \
-    cd /tmp/pai-server && \
-    uv pip compile pyproject.toml -o requirements.txt && \
-    uv pip install --system -r requirements.txt
-
-# Copy framework source
-COPY pydantic-ai-server/pais/ /app/pais/
-
-# Copy custom agent
-COPY docs/examples/custom_server.py /app/custom_server.py
-
-RUN useradd -m -u 65532 agentic && chown -R agentic:agentic /app
-USER agentic
-
-EXPOSE 8000
-
-CMD ["python", "-m", "uvicorn", "custom_server:get_app", "--factory", \
-     "--host", "0.0.0.0", "--port", "8000"]
-```
-
-## Step 3: Build and Load the Image
-
-Build the image from the repository root (needed for COPY paths):
+Build the container image using the CLI:
 
 ```python
-import subprocess
-# Build from repo root; image may already exist in CI
-result = subprocess.run(
-    ["docker", "build", "-t", "custom-agent:test", "-f", "Dockerfile.custom-agent", REPO_ROOT],
-    capture_output=True, text=True
-)
-if result.returncode != 0:
-    # In CI the image is pre-built by the workflow
-    print(f"Docker build skipped (may be pre-built): {result.stderr.strip()[:200]}")
-else:
-    print("Image built successfully")
+!cd custom-math-agent && kaos agent build --name custom-agent --tag test --create-dockerfile
 ```
 
 For KIND clusters, load the image directly:
@@ -340,10 +306,9 @@ kubectl delete namespace $NAMESPACE --wait=false
 
 ```python
 # Clean up local files
-import os
-for f in ["custom_server.py", "Dockerfile.custom-agent"]:
-    if os.path.exists(f):
-        os.remove(f)
+import shutil, os
+if os.path.exists("custom-math-agent"):
+    shutil.rmtree("custom-math-agent")
 ```
 
 ## Next Steps
