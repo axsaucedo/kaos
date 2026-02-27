@@ -210,7 +210,7 @@ flowchart TB
   <img src="docs/public/pais-horizontal.jpg" alt="PAIS — Pydantic AI Server" height="300">
 </p>
 
-KAOS agents are powered by [**PAIS**](pydantic-ai-server/) — an enterprise server wrapper for [Pydantic AI](https://ai.pydantic.dev). PAIS adds OpenAI-compatible HTTP API, distributed memory, multi-agent delegation, A2A discovery, health probes, and OpenTelemetry instrumentation on top of Pydantic AI agents.
+KAOS agents are powered by [**PAIS**](https://github.com/axsaucedo/pydantic-ai-server) — an enterprise server wrapper for [Pydantic AI](https://ai.pydantic.dev). PAIS adds OpenAI-compatible HTTP API, distributed memory, multi-agent delegation, A2A discovery, health probes, and OpenTelemetry instrumentation on top of Pydantic AI agents.
 
 ## Documentation
 
