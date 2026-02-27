@@ -48,6 +48,10 @@ import os
 os.environ['NAMESPACE'] = 'custom-agent-example'
 REPO_ROOT = os.path.abspath("../../")
 os.environ['REPO_ROOT'] = REPO_ROOT
+
+# Base agent image — set KAOS_AGENT_IMAGE for local/CI builds
+AGENT_IMAGE = os.environ.get("KAOS_AGENT_IMAGE", "ghcr.io/axsaucedo/kaos-agent:latest")
+os.environ['KAOS_AGENT_IMAGE'] = AGENT_IMAGE
 ```
 
 ```bash
@@ -145,7 +149,7 @@ if __name__ == "__main__":
 Build the container image using the CLI:
 
 ```python
-!cd custom-math-agent && kaos agent build --name custom-agent --tag test --create-dockerfile
+!cd custom-math-agent && kaos agent build --name custom-agent --tag test --create-dockerfile --base-image $KAOS_AGENT_IMAGE
 ```
 
 For KIND clusters, load the image directly:

@@ -680,7 +680,7 @@ class TestAgentInit:
         result = runner.invoke(app, ["agent", "init", target])
         assert result.exit_code == 0
         content = (tmp_path / "my-agent" / "pyproject.toml").read_text()
-        assert "pydantic-ai-server" in content
+        assert "pydantic-ai" in content
 
     def test_init_skips_existing_without_force(self, tmp_path):
         target = str(tmp_path / "my-agent")

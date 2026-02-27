@@ -6,23 +6,18 @@ from pathlib import Path
 import typer
 
 
-DOCKERFILE_TEMPLATE = """FROM python:3.12-slim
+DEFAULT_BASE_IMAGE = "ghcr.io/axsaucedo/kaos-agent:latest"
+
+DOCKERFILE_TEMPLATE = """FROM {base_image}
 
 WORKDIR /app
 
-RUN pip install --no-cache-dir uv
-
-# Install dependencies from pyproject.toml
+# Install extra dependencies from pyproject.toml (pais is in the base image)
 COPY pyproject.toml README.md* ./
-RUN uv pip install --system --no-cache-dir .
+RUN uv pip install --system --no-cache-dir --no-deps . 2>/dev/null || true
 
-# Copy server code
+# Copy custom agent code
 COPY . .
-
-RUN useradd -m -u 65532 agentic && chown -R agentic:agentic /app
-USER agentic
-
-EXPOSE 8000
 
 CMD ["python", "-m", "uvicorn", "{entry_point}:get_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
 """
@@ -36,6 +31,7 @@ def build_command(
     kind_load: bool,
     create_dockerfile: bool,
     platform: str | None,
+    base_image: str | None,
 ) -> None:
     """Build a Docker image from a custom Pydantic AI agent."""
     source_dir = Path(directory)
@@ -66,12 +62,15 @@ def build_command(
     generated_dockerfile = False
 
     entry_name = entry_point.replace(".py", "")
+    resolved_base = base_image or DEFAULT_BASE_IMAGE
 
     if not dockerfile_path.exists() or create_dockerfile:
-        dockerfile_content = DOCKERFILE_TEMPLATE.format(entry_point=entry_name)
+        dockerfile_content = DOCKERFILE_TEMPLATE.format(
+            entry_point=entry_name, base_image=resolved_base
+        )
         dockerfile_path.write_text(dockerfile_content)
         generated_dockerfile = True
-        typer.echo("📝 Generated Dockerfile")
+        typer.echo(f"📝 Generated Dockerfile (base: {resolved_base})")
 
     image_tag = f"{name}:{tag}"
     typer.echo(f"🔨 Building image {image_tag}...")

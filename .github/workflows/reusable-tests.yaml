@@ -214,6 +214,7 @@ jobs:
           export GATEWAY_URL="http://localhost:8888"
           export OPERATOR_MANAGED_EXTERNALLY=1
           export KIND_CLUSTER=true
+          export KAOS_AGENT_IMAGE="${{ env.REGISTRY }}/kaos-agent:${{ env.AGENT_TAG }}"
           
           # Build pytest command with optional filter
           PYTEST_CMD="uv run pytest ${{ matrix.shard.files }} -v -n 2 --dist loadscope"

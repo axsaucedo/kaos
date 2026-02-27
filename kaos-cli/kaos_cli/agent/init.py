@@ -64,8 +64,7 @@ version = "0.1.0"
 description = "A custom Pydantic AI agent created with kaos agent init"
 requires-python = ">=3.12"
 dependencies = [
-    "pydantic-ai-server",
-    "uvicorn",
+    "pydantic-ai[openai]",
 ]
 
 [build-system]

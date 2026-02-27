@@ -54,6 +54,11 @@ def build_agent(
     platform: str = typer.Option(
         None, "--platform", help="Docker platform (e.g., linux/amd64)."
     ),
+    base_image: str = typer.Option(
+        None,
+        "--base-image",
+        help="Base Docker image (default: ghcr.io/axsaucedo/kaos-agent:latest).",
+    ),
 ) -> None:
     """Build a Docker image from a custom Pydantic AI agent."""
     build_command(
@@ -64,6 +69,7 @@ def build_agent(
         kind_load=kind_load,
         create_dockerfile=create_dockerfile,
         platform=platform,
+        base_image=base_image,
     )
 
 
