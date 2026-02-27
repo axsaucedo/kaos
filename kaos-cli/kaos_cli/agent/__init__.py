@@ -12,11 +12,59 @@ from kaos_cli.agent.deploy import deploy_agent
 from kaos_cli.agent.invoke import invoke_command
 from kaos_cli.agent.status import status_command
 from kaos_cli.agent.memory import memory_command
+from kaos_cli.agent.init import init_command
+from kaos_cli.agent.build import build_command
 
 app = typer.Typer(
     help="Agent management commands.",
     no_args_is_help=True,
 )
+
+
+@app.command(name="init")
+def init_agent(
+    directory: str = typer.Argument(
+        None,
+        help="Directory to initialize. Defaults to current directory.",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Overwrite existing files.",
+    ),
+) -> None:
+    """Initialize a new custom Pydantic AI agent project."""
+    init_command(directory=directory, force=force)
+
+
+@app.command(name="build")
+def build_agent(
+    name: str = typer.Option(..., "--name", "-n", help="Name for the image."),
+    tag: str = typer.Option("latest", "--tag", "-t", help="Tag for the image."),
+    directory: str = typer.Option(".", "--dir", "-d", help="Source directory."),
+    entry_point: str = typer.Option(
+        "server.py", "--entry", "-e", help="Entry point file."
+    ),
+    kind_load: bool = typer.Option(
+        False, "--kind-load", help="Load image to KIND cluster."
+    ),
+    create_dockerfile: bool = typer.Option(
+        False, "--create-dockerfile", help="Create/overwrite Dockerfile."
+    ),
+    platform: str = typer.Option(
+        None, "--platform", help="Docker platform (e.g., linux/amd64)."
+    ),
+) -> None:
+    """Build a Docker image from a custom Pydantic AI agent."""
+    build_command(
+        name=name,
+        tag=tag,
+        directory=directory,
+        entry_point=entry_point,
+        kind_load=kind_load,
+        create_dockerfile=create_dockerfile,
+        platform=platform,
+    )
 
 
 @app.command(name="list")
