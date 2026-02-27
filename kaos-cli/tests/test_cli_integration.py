@@ -652,3 +652,118 @@ class TestVersion:
         result = runner.invoke(app, ["version"])
         assert result.exit_code == 0
         assert "kaos-cli" in result.output
+
+
+# ─── Agent init command ─────────────────────────────────────────────────
+
+
+class TestAgentInit:
+    def test_init_creates_files(self, tmp_path):
+        target = str(tmp_path / "my-agent")
+        result = runner.invoke(app, ["agent", "init", target])
+        assert result.exit_code == 0
+        assert (tmp_path / "my-agent" / "server.py").exists()
+        assert (tmp_path / "my-agent" / "pyproject.toml").exists()
+        assert (tmp_path / "my-agent" / "README.md").exists()
+
+    def test_init_server_has_create_agent_server(self, tmp_path):
+        target = str(tmp_path / "my-agent")
+        result = runner.invoke(app, ["agent", "init", target])
+        assert result.exit_code == 0
+        content = (tmp_path / "my-agent" / "server.py").read_text()
+        assert "Agent(" in content
+        assert "agent.tool_plain" in content
+
+    def test_init_pyproject_has_pais_dep(self, tmp_path):
+        target = str(tmp_path / "my-agent")
+        result = runner.invoke(app, ["agent", "init", target])
+        assert result.exit_code == 0
+        content = (tmp_path / "my-agent" / "pyproject.toml").read_text()
+        assert "pydantic-ai" in content
+
+    def test_init_skips_existing_without_force(self, tmp_path):
+        target = str(tmp_path / "my-agent")
+        runner.invoke(app, ["agent", "init", target])
+        result = runner.invoke(app, ["agent", "init", target])
+        assert result.exit_code == 0
+        assert "Skipping" in strip_ansi(result.output)
+
+    def test_init_force_overwrites(self, tmp_path):
+        target = str(tmp_path / "my-agent")
+        runner.invoke(app, ["agent", "init", target])
+        result = runner.invoke(app, ["agent", "init", target, "--force"])
+        assert result.exit_code == 0
+        assert "Skipping" not in strip_ansi(result.output)
+
+
+# ─── Agent build command ────────────────────────────────────────────────
+
+
+class TestAgentBuild:
+    def test_build_help(self):
+        result = runner.invoke(app, ["agent", "build", "--help"])
+        assert result.exit_code == 0
+        output = strip_ansi(result.output)
+        assert "--name" in output
+        assert "--tag" in output
+        assert "--kind-load" in output
+        assert "--create-dockerfile" in output
+
+    def test_build_missing_directory(self):
+        result = runner.invoke(
+            app,
+            ["agent", "build", "--name", "test", "--dir", "/nonexistent"],
+        )
+        assert result.exit_code != 0
+
+    def test_build_missing_entry_point(self, tmp_path):
+        (tmp_path / "pyproject.toml").write_text("[project]\nname='test'\n")
+        result = runner.invoke(
+            app,
+            ["agent", "build", "--name", "test", "--dir", str(tmp_path)],
+        )
+        assert result.exit_code != 0
+        assert "Entry point" in result.output
+
+    def test_build_missing_pyproject(self, tmp_path):
+        (tmp_path / "server.py").write_text("# empty")
+        result = runner.invoke(
+            app,
+            ["agent", "build", "--name", "test", "--dir", str(tmp_path)],
+        )
+        assert result.exit_code != 0
+        assert "pyproject.toml" in result.output
+
+
+# ─── Agent run command ──────────────────────────────────────────────────
+
+
+class TestAgentRun:
+    def test_run_help(self):
+        result = runner.invoke(app, ["agent", "run", "--help"])
+        assert result.exit_code == 0
+        output = strip_ansi(result.output)
+        assert "--host" in output
+        assert "--port" in output
+        assert "--reload" in output
+
+    def test_run_missing_file(self):
+        result = runner.invoke(app, ["agent", "run", "nonexistent.py"])
+        assert result.exit_code != 0
+
+
+# ─── MCP run command ────────────────────────────────────────────────────
+
+
+class TestMcpRun:
+    def test_run_help(self):
+        result = runner.invoke(app, ["mcp", "run", "--help"])
+        assert result.exit_code == 0
+        output = strip_ansi(result.output)
+        assert "--host" in output
+        assert "--port" in output
+        assert "--reload" in output
+
+    def test_run_missing_file(self):
+        result = runner.invoke(app, ["mcp", "run", "nonexistent.py"])
+        assert result.exit_code != 0

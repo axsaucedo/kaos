@@ -86,7 +86,7 @@ make format                     # Auto-format code
 - Use `create_agent_server(custom_agent=my_agent)` to wrap with KAOS endpoints
 - KAOS overrides the model and adds DelegationToolset to custom agents
 - Deploy via Agent CRD with `container.image` override
-- Example: `examples/custom-agent/server.py`
+- Example: `docs/examples/custom-agent.md` (uses `kaos agent init`/`build` CLI)
 
 ### Memory (memory.py)
 - KAOS memory (Local/Redis/Null) persists across sessions — Pydantic AI has no built-in persistence
