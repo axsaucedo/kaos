@@ -1,0 +1,90 @@
+name: Subtree Sync Check
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  check-subtree-sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check subtrees are push-ready
+        env:
+          CROSS_REPO_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
+        run: |
+          set -e
+
+          # Remove default credential helper so our token is used
+          git config --unset-all http.https://github.com/.extraheader || true
+
+          check_subtree() {
+            local prefix=$1
+            local repo_url=$2
+            local remote_name=$3
+
+            echo "=== Checking subtree: ${prefix} ==="
+            git remote add "${remote_name}" "${repo_url}" 2>/dev/null || true
+            git fetch "${remote_name}" main 2>/dev/null
+
+            # Split the subtree to get what we would push
+            local split_sha
+            split_sha=$(git subtree split --prefix="${prefix}" 2>/dev/null) || {
+              echo "ERROR: git subtree split --prefix=${prefix} failed."
+              echo "This usually means the subtree history is inconsistent."
+              echo "Fix: run 'git subtree pull --prefix=${prefix} ${repo_url} main' locally and commit the merge."
+              return 1
+            }
+
+            # Check if the upstream HEAD is an ancestor of our split
+            local remote_sha
+            remote_sha=$(git rev-parse "${remote_name}/main" 2>/dev/null) || {
+              echo "WARNING: Could not fetch ${remote_name}/main — skipping ancestry check (new repo?)"
+              return 0
+            }
+
+            if git merge-base --is-ancestor "${remote_sha}" "${split_sha}"; then
+              echo "OK: ${prefix} subtree push would be fast-forward"
+            else
+              echo "FAIL: ${prefix} subtree is not up to date with upstream."
+              echo ""
+              echo "The standalone repo (${repo_url}) has commits not present in your branch."
+              echo "Fix: run the following locally, then push:"
+              echo ""
+              echo "  git subtree pull --prefix=${prefix} ${repo_url} main"
+              echo ""
+              return 1
+            fi
+          }
+
+          failed=0
+
+          check_subtree \
+            "pydantic-ai-server" \
+            "https://x-access-token:${CROSS_REPO_TOKEN}@github.com/axsaucedo/pydantic-ai-server.git" \
+            "pais-upstream" \
+          || failed=1
+
+          check_subtree \
+            "kaos-ui" \
+            "https://x-access-token:${CROSS_REPO_TOKEN}@github.com/axsaucedo/kaos-ui.git" \
+            "kaosui-upstream" \
+          || failed=1
+
+          if [ "$failed" -eq 1 ]; then
+            echo ""
+            echo "=== SUBTREE CHECK FAILED ==="
+            echo "One or more subtrees are out of sync with their upstream repos."
+            echo "See instructions above to fix."
+            exit 1
+          fi
+
+          echo ""
+          echo "=== All subtree checks passed ==="

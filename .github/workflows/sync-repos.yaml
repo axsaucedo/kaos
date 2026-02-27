@@ -37,10 +37,9 @@ jobs:
           # Remove default credential helper set by actions/checkout so our token is used
           git config --unset-all http.https://github.com/.extraheader || true
           git remote add pydantic-ai-server https://x-access-token:${CROSS_REPO_TOKEN}@github.com/axsaucedo/pydantic-ai-server.git 2>/dev/null || true
-          # Split subtree into a temporary branch and push (force on first sync to align histories)
-          git subtree split --prefix=pydantic-ai-server -b _split-pais
-          git push pydantic-ai-server _split-pais:main --force
-          git branch -D _split-pais
+          # Fetch remote so subtree split can resolve upstream commit references
+          git fetch pydantic-ai-server main
+          git subtree push --prefix=pydantic-ai-server pydantic-ai-server main
 
   sync-kaos-ui:
     if: >-
@@ -61,7 +60,6 @@ jobs:
           # Remove default credential helper set by actions/checkout so our token is used
           git config --unset-all http.https://github.com/.extraheader || true
           git remote add kaos-ui https://x-access-token:${CROSS_REPO_TOKEN}@github.com/axsaucedo/kaos-ui.git 2>/dev/null || true
-          # Split subtree into a temporary branch and push (force on first sync to align histories)
-          git subtree split --prefix=kaos-ui -b _split-ui
-          git push kaos-ui _split-ui:main --force
-          git branch -D _split-ui
+          # Fetch remote so subtree split can resolve upstream commit references
+          git fetch kaos-ui main
+          git subtree push --prefix=kaos-ui kaos-ui main
