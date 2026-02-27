@@ -34,8 +34,10 @@ jobs:
         env:
           CROSS_REPO_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
         run: |
-          git remote add pydantic-ai-server https://x-access-token:${CROSS_REPO_TOKEN}@github.com/axsaucedo/pydantic-ai-server.git || true
-          git subtree push --prefix=pydantic-ai-server pydantic-ai-server main || echo "Already up to date"
+          # Remove default credential helper set by actions/checkout so our token is used
+          git config --unset-all http.https://github.com/.extraheader || true
+          git remote add pydantic-ai-server https://x-access-token:${CROSS_REPO_TOKEN}@github.com/axsaucedo/pydantic-ai-server.git 2>/dev/null || true
+          git subtree push --prefix=pydantic-ai-server pydantic-ai-server main
 
   sync-kaos-ui:
     if: >-
@@ -53,5 +55,7 @@ jobs:
         env:
           CROSS_REPO_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
         run: |
-          git remote add kaos-ui https://x-access-token:${CROSS_REPO_TOKEN}@github.com/axsaucedo/kaos-ui.git || true
-          git subtree push --prefix=kaos-ui kaos-ui main || echo "Already up to date"
+          # Remove default credential helper set by actions/checkout so our token is used
+          git config --unset-all http.https://github.com/.extraheader || true
+          git remote add kaos-ui https://x-access-token:${CROSS_REPO_TOKEN}@github.com/axsaucedo/kaos-ui.git 2>/dev/null || true
+          git subtree push --prefix=kaos-ui kaos-ui main
