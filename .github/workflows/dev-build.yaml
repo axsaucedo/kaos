@@ -5,8 +5,8 @@ on:
     branches: [main]
     paths:
       - 'operator/**'
-      - 'data-plane/pai-server/**'
-      - 'data-plane/mcp-servers/**'
+      - 'pydantic-ai-server/**'
+      - 'mcp-servers/**'
       - 'VERSION'
       - '.github/workflows/dev-build.yaml'
       - '.github/workflows/reusable-build-images.yaml'

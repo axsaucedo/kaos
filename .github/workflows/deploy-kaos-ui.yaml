@@ -1,0 +1,118 @@
+name: Deploy kaos-ui
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to deploy (e.g., "dev", "0.2.8")'
+        required: true
+        default: 'dev'
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-kaos-ui
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout monorepo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        working-directory: kaos-ui
+        run: npm ci
+
+      - name: Determine deploy path
+        id: paths
+        run: |
+          VERSION="${{ inputs.version }}"
+          if [ "$VERSION" = "dev" ]; then
+            echo "base=/kaos-ui/dev/" >> $GITHUB_OUTPUT
+            echo "dir=dev" >> $GITHUB_OUTPUT
+            echo "update_latest=false" >> $GITHUB_OUTPUT
+          else
+            echo "base=/kaos-ui/v${VERSION}/" >> $GITHUB_OUTPUT
+            echo "dir=v${VERSION}" >> $GITHUB_OUTPUT
+            echo "update_latest=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build for deployment
+        working-directory: kaos-ui
+        env:
+          VITE_BASE: ${{ steps.paths.outputs.base }}
+        run: npm run build
+
+      - name: Checkout kaos-ui gh-pages
+        run: |
+          git clone --depth 1 --branch gh-pages \
+            https://x-access-token:${{ secrets.CROSS_REPO_TOKEN }}@github.com/axsaucedo/kaos-ui.git \
+            gh-pages-checkout 2>/dev/null || {
+            mkdir -p gh-pages-checkout
+            cd gh-pages-checkout && git init
+          }
+
+      - name: Prepare deployment
+        run: |
+          VERSION="${{ inputs.version }}"
+          DEPLOY_DIR="${{ steps.paths.outputs.dir }}"
+
+          cd gh-pages-checkout
+
+          # Remove old content for this version
+          rm -rf "$DEPLOY_DIR"
+          mkdir -p "$DEPLOY_DIR"
+          cp -r ../kaos-ui/dist/* "$DEPLOY_DIR/"
+
+          # Update /latest/ if this is a release version
+          if [ "${{ steps.paths.outputs.update_latest }}" = "true" ]; then
+            echo "Rebuilding for /latest/ path..."
+            cd ../kaos-ui
+            VITE_BASE=/kaos-ui/latest/ npm run build
+            cd ../gh-pages-checkout
+            rm -rf latest
+            mkdir -p latest
+            cp -r ../kaos-ui/dist/* latest/
+          fi
+
+          # Ensure .nojekyll and root redirect exist
+          touch .nojekyll
+          if [ -f ../kaos-ui/public/redirect-index.html ]; then
+            cp ../kaos-ui/public/redirect-index.html index.html
+          fi
+
+          # Generate versions.json from existing directories
+          echo "Generating versions.json..."
+          VERSIONS=$(find . -maxdepth 1 -type d -name "v*" | sed 's|./v||' | sort -rV | head -10 | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          LATEST_V=$(echo "$VERSIONS" | jq -r '.[0] // ""')
+          echo "{\"versions\": $VERSIONS, \"latest\": \"$LATEST_V\"}" > versions.json
+          cat versions.json
+
+          echo "Deployment structure:"
+          ls -la
+          find . -maxdepth 1 -type d | sort
+
+      - name: Push to kaos-ui gh-pages
+        run: |
+          cd gh-pages-checkout
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Deploy ${{ steps.paths.outputs.dir }}: ${{ github.sha }}" || echo "No changes to commit"
+          git push -f "https://x-access-token:${{ secrets.CROSS_REPO_TOKEN }}@github.com/axsaucedo/kaos-ui.git" HEAD:gh-pages
+          echo "✓ Deployed ${{ steps.paths.outputs.dir }} to kaos-ui gh-pages"

@@ -136,7 +136,7 @@ jobs:
         id: build
         uses: docker/build-push-action@v6
         with:
-          context: ./data-plane/pai-server
+          context: ./pydantic-ai-server
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=${{ env.AGENT_IMAGE }},push-by-digest=true,name-canonical=true,push=true
@@ -288,7 +288,7 @@ jobs:
         id: build
         uses: docker/build-push-action@v6
         with:
-          context: ./data-plane/mcp-servers/python-string
+          context: ./mcp-servers/python-string
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=${{ env.MCP_PYTHON_STRING_IMAGE }},push-by-digest=true,name-canonical=true,push=true

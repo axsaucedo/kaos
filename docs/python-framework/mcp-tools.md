@@ -97,7 +97,7 @@ spec:
 
 ## MCP Server Implementation
 
-The `data-plane/mcp-servers/python-string/` module provides the `python-string` runtime:
+The `mcp-servers/python-string/` module provides the `python-string` runtime:
 
 ```python
 from mcptools.server import MCPServer, MCPServerSettings

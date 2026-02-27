@@ -51,18 +51,18 @@ docker build -t "${REGISTRY}/kaos-operator:${OPERATOR_TAG}" "${OPERATOR_ROOT}/"
 
 # Build agent runtime
 echo "Building agent runtime image..."
-docker build -t "${REGISTRY}/kaos-agent:${AGENT_TAG}" "${PROJECT_ROOT}/data-plane/pai-server/"
+docker build -t "${REGISTRY}/kaos-agent:${AGENT_TAG}" "${PROJECT_ROOT}/pydantic-ai-server/"
 
 # Tag same image for MCP server (they use the same base)
 docker tag "${REGISTRY}/kaos-agent:${AGENT_TAG}" "${REGISTRY}/kaos-mcp-server:${AGENT_TAG}"
 
 # Build MCP python-string image
 echo "Building MCP python-string image..."
-docker build -t "${REGISTRY}/kaos-mcp-python-string:${AGENT_TAG}" "${PROJECT_ROOT}/data-plane/mcp-servers/python-string/"
+docker build -t "${REGISTRY}/kaos-mcp-python-string:${AGENT_TAG}" "${PROJECT_ROOT}/mcp-servers/python-string/"
 
 # Build MCP pctx image
 echo "Building MCP pctx image..."
-docker build -t "${REGISTRY}/kaos-mcp-pctx:${AGENT_TAG}" "${PROJECT_ROOT}/data-plane/mcp-servers/pctx/"
+docker build -t "${REGISTRY}/kaos-mcp-pctx:${AGENT_TAG}" "${PROJECT_ROOT}/mcp-servers/pctx/"
 
 # Build minimal LiteLLM image (~200MB vs 1.5GB upstream)
 # Tag it as the upstream image to override for local development

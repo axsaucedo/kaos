@@ -16,8 +16,8 @@ The Python agent framework (**PAIS**) provides the runtime components for AI age
 ## Module Structure
 
 ```
-data-plane/pai-server/
-├── pai_server/
+pydantic-ai-server/
+├── pais/
 │   ├── server.py       # AgentServer, create_agent_server(), HTTP routes
 │   ├── serverutils.py  # AgentDeps, AgentCard, RemoteAgent, AgentServerSettings
 │   ├── tools.py        # DelegationToolset, string-mode handler

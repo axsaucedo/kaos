@@ -1,0 +1,19 @@
+# KAOS-UI Code Owners
+# These owners will be requested for review when someone opens a pull request.
+
+# Global owners - will be requested for all changes
+* @axsaucedo
+
+# UI Components
+/src/components/ @axsaucedo
+
+# Kubernetes types and API client
+/src/types/ @axsaucedo
+/src/lib/kubernetes*.ts @axsaucedo
+
+# Testing
+/tests/ @axsaucedo
+/playwright.config.ts @axsaucedo
+
+# CI/CD and GitHub configurations
+/.github/ @axsaucedo

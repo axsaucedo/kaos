@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'data-plane/mcp-servers/python-string/**'
+      - 'mcp-servers/python-string/**'
       - '.github/workflows/build-mcp-python-string.yaml'
   workflow_dispatch:
     inputs:
@@ -70,7 +70,7 @@ jobs:
         id: build
         uses: docker/build-push-action@v6
         with:
-          context: ./data-plane/mcp-servers/python-string
+          context: ./mcp-servers/python-string
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=${{ env.IMAGE_NAME }},push-by-digest=true,name-canonical=true,push=true

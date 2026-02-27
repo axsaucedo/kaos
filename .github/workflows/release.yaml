@@ -193,6 +193,100 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # Publish pydantic-ai-server to PyPI
+  publish-pydantic-ai-server:
+    needs: [validate, tests]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/pydantic-ai-server/
+    permissions:
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check if version already published
+        id: check-pypi
+        run: |
+          VERSION=${{ needs.validate.outputs.version }}
+          if curl -s "https://pypi.org/pypi/pydantic-ai-server/${VERSION}/json" | grep -q '"version"'; then
+            echo "Version $VERSION already exists on PyPI, skipping publish"
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "Version $VERSION not found on PyPI, will publish"
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Python
+        if: steps.check-pypi.outputs.skip != 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build tools
+        if: steps.check-pypi.outputs.skip != 'true'
+        run: python -m pip install --upgrade pip build
+
+      - name: Update version and build pydantic-ai-server
+        if: steps.check-pypi.outputs.skip != 'true'
+        working-directory: pydantic-ai-server
+        run: |
+          VERSION=${{ needs.validate.outputs.version }}
+          sed -i "s/^version = .*/version = \"$VERSION\"/" pyproject.toml
+          python -m build
+
+      - name: Publish to PyPI
+        if: steps.check-pypi.outputs.skip != 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: pydantic-ai-server/dist/
+
+  # Create releases on standalone repos (idempotent — skips if release exists)
+  release-standalone-repos:
+    needs: [validate, create-release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create release on pydantic-ai-server repo
+        env:
+          GH_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
+        run: |
+          VERSION=${{ needs.validate.outputs.version }}
+          REPO="axsaucedo/pydantic-ai-server"
+          if gh release view "v${VERSION}" --repo "${REPO}" >/dev/null 2>&1; then
+            echo "Release v${VERSION} already exists on ${REPO}, skipping"
+          else
+            gh release create "v${VERSION}" --repo "${REPO}" \
+              --title "v${VERSION}" \
+              --notes "Release v${VERSION} — synced from [KAOS monorepo](https://github.com/axsaucedo/agentic-kubernetes-operator/releases/tag/v${VERSION})" \
+              --latest
+            echo "Created release v${VERSION} on ${REPO}"
+          fi
+
+      - name: Create release on kaos-ui repo
+        env:
+          GH_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
+        run: |
+          VERSION=${{ needs.validate.outputs.version }}
+          REPO="axsaucedo/kaos-ui"
+          if gh release view "v${VERSION}" --repo "${REPO}" >/dev/null 2>&1; then
+            echo "Release v${VERSION} already exists on ${REPO}, skipping"
+          else
+            gh release create "v${VERSION}" --repo "${REPO}" \
+              --title "v${VERSION}" \
+              --notes "Release v${VERSION} — synced from [KAOS monorepo](https://github.com/axsaucedo/agentic-kubernetes-operator/releases/tag/v${VERSION})" \
+              --latest
+            echo "Created release v${VERSION} on ${REPO}"
+          fi
+
+  # Deploy kaos-ui to gh-pages (versioned + latest)
+  deploy-ui:
+    needs: [validate]
+    uses: ./.github/workflows/deploy-kaos-ui.yaml
+    with:
+      version: ${{ needs.validate.outputs.version }}
+    secrets: inherit
+
   # Bump version on main after release
   bump-version:
     needs: [validate, create-release]
@@ -245,7 +339,7 @@ jobs:
           echo "$NEXT_DEV" > VERSION
 
           # Update Python versions (PEP 440 compliant)
-          sed -i "s/^version = .*/version = \"$PYTHON_DEV\"/" data-plane/pai-server/pyproject.toml
+          sed -i "s/^version = .*/version = \"$PYTHON_DEV\"/" pydantic-ai-server/pyproject.toml
           sed -i "s/^version = .*/version = \"$PYTHON_DEV\"/" kaos-cli/pyproject.toml
 
           # Update Helm chart version
@@ -263,7 +357,7 @@ jobs:
 
           echo "Updated files:"
           cat VERSION
-          grep "^version" data-plane/pai-server/pyproject.toml
+          grep "^version" pydantic-ai-server/pyproject.toml
           grep "^version" kaos-cli/pyproject.toml
           grep "^version:\|^appVersion:" operator/chart/Chart.yaml
           grep -E "tag:|kaos-(agent|mcp-server|mcp-python-string|mcp-pctx):" operator/chart/values.yaml
