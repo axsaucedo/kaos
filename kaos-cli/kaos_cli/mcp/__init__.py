@@ -7,6 +7,7 @@ from kaos_cli.mcp.deploy import deploy_custom_image, deploy_runtime
 from kaos_cli.mcp.invoke import invoke_command
 from kaos_cli.mcp.init import init_command
 from kaos_cli.mcp.build import build_command
+from kaos_cli.mcp.run import run_command as mcp_run_command
 
 app = typer.Typer(
     help="MCP server management commands.",
@@ -58,6 +59,20 @@ def build_mcp(
         create_dockerfile=create_dockerfile,
         platform=platform,
     )
+
+
+@app.command(name="run")
+def run_mcp(
+    target: str = typer.Argument(
+        "server.py",
+        help="Python file or file:attribute (default: server.py).",
+    ),
+    host: str = typer.Option("0.0.0.0", "--host", help="Bind host."),
+    port: int = typer.Option(8000, "--port", "-p", help="Bind port."),
+    reload: bool = typer.Option(False, "--reload", "-r", help="Auto-reload on changes."),
+) -> None:
+    """Run a FastMCP server locally."""
+    mcp_run_command(target=target, host=host, port=port, reload=reload)
 
 
 @app.command(name="list")

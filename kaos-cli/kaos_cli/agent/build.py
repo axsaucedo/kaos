@@ -19,7 +19,7 @@ RUN uv pip install --system --no-cache-dir --no-deps . 2>/dev/null || true
 # Copy custom agent code
 COPY . .
 
-CMD ["python", "-m", "uvicorn", "{entry_point}:get_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["pais", "run", "{entry_point}.py"]
 """
 
 

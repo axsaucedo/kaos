@@ -671,9 +671,8 @@ class TestAgentInit:
         result = runner.invoke(app, ["agent", "init", target])
         assert result.exit_code == 0
         content = (tmp_path / "my-agent" / "server.py").read_text()
-        assert "create_agent_server" in content
+        assert "Agent(" in content
         assert "agent.tool_plain" in content
-        assert "get_app" in content
 
     def test_init_pyproject_has_pais_dep(self, tmp_path):
         target = str(tmp_path / "my-agent")
@@ -734,3 +733,37 @@ class TestAgentBuild:
         )
         assert result.exit_code != 0
         assert "pyproject.toml" in result.output
+
+
+# ─── Agent run command ──────────────────────────────────────────────────
+
+
+class TestAgentRun:
+    def test_run_help(self):
+        result = runner.invoke(app, ["agent", "run", "--help"])
+        assert result.exit_code == 0
+        output = strip_ansi(result.output)
+        assert "--host" in output
+        assert "--port" in output
+        assert "--reload" in output
+
+    def test_run_missing_file(self):
+        result = runner.invoke(app, ["agent", "run", "nonexistent.py"])
+        assert result.exit_code != 0
+
+
+# ─── MCP run command ────────────────────────────────────────────────────
+
+
+class TestMcpRun:
+    def test_run_help(self):
+        result = runner.invoke(app, ["mcp", "run", "--help"])
+        assert result.exit_code == 0
+        output = strip_ansi(result.output)
+        assert "--host" in output
+        assert "--port" in output
+        assert "--reload" in output
+
+    def test_run_missing_file(self):
+        result = runner.invoke(app, ["mcp", "run", "nonexistent.py"])
+        assert result.exit_code != 0

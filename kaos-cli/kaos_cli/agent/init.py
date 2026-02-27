@@ -4,58 +4,43 @@ from pathlib import Path
 import typer
 
 
-TEMPLATE_SERVER_PY = '''"""Custom Pydantic AI Agent Server."""
+TEMPLATE_SERVER_PY = '''"""Custom Pydantic AI Agent."""
 
 from pydantic_ai import Agent
-from pais.server import create_agent_server
+
+agent = Agent(
+    model="test",  # Overridden by KAOS env vars at runtime
+    instructions="You are a helpful assistant.",
+    name="my-agent",
+    defer_model_check=True,
+)
 
 
-def create_custom_agent():
-    """Create a Pydantic AI agent with custom tools."""
-    agent = Agent(
-        model="test",  # Overridden by KAOS env vars at runtime
-        instructions="You are a helpful assistant.",
-        name="my-agent",
-        defer_model_check=True,
-    )
+@agent.tool_plain
+def hello(name: str) -> str:
+    """Say hello to someone.
 
-    @agent.tool_plain
-    def hello(name: str) -> str:
-        """Say hello to someone.
+    Args:
+        name: The person to greet.
 
-        Args:
-            name: The person to greet.
-
-        Returns:
-            A greeting string.
-        """
-        return f"Hello, {name}!"
-
-    @agent.tool_plain
-    def add(a: float, b: float) -> str:
-        """Add two numbers.
-
-        Args:
-            a: First number.
-            b: Second number.
-
-        Returns:
-            The sum as a string.
-        """
-        return str(a + b)
-
-    return agent
+    Returns:
+        A greeting string.
+    """
+    return f"Hello, {name}!"
 
 
-def get_app():
-    """ASGI app factory for uvicorn."""
-    server = create_agent_server(custom_agent=create_custom_agent())
-    return server.app
+@agent.tool_plain
+def add(a: float, b: float) -> str:
+    """Add two numbers.
 
+    Args:
+        a: First number.
+        b: Second number.
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("server:get_app", factory=True, host="0.0.0.0", port=8000)
+    Returns:
+        The sum as a string.
+    """
+    return str(a + b)
 '''
 
 TEMPLATE_PYPROJECT_TOML = """[project]
@@ -91,7 +76,13 @@ Run locally:
 
 ```bash
 AGENT_NAME=my-agent MODEL_API_URL=http://localhost:11434 MODEL_NAME=llama3.2 \\
-  python -m uvicorn server:get_app --factory --host 0.0.0.0 --port 8000
+  pais run
+```
+
+Or with kaos CLI:
+
+```bash
+kaos agent run
 ```
 
 ## Build and Deploy
@@ -140,6 +131,6 @@ def init_command(
     typer.echo(f"\n🎉 Custom agent project initialized in {target_dir}")
     typer.echo("\nNext steps:")
     typer.echo("  1. Edit server.py to add your tools")
-    typer.echo("  2. Run locally: AGENT_NAME=my-agent MODEL_API_URL=... python server.py")
+    typer.echo("  2. Run locally: AGENT_NAME=my-agent MODEL_API_URL=... pais run")
     typer.echo("  3. Build: kaos agent build --name my-agent")
     typer.echo("  4. Deploy: kaos agent deploy my-agent --modelapi my-api --model llama3.2")

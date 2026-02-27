@@ -44,16 +44,17 @@ graph TD
 ### Installation
 
 ```bash
-pip install pydantic-ai-server
+pip install pydantic-ai-server         # Library only
+pip install pydantic-ai-server[cli]    # With CLI (includes kaos-cli)
 ```
 
 ### SDK Usage
 
-Create a custom agent with tools and wrap it with PAIS:
+Create a custom agent with pure Pydantic AI — zero boilerplate:
 
 ```python
+# server.py
 from pydantic_ai import Agent
-from pais.server import create_agent_server
 
 agent = Agent(
     model="test",
@@ -65,33 +66,42 @@ agent = Agent(
 def greet(name: str) -> str:
     """Say hello to someone."""
     return f"Hello, {name}!"
-
-server = create_agent_server(custom_agent=agent)
-app = server.app  # ASGI app with all PAIS endpoints
 ```
 
-Run it:
+Run it locally:
 
 ```bash
 AGENT_NAME=my-agent MODEL_API_URL=http://localhost:11434 MODEL_NAME=llama3.2 \
-  uvicorn server:get_app --factory --host 0.0.0.0 --port 8000
+  pais run
+```
+
+The `pais run` CLI auto-discovers your `Agent` and wraps it with PAIS (health probes, A2A card, memory, OpenAI-compatible API).
+
+For explicit ASGI app creation (e.g., custom middleware):
+
+```python
+from pais import serve
+app = serve(agent)  # Returns FastAPI ASGI app
 ```
 
 ### CLI Quick Start
 
-Scaffold, build, and deploy a custom agent with the KAOS CLI:
+Scaffold, build, and deploy a custom agent:
 
 ```bash
 # 1. Scaffold a new agent project
-kaos agent init my-agent
+pais init my-agent    # or: kaos agent init my-agent
 cd my-agent
 
 # 2. Edit server.py — add your tools and logic
 
-# 3. Build the Docker image
-kaos agent build --name my-agent --tag v1
+# 3. Run locally
+pais run              # or: kaos agent run
 
-# 4. Deploy to Kubernetes
+# 4. Build the Docker image
+pais build --name my-agent --tag v1    # or: kaos agent build ...
+
+# 5. Deploy to Kubernetes
 kaos agent deploy my-agent --modelapi my-api --model llama3.2
 ```
 

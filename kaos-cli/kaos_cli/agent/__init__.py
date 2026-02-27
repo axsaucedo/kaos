@@ -14,6 +14,7 @@ from kaos_cli.agent.status import status_command
 from kaos_cli.agent.memory import memory_command
 from kaos_cli.agent.init import init_command
 from kaos_cli.agent.build import build_command
+from kaos_cli.agent.run import run_command
 
 app = typer.Typer(
     help="Agent management commands.",
@@ -71,6 +72,20 @@ def build_agent(
         platform=platform,
         base_image=base_image,
     )
+
+
+@app.command(name="run")
+def run_agent(
+    target: str = typer.Argument(
+        "server.py",
+        help="Python file or file:attribute (default: server.py).",
+    ),
+    host: str = typer.Option("0.0.0.0", "--host", help="Bind host."),
+    port: int = typer.Option(8000, "--port", "-p", help="Bind port."),
+    reload: bool = typer.Option(False, "--reload", "-r", help="Auto-reload on changes."),
+) -> None:
+    """Run a Pydantic AI agent server locally."""
+    run_command(target=target, host=host, port=port, reload=reload)
 
 
 @app.command(name="list")
