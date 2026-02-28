@@ -156,7 +156,7 @@ export function OverviewDashboard() {
   const navigate = useNavigate();
   const { modelAPIs, mcpServers, agents, pods, logs, setActiveTab } = useKubernetesStore();
 
-  const getStatusCounts = (resources: any[], statusField = 'status.phase') => {
+  const getStatusCounts = (resources: any[]) => {
     const running = resources.filter(r => {
       const phase = r.status?.phase;
       return phase === 'Running' || phase === 'Ready';

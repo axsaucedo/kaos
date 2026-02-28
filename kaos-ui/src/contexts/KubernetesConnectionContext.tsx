@@ -8,7 +8,7 @@
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
 import { k8sClient } from '@/lib/kubernetes-client';
 import { useKubernetesStore } from '@/stores/kubernetesStore';
-import type { ModelAPI, MCPServer, Agent, LogEntry, Service, K8sSecret } from '@/types/kubernetes';
+import type { ModelAPI, MCPServer, Agent, LogEntry, K8sSecret } from '@/types/kubernetes';
 
 interface ConnectionState {
   connected: boolean;

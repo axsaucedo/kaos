@@ -157,7 +157,6 @@ export async function setupConnection(
  */
 export async function waitForResourceList(
   page: Page,
-  resourceType: 'agents' | 'mcpservers' | 'modelapis' | 'pods'
 ): Promise<void> {
   // Wait for loading to complete
   await page.waitForLoadState('networkidle');
@@ -188,7 +187,6 @@ export async function navigateToResource(
  */
 export async function getResourceCards(
   page: Page,
-  resourceType: 'agent' | 'mcpserver' | 'modelapi'
 ): Promise<string[]> {
   // Wait for content to load
   await page.waitForLoadState('networkidle');

@@ -87,7 +87,7 @@ export function MCPServerEditDialog({ mcpServer, open, onClose }: MCPServerEditD
     watch,
     setValue,
     reset,
-    formState: { errors, isSubmitting },
+    formState: { isSubmitting },
   } = useForm<MCPServerFormData>({
     defaultValues: {
       runtime: getRuntime(),

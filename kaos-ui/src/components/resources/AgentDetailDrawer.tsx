@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bot, Link2, Server, Cpu, X, ExternalLink } from 'lucide-react';
+import { Bot, Link2, Server, Cpu } from 'lucide-react';
 import {
   Sheet,
   SheetContent,

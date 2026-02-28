@@ -11,7 +11,6 @@ import { useKubernetesStore } from '@/stores/kubernetesStore';
 import { useKubernetesConnection } from '@/contexts/KubernetesConnectionContext';
 import { k8sClient } from '@/lib/kubernetes-client';
 import { YamlViewer } from '@/components/shared/YamlViewer';
-import type { Pod } from '@/types/kubernetes';
 
 export default function PodDetail() {
   const { namespace, name } = useParams<{ namespace: string; name: string }>();

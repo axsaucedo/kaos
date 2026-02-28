@@ -124,21 +124,9 @@ function getResourceIcon(type: 'Agent' | 'ModelAPI' | 'MCPServer') {
   }
 }
 
-function getResourceBadgeVariant(type: 'Agent' | 'ModelAPI' | 'MCPServer'): 'default' | 'secondary' | 'outline' {
-  return 'secondary';
-}
-
 export function AgentPods({ agent }: AgentPodsProps) {
   const navigate = useNavigate();
-  const { pods, deployments, services, modelAPIs, mcpServers } = useKubernetesStore();
-
-  // Get the ModelAPI this agent depends on
-  const modelAPIName = agent.spec.modelAPI;
-  const modelAPI = modelAPIs.find(m => m.metadata.name === modelAPIName);
-
-  // Get the MCPServers this agent depends on
-  const mcpServerNames = agent.spec.mcpServers || [];
-  const relatedMCPServers = mcpServers.filter(m => mcpServerNames.includes(m.metadata.name));
+  const { pods, deployments, services } = useKubernetesStore();
 
   // Helper to find pods for a resource
   const findPodsForResource = (resourceType: string, resourceName: string): Pod[] => {

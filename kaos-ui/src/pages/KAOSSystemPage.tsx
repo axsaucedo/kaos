@@ -40,7 +40,6 @@ export default function KAOSSystemPage() {
   const [operatorDeployments, setOperatorDeployments] = useState<Deployment[]>([]);
   const [operatorConfig, setOperatorConfig] = useState<ConfigMap | null>(null);
   const [mcpRuntimes, setMcpRuntimes] = useState<ConfigMap | null>(null);
-  const [parsedRuntimes, setParsedRuntimes] = useState<MCPRuntime[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currentTab, setCurrentTab] = useState('overview');
@@ -156,14 +155,11 @@ export default function KAOSSystemPage() {
         if (runtimesResponse.ok) {
           const runtimesData = await runtimesResponse.json();
           setMcpRuntimes(runtimesData);
-          setParsedRuntimes(parseRuntimes(runtimesData));
         } else {
           setMcpRuntimes(null);
-          setParsedRuntimes([]);
         }
       } catch {
         setMcpRuntimes(null);
-        setParsedRuntimes([]);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch KAOS resources');

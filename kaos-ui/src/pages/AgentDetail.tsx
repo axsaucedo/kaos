@@ -32,7 +32,7 @@ const getChatStorageKey = (namespace: string, name: string) => `agent-chat-${nam
 
 export default function AgentDetail() {
   const { namespace, name } = useParams<{ namespace: string; name: string }>();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { toast } = useToast();
   const { agents } = useKubernetesStore();

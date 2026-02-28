@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box, X } from 'lucide-react';
+import { Box } from 'lucide-react';
 import {
   Sheet,
   SheetContent,

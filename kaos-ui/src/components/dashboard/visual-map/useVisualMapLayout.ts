@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, useMemo, useEffect } from 'react';
+import { useCallback, useRef, useMemo } from 'react';
 import type { Node, Edge } from '@xyflow/react';
 import { computeLayout } from './layout-engine';
 import type { ResourceNodeData } from './types';
