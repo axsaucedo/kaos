@@ -36,7 +36,7 @@ import {
   EnvVarEntry, 
   envVarEntriesToK8sEnvVars 
 } from './shared/EnvVarEditorWithSecrets';
-import { validateKubernetesName } from './shared/EnvVarEditor';
+import { validateKubernetesName } from '@/lib/utils';
 import type { Agent } from '@/types/kubernetes';
 
 interface AgentFormData {

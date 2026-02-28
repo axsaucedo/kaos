@@ -9,6 +9,15 @@ export function formatDate(dateString: string): string {
   return new Date(dateString).toLocaleString();
 }
 
+export function validateKubernetesName(name: string): string | true {
+  if (!name) return 'Name is required';
+  if (name.length > 253) return 'Name must be 253 characters or less';
+  if (!/^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/.test(name)) {
+    return 'Name must be lowercase, start with alphanumeric, and contain only alphanumeric or hyphens';
+  }
+  return true;
+}
+
 export function formatRelativeTime(dateString: string): string {
   const date = new Date(dateString);
   const now = new Date();

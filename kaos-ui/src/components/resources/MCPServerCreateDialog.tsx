@@ -29,7 +29,7 @@ import {
   EnvVarEntry, 
   envVarEntriesToK8sEnvVars 
 } from './shared/EnvVarEditorWithSecrets';
-import { validateKubernetesName } from './shared/EnvVarEditor';
+import { validateKubernetesName } from '@/lib/utils';
 import type { MCPServer } from '@/types/kubernetes';
 
 // Runtime options based on KAOS registry

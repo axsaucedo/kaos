@@ -35,7 +35,7 @@ import {
   pickerValueToApiKeySource,
   ApiKeyType 
 } from './shared/ApiKeySecretPicker';
-import { validateKubernetesName } from './shared/EnvVarEditor';
+import { validateKubernetesName } from '@/lib/utils';
 import type { ModelAPI, ModelAPIMode } from '@/types/kubernetes';
 
 interface ModelAPIFormData {

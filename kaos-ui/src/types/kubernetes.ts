@@ -476,26 +476,3 @@ export interface LogEntry {
   resourceKind?: string;
 }
 
-// Canvas node for visual editor
-export interface CanvasNode {
-  id: string;
-  type: 'ModelAPI' | 'MCPServer' | 'Agent';
-  position: { x: number; y: number };
-  data: AgenticResource;
-  selected?: boolean;
-}
-
-export interface CanvasConnection {
-  id: string;
-  sourceId: string;
-  targetId: string;
-  sourceHandle?: string;
-  targetHandle?: string;
-}
-
-export interface CanvasState {
-  nodes: CanvasNode[];
-  connections: CanvasConnection[];
-  zoom: number;
-  pan: { x: number; y: number };
-}
