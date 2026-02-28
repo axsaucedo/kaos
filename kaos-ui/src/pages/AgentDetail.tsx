@@ -254,14 +254,14 @@ export default function AgentDetail() {
       {/* Tabs Content */}
       <Tabs value={currentTab} onValueChange={setCurrentTab} className="space-y-6">
         <TabsList className="grid w-full max-w-2xl grid-cols-5">
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="chat">Chat</TabsTrigger>
-          <TabsTrigger value="memory">Memory</TabsTrigger>
-          <TabsTrigger value="pods" className="flex items-center gap-1">
+          <TabsTrigger value="overview" data-testid="tab-overview">Overview</TabsTrigger>
+          <TabsTrigger value="chat" data-testid="tab-chat">Chat</TabsTrigger>
+          <TabsTrigger value="memory" data-testid="tab-memory">Memory</TabsTrigger>
+          <TabsTrigger value="pods" data-testid="tab-pods" className="flex items-center gap-1">
             <Box className="h-3 w-3" />
             Pods
           </TabsTrigger>
-          <TabsTrigger value="yaml" className="flex items-center gap-1">
+          <TabsTrigger value="yaml" data-testid="tab-yaml" className="flex items-center gap-1">
             <FileCode className="h-3 w-3" />
             YAML
           </TabsTrigger>

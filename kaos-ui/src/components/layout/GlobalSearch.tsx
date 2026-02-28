@@ -165,6 +165,7 @@ export function GlobalSearch() {
           <Input
             placeholder="Search resources... (Ctrl+K)"
             className="pl-9 bg-muted/50 border-transparent focus:border-primary h-9 cursor-pointer"
+            data-testid="global-search-input"
             readOnly
             value=""
           />
@@ -216,6 +217,7 @@ export function GlobalSearch() {
                     return (
                       <button
                         key={`${result.type}-${result.namespace}-${result.name}-${index}`}
+                        data-testid={`search-result-${result.type}-${result.name}`}
                         className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-muted/50 text-left transition-colors"
                         onClick={() => handleSelect(result)}
                       >

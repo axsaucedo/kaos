@@ -181,19 +181,19 @@ export default function MCPServerDetail() {
       {/* Tabs Content */}
       <Tabs value={currentTab} onValueChange={setCurrentTab} className="space-y-6">
         <TabsList className="grid w-full max-w-lg grid-cols-4">
-          <TabsTrigger value="overview" className="flex items-center gap-1">
+          <TabsTrigger value="overview" data-testid="tab-overview" className="flex items-center gap-1">
             <Info className="h-3 w-3" />
             Overview
           </TabsTrigger>
-          <TabsTrigger value="tools" className="flex items-center gap-1">
+          <TabsTrigger value="tools" data-testid="tab-tools" className="flex items-center gap-1">
             <Wrench className="h-3 w-3" />
             Tools
           </TabsTrigger>
-          <TabsTrigger value="pods" className="flex items-center gap-1">
+          <TabsTrigger value="pods" data-testid="tab-pods" className="flex items-center gap-1">
             <Boxes className="h-3 w-3" />
             Pods
           </TabsTrigger>
-          <TabsTrigger value="yaml" className="flex items-center gap-1">
+          <TabsTrigger value="yaml" data-testid="tab-yaml" className="flex items-center gap-1">
             <FileCode className="h-3 w-3" />
             YAML
           </TabsTrigger>

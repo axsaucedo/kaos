@@ -116,7 +116,7 @@ export function ResourceList<T>({
             <p className="text-muted-foreground">{description}</p>
           </div>
         </div>
-        <Button onClick={onAdd} className="gap-2">
+        <Button onClick={onAdd} className="gap-2" data-testid={`create-${title.toLowerCase().replace(/\s+/g, '')}-button`}>
           <Plus className="h-4 w-4" />
           Create {title.slice(0, -1)}
         </Button>
@@ -186,6 +186,7 @@ export function ResourceList<T>({
               return (
                 <tr
                   key={id}
+                  data-testid={`resource-row-${id}`}
                   className={cn(
                     'hover:bg-muted/30 transition-colors',
                     selectedItems.has(id) && 'bg-primary/5'

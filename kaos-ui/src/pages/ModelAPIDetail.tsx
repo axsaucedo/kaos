@@ -181,19 +181,19 @@ export default function ModelAPIDetail() {
       {/* Tabs Content */}
       <Tabs value={currentTab} onValueChange={setCurrentTab} className="space-y-6">
         <TabsList className="grid w-full max-w-lg grid-cols-4">
-          <TabsTrigger value="overview" className="flex items-center gap-1">
+          <TabsTrigger value="overview" data-testid="tab-overview" className="flex items-center gap-1">
             <Info className="h-3 w-3" />
             Overview
           </TabsTrigger>
-          <TabsTrigger value="diagnostics" className="flex items-center gap-1">
+          <TabsTrigger value="diagnostics" data-testid="tab-diagnostics" className="flex items-center gap-1">
             <Stethoscope className="h-3 w-3" />
             Diagnostics
           </TabsTrigger>
-          <TabsTrigger value="pods" className="flex items-center gap-1">
+          <TabsTrigger value="pods" data-testid="tab-pods" className="flex items-center gap-1">
             <Boxes className="h-3 w-3" />
             Pods
           </TabsTrigger>
-          <TabsTrigger value="yaml" className="flex items-center gap-1">
+          <TabsTrigger value="yaml" data-testid="tab-yaml" className="flex items-center gap-1">
             <FileCode className="h-3 w-3" />
             YAML
           </TabsTrigger>

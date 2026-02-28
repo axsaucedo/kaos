@@ -51,6 +51,7 @@ export function ConnectionStatus() {
         <Tooltip>
           <TooltipTrigger asChild>
             <div 
+              data-testid="connection-status"
               className={cn(
                 'flex items-center gap-2 px-3 py-1.5 rounded-md text-xs cursor-default transition-colors',
                 'bg-muted text-muted-foreground border border-border'
@@ -87,6 +88,7 @@ export function ConnectionStatus() {
           <DropdownMenuTrigger asChild>
             <TooltipTrigger asChild>
               <button 
+                data-testid="connection-status"
                 className={cn(
                   'flex items-center gap-2 px-3 py-1.5 rounded-md text-xs transition-colors',
                   'bg-success/10 text-success border border-success/20 hover:bg-success/20'
