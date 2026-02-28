@@ -1,10 +1,10 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { RefreshCw, AlertCircle, Download, Terminal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { k8sClient } from '@/lib/kubernetes-client';
+import { usePodLogs } from '@/hooks/usePodLogs';
 import type { Pod } from '@/types/kubernetes';
 
 interface SystemLogsProps {
@@ -39,43 +39,21 @@ export default function SystemLogs({
   onSelectPod,
   active,
 }: SystemLogsProps) {
-  const [logs, setLogs] = useState<string>('');
-  const [logsLoading, setLogsLoading] = useState(false);
-  const [logsError, setLogsError] = useState<string | null>(null);
   const [selectedContainer, setSelectedContainer] = useState<string>('');
-  const [tailLines, setTailLines] = useState<number>(200);
-  const [autoRefresh, setAutoRefresh] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
 
   const containers = selectedPod?.spec?.containers?.map(c => c.name) || [];
 
-  const fetchLogs = useCallback(async () => {
-    if (!selectedPod) return;
-    
-    setLogsLoading(true);
-    setLogsError(null);
-    
-    try {
-      const logContent = await k8sClient.getPodLogs(
-        selectedPod.metadata.name, 
-        selectedPod.metadata.namespace, 
-        {
-          container: selectedContainer || undefined,
-          tailLines,
-        }
-      );
-      setLogs(logContent);
-      
-      if (scrollRef.current) {
-        scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-      }
-    } catch (err) {
-      setLogsError(err instanceof Error ? err.message : 'Failed to fetch logs');
-      setLogs('');
-    } finally {
-      setLogsLoading(false);
-    }
-  }, [selectedPod, selectedContainer, tailLines]);
+  const {
+    logs, logsLoading, logsError,
+    tailLines, setTailLines,
+    autoRefresh, setAutoRefresh,
+    scrollRef, fetchLogs, handleDownload: handleDownloadLogs,
+  } = usePodLogs({
+    namespace: selectedPod?.metadata.namespace,
+    podName: selectedPod?.metadata.name,
+    containerName: selectedContainer,
+    active: active && !!selectedPod,
+  });
 
   // Set default container when pod is selected
   useEffect(() => {
@@ -83,31 +61,6 @@ export default function SystemLogs({
       setSelectedContainer(selectedPod.spec.containers[0].name);
     }
   }, [selectedPod]);
-
-  // Fetch logs when tab becomes active or pod/container changes
-  useEffect(() => {
-    if (active && selectedPod) {
-      fetchLogs();
-    }
-  }, [active, selectedPod, selectedContainer, tailLines, fetchLogs]);
-
-  // Auto-refresh logs
-  useEffect(() => {
-    if (!autoRefresh || !active) return;
-    
-    const interval = setInterval(fetchLogs, 5000);
-    return () => clearInterval(interval);
-  }, [autoRefresh, active, fetchLogs]);
-
-  const handleDownloadLogs = () => {
-    const blob = new Blob([logs], { type: 'text/plain' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${selectedPod?.metadata.name}-${selectedContainer || 'logs'}.txt`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
 
   return (
     <>
