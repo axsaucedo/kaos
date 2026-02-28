@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Box, Edit, Trash2, RefreshCw, Info, Boxes, FileCode, Stethoscope } from 'lucide-react';
+import { getStatusVariant } from '@/lib/status-utils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -68,17 +69,6 @@ export default function ModelAPIDetail() {
       });
     } finally {
       setIsDeleting(false);
-    }
-  };
-
-  const getStatusVariant = (phase?: string) => {
-    switch (phase) {
-      case 'Running':
-      case 'Ready': return 'success';
-      case 'Pending': return 'warning';
-      case 'Error':
-      case 'Failed': return 'destructive';
-      default: return 'secondary';
     }
   };
 

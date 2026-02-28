@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Search, X, Box, Server, Bot, Boxes } from 'lucide-react';
+import { getStatusVariant } from '@/lib/status-utils';
 import { useNavigate } from 'react-router-dom';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -149,18 +150,6 @@ export function GlobalSearch() {
       case 'mcpserver': return 'MCPServer';
       case 'agent': return 'Agent';
       case 'pod': return 'Pod';
-    }
-  };
-
-  const getStatusVariant = (status?: string) => {
-    switch (status) {
-      case 'Running':
-      case 'Ready': return 'success';
-      case 'Pending':
-      case 'Waiting': return 'warning';
-      case 'Error':
-      case 'Failed': return 'destructive';
-      default: return 'secondary';
     }
   };
 

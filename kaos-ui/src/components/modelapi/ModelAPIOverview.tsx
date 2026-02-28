@@ -5,23 +5,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { DeploymentStatusCard } from '@/components/shared/DeploymentStatusCard';
 import type { ModelAPI } from '@/types/kubernetes';
+import { getStatusVariant } from '@/lib/status-utils';
 
 interface ModelAPIOverviewProps {
   modelAPI: ModelAPI;
 }
 
 export function ModelAPIOverview({ modelAPI }: ModelAPIOverviewProps) {
-  const getStatusVariant = (phase?: string) => {
-    switch (phase) {
-      case 'Running':
-      case 'Ready': return 'success';
-      case 'Pending': return 'warning';
-      case 'Error':
-      case 'Failed': return 'destructive';
-      default: return 'secondary';
-    }
-  };
-
   // NEW: prefer container.env, fall back to legacy proxyConfig.env/hostedConfig.env
   const envVars = modelAPI.spec.container?.env 
     || (modelAPI.spec.mode === 'Proxy' 

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Plus, Search, Edit, Trash2, Eye, RefreshCw } from 'lucide-react';
+import { getStatusVariant } from '@/lib/status-utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -80,33 +81,6 @@ export function ResourceList<T>({
     const id = getItemId(item);
     return id.toLowerCase().includes(search.toLowerCase());
   });
-
-  const getStatusVariant = (status: string) => {
-    const normalizedStatus = status?.toLowerCase();
-    switch (normalizedStatus) {
-      case 'running':
-      case 'ready':
-      case 'bound':
-      case 'active':
-      case 'available':
-        return 'success';
-      case 'pending':
-      case 'creating':
-      case 'waiting':
-      case 'progressing':
-        return 'warning';
-      case 'error':
-      case 'failed':
-      case 'crashloopbackoff':
-        return 'error';
-      case 'terminating':
-      case 'terminated':
-      case 'deleting':
-        return 'destructive';
-      default:
-        return 'secondary';
-    }
-  };
 
   const handleDeleteClick = (item: T) => {
     setItemToDelete(item);

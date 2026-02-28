@@ -5,6 +5,7 @@ import { useKubernetesStore } from '@/stores/kubernetesStore';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { getStatusVariant } from '@/lib/status-utils';
 
 interface StatCardProps {
   title: string;
@@ -78,18 +79,6 @@ function ResourceItem({ name, namespace, type, status, icon: Icon, onClick }: Re
     pod: 'pod-color',
   };
   
-  const getStatusVariant = (s?: string) => {
-    switch (s) {
-      case 'Running':
-      case 'Ready': return 'success';
-      case 'Pending':
-      case 'Waiting': return 'warning';
-      case 'Error':
-      case 'Failed': return 'error';
-      default: return 'secondary';
-    }
-  };
-
   return (
     <div 
       className="flex items-center justify-between p-3 rounded-lg bg-muted/30 hover:bg-muted/50 cursor-pointer transition-colors"

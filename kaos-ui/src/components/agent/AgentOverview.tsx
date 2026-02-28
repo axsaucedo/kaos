@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { DeploymentStatusCard } from '@/components/shared/DeploymentStatusCard';
 import type { Agent } from '@/types/kubernetes';
+import { getStatusVariant } from '@/lib/status-utils';
 
 interface AgentOverviewProps {
   agent: Agent;
@@ -12,18 +13,6 @@ interface AgentOverviewProps {
 
 export function AgentOverview({ agent }: AgentOverviewProps) {
   const { metadata, spec, status } = agent;
-
-  const getStatusVariant = (phase?: string) => {
-    switch (phase) {
-      case 'Running':
-      case 'Ready': return 'success';
-      case 'Pending':
-      case 'Waiting': return 'warning';
-      case 'Error':
-      case 'Failed': return 'destructive';
-      default: return 'secondary';
-    }
-  };
 
   return (
     <div className="grid gap-6 md:grid-cols-2">
