@@ -35,7 +35,7 @@ import {
   pickerValueToApiKeySource,
   ApiKeyType 
 } from './shared/ApiKeySecretPicker';
-import { validateKubernetesName } from '@/lib/utils';
+import { NameField } from './shared/NameField';
 import type { ModelAPI, ModelAPIMode } from '@/types/kubernetes';
 
 interface ModelAPIFormData {
@@ -192,25 +192,12 @@ export function ModelAPICreateDialog({ open, onClose }: ModelAPICreateDialogProp
           <ScrollArea className="h-[calc(90vh-220px)] pr-4">
             <div className="space-y-6 py-4">
               {/* Name */}
-              <div className="space-y-2">
-                <Label htmlFor="name">Name</Label>
-                <Input
-                  id="name"
-                  {...register('name', { 
-                    required: 'Name is required',
-                    validate: (value) => {
-                      const k8sValidation = validateKubernetesName(value);
-                      if (k8sValidation !== true) return k8sValidation;
-                      return validateUniqueName(value);
-                    },
-                  })}
-                  placeholder="my-model-api"
-                  className="font-mono"
-                />
-                {errors.name && (
-                  <p className="text-sm text-destructive">{errors.name.message}</p>
-                )}
-              </div>
+              <NameField
+                register={register}
+                errors={errors}
+                placeholder="my-model-api"
+                validateUniqueName={validateUniqueName}
+              />
 
               {/* Mode */}
               <div className="space-y-2">
