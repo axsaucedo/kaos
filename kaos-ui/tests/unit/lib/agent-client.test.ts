@@ -66,7 +66,7 @@ describe('streamAgentChat', () => {
   });
 
   it('detects progress blocks and calls onProgress', async () => {
-    const progressEvents: any[] = [];
+    const progressEvents: { type: string; step: number; max_steps: number; action: string; target: string }[] = [];
     const chunks: string[] = [];
     const progressJson = JSON.stringify({
       type: 'progress',

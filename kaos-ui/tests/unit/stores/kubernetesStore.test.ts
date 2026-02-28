@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import type { Agent, ModelAPI, MCPServer, Pod, LogEntry } from '@/types/kubernetes';
 
 // Mock localStorage for auto-refresh state
 const localStorageMock = (() => {
@@ -59,7 +60,7 @@ describe('kubernetesStore', () => {
     const mockAgent = {
       metadata: { name: 'test-agent', namespace: 'default' },
       spec: { modelAPI: 'test-model', model: 'gpt-4' },
-    } as any;
+    } as unknown as Agent;
 
     it('sets agents', () => {
       useKubernetesStore.getState().setAgents([mockAgent]);
@@ -77,7 +78,7 @@ describe('kubernetesStore', () => {
       useKubernetesStore.getState().setAgents([mockAgent]);
       useKubernetesStore.getState().updateAgent('test-agent', {
         spec: { modelAPI: 'updated-model', model: 'gpt-5' },
-      } as any);
+      } as unknown as Partial<Agent>);
       expect(useKubernetesStore.getState().agents[0].spec.modelAPI).toBe('updated-model');
     });
 
@@ -101,7 +102,7 @@ describe('kubernetesStore', () => {
     const mockAPI = {
       metadata: { name: 'test-api', namespace: 'default' },
       spec: {},
-    } as any;
+    } as unknown as ModelAPI;
 
     it('sets and deletes modelAPIs', () => {
       useKubernetesStore.getState().setModelAPIs([mockAPI], true);
@@ -115,7 +116,7 @@ describe('kubernetesStore', () => {
     const mockServer = {
       metadata: { name: 'test-mcp', namespace: 'default' },
       spec: {},
-    } as any;
+    } as unknown as MCPServer;
 
     it('sets and deletes mcpServers', () => {
       useKubernetesStore.getState().setMCPServers([mockServer], true);
@@ -128,10 +129,10 @@ describe('kubernetesStore', () => {
   describe('clearAllResources', () => {
     it('clears all resource arrays', () => {
       const state = useKubernetesStore.getState();
-      state.setAgents([{ metadata: { name: 'a' } } as any], true);
-      state.setModelAPIs([{ metadata: { name: 'b' } } as any], true);
-      state.setMCPServers([{ metadata: { name: 'c' } } as any], true);
-      state.setPods([{ metadata: { name: 'd' } } as any]);
+      state.setAgents([{ metadata: { name: 'a' } } as unknown as Agent], true);
+      state.setModelAPIs([{ metadata: { name: 'b' } } as unknown as ModelAPI], true);
+      state.setMCPServers([{ metadata: { name: 'c' } } as unknown as MCPServer], true);
+      state.setPods([{ metadata: { name: 'd' } } as unknown as Pod]);
 
       useKubernetesStore.getState().clearAllResources();
 
@@ -164,13 +165,13 @@ describe('kubernetesStore', () => {
     it('adds logs and caps at 1000', () => {
       const state = useKubernetesStore.getState();
       for (let i = 0; i < 1005; i++) {
-        state.addLog({ timestamp: new Date().toISOString(), message: `log-${i}` } as any);
+        state.addLog({ timestamp: new Date().toISOString(), message: `log-${i}` } as unknown as LogEntry);
       }
       expect(useKubernetesStore.getState().logs.length).toBeLessThanOrEqual(1000);
     });
 
     it('clears logs', () => {
-      useKubernetesStore.getState().addLog({ timestamp: new Date().toISOString(), message: 'test' } as any);
+      useKubernetesStore.getState().addLog({ timestamp: new Date().toISOString(), message: 'test' } as unknown as LogEntry);
       useKubernetesStore.getState().clearLogs();
       expect(useKubernetesStore.getState().logs).toEqual([]);
     });

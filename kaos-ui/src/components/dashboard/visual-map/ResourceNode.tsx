@@ -9,7 +9,9 @@ import { RESOURCE_ROUTES } from './types';
 import { getStatusVariant } from '@/lib/status-utils';
 
 // Context for zoom level and compact mode toggle (zoom no longer triggers compact)
+// eslint-disable-next-line react-refresh/only-export-components
 export const VisualMapZoomContext = createContext<number>(1);
+// eslint-disable-next-line react-refresh/only-export-components
 export const VisualMapCompactContext = createContext<boolean>(false);
 
 const ICON_MAP = { Box, Server, Bot, Info, MessageSquare, Brain, Wrench, Stethoscope };

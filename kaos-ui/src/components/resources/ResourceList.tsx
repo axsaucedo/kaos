@@ -3,7 +3,7 @@ import { Plus, Search, Edit, Trash2, Eye, RefreshCw } from 'lucide-react';
 import { getStatusVariant } from '@/lib/status-utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
+import { Badge, type BadgeProps } from '@/components/ui/badge';
 import {
   Tooltip,
   TooltipContent,
@@ -214,7 +214,7 @@ export function ResourceList<T>({
                         col.render(item)
                       ) : (
                         <span className="text-sm text-foreground">
-                          {(item as any)[col.key]}
+                          {(item as Record<string, unknown>)[col.key] as React.ReactNode}
                         </span>
                       )}
                     </td>
@@ -222,10 +222,10 @@ export function ResourceList<T>({
                   {status && (
                     <td className="px-4 py-3">
                       {typeof status === 'string' ? (
-                        <Badge variant={getStatusVariant(status) as any}>{status}</Badge>
+                        <Badge variant={getStatusVariant(status) as BadgeProps['variant']}>{status}</Badge>
                       ) : (
                         <div className="flex items-center gap-2">
-                          <Badge variant={status.variant as any} className="gap-1">
+                          <Badge variant={status.variant as BadgeProps['variant']} className="gap-1">
                             {status.isRolling && (
                               <RefreshCw className="h-3 w-3 animate-spin" />
                             )}

@@ -119,6 +119,7 @@ export function ModelAPIEditDialog({ modelAPI, open, onClose }: ModelAPIEditDial
     reset(getDefaultValues());
     setEnvVars(k8sEnvVarsToEntries(getEnvVars()));
     setApiKeyValue(apiKeySourceToPickerValue(modelAPI.spec.proxyConfig?.apiKey));
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- getDefaultValues and getEnvVars are stable closures over modelAPI prop
   }, [modelAPI, reset]);
 
   const parseModels = (modelsStr: string): string[] => {

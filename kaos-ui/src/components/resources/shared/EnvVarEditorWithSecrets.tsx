@@ -233,7 +233,7 @@ export function EnvVarEditorWithSecrets({
   );
 }
 
-// Helper to convert EnvVarEntry[] to the Kubernetes EnvVar[] format
+// eslint-disable-next-line react-refresh/only-export-components
 export function envVarEntriesToK8sEnvVars(entries: EnvVarEntry[]): EnvVar[] {
   return entries
     .filter(e => e.name.trim())
@@ -256,7 +256,7 @@ export function envVarEntriesToK8sEnvVars(entries: EnvVarEntry[]): EnvVar[] {
     });
 }
 
-// Helper to convert Kubernetes EnvVar[] to EnvVarEntry[] format
+// eslint-disable-next-line react-refresh/only-export-components
 export function k8sEnvVarsToEntries(envVars?: EnvVar[]): EnvVarEntry[] {
   if (!envVars) return [];
   return envVars.map(e => {

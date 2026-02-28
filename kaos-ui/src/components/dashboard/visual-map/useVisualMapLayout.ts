@@ -1,4 +1,4 @@
-import { useCallback, useRef, useMemo } from 'react';
+import React, { useCallback, useRef, useMemo } from 'react';
 import type { Node, Edge } from '@xyflow/react';
 import { computeLayout } from './layout-engine';
 import type { ResourceNodeData } from './types';
@@ -13,7 +13,7 @@ const POSITIONS_STORAGE_KEY = 'visual-map-node-positions';
  */
 function computeEffectiveStatus(resource: ModelAPI | MCPServer | Agent): string {
   const phase = resource.status?.phase || 'Unknown';
-  const deployment = (resource.status as any)?.deployment as DeploymentStatusInfo | undefined;
+  const deployment = (resource.status as { deployment?: DeploymentStatusInfo } | undefined)?.deployment;
   if (!deployment) return phase;
 
   const { replicas = 0, readyReplicas = 0, updatedReplicas = 0 } = deployment;
@@ -133,9 +133,10 @@ function buildGraph(
 }
 
 function resourceFingerprint(modelAPIs: ModelAPI[], mcpServers: MCPServer[], agents: Agent[]): string {
-  const m = modelAPIs.map(r => `${r.metadata.namespace}/${r.metadata.name}:${r.status?.phase}:${(r.status as any)?.deployment?.readyReplicas ?? ''}/${(r.status as any)?.deployment?.replicas ?? ''}`).sort().join(',');
-  const s = mcpServers.map(r => `${r.metadata.namespace}/${r.metadata.name}:${r.status?.phase}:${(r.status as any)?.deployment?.readyReplicas ?? ''}/${(r.status as any)?.deployment?.replicas ?? ''}`).sort().join(',');
-  const a = agents.map(r => `${r.metadata.namespace}/${r.metadata.name}:${r.status?.phase}:${r.spec.modelAPI}:${r.spec.mcpServers?.sort().join('+')}:${r.spec.agentNetwork?.access?.sort().join('+') ?? ''}:${(r.status as any)?.deployment?.readyReplicas ?? ''}/${(r.status as any)?.deployment?.replicas ?? ''}`).sort().join(',');
+  type StatusWithDeployment = { deployment?: DeploymentStatusInfo } | undefined;
+  const m = modelAPIs.map(r => `${r.metadata.namespace}/${r.metadata.name}:${r.status?.phase}:${(r.status as StatusWithDeployment)?.deployment?.readyReplicas ?? ''}/${(r.status as StatusWithDeployment)?.deployment?.replicas ?? ''}`).sort().join(',');
+  const s = mcpServers.map(r => `${r.metadata.namespace}/${r.metadata.name}:${r.status?.phase}:${(r.status as StatusWithDeployment)?.deployment?.readyReplicas ?? ''}/${(r.status as StatusWithDeployment)?.deployment?.replicas ?? ''}`).sort().join(',');
+  const a = agents.map(r => `${r.metadata.namespace}/${r.metadata.name}:${r.status?.phase}:${r.spec.modelAPI}:${r.spec.mcpServers?.sort().join('+')}:${r.spec.agentNetwork?.access?.sort().join('+') ?? ''}:${(r.status as StatusWithDeployment)?.deployment?.readyReplicas ?? ''}/${(r.status as StatusWithDeployment)?.deployment?.replicas ?? ''}`).sort().join(',');
   return `${m}|${s}|${a}`;
 }
 
@@ -209,7 +210,7 @@ export function useVisualMapLayout(
     return { initialNodes: layoutedNodes, initialEdges: edges, changed: structurallyChanged, newNodeIds: newIds };
   }, [modelAPIs, mcpServers, agents, structuralFP]);
 
-  const handleNodeDragStop = useCallback((_: any, node: Node) => {
+  const handleNodeDragStop = useCallback((_: React.MouseEvent, node: Node) => {
     lockedPositions.current.set(node.id, { ...node.position });
     savePositions(lockedPositions.current);
   }, []);

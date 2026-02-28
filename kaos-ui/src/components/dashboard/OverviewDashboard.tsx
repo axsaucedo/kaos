@@ -2,10 +2,11 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Box, Server, Bot, Boxes, AlertCircle, CheckCircle2, Clock, Activity, ArrowRight } from 'lucide-react';
 import { useKubernetesStore } from '@/stores/kubernetesStore';
-import { Badge } from '@/components/ui/badge';
+import { Badge, type BadgeProps } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { getStatusVariant } from '@/lib/status-utils';
+import type { LogEntry } from '@/types/kubernetes';
 
 interface StatCardProps {
   title: string;
@@ -94,14 +95,14 @@ function ResourceItem({ name, namespace, type, status, icon: Icon, onClick }: Re
           {namespace && <p className="text-xs text-muted-foreground font-mono">{namespace}</p>}
         </div>
       </div>
-      <Badge variant={getStatusVariant(status) as any}>
+      <Badge variant={getStatusVariant(status) as BadgeProps['variant']}>
         {status || 'Unknown'}
       </Badge>
     </div>
   );
 }
 
-function ActivityItem({ log }: { log: any }) {
+function ActivityItem({ log }: { log: LogEntry }) {
   const levelColors = {
     info: 'text-primary',
     warn: 'text-warning',
@@ -145,7 +146,7 @@ export function OverviewDashboard() {
   const navigate = useNavigate();
   const { modelAPIs, mcpServers, agents, pods, logs, setActiveTab } = useKubernetesStore();
 
-  const getStatusCounts = (resources: any[]) => {
+  const getStatusCounts = (resources: { status?: { phase?: string } }[]) => {
     const running = resources.filter(r => {
       const phase = r.status?.phase;
       return phase === 'Running' || phase === 'Ready';

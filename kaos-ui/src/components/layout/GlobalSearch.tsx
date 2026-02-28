@@ -3,7 +3,7 @@ import { Search, X, Box, Server, Bot, Boxes } from 'lucide-react';
 import { getStatusVariant } from '@/lib/status-utils';
 import { useNavigate } from 'react-router-dom';
 import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
+import { Badge, type BadgeProps } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useKubernetesStore } from '@/stores/kubernetesStore';
@@ -234,7 +234,7 @@ export function GlobalSearch() {
                           <p className="text-xs text-muted-foreground font-mono">{result.namespace}</p>
                         </div>
                         {result.status && (
-                          <Badge variant={getStatusVariant(result.status) as any} className="shrink-0">
+                          <Badge variant={getStatusVariant(result.status) as BadgeProps['variant']} className="shrink-0">
                             {result.status}
                           </Badge>
                         )}

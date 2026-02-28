@@ -1,5 +1,5 @@
 import React from 'react';
-import { getSmoothStepPath, useInternalNode, EdgeLabelRenderer, Position, type EdgeProps } from '@xyflow/react';
+import { getSmoothStepPath, useInternalNode, EdgeLabelRenderer, Position, type EdgeProps, type EdgeMarker } from '@xyflow/react';
 
 // Fallback dimensions if measured not available
 const CARD_W = 240;
@@ -83,7 +83,7 @@ export function DynamicEdge({
   const markerEndStr = typeof markerEnd === 'string'
     ? markerEnd
     : markerEnd && typeof markerEnd === 'object' && 'type' in markerEnd
-      ? `url(#${(markerEnd as any).type})`
+      ? `url(#${(markerEnd as EdgeMarker).type})`
       : undefined;
 
   return (
@@ -103,12 +103,12 @@ export function DynamicEdge({
               position: 'absolute',
               transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
               pointerEvents: 'none',
-              ...(labelBgStyle as any),
+              ...(labelBgStyle as React.CSSProperties),
               padding: '1px 4px',
               borderRadius: 3,
             }}
           >
-            <span style={labelStyle as any}>{label}</span>
+            <span style={labelStyle as React.CSSProperties}>{label}</span>
           </div>
         </EdgeLabelRenderer>
       )}

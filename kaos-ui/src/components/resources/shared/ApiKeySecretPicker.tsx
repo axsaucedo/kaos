@@ -215,7 +215,7 @@ export function ApiKeySecretPicker({
   );
 }
 
-// Helper to convert picker value to ApiKeySource
+// eslint-disable-next-line react-refresh/only-export-components
 export function pickerValueToApiKeySource(value: ApiKeySecretPickerProps['value']): ApiKeySource | undefined {
   switch (value.type) {
     case 'value':
@@ -229,7 +229,7 @@ export function pickerValueToApiKeySource(value: ApiKeySecretPickerProps['value'
   }
 }
 
-// Helper to convert ApiKeySource to picker value
+// eslint-disable-next-line react-refresh/only-export-components
 export function apiKeySourceToPickerValue(source?: ApiKeySource): ApiKeySecretPickerProps['value'] {
   if (!source) {
     return { type: 'none' };

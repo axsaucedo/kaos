@@ -103,7 +103,7 @@ export function AgentMemory({ agent }: AgentMemoryProps) {
     } finally {
       setIsLoading(false);
     }
-  }, [k8sClient, serviceName, namespace]);
+  }, [serviceName, namespace]);
 
   // Auto-fetch on mount, but only if memory is enabled
   useEffect(() => {

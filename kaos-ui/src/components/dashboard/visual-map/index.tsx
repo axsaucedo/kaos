@@ -55,7 +55,7 @@ function saveViewport(vp: Viewport) {
 }
 
 // ── Wrap ResourceNode with context menu + edit handler ──
-function ContextMenuResourceNode({ data }: { data: ResourceNodeData; [key: string]: any }) {
+function ContextMenuResourceNode({ data }: { data: ResourceNodeData; [key: string]: unknown }) {
   const { fitView } = useReactFlow();
 
   const handleFocusNode = useCallback((nodeId: string) => {
@@ -78,12 +78,12 @@ function ContextMenuResourceNode({ data }: { data: ResourceNodeData; [key: strin
 }
 
 const nodeTypes: NodeTypes = {
-  resourceNode: ContextMenuResourceNode as any,
-  columnHeader: ColumnHeaderNode as any,
+  resourceNode: ContextMenuResourceNode as unknown as NodeTypes[string],
+  columnHeader: ColumnHeaderNode as unknown as NodeTypes[string],
 };
 
 const edgeTypes: EdgeTypes = {
-  dynamic: DynamicEdge as any,
+  dynamic: DynamicEdge as unknown as EdgeTypes[string],
 };
 
 // ── Inner component (needs ReactFlowProvider) ──

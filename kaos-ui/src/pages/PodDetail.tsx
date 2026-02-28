@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Boxes, RefreshCw, Info, Terminal, FileCode } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -27,7 +27,7 @@ export default function PodDetail() {
   const [copiedCommand, setCopiedCommand] = useState(false);
 
   const pod = pods.find(p => p.metadata.name === name && p.metadata.namespace === namespace);
-  const containers = pod?.spec?.containers?.map(c => c.name) || [];
+  const containers = useMemo(() => pod?.spec?.containers?.map(c => c.name) || [], [pod]);
 
   // Set default container when pod is loaded
   useEffect(() => {
