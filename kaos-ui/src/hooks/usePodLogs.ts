@@ -13,7 +13,7 @@ export function usePodLogs({ namespace, podName, containerName, active }: UsePod
   const [logsLoading, setLogsLoading] = useState(false);
   const [logsError, setLogsError] = useState<string | null>(null);
   const [tailLines, setTailLines] = useState<number>(200);
-  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [autoRefresh, setAutoRefresh] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const fetchLogs = useCallback(async () => {
@@ -51,7 +51,7 @@ export function usePodLogs({ namespace, podName, containerName, active }: UsePod
   useEffect(() => {
     if (!autoRefresh || !active) return;
 
-    const interval = setInterval(fetchLogs, 5000);
+    const interval = setInterval(fetchLogs, 1000);
     return () => clearInterval(interval);
   }, [autoRefresh, active, fetchLogs]);
 

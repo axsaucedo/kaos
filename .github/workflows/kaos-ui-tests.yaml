@@ -17,8 +17,8 @@ env:
   REGISTRY: axsauze
 
 jobs:
-  build-lint-unit:
-    name: Build + Lint + Unit
+  build:
+    name: Build
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -40,9 +40,47 @@ jobs:
         working-directory: kaos-ui
         run: npm run build
 
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: kaos-ui/package-lock.json
+
+      - name: Install dependencies
+        working-directory: kaos-ui
+        run: npm ci
+
       - name: Lint
         working-directory: kaos-ui
         run: npm run lint
+
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: kaos-ui/package-lock.json
+
+      - name: Install dependencies
+        working-directory: kaos-ui
+        run: npm ci
 
       - name: Unit tests
         working-directory: kaos-ui

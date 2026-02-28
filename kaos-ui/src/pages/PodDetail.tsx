@@ -41,7 +41,7 @@ export default function PodDetail() {
     tailLines, setTailLines,
     autoRefresh, setAutoRefresh,
     scrollRef, fetchLogs, handleDownload,
-  } = usePodLogs({ namespace, podName: name, containerName: selectedContainer, activeTab: currentTab });
+  } = usePodLogs({ namespace, podName: name, containerName: selectedContainer, active: currentTab === 'logs' });
 
   const copyExecCommand = () => {
     const container = selectedContainer || containers[0];
