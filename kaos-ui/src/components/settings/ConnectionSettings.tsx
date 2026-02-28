@@ -261,8 +261,8 @@ export function ConnectionSettings() {
       {/* Diagnostics Card */}
       <ConnectionDiagnostics />
 
-      {/* CRUD Test Panel */}
-      <CRUDTestPanel />
+      {/* CRUD Test Panel (dev only) */}
+      {import.meta.env.DEV && <CRUDTestPanel />}
 
       {/* Instructions Card */}
       <Card>
