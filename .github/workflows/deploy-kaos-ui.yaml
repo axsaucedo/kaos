@@ -1,6 +1,11 @@
 name: Deploy kaos-ui
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'kaos-ui/**'
+      - '.github/workflows/deploy-kaos-ui.yaml'
   workflow_dispatch:
     inputs:
       version:
@@ -41,7 +46,7 @@ jobs:
       - name: Determine deploy path
         id: paths
         run: |
-          VERSION="${{ inputs.version }}"
+          VERSION="${{ inputs.version || 'dev' }}"
           if [ "$VERSION" = "dev" ]; then
             echo "base=/kaos-ui/dev/" >> $GITHUB_OUTPUT
             echo "dir=dev" >> $GITHUB_OUTPUT
@@ -69,7 +74,7 @@ jobs:
 
       - name: Prepare deployment
         run: |
-          VERSION="${{ inputs.version }}"
+          VERSION="${{ inputs.version || 'dev' }}"
           DEPLOY_DIR="${{ steps.paths.outputs.dir }}"
 
           cd gh-pages-checkout
