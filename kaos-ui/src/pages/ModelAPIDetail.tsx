@@ -20,7 +20,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useKubernetesStore } from '@/stores/kubernetesStore';
 import { useKubernetesConnection } from '@/contexts/KubernetesConnectionContext';
 import { ModelAPIOverview } from '@/components/modelapi/ModelAPIOverview';
-import { ModelAPIPods } from '@/components/modelapi/ModelAPIPods';
+import { ResourcePods } from '@/components/shared/ResourcePods';
 import { ModelAPIDiagnostics } from '@/components/modelapi/ModelAPIDiagnostics';
 import { ModelAPIEditDialog } from '@/components/resources/ModelAPIEditDialog';
 import { YamlViewer } from '@/components/shared/YamlViewer';
@@ -208,7 +208,7 @@ export default function ModelAPIDetail() {
         </TabsContent>
 
         <TabsContent value="pods" className="space-y-6">
-          <ModelAPIPods modelAPI={modelAPI} />
+          <ResourcePods resourceType="ModelAPI" resource={modelAPI} namespace={namespace!} name={name!} />
         </TabsContent>
 
         <TabsContent value="yaml" className="space-y-6">

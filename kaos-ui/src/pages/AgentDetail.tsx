@@ -21,7 +21,7 @@ import { useKubernetesConnection } from '@/contexts/KubernetesConnectionContext'
 import { AgentChat } from '@/components/agent/AgentChat';
 import { AgentOverview } from '@/components/agent/AgentOverview';
 import { AgentMemory } from '@/components/agent/AgentMemory';
-import { AgentPods } from '@/components/agent/AgentPods';
+import { ResourcePods } from '@/components/shared/ResourcePods';
 import { AgentEditDialog } from '@/components/resources/AgentEditDialog';
 import { YamlViewer } from '@/components/shared/YamlViewer';
 import type { Agent } from '@/types/kubernetes';
@@ -288,7 +288,7 @@ export default function AgentDetail() {
         </TabsContent>
 
         <TabsContent value="pods" className="space-y-6">
-          <AgentPods agent={agent} />
+          <ResourcePods resourceType="Agent" resource={agent} namespace={namespace!} name={name!} />
         </TabsContent>
 
         <TabsContent value="yaml" className="space-y-6">

@@ -21,7 +21,7 @@ import { useKubernetesStore } from '@/stores/kubernetesStore';
 import { useKubernetesConnection } from '@/contexts/KubernetesConnectionContext';
 import { MCPToolsDebug } from '@/components/mcp/MCPToolsDebug';
 import { MCPServerOverview } from '@/components/mcp/MCPServerOverview';
-import { MCPServerPods } from '@/components/mcp/MCPServerPods';
+import { ResourcePods } from '@/components/shared/ResourcePods';
 import { YamlViewer } from '@/components/shared/YamlViewer';
 import { MCPServerEditDialog } from '@/components/resources/MCPServerEditDialog';
 import type { MCPServer } from '@/types/kubernetes';
@@ -208,7 +208,7 @@ export default function MCPServerDetail() {
         </TabsContent>
 
         <TabsContent value="pods" className="space-y-6">
-          <MCPServerPods mcpServer={mcpServer} />
+          <ResourcePods resourceType="MCPServer" resource={mcpServer} namespace={namespace!} name={name!} />
         </TabsContent>
 
         <TabsContent value="yaml" className="space-y-6">
