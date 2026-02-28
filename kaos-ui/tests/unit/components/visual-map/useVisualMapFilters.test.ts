@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useVisualMapFilters } from '@/components/dashboard/visual-map/useVisualMapFilters';
 import type { Node, Edge } from '@xyflow/react';
+import type { ResourceNodeData } from '@/components/dashboard/visual-map/types';
 
 function makeResourceNode(id: string, resourceType: string, status: string, label?: string): Node {
   return {
@@ -80,8 +81,8 @@ describe('useVisualMapFilters', () => {
       const modelNode = filtered.nodes.find((n) => n.id === 'model-1')!;
       const agentNode = filtered.nodes.find((n) => n.id === 'agent-1')!;
 
-      expect((modelNode.data as any).isDimmed).toBe(true);
-      expect((agentNode.data as any).isDimmed).toBe(false);
+      expect((modelNode.data as unknown as ResourceNodeData).isDimmed).toBe(true);
+      expect((agentNode.data as unknown as ResourceNodeData).isDimmed).toBe(false);
     });
 
     it('dims edges connected to dimmed nodes', () => {
@@ -101,9 +102,9 @@ describe('useVisualMapFilters', () => {
       const agentNode = filtered.nodes.find((n) => n.id === 'agent-1')!;
       const mcpNode = filtered.nodes.find((n) => n.id === 'mcp-1')!;
 
-      expect((agentNode.data as any).isDimmed).toBe(false);
-      expect((agentNode.data as any).isHighlighted).toBe(true);
-      expect((mcpNode.data as any).isDimmed).toBe(true);
+      expect((agentNode.data as unknown as ResourceNodeData).isDimmed).toBe(false);
+      expect((agentNode.data as unknown as ResourceNodeData).isHighlighted).toBe(true);
+      expect((mcpNode.data as unknown as ResourceNodeData).isDimmed).toBe(true);
     });
 
     it('filters by status when status filter is active', () => {
@@ -114,8 +115,8 @@ describe('useVisualMapFilters', () => {
       const modelNode = filtered.nodes.find((n) => n.id === 'model-1')!;
       const agentNode = filtered.nodes.find((n) => n.id === 'agent-1')!;
 
-      expect((modelNode.data as any).isDimmed).toBe(false);
-      expect((agentNode.data as any).isDimmed).toBe(true);
+      expect((modelNode.data as unknown as ResourceNodeData).isDimmed).toBe(false);
+      expect((agentNode.data as unknown as ResourceNodeData).isDimmed).toBe(true);
     });
 
     it('passes through non-resourceNode nodes unchanged', () => {

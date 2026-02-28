@@ -62,7 +62,7 @@ export function ConnectionDiagnostics() {
     await new Promise(r => setTimeout(r, 200));
     
     let getWorked = false;
-    let responseData: any = null;
+    let responseData: Record<string, unknown> | null = null;
     
     try {
       const response = await fetch(`${cleanUrl}/version`);
@@ -73,7 +73,7 @@ export function ConnectionDiagnostics() {
         updateResult(1, { 
           status: 'success', 
           message: 'Connection successful!', 
-          details: `K8s ${responseData.gitVersion || 'responded'}` 
+          details: `K8s ${responseData?.gitVersion || 'responded'}` 
         });
       } else {
         const text = await response.text();

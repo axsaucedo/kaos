@@ -47,7 +47,7 @@ export function useAgentChat(options: UseAgentChatOptions) {
     if (initialMessages.length > 0 && messages.length === 0) {
       setMessages(initialMessages);
     }
-  }, [initialMessages]);
+  }, [initialMessages, messages.length]);
 
   const resolvedServiceName = serviceName || `agent-${agentName}`;
 

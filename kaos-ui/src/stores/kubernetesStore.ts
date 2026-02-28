@@ -28,7 +28,7 @@ interface KubernetesState {
   logs: LogEntry[];
   
   // UI State
-  selectedResource: any | null;
+  selectedResource: ModelAPI | MCPServer | Agent | Pod | null;
   selectedResourceMode: 'view' | 'edit' | null;
   activeTab: string;
   
@@ -74,7 +74,7 @@ interface KubernetesState {
   addLog: (log: LogEntry) => void;
   clearLogs: () => void;
   
-  setSelectedResource: (resource: any | null) => void;
+  setSelectedResource: (resource: ModelAPI | MCPServer | Agent | Pod | null) => void;
   setSelectedResourceMode: (mode: 'view' | 'edit' | null) => void;
   setActiveTab: (tab: string) => void;
   

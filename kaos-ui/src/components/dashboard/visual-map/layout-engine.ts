@@ -138,7 +138,7 @@ export function computeLayout(
   const headerNodes = nodes.filter((n) => n.type === 'columnHeader');
 
   // Separate by type (agent nodes used for layout)
-  const agentNodes = resourceNodes.filter((n) => (n.data as any)?.resourceType === 'Agent');
+  const agentNodes = resourceNodes.filter((n) => (n.data as Record<string, unknown>)?.resourceType === 'Agent');
 
   // Compute agent dependency depths for multi-column
   const agentDepths = computeAgentDepths(agentNodes, edges);
@@ -172,7 +172,7 @@ export function computeLayout(
     cluster.forEach((nodeId) => {
       const node = resourceNodes.find((n) => n.id === nodeId);
       if (!node) return;
-      const rt = (node.data as any)?.resourceType as string;
+      const rt = (node.data as Record<string, unknown>)?.resourceType as string;
       let col: number;
       if (rt === 'ModelAPI') col = 0;
       else if (rt === 'MCPServer') col = mcpServerCol;
@@ -250,7 +250,7 @@ export function computeLayout(
   // Also position any orphan nodes (no edges, not in any cluster with others)
   resourceNodes.forEach((node) => {
     if (positioned.has(node.id) || lockedNodeIds.has(node.id)) return;
-    const rt = (node.data as any)?.resourceType as string;
+    const rt = (node.data as Record<string, unknown>)?.resourceType as string;
     let col: number;
     if (rt === 'ModelAPI') col = 0;
     else if (rt === 'MCPServer') col = mcpServerCol;
@@ -283,7 +283,7 @@ export function computeLayout(
     let minY = 0;
     const relevantNodes = layoutedResourceNodes.filter((n) => {
       if (lockedNodeIds.has(n.id)) return false;
-      const rt = (n.data as any)?.resourceType;
+      const rt = (n.data as Record<string, unknown>)?.resourceType;
       return rt === kind;
     });
     if (relevantNodes.length > 0) {

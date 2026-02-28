@@ -113,6 +113,7 @@ export function MCPServerEditDialog({ mcpServer, open, onClose }: MCPServerEditD
       annotations: recordToArray(mcpServer.metadata.annotations),
     });
     setEnvVars(k8sEnvVarsToEntries(mcpServer.spec.container?.env || mcpServer.spec.config?.env));
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- getParams and getRuntime are stable closures over mcpServer prop
   }, [mcpServer, reset]);
 
   const onSubmit = async (data: MCPServerFormData) => {

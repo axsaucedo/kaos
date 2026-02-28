@@ -49,7 +49,7 @@ test.describe.serial('Full Lifecycle Integration', () => {
   });
 
   // Helper to setup connection for each test
-  async function connectToTestNamespace(page: any) {
+  async function connectToTestNamespace(page: import('@playwright/test').Page) {
     page.on('pageerror', (err: Error) => {
       console.error('Page error:', err.message);
     });

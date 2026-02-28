@@ -88,8 +88,8 @@ export function AgentChat({
         
         // Convert memory events to chat messages
         const historyMessages: ChatMessageType[] = events
-          .filter((e: any) => e.role === 'user' || e.role === 'assistant')
-          .map((e: any, idx: number) => ({
+          .filter((e: Record<string, unknown>) => e.role === 'user' || e.role === 'assistant')
+          .map((e: Record<string, unknown>, idx: number) => ({
             id: e.id || `hist-${idx}`,
             role: e.role,
             content: typeof e.content === 'string' ? e.content : JSON.stringify(e.content),
@@ -121,6 +121,7 @@ export function AgentChat({
     if (hookMessages.length > 0 && hookMessages !== externalMessages) {
       onMessagesChange(hookMessages);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- externalMessages and onMessagesChange intentionally omitted to avoid infinite re-render loops (callbacks/arrays from parent change identity on each render)
   }, [hookMessages]);
 
   // Use hookMessages for rendering to get real-time streaming updates

@@ -1,5 +1,5 @@
 import React from 'react';
-import { UseFormRegister, useFieldArray, Control } from 'react-hook-form';
+import { UseFormRegister, useFieldArray, Control, FieldValues } from 'react-hook-form';
 import { Plus, Trash2, Tag } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,8 +7,8 @@ import { Label } from '@/components/ui/label';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 
 interface LabelsAnnotationsEditorProps {
-  control: Control<any>;
-  register: UseFormRegister<any>;
+  control: Control<FieldValues>;
+  register: UseFormRegister<FieldValues>;
   labelsFieldName?: string;
   annotationsFieldName?: string;
 }

@@ -9,7 +9,7 @@ interface ResourceStatusLegendProps {
 
 function computeEffectiveStatus(resource: ModelAPI | MCPServer | Agent): string {
   const phase = resource.status?.phase || 'Unknown';
-  const deployment = (resource.status as any)?.deployment as DeploymentStatusInfo | undefined;
+  const deployment = (resource.status as { deployment?: DeploymentStatusInfo } | undefined)?.deployment;
   if (!deployment) return phase;
   const { replicas = 0, readyReplicas = 0, updatedReplicas = 0 } = deployment;
   if (replicas > 0 && updatedReplicas < replicas) return 'Updating';

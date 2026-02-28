@@ -160,7 +160,7 @@ export function KubernetesConnectionProvider({ children }: { children: React.Rea
         store.setNextRefreshTime(Date.now() + interval);
       }
     }, interval);
-  }, [refreshAll, store.autoRefreshEnabled, store.autoRefreshInterval]);
+  }, [refreshAll, store]);
 
   const stopPolling = useCallback(() => {
     if (pollIntervalRef.current) {
@@ -314,6 +314,7 @@ const defaultContextValue: KubernetesConnectionContextType = {
   deleteSecret: async () => {},
 };
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useKubernetesConnection() {
   const context = useContext(KubernetesConnectionContext);
   if (!context) {
