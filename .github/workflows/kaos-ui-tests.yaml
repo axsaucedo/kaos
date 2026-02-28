@@ -10,6 +10,14 @@ on:
     paths:
       - 'kaos-ui/**'
       - '.github/workflows/kaos-ui-tests.yaml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kaos-ui-tests-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   KIND_CLUSTER_NAME: kaos-e2e
