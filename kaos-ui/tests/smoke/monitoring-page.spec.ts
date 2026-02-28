@@ -8,15 +8,20 @@
 import { test, expect } from '@playwright/test';
 
 test.describe('Monitoring Page', () => {
+  test.beforeEach(async ({ page }) => {
+    page.on('pageerror', (err) => {
+      console.error('Page error:', err.message);
+    });
+  });
+
   test('should render the monitoring page with header', async ({ page }) => {
     await page.goto('/');
     await page.waitForLoadState('networkidle');
 
     // Navigate to monitoring tab via sidebar
     const monitoringLink = page.locator('text=KAOS Observability');
-    if (await monitoringLink.isVisible()) {
-      await monitoringLink.click();
-    }
+    await expect(monitoringLink).toBeVisible({ timeout: 5000 });
+    await monitoringLink.click();
 
     // The page header should be visible
     await expect(page.locator('text=KAOS Monitoring')).toBeVisible();
@@ -29,16 +34,15 @@ test.describe('Monitoring Page', () => {
 
     // Navigate to monitoring tab
     const monitoringLink = page.locator('text=KAOS Observability');
-    if (await monitoringLink.isVisible()) {
-      await monitoringLink.click();
-    }
+    await expect(monitoringLink).toBeVisible({ timeout: 5000 });
+    await monitoringLink.click();
 
-    // Wait for port check to complete
-    await page.waitForTimeout(4000);
+    // Wait for port check to complete — monitoring check needs time to probe port 8011
+    await expect(page.locator('text=KAOS Monitoring')).toBeVisible({ timeout: 5000 });
 
     // If monitoring is actually running on port 8011, the "not available" message won't appear
     const notAvailable = page.locator('text=Monitoring Not Available');
-    if (await notAvailable.isVisible({ timeout: 3000 }).catch(() => false)) {
+    if (await notAvailable.isVisible({ timeout: 5000 }).catch(() => false)) {
       await expect(notAvailable).toBeVisible();
       await expect(page.locator('text=kaos ui --monitoring-enabled signoz')).toBeVisible();
     } else {
@@ -53,9 +57,8 @@ test.describe('Monitoring Page', () => {
     await page.waitForLoadState('networkidle');
 
     const monitoringLink = page.locator('text=KAOS Observability');
-    if (await monitoringLink.isVisible()) {
-      await monitoringLink.click();
-    }
+    await expect(monitoringLink).toBeVisible({ timeout: 5000 });
+    await monitoringLink.click();
 
     await expect(page.getByRole('button', { name: 'Refresh', exact: true })).toBeVisible();
   });

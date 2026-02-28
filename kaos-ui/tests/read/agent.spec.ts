@@ -12,6 +12,9 @@ import { setupConnection, TEST_CONFIG } from '../fixtures/test-utils';
 
 test.describe('Agent Read Operations', () => {
   test.beforeEach(async ({ page }) => {
+    page.on('pageerror', (err) => {
+      console.error('Page error:', err.message);
+    });
     await setupConnection(page, {
       proxyUrl: TEST_CONFIG.proxyUrl,
       namespace: TEST_CONFIG.namespace,
@@ -35,10 +38,10 @@ test.describe('Agent Read Operations', () => {
     // Navigate to Agents
     await page.getByRole('button', { name: /agents/i }).click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(2000);
     
-    // The table rows should be visible with resource data
+    // Wait for table rows to render
     const rows = page.locator('table tbody tr');
+    await expect(rows.first()).toBeVisible({ timeout: 5000 });
     const count = await rows.count();
     
     // We expect resources in the test cluster - fail if none found
@@ -63,9 +66,10 @@ test.describe('Agent Read Operations', () => {
     // Navigate to Agents
     await page.getByRole('button', { name: /agents/i }).click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(2000);
     
+    // Wait for table rows to render
     const rows = page.locator('table tbody tr');
+    await expect(rows.first()).toBeVisible({ timeout: 5000 });
     const count = await rows.count();
     
     // We expect resources in the test cluster
@@ -91,9 +95,10 @@ test.describe('Agent Read Operations', () => {
     // Navigate to Agents
     await page.getByRole('button', { name: /agents/i }).click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(2000);
     
+    // Wait for table rows to render
     const rows = page.locator('table tbody tr');
+    await expect(rows.first()).toBeVisible({ timeout: 5000 });
     const count = await rows.count();
     
     // We expect resources in the test cluster

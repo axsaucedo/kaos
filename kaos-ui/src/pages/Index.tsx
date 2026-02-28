@@ -3,11 +3,9 @@ import { VisualMap } from '@/components/dashboard/VisualMap';
 import { ModelAPIList } from '@/components/resources/ModelAPIList';
 import { MCPServerList } from '@/components/resources/MCPServerList';
 import { AgentList } from '@/components/resources/AgentList';
-import { AgentDetailDrawer } from '@/components/resources/AgentDetailDrawer';
+import { ResourceDetailDrawer } from '@/components/resources/ResourceDetailDrawer';
 import { AgentEditDialog } from '@/components/resources/AgentEditDialog';
-import { ModelAPIDetailDrawer } from '@/components/resources/ModelAPIDetailDrawer';
 import { ModelAPIEditDialog } from '@/components/resources/ModelAPIEditDialog';
-import { MCPServerDetailDrawer } from '@/components/resources/MCPServerDetailDrawer';
 import { MCPServerEditDialog } from '@/components/resources/MCPServerEditDialog';
 import { PodsList } from '@/components/kubernetes/PodsList';
 import { SecretsList } from '@/components/kubernetes/SecretsList';
@@ -69,8 +67,9 @@ function IndexContent() {
 
       {/* ModelAPI Detail Drawer */}
       {isModelAPISelected && selectedResourceMode === 'view' && (
-        <ModelAPIDetailDrawer
-          modelAPI={selectedResource as ModelAPI}
+        <ResourceDetailDrawer
+          resourceType="ModelAPI"
+          resource={selectedResource as ModelAPI}
           open={true}
           onClose={handleCloseResource}
           onEdit={handleSwitchToEdit}
@@ -88,8 +87,9 @@ function IndexContent() {
 
       {/* MCPServer Detail Drawer */}
       {isMCPServerSelected && selectedResourceMode === 'view' && (
-        <MCPServerDetailDrawer
-          mcpServer={selectedResource as MCPServer}
+        <ResourceDetailDrawer
+          resourceType="MCPServer"
+          resource={selectedResource as MCPServer}
           open={true}
           onClose={handleCloseResource}
           onEdit={handleSwitchToEdit}
@@ -107,8 +107,9 @@ function IndexContent() {
 
       {/* Agent Detail Drawer */}
       {isAgentSelected && selectedResourceMode === 'view' && (
-        <AgentDetailDrawer
-          agent={selectedResource as Agent}
+        <ResourceDetailDrawer
+          resourceType="Agent"
+          resource={selectedResource as Agent}
           open={true}
           onClose={handleCloseResource}
           onEdit={handleSwitchToEdit}

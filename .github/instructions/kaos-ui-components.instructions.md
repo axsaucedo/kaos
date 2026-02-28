@@ -12,29 +12,40 @@ Instructions for developing UI components in KAOS-UI.
 
 ```
 src/components/
-├── agent/           # Agent-specific (Chat, Memory, Overview, Pods)
-├── mcp/             # MCPServer (Overview, Pods, ToolsDebug)
-├── modelapi/        # ModelAPI (Overview, Pods, Diagnostics)
+├── agent/           # Agent-specific (Chat, Memory, Overview, ChatMessage, ReasoningSteps)
+├── mcp/             # MCPServer (Overview, ToolsDebug sub-components + useMCPTools hook)
+│   ├── MCPToolsDebug.tsx      # Main tools debug container
+│   ├── MCPToolsList.tsx       # Tool listing panel
+│   ├── MCPToolExecutor.tsx    # Tool execution form
+│   ├── MCPToolResult.tsx      # Result display
+│   ├── JsonSyntaxHighlight.tsx # JSON highlighting
+│   ├── useMCPTools.ts         # Tools state hook
+│   └── mcpToolsUtils.ts      # Utility functions
+├── modelapi/        # ModelAPI (Overview, Diagnostics)
 ├── dashboard/       # Dashboard widgets (OverviewDashboard, VisualMap)
 │   └── visual-map/  # Enhanced visual topology module
 │       ├── index.tsx              # ReactFlow orchestration + providers
 │       ├── ResourceNode.tsx       # Custom node with semantic zoom, quick-action icons, context menu
 │       ├── ColumnHeaderNode.tsx   # Column header label node
+│       ├── DynamicEdge.tsx        # Custom edge with 4-point closest-anchor selection
+│       ├── ResourceStatusLegend.tsx # Status legend overlay
 │       ├── VisualMapToolbar.tsx   # Filter bar, search, layout controls (Fit, Re-layout, Lock)
 │       ├── VisualMapContextMenu.tsx # Right-click context menu for nodes
 │       ├── useVisualMapLayout.ts  # Dagre auto-layout hook + locked-positions state
 │       ├── useVisualMapFilters.ts # Graph-aware filter/search hook
 │       ├── layout-engine.ts      # Dagre wrapper for computing node positions
 │       └── types.ts              # Shared types (ResourceNodeData, filter state, etc.)
-├── kubernetes/      # K8s resources (PodsList, SecretsList, CreateSecretDialog)
-├── layout/          # Layout (MainLayout, Sidebar, Header, ConnectionStatus)
+├── kubernetes/      # K8s resources (PodsList, SecretsList, CreateSecretDialog, PodOverviewTab, PodLogsTab, ContainerSelector)
+├── layout/          # Layout (MainLayout, Sidebar, Header, ConnectionStatus, GlobalSearch, AutoRefreshControl)
 ├── resources/       # Resource CRUD
 │   ├── AgentList.tsx, AgentCreateDialog.tsx, AgentEditDialog.tsx
 │   ├── MCPServerList.tsx, MCPServerCreateDialog.tsx, ...
 │   ├── ModelAPIList.tsx, ModelAPICreateDialog.tsx, ...
-│   └── shared/      # EnvVarEditor, LabelsAnnotationsEditor
+│   ├── ResourceList.tsx           # Shared list component
+│   ├── ResourceDetailDrawer.tsx   # Consolidated detail drawer (replaces per-resource drawers)
+│   └── shared/      # EnvVarEditor, LabelsAnnotationsEditor, NameField, ApiKeySecretPicker
 ├── settings/        # Settings page components
-├── shared/          # Cross-cutting (DeploymentStatusCard, YamlViewer)
+├── shared/          # Cross-cutting (DeploymentStatusCard, ResourcePods, YamlViewer)
 ├── theme/           # Theme (ThemeProvider, ThemeToggle)
 └── ui/              # shadcn/ui base components (DO NOT MODIFY)
 ```
@@ -55,6 +66,39 @@ Interactive topology view using `@xyflow/react`:
 - Calls K8s service proxy: `/api/v1/namespaces/{ns}/services/{name}:8000/proxy/v1/chat/completions`
 - SSE streaming with progress blocks and artifact filtering
 - Used by `useAgentChat` hook
+
+### Kubernetes Client (`src/lib/k8s/`)
+
+The monolithic `kubernetes-client.ts` has been split into focused modules:
+- `core.ts` — Base K8s API functions (fetch wrapper, error handling)
+- `resources.ts` — CRUD operations for KAOS CRDs (Agent, MCPServer, ModelAPI)
+- `proxy.ts` — Service proxy and port-forward utilities
+- `client.ts` — High-level client class composing core/resources/proxy
+- `index.ts` — Re-exports for backward compatibility
+
+The legacy `kubernetes-client.ts` still exists as a re-export shim.
+
+### Shared Components
+
+#### ResourceDetailDrawer (`src/components/resources/ResourceDetailDrawer.tsx`)
+Consolidated detail drawer replacing the three per-resource drawers (AgentDetail, MCPServerDetail, ModelAPIDetail). Uses generics to handle all resource types with shared tab structure.
+
+#### ResourcePods (`src/components/shared/ResourcePods.tsx`)
+Consolidated pod listing component replacing per-resource pod tabs. Shows pods filtered by resource type and name.
+
+#### NameField (`src/components/resources/shared/NameField.tsx`)
+Shared form field for Kubernetes resource names with built-in validation (`validateKubernetesName` from `src/lib/utils.ts`).
+
+### Status Utilities (`src/lib/status-utils.ts`)
+Extracted status badge/color logic used across components. Provides consistent status rendering for all resource types.
+
+### System Page (`src/pages/system/`)
+`KAOSSystemPage.tsx` split into sub-components:
+- `SystemOverview.tsx` — Cluster overview panel
+- `OperatorConfig.tsx` — Operator configuration
+- `NamespaceManager.tsx` — Namespace management
+- `SystemLogs.tsx` — System log viewer
+- `useKAOSResources.ts` — Data fetching hook
 
 ### Component Naming
 
@@ -125,6 +169,9 @@ toast.error('Failed to create agent', { description: error.message });
 ```
 
 ## Data-TestID Conventions
+
+Systematic `data-testid` attributes are applied throughout the codebase for reliable test targeting.
+
 ```tsx
 <Button data-testid="create-agent-button">Create</Button>
 <tr data-testid={`agent-row-${agent.metadata.name}`}>

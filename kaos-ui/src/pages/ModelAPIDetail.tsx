@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Box, Edit, Trash2, RefreshCw, Info, Boxes, FileCode, Stethoscope } from 'lucide-react';
+import { getStatusVariant } from '@/lib/status-utils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -19,7 +20,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useKubernetesStore } from '@/stores/kubernetesStore';
 import { useKubernetesConnection } from '@/contexts/KubernetesConnectionContext';
 import { ModelAPIOverview } from '@/components/modelapi/ModelAPIOverview';
-import { ModelAPIPods } from '@/components/modelapi/ModelAPIPods';
+import { ResourcePods } from '@/components/shared/ResourcePods';
 import { ModelAPIDiagnostics } from '@/components/modelapi/ModelAPIDiagnostics';
 import { ModelAPIEditDialog } from '@/components/resources/ModelAPIEditDialog';
 import { YamlViewer } from '@/components/shared/YamlViewer';
@@ -68,17 +69,6 @@ export default function ModelAPIDetail() {
       });
     } finally {
       setIsDeleting(false);
-    }
-  };
-
-  const getStatusVariant = (phase?: string) => {
-    switch (phase) {
-      case 'Running':
-      case 'Ready': return 'success';
-      case 'Pending': return 'warning';
-      case 'Error':
-      case 'Failed': return 'destructive';
-      default: return 'secondary';
     }
   };
 
@@ -191,19 +181,19 @@ export default function ModelAPIDetail() {
       {/* Tabs Content */}
       <Tabs value={currentTab} onValueChange={setCurrentTab} className="space-y-6">
         <TabsList className="grid w-full max-w-lg grid-cols-4">
-          <TabsTrigger value="overview" className="flex items-center gap-1">
+          <TabsTrigger value="overview" data-testid="tab-overview" className="flex items-center gap-1">
             <Info className="h-3 w-3" />
             Overview
           </TabsTrigger>
-          <TabsTrigger value="diagnostics" className="flex items-center gap-1">
+          <TabsTrigger value="diagnostics" data-testid="tab-diagnostics" className="flex items-center gap-1">
             <Stethoscope className="h-3 w-3" />
             Diagnostics
           </TabsTrigger>
-          <TabsTrigger value="pods" className="flex items-center gap-1">
+          <TabsTrigger value="pods" data-testid="tab-pods" className="flex items-center gap-1">
             <Boxes className="h-3 w-3" />
             Pods
           </TabsTrigger>
-          <TabsTrigger value="yaml" className="flex items-center gap-1">
+          <TabsTrigger value="yaml" data-testid="tab-yaml" className="flex items-center gap-1">
             <FileCode className="h-3 w-3" />
             YAML
           </TabsTrigger>
@@ -218,7 +208,7 @@ export default function ModelAPIDetail() {
         </TabsContent>
 
         <TabsContent value="pods" className="space-y-6">
-          <ModelAPIPods modelAPI={modelAPI} />
+          <ResourcePods resourceType="ModelAPI" resource={modelAPI} namespace={namespace!} name={name!} />
         </TabsContent>
 
         <TabsContent value="yaml" className="space-y-6">

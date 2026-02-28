@@ -21,7 +21,7 @@ import { useKubernetesConnection } from '@/contexts/KubernetesConnectionContext'
 import { AgentChat } from '@/components/agent/AgentChat';
 import { AgentOverview } from '@/components/agent/AgentOverview';
 import { AgentMemory } from '@/components/agent/AgentMemory';
-import { AgentPods } from '@/components/agent/AgentPods';
+import { ResourcePods } from '@/components/shared/ResourcePods';
 import { AgentEditDialog } from '@/components/resources/AgentEditDialog';
 import { YamlViewer } from '@/components/shared/YamlViewer';
 import type { Agent } from '@/types/kubernetes';
@@ -32,7 +32,7 @@ const getChatStorageKey = (namespace: string, name: string) => `agent-chat-${nam
 
 export default function AgentDetail() {
   const { namespace, name } = useParams<{ namespace: string; name: string }>();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { toast } = useToast();
   const { agents } = useKubernetesStore();
@@ -254,14 +254,14 @@ export default function AgentDetail() {
       {/* Tabs Content */}
       <Tabs value={currentTab} onValueChange={setCurrentTab} className="space-y-6">
         <TabsList className="grid w-full max-w-2xl grid-cols-5">
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="chat">Chat</TabsTrigger>
-          <TabsTrigger value="memory">Memory</TabsTrigger>
-          <TabsTrigger value="pods" className="flex items-center gap-1">
+          <TabsTrigger value="overview" data-testid="tab-overview">Overview</TabsTrigger>
+          <TabsTrigger value="chat" data-testid="tab-chat">Chat</TabsTrigger>
+          <TabsTrigger value="memory" data-testid="tab-memory">Memory</TabsTrigger>
+          <TabsTrigger value="pods" data-testid="tab-pods" className="flex items-center gap-1">
             <Box className="h-3 w-3" />
             Pods
           </TabsTrigger>
-          <TabsTrigger value="yaml" className="flex items-center gap-1">
+          <TabsTrigger value="yaml" data-testid="tab-yaml" className="flex items-center gap-1">
             <FileCode className="h-3 w-3" />
             YAML
           </TabsTrigger>
@@ -288,7 +288,7 @@ export default function AgentDetail() {
         </TabsContent>
 
         <TabsContent value="pods" className="space-y-6">
-          <AgentPods agent={agent} />
+          <ResourcePods resourceType="Agent" resource={agent} namespace={namespace!} name={name!} />
         </TabsContent>
 
         <TabsContent value="yaml" className="space-y-6">

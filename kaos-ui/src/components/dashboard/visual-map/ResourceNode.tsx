@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import type { ResourceNodeData, ResourceKind } from './types';
 import { RESOURCE_ROUTES } from './types';
+import { getStatusVariant } from '@/lib/status-utils';
 
 // Context for zoom level and compact mode toggle (zoom no longer triggers compact)
 export const VisualMapZoomContext = createContext<number>(1);
@@ -48,20 +49,6 @@ const RESOURCE_CONFIG: Record<ResourceKind, {
     ],
   },
 };
-
-function getStatusVariant(status: string): 'success' | 'warning' | 'destructive' | 'secondary' {
-  switch (status?.toLowerCase()) {
-    case 'ready':
-    case 'running': return 'success';
-    case 'pending':
-    case 'waiting':
-    case 'updating':
-    case 'progressing': return 'warning';
-    case 'failed':
-    case 'error': return 'destructive';
-    default: return 'secondary';
-  }
-}
 
 function getStatusDotColor(status: string): string {
   switch (status?.toLowerCase()) {

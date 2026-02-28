@@ -18,7 +18,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { useKubernetesStore } from '@/stores/kubernetesStore';
 import { CreateSecretDialog } from '@/components/kubernetes/CreateSecretDialog';
-import type { EnvVar, K8sSecret } from '@/types/kubernetes';
+import type { EnvVar } from '@/types/kubernetes';
 
 export interface EnvVarEntry {
   name: string;
@@ -77,11 +77,6 @@ export function EnvVarEditorWithSecrets({
       handleSecretSelect(pendingSecretIndex, secretName, keys[0]);
     }
     setPendingSecretIndex(null);
-  };
-
-  const getSecretKeys = (secretName: string): string[] => {
-    const secret = secrets.find(s => s.metadata.name === secretName);
-    return secret?.dataKeys || [];
   };
 
   return (

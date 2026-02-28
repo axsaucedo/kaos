@@ -21,6 +21,9 @@ const TEST_MCPSERVER = 'hierarchy-calc-mcp'; // Calculator MCP server
 
 test.describe('MCPServer Tools Functionality', () => {
   test.beforeEach(async ({ page }) => {
+    page.on('pageerror', (err) => {
+      console.error('Page error:', err.message);
+    });
     await setupConnection(page, {
       proxyUrl: TEST_CONFIG.proxyUrl,
       namespace: TEST_CONFIG.namespace,
@@ -31,10 +34,12 @@ test.describe('MCPServer Tools Functionality', () => {
     // Navigate to MCP Servers
     await page.getByRole('button', { name: /mcp server/i }).click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1000);
+    
+    // Wait for table rows to render
+    const rows = page.locator('table tbody tr');
+    await expect(rows.first()).toBeVisible({ timeout: 5000 });
     
     // Find the test MCPServer in the table
-    const rows = page.locator('table tbody tr');
     const testRow = rows.filter({ hasText: TEST_MCPSERVER });
     
     // Check if the MCPServer exists
@@ -48,17 +53,15 @@ test.describe('MCPServer Tools Functionality', () => {
     // Click view button to open detail
     const viewButton = testRow.locator('button').first();
     await viewButton.click();
-    await page.waitForTimeout(1000);
+    await page.waitForLoadState('networkidle');
     
     // Navigate to Tools tab
     const toolsTab = page.getByRole('tab', { name: /tools/i });
     if (await toolsTab.isVisible()) {
       await toolsTab.click();
       await page.waitForLoadState('networkidle');
-      await page.waitForTimeout(2000);
       
       // Verify tools section is visible
-      const toolsSection = page.locator('text=Available Tools').or(page.locator('text=Tool List'));
       const pageContent = await page.locator('body').textContent() || '';
       
       // Either tools are listed or there's a loading/initializing state
@@ -87,10 +90,12 @@ test.describe('MCPServer Tools Functionality', () => {
     // Navigate to MCP Servers
     await page.getByRole('button', { name: /mcp server/i }).click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1000);
+    
+    // Wait for table rows to render
+    const rows = page.locator('table tbody tr');
+    await expect(rows.first()).toBeVisible({ timeout: 5000 });
     
     // Find and click on test MCPServer
-    const rows = page.locator('table tbody tr');
     const testRow = rows.filter({ hasText: TEST_MCPSERVER });
     
     if (await testRow.count() === 0) {
@@ -100,7 +105,7 @@ test.describe('MCPServer Tools Functionality', () => {
     
     const viewButton = testRow.locator('button').first();
     await viewButton.click();
-    await page.waitForTimeout(1000);
+    await page.waitForLoadState('networkidle');
     
     // Navigate to Tools tab
     const toolsTab = page.getByRole('tab', { name: /tools/i });
@@ -112,7 +117,6 @@ test.describe('MCPServer Tools Functionality', () => {
     
     await toolsTab.click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(3000);
     
     // Look for a tool in the list (calculator tool: calculate, or others)
     const toolNames = ['calculate', 'add', 'subtract', 'multiply', 'divide'];
@@ -121,15 +125,14 @@ test.describe('MCPServer Tools Functionality', () => {
     for (const toolName of toolNames) {
       // Look for tool item with this name
       const toolItem = page.locator(`text=${toolName}`).first();
-      if (await toolItem.isVisible({ timeout: 1000 })) {
+      if (await toolItem.isVisible({ timeout: 3000 }).catch(() => false)) {
         // Click on the tool or the Select Tool button
         const selectButton = page.getByRole('button', { name: /select tool/i });
-        if (await selectButton.isVisible({ timeout: 500 })) {
+        if (await selectButton.isVisible({ timeout: 500 }).catch(() => false)) {
           await selectButton.click();
         } else {
           await toolItem.click();
         }
-        await page.waitForTimeout(500);
         toolFound = true;
         
         // Verify tool details are shown (parameters section or description)
@@ -167,10 +170,12 @@ test.describe('MCPServer Tools Functionality', () => {
     // Navigate to MCP Servers
     await page.getByRole('button', { name: /mcp server/i }).click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1000);
+    
+    // Wait for table rows to render
+    const rows = page.locator('table tbody tr');
+    await expect(rows.first()).toBeVisible({ timeout: 5000 });
     
     // Find and click on test MCPServer
-    const rows = page.locator('table tbody tr');
     const testRow = rows.filter({ hasText: TEST_MCPSERVER });
     
     if (await testRow.count() === 0) {
@@ -180,7 +185,7 @@ test.describe('MCPServer Tools Functionality', () => {
     
     const viewButton = testRow.locator('button').first();
     await viewButton.click();
-    await page.waitForTimeout(1000);
+    await page.waitForLoadState('networkidle');
     
     // Navigate to Tools tab
     const toolsTab = page.getByRole('tab', { name: /tools/i });
@@ -191,7 +196,6 @@ test.describe('MCPServer Tools Functionality', () => {
     
     await toolsTab.click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(3000);
     
     // Try to find and click on a tool (e.g., 'calculate')
     const calculateTool = page.locator('button:has-text("calculate")').first();
@@ -201,21 +205,19 @@ test.describe('MCPServer Tools Functionality', () => {
       const initButton = page.getByRole('button', { name: /initialize|connect/i });
       if (await initButton.isVisible()) {
         await initButton.click();
-        await page.waitForTimeout(5000);
+        await page.waitForLoadState('networkidle');
       }
     }
     
     // Click to expand the calculate tool
     if (await calculateTool.isVisible()) {
       await calculateTool.click();
-      await page.waitForTimeout(500);
     }
     
     // Click on Select Tool button if visible
     const selectButton = page.getByRole('button', { name: /select tool/i });
-    if (await selectButton.isVisible({ timeout: 2000 })) {
+    if (await selectButton.isVisible({ timeout: 2000 }).catch(() => false)) {
       await selectButton.click();
-      await page.waitForTimeout(500);
     }
     
     // Look for parameter input (for calculate: expression)
@@ -238,6 +240,8 @@ test.describe('MCPServer Tools Functionality', () => {
     }
     
     await callButton.click();
+    
+    // Wait for tool call response — keep timeout for MCP tool execution
     await page.waitForTimeout(3000);
     
     // Verify response appears (should show result "8" for 5+3)

@@ -6,6 +6,12 @@ import { test, expect } from '@playwright/test';
 
 test.describe('App Loading', () => {
   test('should load the application without errors', async ({ page }) => {
+    // Set up error listener BEFORE navigation
+    const errors: string[] = [];
+    page.on('pageerror', (error) => {
+      errors.push(error.message);
+    });
+
     // Navigate to the app
     await page.goto('/');
     
@@ -15,14 +21,8 @@ test.describe('App Loading', () => {
     // Check that the app container is present
     await expect(page.locator('body')).toBeVisible();
     
-    // Check there are no critical JavaScript errors
-    const errors: string[] = [];
-    page.on('pageerror', (error) => {
-      errors.push(error.message);
-    });
-    
-    // Give the app time to initialize
-    await page.waitForTimeout(2000);
+    // Wait for app to fully initialize
+    await page.waitForLoadState('networkidle');
     
     // The app should not have critical errors (some warnings are OK)
     const criticalErrors = errors.filter(e => 

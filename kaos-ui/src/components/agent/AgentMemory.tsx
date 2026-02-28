@@ -35,12 +35,6 @@ function normalizeEvent(raw: any): MemoryEvent {
   };
 }
 
-interface MemorySession {
-  id: string;
-  created_at?: string;
-  event_count?: number;
-}
-
 interface AgentMemoryProps {
   agent: Agent;
 }

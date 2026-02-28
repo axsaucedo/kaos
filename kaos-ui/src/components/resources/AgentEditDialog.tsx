@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { useForm, useFieldArray } from 'react-hook-form';
-import { Bot, Plus, Trash2, Info } from 'lucide-react';
+import { useForm } from 'react-hook-form';
+import { Bot, Info } from 'lucide-react';
 import {
   Dialog,
   DialogContent,

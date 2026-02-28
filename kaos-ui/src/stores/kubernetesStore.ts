@@ -9,7 +9,6 @@ import type {
   Service,
   K8sSecret,
   LogEntry,
-  ResourceStatus,
 } from '@/types/kubernetes';
 
 interface KubernetesState {

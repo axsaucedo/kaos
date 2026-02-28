@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback } from 'react';
 import type { Node, Edge } from '@xyflow/react';
 import type { ResourceKind, ResourceNodeData } from './types';
 

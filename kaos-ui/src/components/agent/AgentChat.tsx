@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Send, Trash2, StopCircle, AlertCircle, RefreshCw, Hash, Copy, Check, Plus, Shuffle, Download } from 'lucide-react';
+import { Send, StopCircle, AlertCircle, RefreshCw, Hash, Copy, Check, Plus, Shuffle, Download } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';

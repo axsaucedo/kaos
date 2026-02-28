@@ -94,7 +94,6 @@ export function VersionSwitcher({ collapsed = false }: VersionSwitcherProps) {
   }, []);
 
   // Don't show if no versions available and in dev mode
-  const hasVersions = versions.length > 0 || !loading;
   
   const displayVersion = currentVersion === 'latest' && latestVersion 
     ? `latest (${latestVersion})` 

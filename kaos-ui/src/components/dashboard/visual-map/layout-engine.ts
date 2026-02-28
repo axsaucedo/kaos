@@ -1,6 +1,5 @@
 import type { Node, Edge } from '@xyflow/react';
 
-const NODE_WIDTH = 240;
 const NODE_HEIGHT = 120;
 
 export interface LayoutOptions {
@@ -138,9 +137,7 @@ export function computeLayout(
   const resourceNodes = nodes.filter((n) => n.type === 'resourceNode');
   const headerNodes = nodes.filter((n) => n.type === 'columnHeader');
 
-  // Separate by type
-  const modelAPINodes = resourceNodes.filter((n) => (n.data as any)?.resourceType === 'ModelAPI');
-  const mcpServerNodes = resourceNodes.filter((n) => (n.data as any)?.resourceType === 'MCPServer');
+  // Separate by type (agent nodes used for layout)
   const agentNodes = resourceNodes.filter((n) => (n.data as any)?.resourceType === 'Agent');
 
   // Compute agent dependency depths for multi-column
@@ -149,7 +146,6 @@ export function computeLayout(
   const agentColumnCount = maxAgentDepth + 1;
 
   // Column X positions: ModelAPI=0, Agent columns=1..N, MCPServer=N+1
-  const modelAPIX = 0;
   const agentBaseCol = 1;
   const mcpServerCol = agentBaseCol + agentColumnCount;
 

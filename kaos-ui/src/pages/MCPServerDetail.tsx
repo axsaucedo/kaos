@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Server, Edit, Trash2, RefreshCw, Wrench, Info, Boxes, FileCode } from 'lucide-react';
+import { getStatusVariant } from '@/lib/status-utils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -20,7 +21,7 @@ import { useKubernetesStore } from '@/stores/kubernetesStore';
 import { useKubernetesConnection } from '@/contexts/KubernetesConnectionContext';
 import { MCPToolsDebug } from '@/components/mcp/MCPToolsDebug';
 import { MCPServerOverview } from '@/components/mcp/MCPServerOverview';
-import { MCPServerPods } from '@/components/mcp/MCPServerPods';
+import { ResourcePods } from '@/components/shared/ResourcePods';
 import { YamlViewer } from '@/components/shared/YamlViewer';
 import { MCPServerEditDialog } from '@/components/resources/MCPServerEditDialog';
 import type { MCPServer } from '@/types/kubernetes';
@@ -68,17 +69,6 @@ export default function MCPServerDetail() {
       });
     } finally {
       setIsDeleting(false);
-    }
-  };
-
-  const getStatusVariant = (phase?: string) => {
-    switch (phase) {
-      case 'Running':
-      case 'Ready': return 'success';
-      case 'Pending': return 'warning';
-      case 'Error':
-      case 'Failed': return 'destructive';
-      default: return 'secondary';
     }
   };
 
@@ -191,19 +181,19 @@ export default function MCPServerDetail() {
       {/* Tabs Content */}
       <Tabs value={currentTab} onValueChange={setCurrentTab} className="space-y-6">
         <TabsList className="grid w-full max-w-lg grid-cols-4">
-          <TabsTrigger value="overview" className="flex items-center gap-1">
+          <TabsTrigger value="overview" data-testid="tab-overview" className="flex items-center gap-1">
             <Info className="h-3 w-3" />
             Overview
           </TabsTrigger>
-          <TabsTrigger value="tools" className="flex items-center gap-1">
+          <TabsTrigger value="tools" data-testid="tab-tools" className="flex items-center gap-1">
             <Wrench className="h-3 w-3" />
             Tools
           </TabsTrigger>
-          <TabsTrigger value="pods" className="flex items-center gap-1">
+          <TabsTrigger value="pods" data-testid="tab-pods" className="flex items-center gap-1">
             <Boxes className="h-3 w-3" />
             Pods
           </TabsTrigger>
-          <TabsTrigger value="yaml" className="flex items-center gap-1">
+          <TabsTrigger value="yaml" data-testid="tab-yaml" className="flex items-center gap-1">
             <FileCode className="h-3 w-3" />
             YAML
           </TabsTrigger>
@@ -218,7 +208,7 @@ export default function MCPServerDetail() {
         </TabsContent>
 
         <TabsContent value="pods" className="space-y-6">
-          <MCPServerPods mcpServer={mcpServer} />
+          <ResourcePods resourceType="MCPServer" resource={mcpServer} namespace={namespace!} name={name!} />
         </TabsContent>
 
         <TabsContent value="yaml" className="space-y-6">

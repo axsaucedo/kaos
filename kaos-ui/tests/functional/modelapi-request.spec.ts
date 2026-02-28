@@ -21,6 +21,9 @@ const TEST_MODELAPI = 'hierarchy-modelapi';
 
 test.describe('ModelAPI Request Functionality', () => {
   test.beforeEach(async ({ page }) => {
+    page.on('pageerror', (err) => {
+      console.error('Page error:', err.message);
+    });
     await setupConnection(page, {
       proxyUrl: TEST_CONFIG.proxyUrl,
       namespace: TEST_CONFIG.namespace,
@@ -31,10 +34,12 @@ test.describe('ModelAPI Request Functionality', () => {
     // Navigate to Model APIs
     await page.getByRole('button', { name: /model api/i }).click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1000);
+    
+    // Wait for table rows to render
+    const rows = page.locator('table tbody tr');
+    await expect(rows.first()).toBeVisible({ timeout: 5000 });
     
     // Find the test ModelAPI in the table
-    const rows = page.locator('table tbody tr');
     const testRow = rows.filter({ hasText: TEST_MODELAPI });
     
     if (await testRow.count() === 0) {
@@ -53,15 +58,14 @@ test.describe('ModelAPI Request Functionality', () => {
       await viewButton.click();
     }
     
-    await page.waitForTimeout(1000);
+    await page.waitForLoadState('networkidle');
     
     // Navigate to Diagnostics tab
     const diagnosticsTab = page.getByRole('tab', { name: /diagnostics/i });
-    expect(await diagnosticsTab.isVisible()).toBeTruthy();
+    await expect(diagnosticsTab).toBeVisible({ timeout: 5000 });
     
     await diagnosticsTab.click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1000);
     
     // Verify diagnostics interface elements
     const pageContent = await page.locator('body').textContent() || '';
@@ -78,10 +82,12 @@ test.describe('ModelAPI Request Functionality', () => {
     // Navigate to Model APIs
     await page.getByRole('button', { name: /model api/i }).click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1000);
+    
+    // Wait for table rows to render
+    const rows = page.locator('table tbody tr');
+    await expect(rows.first()).toBeVisible({ timeout: 5000 });
     
     // Find any Ready ModelAPI
-    const rows = page.locator('table tbody tr');
     const readyRow = rows.filter({ hasText: 'Ready' }).first();
     
     if (await readyRow.count() === 0) {
@@ -91,12 +97,12 @@ test.describe('ModelAPI Request Functionality', () => {
     
     const viewButton = readyRow.locator('button').first();
     await viewButton.click();
-    await page.waitForTimeout(1000);
+    await page.waitForLoadState('networkidle');
     
     // Check for endpoint info on Overview or Diagnostics
     const overviewTab = page.getByRole('tab', { name: /overview/i });
     await overviewTab.click();
-    await page.waitForTimeout(500);
+    await page.waitForLoadState('networkidle');
     
     let pageContent = await page.locator('body').textContent() || '';
     let hasEndpoint = pageContent.includes('svc.cluster.local') ||
@@ -109,7 +115,7 @@ test.describe('ModelAPI Request Functionality', () => {
     const diagnosticsTab = page.getByRole('tab', { name: /diagnostics/i });
     if (await diagnosticsTab.isVisible()) {
       await diagnosticsTab.click();
-      await page.waitForTimeout(500);
+      await page.waitForLoadState('networkidle');
       
       pageContent = await page.locator('body').textContent() || '';
       hasEndpoint = hasEndpoint ||
@@ -127,10 +133,12 @@ test.describe('ModelAPI Request Functionality', () => {
     // Navigate to Model APIs
     await page.getByRole('button', { name: /model api/i }).click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1000);
+    
+    // Wait for table rows to render
+    const rows = page.locator('table tbody tr');
+    await expect(rows.first()).toBeVisible({ timeout: 5000 });
     
     // Find any Ready ModelAPI
-    const rows = page.locator('table tbody tr');
     const readyRow = rows.filter({ hasText: 'Ready' }).first();
     
     if (await readyRow.count() === 0) {
@@ -140,7 +148,7 @@ test.describe('ModelAPI Request Functionality', () => {
     
     const viewButton = readyRow.locator('button').first();
     await viewButton.click();
-    await page.waitForTimeout(1000);
+    await page.waitForLoadState('networkidle');
     
     // Navigate to Diagnostics tab
     const diagnosticsTab = page.getByRole('tab', { name: /diagnostics/i });
@@ -151,7 +159,6 @@ test.describe('ModelAPI Request Functionality', () => {
     
     await diagnosticsTab.click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1000);
     
     // Find prompt input
     const promptInput = page.locator('textarea').or(page.locator('input[type="text"]')).first();
@@ -175,7 +182,7 @@ test.describe('ModelAPI Request Functionality', () => {
     
     await sendButton.click();
     
-    // Wait for response (may take time)
+    // Wait for response (may take time) — keep timeout for LLM response
     await page.waitForTimeout(10000);
     
     // Check for response display
@@ -197,10 +204,12 @@ test.describe('ModelAPI Request Functionality', () => {
     // Navigate to Model APIs
     await page.getByRole('button', { name: /model api/i }).click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1000);
+    
+    // Wait for table rows to render
+    const rows = page.locator('table tbody tr');
+    await expect(rows.first()).toBeVisible({ timeout: 5000 });
     
     // Find any Ready ModelAPI
-    const rows = page.locator('table tbody tr');
     const readyRow = rows.filter({ hasText: 'Ready' }).first();
     
     if (await readyRow.count() === 0) {
@@ -210,7 +219,7 @@ test.describe('ModelAPI Request Functionality', () => {
     
     const viewButton = readyRow.locator('button').first();
     await viewButton.click();
-    await page.waitForTimeout(1000);
+    await page.waitForLoadState('networkidle');
     
     // Navigate to Diagnostics tab
     const diagnosticsTab = page.getByRole('tab', { name: /diagnostics/i });
@@ -221,7 +230,6 @@ test.describe('ModelAPI Request Functionality', () => {
     
     await diagnosticsTab.click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1000);
     
     // Check for diagnostics info section
     const pageContent = await page.locator('body').textContent() || '';

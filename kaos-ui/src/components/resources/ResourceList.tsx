@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Plus, Search, Edit, Trash2, Eye, RefreshCw } from 'lucide-react';
+import { getStatusVariant } from '@/lib/status-utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -81,33 +82,6 @@ export function ResourceList<T>({
     return id.toLowerCase().includes(search.toLowerCase());
   });
 
-  const getStatusVariant = (status: string) => {
-    const normalizedStatus = status?.toLowerCase();
-    switch (normalizedStatus) {
-      case 'running':
-      case 'ready':
-      case 'bound':
-      case 'active':
-      case 'available':
-        return 'success';
-      case 'pending':
-      case 'creating':
-      case 'waiting':
-      case 'progressing':
-        return 'warning';
-      case 'error':
-      case 'failed':
-      case 'crashloopbackoff':
-        return 'error';
-      case 'terminating':
-      case 'terminated':
-      case 'deleting':
-        return 'destructive';
-      default:
-        return 'secondary';
-    }
-  };
-
   const handleDeleteClick = (item: T) => {
     setItemToDelete(item);
     setDeleteDialogOpen(true);
@@ -142,7 +116,7 @@ export function ResourceList<T>({
             <p className="text-muted-foreground">{description}</p>
           </div>
         </div>
-        <Button onClick={onAdd} className="gap-2">
+        <Button onClick={onAdd} className="gap-2" data-testid={`create-${title.toLowerCase().replace(/\s+/g, '')}-button`}>
           <Plus className="h-4 w-4" />
           Create {title.slice(0, -1)}
         </Button>
@@ -212,6 +186,7 @@ export function ResourceList<T>({
               return (
                 <tr
                   key={id}
+                  data-testid={`resource-row-${id}`}
                   className={cn(
                     'hover:bg-muted/30 transition-colors',
                     selectedItems.has(id) && 'bg-primary/5'
@@ -297,6 +272,7 @@ export function ResourceList<T>({
                               variant="ghost"
                               size="icon"
                               className="h-8 w-8"
+                              data-testid={`view-${id}`}
                               onClick={() => onView(item)}
                             >
                               <Eye className="h-4 w-4" />
@@ -316,6 +292,7 @@ export function ResourceList<T>({
                               variant="ghost"
                               size="icon"
                               className="h-8 w-8"
+                              data-testid={`edit-${id}`}
                               onClick={() => onEdit(item)}
                             >
                               <Edit className="h-4 w-4" />
@@ -335,6 +312,7 @@ export function ResourceList<T>({
                               variant="ghost"
                               size="icon"
                               className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                              data-testid={`delete-${id}`}
                               onClick={() => handleDeleteClick(item)}
                             >
                               <Trash2 className="h-4 w-4" />

@@ -101,6 +101,7 @@ export function AutoRefreshControl() {
         size="sm"
         onClick={handleManualRefresh}
         disabled={!connected || isRefreshing}
+        data-testid="refresh-button"
         className="h-8 px-2 text-muted-foreground hover:text-foreground"
         title="Refresh now"
       >

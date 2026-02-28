@@ -23,9 +23,7 @@ export function ConnectionStatus() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Truncate baseUrl for display
-  const truncatedUrl = baseUrl ? (baseUrl.length > 30 ? baseUrl.slice(0, 30) + '...' : baseUrl) : 'Not connected';
-
+  // Truncate baseUrl for display (used in UI)
   const statusIndicator = (
     <div className="flex items-center gap-2">
       {connecting ? (
@@ -53,6 +51,7 @@ export function ConnectionStatus() {
         <Tooltip>
           <TooltipTrigger asChild>
             <div 
+              data-testid="connection-status"
               className={cn(
                 'flex items-center gap-2 px-3 py-1.5 rounded-md text-xs cursor-default transition-colors',
                 'bg-muted text-muted-foreground border border-border'
@@ -89,6 +88,7 @@ export function ConnectionStatus() {
           <DropdownMenuTrigger asChild>
             <TooltipTrigger asChild>
               <button 
+                data-testid="connection-status"
                 className={cn(
                   'flex items-center gap-2 px-3 py-1.5 rounded-md text-xs transition-colors',
                   'bg-success/10 text-success border border-success/20 hover:bg-success/20'

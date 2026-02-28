@@ -31,6 +31,7 @@ export function ThemeToggle({ className }: { className?: string }) {
   return (
     <button
       onClick={toggleTheme}
+      data-testid="theme-toggle"
       className={cn(
         "flex items-center gap-1 p-1 rounded-full bg-muted border border-border cursor-pointer hover:bg-muted/80 transition-colors",
         className

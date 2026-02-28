@@ -50,6 +50,9 @@ test.describe.serial('Full Lifecycle Integration', () => {
 
   // Helper to setup connection for each test
   async function connectToTestNamespace(page: any) {
+    page.on('pageerror', (err: Error) => {
+      console.error('Page error:', err.message);
+    });
     await setupConnection(page, {
       proxyUrl: TEST_CONFIG.proxyUrl,
       namespace: testNamespace,
@@ -64,7 +67,6 @@ test.describe.serial('Full Lifecycle Integration', () => {
     // Check ModelAPIs
     await page.getByRole('button', { name: /model api/i }).click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(500);
     
     // Should show no resources or empty message
     const modelAPIRows = page.locator('table tbody tr');
@@ -74,7 +76,6 @@ test.describe.serial('Full Lifecycle Integration', () => {
     // Check MCPServers  
     await page.getByRole('button', { name: /mcp server/i }).click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(500);
     
     const mcpRows = page.locator('table tbody tr');
     const mcpCount = await mcpRows.count();
@@ -83,7 +84,6 @@ test.describe.serial('Full Lifecycle Integration', () => {
     // Check Agents
     await page.getByRole('button', { name: /agents/i }).click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(500);
     
     const agentRows = page.locator('table tbody tr');
     const agentCount = await agentRows.count();
@@ -102,10 +102,12 @@ test.describe.serial('Full Lifecycle Integration', () => {
     // Click Create button (try both header button and empty state button)
     const createButton = page.getByRole('button', { name: /create model api|create your first resource/i }).first();
     await createButton.click();
-    await page.waitForTimeout(500);
+    
+    // Wait for dialog
+    const dialog = page.locator('[role="dialog"]');
+    await expect(dialog).toBeVisible({ timeout: 5000 });
     
     // Fill form in dialog
-    const dialog = page.locator('[role="dialog"]');
     await dialog.locator('#name').fill(modelAPIName);
     await dialog.locator('#models').fill('openai/gpt-4');
     await dialog.locator('#apiBase').fill('http://test-api:11434');
@@ -113,12 +115,10 @@ test.describe.serial('Full Lifecycle Integration', () => {
     // Submit - button says "Create ModelAPI" in dialog
     await dialog.getByRole('button', { name: /create modelapi/i }).click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1000);
     
     // Verify it appears in the list
     await page.getByRole('button', { name: 'Refresh', exact: true }).click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(500);
     
     const rows = page.locator('table tbody tr');
     await expect(rows.filter({ hasText: modelAPIName })).toHaveCount(1);
@@ -134,10 +134,12 @@ test.describe.serial('Full Lifecycle Integration', () => {
     // Click Create button
     const createButton = page.getByRole('button', { name: /create mcp|create your first resource/i }).first();
     await createButton.click();
-    await page.waitForTimeout(500);
+    
+    // Wait for dialog
+    const dialog = page.locator('[role="dialog"]');
+    await expect(dialog).toBeVisible({ timeout: 5000 });
     
     // Fill form
-    const dialog = page.locator('[role="dialog"]');
     await dialog.locator('#name').fill(mcpServerName);
     
     // Select runtime
@@ -151,12 +153,10 @@ test.describe.serial('Full Lifecycle Integration', () => {
     // Submit
     await dialog.getByRole('button', { name: /create mcpserver/i }).click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1000);
     
     // Refresh and verify
     await page.getByRole('button', { name: 'Refresh', exact: true }).click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(500);
     
     const rows = page.locator('table tbody tr');
     await expect(rows.filter({ hasText: mcpServerName })).toHaveCount(1);
@@ -172,10 +172,12 @@ test.describe.serial('Full Lifecycle Integration', () => {
     // Click Create button
     const createButton = page.getByRole('button', { name: /create agent|create your first resource/i }).first();
     await createButton.click();
-    await page.waitForTimeout(500);
+    
+    // Wait for dialog
+    const dialog = page.locator('[role="dialog"]');
+    await expect(dialog).toBeVisible({ timeout: 5000 });
     
     // Fill form
-    const dialog = page.locator('[role="dialog"]');
     await dialog.locator('#name').fill(agentName);
     await dialog.locator('#description').fill('Test agent for integration tests');
     await dialog.locator('#instructions').fill('You are a helpful test agent');
@@ -183,7 +185,6 @@ test.describe.serial('Full Lifecycle Integration', () => {
     // Select ModelAPI - it's a combobox with "Select a Model API" placeholder
     const modelAPISelect = dialog.getByRole('combobox').filter({ hasText: /select a model api/i });
     await modelAPISelect.click();
-    await page.waitForTimeout(300);
     await page.getByRole('option', { name: new RegExp(modelAPIName, 'i') }).click();
     
     // Enter model
@@ -193,12 +194,10 @@ test.describe.serial('Full Lifecycle Integration', () => {
     // Submit
     await dialog.getByRole('button', { name: /create agent/i }).click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1000);
     
     // Refresh and verify
     await page.getByRole('button', { name: 'Refresh', exact: true }).click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(500);
     
     const rows = page.locator('table tbody tr');
     await expect(rows.filter({ hasText: agentName })).toHaveCount(1);
@@ -238,7 +237,7 @@ test.describe.serial('Full Lifecycle Integration', () => {
     const row = page.locator('table tbody tr').filter({ hasText: modelAPIName });
     const viewButton = row.locator('button').first();
     await viewButton.click();
-    await page.waitForTimeout(1000);
+    await page.waitForLoadState('networkidle');
     
     // Verify detail page loaded
     const content = await page.locator('body').textContent();
@@ -259,7 +258,7 @@ test.describe.serial('Full Lifecycle Integration', () => {
     const row = page.locator('table tbody tr').filter({ hasText: mcpServerName });
     const viewButton = row.locator('button').first();
     await viewButton.click();
-    await page.waitForTimeout(1000);
+    await page.waitForLoadState('networkidle');
     
     const content = await page.locator('body').textContent();
     expect(content).toContain(mcpServerName);
@@ -275,7 +274,7 @@ test.describe.serial('Full Lifecycle Integration', () => {
     const row = page.locator('table tbody tr').filter({ hasText: agentName });
     const viewButton = row.locator('button').first();
     await viewButton.click();
-    await page.waitForTimeout(1000);
+    await page.waitForLoadState('networkidle');
     
     const content = await page.locator('body').textContent();
     expect(content).toContain(agentName);
@@ -290,11 +289,9 @@ test.describe.serial('Full Lifecycle Integration', () => {
     await page.getByRole('button', { name: /model api/i }).click();
     await page.waitForLoadState('networkidle');
     
-    // Click edit button (second button in row)
+    // Click edit button using data-testid
     const row = page.locator('table tbody tr').filter({ hasText: modelAPIName });
-    const editButton = row.locator('button').nth(1);
-    await editButton.click();
-    await page.waitForTimeout(1000);
+    await row.getByTestId(`edit-${modelAPIName}`).click();
     
     // Wait for edit dialog — use last() because create+edit dialogs may both mount
     const dialog = page.locator('[role="dialog"]').last();
@@ -308,7 +305,7 @@ test.describe.serial('Full Lifecycle Integration', () => {
     await submitBtn.click();
     
     // Wait for dialog to close
-    await page.waitForTimeout(3000);
+    await expect(dialog).not.toBeVisible({ timeout: 10000 });
     
     // If dialog is still open, dismiss it (may have succeeded but stayed open)
     const stillOpen = await dialog.isVisible().catch(() => false);
@@ -316,7 +313,6 @@ test.describe.serial('Full Lifecycle Integration', () => {
       const closeBtn = dialog.locator('button:has-text("Cancel")').or(dialog.locator('button[aria-label="Close"]')).or(dialog.locator('button.absolute'));
       if (await closeBtn.first().isVisible().catch(() => false)) {
         await closeBtn.first().click();
-        await page.waitForTimeout(1000);
       }
     }
     
@@ -338,20 +334,17 @@ test.describe.serial('Full Lifecycle Integration', () => {
     await page.getByRole('button', { name: /agents/i }).click();
     await page.waitForLoadState('networkidle');
     
-    // Click delete button (third button)
+    // Click delete button using data-testid
     const row = page.locator('table tbody tr').filter({ hasText: agentName });
-    const deleteButton = row.locator('button').nth(2);
-    await deleteButton.click();
+    await row.getByTestId(`delete-${agentName}`).click();
     
     // Confirm delete
     await page.getByRole('button', { name: /delete|confirm/i }).click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(2000);
     
     // Refresh and verify deleted
     await page.getByRole('button', { name: 'Refresh', exact: true }).click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(500);
     
     const rows = page.locator('table tbody tr');
     await expect(rows.filter({ hasText: agentName })).toHaveCount(0);
@@ -364,12 +357,10 @@ test.describe.serial('Full Lifecycle Integration', () => {
     await page.waitForLoadState('networkidle');
     
     const row = page.locator('table tbody tr').filter({ hasText: mcpServerName });
-    const deleteButton = row.locator('button').nth(2);
-    await deleteButton.click();
+    await row.getByTestId(`delete-${mcpServerName}`).click();
     
     await page.getByRole('button', { name: /delete|confirm/i }).click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(2000);
     
     await page.getByRole('button', { name: 'Refresh', exact: true }).click();
     await page.waitForLoadState('networkidle');
@@ -385,12 +376,10 @@ test.describe.serial('Full Lifecycle Integration', () => {
     await page.waitForLoadState('networkidle');
     
     const row = page.locator('table tbody tr').filter({ hasText: modelAPIName });
-    const deleteButton = row.locator('button').nth(2);
-    await deleteButton.click();
+    await row.getByTestId(`delete-${modelAPIName}`).click();
     
     await page.getByRole('button', { name: /delete|confirm/i }).click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(2000);
     
     await page.getByRole('button', { name: 'Refresh', exact: true }).click();
     await page.waitForLoadState('networkidle');

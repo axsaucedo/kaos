@@ -118,6 +118,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
     return (
       <button
         key={item.id}
+        data-testid={`nav-${item.id}`}
         onClick={() => handleNavClick(item.id)}
         className={cn(
           'flex items-center gap-3 w-full px-3 py-2.5 rounded-lg transition-all duration-200 group',
@@ -181,6 +182,7 @@ export function Sidebar({ collapsed, onToggle }: SidebarProps) {
           variant="ghost"
           size="icon"
           onClick={onToggle}
+          data-testid="sidebar-toggle"
           className="h-8 w-8 text-muted-foreground hover:text-foreground"
         >
           {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}

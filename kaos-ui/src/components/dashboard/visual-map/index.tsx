@@ -55,7 +55,7 @@ function saveViewport(vp: Viewport) {
 }
 
 // ── Wrap ResourceNode with context menu + edit handler ──
-function ContextMenuResourceNode({ data, ...rest }: { data: ResourceNodeData; [key: string]: any }) {
+function ContextMenuResourceNode({ data }: { data: ResourceNodeData; [key: string]: any }) {
   const { fitView } = useReactFlow();
 
   const handleFocusNode = useCallback((nodeId: string) => {
