@@ -96,7 +96,7 @@ test.describe('Agent Chat and Memory Functionality', () => {
     await expect(rows.first()).toBeVisible({ timeout: 5000 });
     
     // Find any Ready agent
-    let testRow = rows.filter({ hasText: 'Ready' }).first();
+    const testRow = rows.filter({ hasText: 'Ready' }).first();
     
     if (await testRow.count() === 0) {
       console.log('No Ready agent found, skipping test');
@@ -172,7 +172,7 @@ test.describe('Agent Chat and Memory Functionality', () => {
     await expect(rows.first()).toBeVisible({ timeout: 5000 });
     
     // Find any Ready agent
-    let testRow = rows.filter({ hasText: 'Ready' }).first();
+    const testRow = rows.filter({ hasText: 'Ready' }).first();
     
     if (await testRow.count() === 0) {
       test.skip();
@@ -217,7 +217,7 @@ test.describe('Agent Chat and Memory Functionality', () => {
     await expect(rows.first()).toBeVisible({ timeout: 5000 });
     
     // Find any Ready agent
-    let testRow = rows.filter({ hasText: 'Ready' }).first();
+    const testRow = rows.filter({ hasText: 'Ready' }).first();
     
     if (await testRow.count() === 0) {
       test.skip();
