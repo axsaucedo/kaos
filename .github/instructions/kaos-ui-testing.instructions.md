@@ -4,23 +4,31 @@ applyTo: "kaos-ui/tests/**"
 
 # KAOS-UI Testing Guidelines
 
-Instructions for writing and running Playwright tests in KAOS-UI.
+Instructions for writing and running tests in KAOS-UI.
 
 ## Testing Stack
 
-- **Playwright** for end-to-end testing
-- Tests run against a real Kubernetes cluster via the KAOS proxy
+- **Vitest** for unit tests (components, hooks, stores, utilities)
+- **Playwright** for end-to-end testing against a real Kubernetes cluster
+- **CI**: `.github/workflows/kaos-ui-tests.yaml` runs build + lint + unit tests on PRs
 
 ## Directory Structure
 
 ```
 kaos-ui/tests/
+├── unit/                       # Vitest unit tests
+│   ├── setup.ts                # Vitest test setup
+│   ├── components/
+│   │   └── visual-map/         # layout-engine, useVisualMapFilters
+│   ├── hooks/                  # useAgentChat
+│   ├── lib/                    # agent-client, status-utils
+│   └── stores/                 # kubernetesStore
 ├── fixtures/
-│   └── test-utils.ts           # Shared helpers and fixtures
+│   └── test-utils.ts           # Shared Playwright helpers and fixtures
 ├── smoke/                      # Basic app loading, cluster connectivity
 ├── read/                       # List/detail page tests
 ├── crud/                       # Create/update/delete tests
-├── functional/                 # Feature workflow tests (chat, tools)
+├── functional/                 # Feature workflow tests (chat, tools, visual-map)
 └── integration/                # End-to-end lifecycle tests
 ```
 
@@ -34,6 +42,15 @@ kaos ui --no-browser     # Proxy at http://localhost:8010
 
 ## Running Tests
 
+### Unit Tests (Vitest)
+```bash
+npm run test:unit                          # Run all unit tests
+npx vitest run tests/unit/lib/             # Run specific directory
+npx vitest run --reporter=verbose          # Verbose output
+npx vitest                                 # Watch mode
+```
+
+### E2E Tests (Playwright)
 ```bash
 npm run test:e2e                           # All tests
 npm run test:e2e -- tests/crud/            # CRUD tests only
@@ -43,6 +60,23 @@ npm run test:e2e -- -g "should CREATE"     # By test name
 ```
 
 ## Writing Tests
+
+### Unit Tests (Vitest)
+
+```typescript
+import { describe, it, expect, vi } from 'vitest';
+import { someFunction } from '@/lib/status-utils';
+
+describe('someFunction', () => {
+  it('should return expected value', () => {
+    expect(someFunction('input')).toBe('expected');
+  });
+});
+```
+
+Unit test files use `.test.ts` extension and live in `tests/unit/` mirroring the `src/` structure.
+
+### E2E Tests (Playwright)
 
 ```typescript
 import { test, expect } from '@playwright/test';
@@ -94,3 +128,9 @@ npx playwright show-trace trace.zip    # View traces
 ```
 
 Screenshots auto-captured on failure in `test-results/`.
+
+## CI Integration
+
+The `.github/workflows/kaos-ui-tests.yaml` workflow runs on PRs touching `kaos-ui/`:
+- **Build + Lint + Unit**: `npm run build`, `npm run lint`, `npm run test:unit`
+- Triggered on PRs and pushes to main

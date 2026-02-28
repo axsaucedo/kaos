@@ -22,7 +22,9 @@ Context and guidelines for GitHub Copilot and AI coding assistants working with 
 | Zustand | State management |
 | TanStack Query | Server state caching |
 | React Router | Client-side routing |
+| Vitest | Unit testing |
 | Playwright | End-to-end testing |
+| ESLint 9 | Linting (no-unused-vars: warn) |
 
 ## Architecture
 
@@ -40,21 +42,27 @@ The UI is a static SPA that connects to Kubernetes via a CORS proxy (`kaos ui --
 ```
 kaos-ui/src/
 ├── components/          # React components
-│   ├── agent/           # Agent-specific (Chat, Memory, Overview, Pods)
-│   ├── mcp/             # MCPServer components (Overview, Pods, ToolsDebug)
-│   ├── modelapi/        # ModelAPI components (Overview, Pods, Diagnostics)
+│   ├── agent/           # Agent-specific (Chat, Memory, Overview)
+│   ├── mcp/             # MCPServer (Overview, ToolsDebug sub-components + hooks)
+│   ├── modelapi/        # ModelAPI (Overview, Diagnostics)
 │   ├── dashboard/       # Dashboard widgets (OverviewDashboard, VisualMap)
-│   ├── kubernetes/      # K8s resources (PodsList, SecretsList)
-│   ├── layout/          # Layout (MainLayout, Sidebar, Header)
+│   ├── kubernetes/      # K8s resources (PodsList, SecretsList, PodOverviewTab, PodLogsTab)
+│   ├── layout/          # Layout (MainLayout, Sidebar, Header, ConnectionStatus)
 │   ├── resources/       # Resource CRUD (List, CreateDialog, EditDialog)
-│   │   └── shared/      # Shared editors (EnvVarEditor, LabelsAnnotationsEditor)
+│   │   ├── ResourceDetailDrawer.tsx  # Consolidated detail drawer (all resource types)
+│   │   └── shared/      # EnvVarEditor, LabelsAnnotationsEditor, NameField
 │   ├── settings/        # Settings components
-│   ├── shared/          # Reusable (DeploymentStatusCard, YamlViewer)
+│   ├── shared/          # Cross-cutting (DeploymentStatusCard, ResourcePods, YamlViewer)
 │   └── ui/              # shadcn/ui base components (DO NOT MODIFY)
 ├── contexts/            # React contexts (KubernetesConnectionContext)
-├── hooks/               # Custom hooks (useAgentChat, useRealKubernetesAPI)
-├── lib/                 # Utilities (kubernetes-client.ts, agent-client.ts)
+├── hooks/               # Custom hooks (useAgentChat, useResourceCrud, usePodLogs)
+├── lib/                 # Utilities
+│   ├── k8s/             # K8s client modules (client.ts, resources.ts, core.ts, proxy.ts, index.ts)
+│   ├── agent-client.ts  # Agent chat SSE client
+│   ├── status-utils.ts  # Status badge/color utilities
+│   └── utils.ts         # General utils (cn, validateKubernetesName)
 ├── pages/               # Route pages
+│   └── system/          # KAOSSystemPage sub-components (NamespaceManager, OperatorConfig, etc.)
 ├── stores/              # Zustand stores (kubernetesStore)
 └── types/               # TypeScript types (kubernetes.ts, mcp.ts)
 ```
@@ -81,8 +89,10 @@ AI agents with memory, tools, and multi-agent capabilities. References ModelAPI 
 ```typescript
 // Zustand store
 const { agents, modelAPIs, activeTab } = useKubernetesStore();
-// API operations
+// API operations (via KubernetesConnectionContext)
 const { createAgent, updateAgent, deleteAgent, refreshAll } = useKubernetesConnection();
+// CRUD operations helper (wraps context with logging + refresh)
+const { createResource, updateResource, deleteResource } = useResourceCrud(addLogEntry, refreshAll);
 ```
 
 ### Form Patterns
@@ -111,13 +121,18 @@ Bot (Agent), Server (MCP), Box (ModelAPI), Boxes (Pods), KeyRound (Secrets)
 
 ## Testing
 
-See `kaos-ui-testing.instructions.md` for Playwright test patterns.
+See `kaos-ui-testing.instructions.md` for full testing details.
 
 ```bash
 npm run dev              # UI at http://localhost:8081
 kaos ui --no-browser     # Proxy at http://localhost:8010
-npm run test:e2e         # All tests
+npm run test:unit        # Vitest unit tests (63 tests)
+npm run test:e2e         # Playwright E2E tests (109 tests)
+npm run lint             # ESLint
+npm run build            # Type-check + build
 ```
+
+CI runs automatically via `.github/workflows/kaos-ui-tests.yaml` on PRs touching `kaos-ui/`.
 
 ## Additional Instruction Files
 - `kaos-ui-components.instructions.md` — UI component patterns, Visual Map

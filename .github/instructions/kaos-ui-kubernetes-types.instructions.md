@@ -10,6 +10,8 @@ Guidelines for managing KAOS CRD type definitions in the UI.
 
 The KAOS-UI TypeScript types in `kaos-ui/src/types/kubernetes.ts` must stay in sync with the KAOS operator Go types in `operator/api/v1alpha1/`.
 
+Types are focused on CRD definitions only. Canvas/visual-map types live in `src/components/dashboard/visual-map/types.ts`.
+
 ## Type Mapping: Go → TypeScript
 
 | Go Type | TypeScript Type |
