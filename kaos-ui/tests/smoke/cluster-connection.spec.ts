@@ -10,6 +10,12 @@ import { test, expect } from '@playwright/test';
 import { setupConnection, TEST_CONFIG } from '../fixtures/test-utils';
 
 test.describe('Cluster Connection', () => {
+  test.beforeEach(async ({ page }) => {
+    page.on('pageerror', (err) => {
+      console.error('Page error:', err.message);
+    });
+  });
+
   test('should connect to the cluster via URL parameters', async ({ page }) => {
     // Setup connection using URL parameters
     await setupConnection(page, {
@@ -34,7 +40,9 @@ test.describe('Cluster Connection', () => {
     
     // Wait for data to load
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(2000);
+    
+    // Wait for the dashboard to render content
+    await expect(page.locator('body')).toContainText(/.+/, { timeout: 5000 });
     
     // The dashboard should show some content
     // Look for any resource-related content
@@ -52,7 +60,6 @@ test.describe('Cluster Connection', () => {
     });
     
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1000);
     
     // The namespace should be visible somewhere in the UI
     // This could be in a namespace selector, header, or resource details

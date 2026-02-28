@@ -95,6 +95,9 @@ const MOCK_SESSIONS = ['sess-abc123'];
 
 test.describe('Agent Memory Event Display', () => {
   test.beforeEach(async ({ page }) => {
+    page.on('pageerror', (err) => {
+      console.error('Page error:', err.message);
+    });
     await setupConnection(page, {
       proxyUrl: TEST_CONFIG.proxyUrl,
       namespace: TEST_CONFIG.namespace,
@@ -127,10 +130,12 @@ test.describe('Agent Memory Event Display', () => {
     // Navigate to Agents list
     await page.getByRole('button', { name: /agents/i }).click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1000);
+
+    // Wait for table rows to render
+    const rows = page.locator('table tbody tr');
+    await expect(rows.first()).toBeVisible({ timeout: 5000 });
 
     // Find a Ready agent
-    const rows = page.locator('table tbody tr');
     const testRow = rows.filter({ hasText: 'Ready' }).first();
     if (await testRow.count() === 0) {
       return false;
@@ -138,7 +143,7 @@ test.describe('Agent Memory Event Display', () => {
 
     // Open agent detail
     await testRow.locator('button').first().click();
-    await page.waitForTimeout(1000);
+    await page.waitForLoadState('networkidle');
 
     // Navigate to Memory tab
     const memoryTab = page.getByRole('tab', { name: /memory/i });
@@ -147,7 +152,6 @@ test.describe('Agent Memory Event Display', () => {
     }
     await memoryTab.click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(2000);
 
     return true;
   }
@@ -276,7 +280,7 @@ test.describe('Agent Memory Event Display', () => {
     // Switch to Sessions tab
     const sessionsTab = page.getByRole('tab', { name: /sessions/i });
     await sessionsTab.click();
-    await page.waitForTimeout(500);
+    await page.waitForLoadState('networkidle');
 
     // Session ID should be visible
     await expect(page.locator('text=sess-abc123').first()).toBeVisible();

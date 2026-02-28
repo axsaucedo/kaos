@@ -22,6 +22,9 @@ const TEST_AGENTS = ['analyst-1', 'researcher-1', 'research-lead']; // Fallback 
 
 test.describe('Agent Chat and Memory Functionality', () => {
   test.beforeEach(async ({ page }) => {
+    page.on('pageerror', (err) => {
+      console.error('Page error:', err.message);
+    });
     await setupConnection(page, {
       proxyUrl: TEST_CONFIG.proxyUrl,
       namespace: TEST_CONFIG.namespace,
@@ -32,10 +35,10 @@ test.describe('Agent Chat and Memory Functionality', () => {
     // Navigate to Agents
     await page.getByRole('button', { name: /agents/i }).click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1000);
     
-    // Find any Ready agent in the table
+    // Wait for table rows to render
     const rows = page.locator('table tbody tr');
+    await expect(rows.first()).toBeVisible({ timeout: 5000 });
     let testRow = null;
     
     for (const agentName of TEST_AGENTS) {
@@ -60,15 +63,14 @@ test.describe('Agent Chat and Memory Functionality', () => {
     // Click view button to open detail
     const viewButton = testRow.locator('button').first();
     await viewButton.click();
-    await page.waitForTimeout(1000);
+    await page.waitForLoadState('networkidle');
     
     // Navigate to Chat tab
     const chatTab = page.getByRole('tab', { name: /chat/i });
-    expect(await chatTab.isVisible()).toBeTruthy();
+    await expect(chatTab).toBeVisible({ timeout: 5000 });
     
     await chatTab.click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1000);
     
     // Verify chat interface elements are present
     const chatElements = await Promise.all([
@@ -77,7 +79,6 @@ test.describe('Agent Chat and Memory Functionality', () => {
     ]);
     
     const hasInput = chatElements[0] > 0;
-    const hasSessionInfo = chatElements[1] > 0;
     
     expect(hasInput, 'Chat should have a message input').toBeTruthy();
   });
@@ -89,10 +90,12 @@ test.describe('Agent Chat and Memory Functionality', () => {
     // Navigate to Agents
     await page.getByRole('button', { name: /agents/i }).click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1000);
+    
+    // Wait for table rows to render
+    const rows = page.locator('table tbody tr');
+    await expect(rows.first()).toBeVisible({ timeout: 5000 });
     
     // Find any Ready agent
-    const rows = page.locator('table tbody tr');
     let testRow = rows.filter({ hasText: 'Ready' }).first();
     
     if (await testRow.count() === 0) {
@@ -104,13 +107,12 @@ test.describe('Agent Chat and Memory Functionality', () => {
     // Click view button
     const viewButton = testRow.locator('button').first();
     await viewButton.click();
-    await page.waitForTimeout(1000);
+    await page.waitForLoadState('networkidle');
     
     // Navigate to Chat tab
     const chatTab = page.getByRole('tab', { name: /chat/i });
     await chatTab.click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1000);
     
     // Find message input
     const messageInput = page.locator('textarea').first();
@@ -164,10 +166,12 @@ test.describe('Agent Chat and Memory Functionality', () => {
     // Navigate to Agents
     await page.getByRole('button', { name: /agents/i }).click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1000);
+    
+    // Wait for table rows to render
+    const rows = page.locator('table tbody tr');
+    await expect(rows.first()).toBeVisible({ timeout: 5000 });
     
     // Find any Ready agent
-    const rows = page.locator('table tbody tr');
     let testRow = rows.filter({ hasText: 'Ready' }).first();
     
     if (await testRow.count() === 0) {
@@ -178,7 +182,7 @@ test.describe('Agent Chat and Memory Functionality', () => {
     // Click view button
     const viewButton = testRow.locator('button').first();
     await viewButton.click();
-    await page.waitForTimeout(1000);
+    await page.waitForLoadState('networkidle');
     
     // Navigate to Memory tab
     const memoryTab = page.getByRole('tab', { name: /memory/i });
@@ -190,7 +194,6 @@ test.describe('Agent Chat and Memory Functionality', () => {
     
     await memoryTab.click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(2000);
     
     // Check for memory interface elements
     const pageContent = await page.locator('body').textContent() || '';
@@ -208,10 +211,12 @@ test.describe('Agent Chat and Memory Functionality', () => {
     // Navigate to Agents
     await page.getByRole('button', { name: /agents/i }).click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(1000);
+    
+    // Wait for table rows to render
+    const rows = page.locator('table tbody tr');
+    await expect(rows.first()).toBeVisible({ timeout: 5000 });
     
     // Find any Ready agent
-    const rows = page.locator('table tbody tr');
     let testRow = rows.filter({ hasText: 'Ready' }).first();
     
     if (await testRow.count() === 0) {
@@ -222,7 +227,7 @@ test.describe('Agent Chat and Memory Functionality', () => {
     // Click view button
     const viewButton = testRow.locator('button').first();
     await viewButton.click();
-    await page.waitForTimeout(1000);
+    await page.waitForLoadState('networkidle');
     
     // Navigate to Memory tab
     const memoryTab = page.getByRole('tab', { name: /memory/i });
@@ -233,7 +238,6 @@ test.describe('Agent Chat and Memory Functionality', () => {
     
     await memoryTab.click();
     await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(2000);
     
     // Try to switch to Sessions sub-tab if available
     const sessionsTab = page.getByRole('tab', { name: /sessions/i }).or(
@@ -242,7 +246,7 @@ test.describe('Agent Chat and Memory Functionality', () => {
     
     if (await sessionsTab.isVisible()) {
       await sessionsTab.click();
-      await page.waitForTimeout(1000);
+      await page.waitForLoadState('networkidle');
     }
     
     // Check for sessions list or empty state

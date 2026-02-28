@@ -297,6 +297,7 @@ export function ResourceList<T>({
                               variant="ghost"
                               size="icon"
                               className="h-8 w-8"
+                              data-testid={`view-${id}`}
                               onClick={() => onView(item)}
                             >
                               <Eye className="h-4 w-4" />
@@ -316,6 +317,7 @@ export function ResourceList<T>({
                               variant="ghost"
                               size="icon"
                               className="h-8 w-8"
+                              data-testid={`edit-${id}`}
                               onClick={() => onEdit(item)}
                             >
                               <Edit className="h-4 w-4" />
@@ -335,6 +337,7 @@ export function ResourceList<T>({
                               variant="ghost"
                               size="icon"
                               className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/10"
+                              data-testid={`delete-${id}`}
                               onClick={() => handleDeleteClick(item)}
                             >
                               <Trash2 className="h-4 w-4" />

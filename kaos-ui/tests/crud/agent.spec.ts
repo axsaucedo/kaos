@@ -19,6 +19,9 @@ const TEST_RESOURCE_NAME = `test-agent-${Date.now()}`;
 
 test.describe('Agent CRUD Operations', () => {
   test.beforeEach(async ({ page }) => {
+    page.on('pageerror', (err) => {
+      console.error('Page error:', err.message);
+    });
     await setupConnection(page, {
       proxyUrl: TEST_CONFIG.proxyUrl,
       namespace: TEST_CONFIG.namespace,
@@ -31,7 +34,6 @@ test.describe('Agent CRUD Operations', () => {
       // Navigate to Agents
       await page.getByRole('button', { name: /agents/i }).click();
       await page.waitForLoadState('networkidle');
-      await page.waitForTimeout(1000);
       
       // Check for any crash/errors on the page first
       const errorMessage = page.locator('text=Something went wrong').or(page.locator('text=TypeError'));
@@ -39,10 +41,10 @@ test.describe('Agent CRUD Operations', () => {
       
       // Click Create button
       await page.getByRole('button', { name: /create agent/i }).click();
-      await page.waitForTimeout(500);
       
-      // Fill in the form
+      // Wait for dialog to appear
       const dialog = page.locator('[role="dialog"]');
+      await expect(dialog).toBeVisible({ timeout: 5000 });
       
       // 1. Name
       await dialog.getByLabel(/name/i).first().fill(TEST_RESOURCE_NAME);
@@ -56,11 +58,9 @@ test.describe('Agent CRUD Operations', () => {
       // 4. Model API - select from dropdown
       const modelAPISelect = dialog.locator('button:has-text("Select a Model API")');
       await modelAPISelect.click();
-      await page.waitForTimeout(300);
       const firstOption = page.getByRole('option').first();
-      if (await firstOption.isVisible()) {
-        await firstOption.click();
-      }
+      await expect(firstOption).toBeVisible({ timeout: 3000 });
+      await firstOption.click();
       
       // 5. Model - fill in model name
       const modelInput = dialog.locator('#model');
@@ -70,14 +70,12 @@ test.describe('Agent CRUD Operations', () => {
       // 6. Tool Call Mode - select "native" to verify the dropdown works
       const scrollArea = dialog.locator('[data-radix-scroll-area-viewport]');
       await scrollArea.evaluate(el => el.scrollTop = el.scrollHeight);
-      await page.waitForTimeout(300);
       
       const toolCallModeSelect = dialog.locator('button:has-text("auto")').last();
       if (await toolCallModeSelect.isVisible()) {
         await toolCallModeSelect.click();
-        await page.waitForTimeout(300);
         const nativeOption = page.getByRole('option', { name: 'native' });
-        if (await nativeOption.isVisible()) {
+        if (await nativeOption.isVisible({ timeout: 1000 }).catch(() => false)) {
           await nativeOption.click();
         }
       }
@@ -85,8 +83,8 @@ test.describe('Agent CRUD Operations', () => {
       // Click Create Agent button
       await page.getByRole('button', { name: 'Create Agent' }).click();
       
-      // Wait for dialog to close
-      await page.waitForTimeout(2000);
+      // Wait for dialog to close (indicates success)
+      await expect(dialog).not.toBeVisible({ timeout: 10000 });
       
       // Check for errors
       const hasError = await page.locator('[role="alert"]').filter({ hasText: /error|fail/i }).count() > 0;
@@ -106,10 +104,12 @@ test.describe('Agent CRUD Operations', () => {
       // Navigate to Agents
       await page.getByRole('button', { name: /agents/i }).click();
       await page.waitForLoadState('networkidle');
-      await page.waitForTimeout(2000);
+      
+      // Wait for table rows to render
+      const rows = page.locator('table tbody tr');
+      await expect(rows.first()).toBeVisible({ timeout: 5000 });
       
       // Find the test resource in the table
-      const rows = page.locator('table tbody tr');
       const testRow = rows.filter({ hasText: TEST_RESOURCE_NAME });
       const rowCount = await testRow.count();
       
@@ -119,10 +119,8 @@ test.describe('Agent CRUD Operations', () => {
         return;
       }
       
-      // Click the edit button (second button in actions - after view)
-      const editButton = testRow.locator('button').nth(1);
-      await editButton.click();
-      await page.waitForTimeout(1000);
+      // Click the edit button using data-testid
+      await testRow.getByTestId(`edit-${TEST_RESOURCE_NAME}`).click();
       
       // Wait for edit dialog — use last() because create+edit dialogs may both mount
       const dialog = page.locator('[role="dialog"]').last();
@@ -130,15 +128,14 @@ test.describe('Agent CRUD Operations', () => {
       
       // Update the instructions
       const instructionsField = dialog.locator('#instructions');
-      if (await instructionsField.isVisible()) {
-        await instructionsField.fill('Updated instructions for testing updates');
-      }
+      await expect(instructionsField).toBeVisible({ timeout: 3000 });
+      await instructionsField.fill('Updated instructions for testing updates');
       
       // Submit the update — scope to the active dialog to avoid duplicate button matches
       await dialog.locator('button:has-text("Save Changes")').click();
       
       // Wait for the dialog to close
-      await page.waitForTimeout(2000);
+      await expect(dialog).not.toBeVisible({ timeout: 10000 });
       await page.waitForLoadState('networkidle');
       
       // Check for errors
@@ -150,10 +147,12 @@ test.describe('Agent CRUD Operations', () => {
       // Navigate to Agents
       await page.getByRole('button', { name: /agents/i }).click();
       await page.waitForLoadState('networkidle');
-      await page.waitForTimeout(2000);
+      
+      // Wait for table rows to render
+      const rows = page.locator('table tbody tr');
+      await expect(rows.first()).toBeVisible({ timeout: 5000 });
       
       // Find the test resource in the table
-      const rows = page.locator('table tbody tr');
       const testRow = rows.filter({ hasText: TEST_RESOURCE_NAME });
       const rowCount = await testRow.count();
       
@@ -163,25 +162,19 @@ test.describe('Agent CRUD Operations', () => {
         return;
       }
       
-      // Click the delete button (third button in actions)
-      const deleteButton = testRow.locator('button').nth(2);
-      await deleteButton.click();
-      await page.waitForTimeout(500);
+      // Click the delete button using data-testid
+      await testRow.getByTestId(`delete-${TEST_RESOURCE_NAME}`).click();
       
-      // Handle confirmation dialog if present
+      // Handle confirmation dialog
       const confirmButton = page.getByRole('button', { name: /delete|confirm|yes/i }).last();
-      if (await confirmButton.isVisible({ timeout: 2000 })) {
-        await confirmButton.click();
-      }
+      await expect(confirmButton).toBeVisible({ timeout: 3000 });
+      await confirmButton.click();
       
       // Wait for deletion to complete
-      await page.waitForTimeout(2000);
       await page.waitForLoadState('networkidle');
       
       // Verify the resource is no longer in the list
-      await page.waitForTimeout(1000);
-      const stillExists = await rows.filter({ hasText: TEST_RESOURCE_NAME }).count() > 0;
-      expect(stillExists, 'Agent should be deleted').toBeFalsy();
+      await expect(rows.filter({ hasText: TEST_RESOURCE_NAME })).toHaveCount(0, { timeout: 10000 });
     });
   });
 });
