@@ -40,6 +40,7 @@ def deploy_agent(
     name: str,
     modelapi: str,
     model: str,
+    image: str | None,
     namespace: str | None,
     description: str | None,
     instructions: str | None,
@@ -90,7 +91,7 @@ def deploy_agent(
             for agent in sub_agents:
                 yaml_content += f"    - {agent}\n"
 
-    # Build container.env section with mock responses and custom env vars
+    # Build container section (image + env vars)
     env_entries = []
     parsed_env = _parse_env_vars(env_vars)
     for env_name, env_value in parsed_env:
@@ -101,12 +102,16 @@ def deploy_agent(
         mock_json = mock_json.replace("'", "''")
         env_entries.append(("DEBUG_MOCK_RESPONSES", f"'{mock_json}'"))
 
-    if env_entries:
+    has_container = image or env_entries
+    if has_container:
         yaml_content += "  container:\n"
-        yaml_content += "    env:\n"
-        for env_name, env_value in env_entries:
-            yaml_content += f"    - name: {env_name}\n"
-            yaml_content += f"      value: {env_value}\n"
+        if image:
+            yaml_content += f"    image: {image}\n"
+        if env_entries:
+            yaml_content += "    env:\n"
+            for env_name, env_value in env_entries:
+                yaml_content += f"    - name: {env_name}\n"
+                yaml_content += f"      value: {env_value}\n"
 
     # Dry run: print YAML and exit
     if dry_run:

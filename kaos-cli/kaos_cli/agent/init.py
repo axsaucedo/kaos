@@ -4,7 +4,7 @@ from pathlib import Path
 import typer
 
 
-TEMPLATE_SERVER_PY = '''"""Custom Pydantic AI Agent."""
+TEMPLATE_AGENT_PY = '''"""Custom Pydantic AI Agent."""
 
 from pydantic_ai import Agent
 
@@ -90,13 +90,19 @@ kaos agent run
 Build Docker image:
 
 ```bash
-kaos agent build --name my-agent
+kaos agent build --image my-agent:latest
 ```
 
 Deploy to Kubernetes:
 
 ```bash
-kaos agent deploy my-agent --modelapi my-api --model llama3.2
+kaos agent deploy my-agent --image my-agent:latest --modelapi my-api --model llama3.2
+```
+
+Or build and deploy in one command:
+
+```bash
+kaos agent deploy my-agent --image my-agent:latest --build --modelapi my-api --model llama3.2
 ```
 """
 
@@ -112,7 +118,7 @@ def init_command(
         target_dir.mkdir(parents=True)
 
     files = {
-        "server.py": TEMPLATE_SERVER_PY,
+        "agent.py": TEMPLATE_AGENT_PY,
         "pyproject.toml": TEMPLATE_PYPROJECT_TOML,
         "README.md": TEMPLATE_README_MD,
     }
@@ -130,7 +136,7 @@ def init_command(
 
     typer.echo(f"\n🎉 Custom agent project initialized in {target_dir}")
     typer.echo("\nNext steps:")
-    typer.echo("  1. Edit server.py to add your tools")
+    typer.echo("  1. Edit agent.py to add your tools")
     typer.echo("  2. Run locally: AGENT_NAME=my-agent MODEL_API_URL=... pais run")
-    typer.echo("  3. Build: kaos agent build --name my-agent")
-    typer.echo("  4. Deploy: kaos agent deploy my-agent --modelapi my-api --model llama3.2")
+    typer.echo("  3. Build: kaos agent build --image my-agent:latest")
+    typer.echo("  4. Deploy: kaos agent deploy my-agent --image my-agent:latest --modelapi my-api --model llama3.2")

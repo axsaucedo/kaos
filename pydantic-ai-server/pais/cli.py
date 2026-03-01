@@ -1,4 +1,4 @@
-"""PAIS CLI — run, init, and build commands for Pydantic AI agents."""
+"""PAIS CLI — run and init commands for Pydantic AI agents."""
 
 import importlib
 import importlib.util
@@ -54,9 +54,9 @@ def run_agent_server(target: str, host: str, port: int, reload: bool):
         file_part = target
         attr = None
 
-    # Default to server.py
+    # Default to agent.py
     if not file_part:
-        file_part = "server.py"
+        file_part = "agent.py"
 
     module = _import_module_from_file(file_part)
 
@@ -85,8 +85,8 @@ def run_agent_server(target: str, host: str, port: int, reload: bool):
 @app.command(name="run")
 def run(
     target: str = typer.Argument(
-        "server.py",
-        help="Python file or file:attribute (default: server.py).",
+        "agent.py",
+        help="Python file or file:attribute (default: agent.py).",
     ),
     host: str = typer.Option("0.0.0.0", "--host", "-h", help="Bind host."),
     port: int = typer.Option(8000, "--port", "-p", help="Bind port."),
@@ -108,41 +108,6 @@ def init(
         from kaos_cli.agent.init import init_command  # type: ignore[import-untyped]
 
         init_command(directory=directory, force=force)
-    except ImportError:
-        typer.echo(
-            "Error: kaos-cli not installed. Install with: pip install pydantic-ai-server[cli]",
-            err=True,
-        )
-        raise typer.Exit(1)
-
-
-@app.command(name="build")
-def build(
-    name: str = typer.Option(..., "--name", "-n", help="Image name."),
-    tag: str = typer.Option("latest", "--tag", "-t", help="Image tag."),
-    directory: str = typer.Option(".", "--dir", "-d", help="Source directory."),
-    entry_point: str = typer.Option("server.py", "--entry", "-e", help="Entry point."),
-    kind_load: bool = typer.Option(False, "--kind-load", help="Load to KIND."),
-    create_dockerfile: bool = typer.Option(
-        False, "--create-dockerfile", help="Create/overwrite Dockerfile."
-    ),
-    platform: str = typer.Option(None, "--platform", help="Docker platform."),
-    base_image: str = typer.Option(None, "--base-image", help="Base Docker image."),
-) -> None:
-    """Build a Docker image from a custom agent project."""
-    try:
-        from kaos_cli.agent.build import build_command  # type: ignore[import-untyped]
-
-        build_command(
-            name=name,
-            tag=tag,
-            directory=directory,
-            entry_point=entry_point,
-            kind_load=kind_load,
-            create_dockerfile=create_dockerfile,
-            platform=platform,
-            base_image=base_image,
-        )
     except ImportError:
         typer.echo(
             "Error: kaos-cli not installed. Install with: pip install pydantic-ai-server[cli]",

@@ -40,14 +40,17 @@ def init_agent(
 
 @app.command(name="build")
 def build_agent(
-    name: str = typer.Option(..., "--name", "-n", help="Name for the image."),
-    tag: str = typer.Option("latest", "--tag", "-t", help="Tag for the image."),
-    directory: str = typer.Option(".", "--dir", "-d", help="Source directory."),
-    entry_point: str = typer.Option(
-        "server.py", "--entry", "-e", help="Entry point file."
+    target: str = typer.Argument(
+        "agent:agent",
+        help="Module:object target (default: agent:agent). No .py extension.",
     ),
+    image: str = typer.Option(..., "--image", "-i", help="Image name with tag (e.g. my-agent:latest)."),
+    directory: str = typer.Option(".", "--dir", "-d", help="Source directory."),
     kind_load: bool = typer.Option(
         False, "--kind-load", help="Load image to KIND cluster."
+    ),
+    push: bool = typer.Option(
+        False, "--push", help="Push image to registry after build."
     ),
     create_dockerfile: bool = typer.Option(
         False, "--create-dockerfile", help="Create/overwrite Dockerfile."
@@ -58,16 +61,22 @@ def build_agent(
     base_image: str = typer.Option(
         None,
         "--base-image",
-        help="Base Docker image (default: ghcr.io/axsaucedo/kaos-agent:latest).",
+        help="Base Docker image (default: axsauze/kaos-agent:<version>).",
     ),
 ) -> None:
-    """Build a Docker image from a custom Pydantic AI agent."""
+    """Build a Docker image from a custom Pydantic AI agent.
+
+    Examples:
+      kaos agent build --image my-agent:latest
+      kaos agent build agent:my_bot --image my-agent:v2 --kind-load
+      kaos agent build --image reg.io/agent:v1 --push
+    """
     build_command(
-        name=name,
-        tag=tag,
+        target=target,
+        image=image,
         directory=directory,
-        entry_point=entry_point,
         kind_load=kind_load,
+        push=push,
         create_dockerfile=create_dockerfile,
         platform=platform,
         base_image=base_image,
@@ -77,8 +86,8 @@ def build_agent(
 @app.command(name="run")
 def run_agent(
     target: str = typer.Argument(
-        "server.py",
-        help="Python file or file:attribute (default: server.py).",
+        "agent:agent",
+        help="Module:object target (default: agent:agent). No .py extension.",
     ),
     host: str = typer.Option("0.0.0.0", "--host", help="Bind host."),
     port: int = typer.Option(8000, "--port", "-p", help="Bind port."),
@@ -171,6 +180,20 @@ def deploy_agent_cmd(
     name: str = typer.Argument(..., help="Name for the Agent."),
     modelapi: str = typer.Option(..., "--modelapi", "-a", help="ModelAPI reference."),
     model: str = typer.Option(..., "--model", "-m", help="Model name to use."),
+    image: str = typer.Option(
+        None, "--image", "-i", help="Custom container image (e.g. my-agent:latest)."
+    ),
+    build: str = typer.Option(
+        None,
+        "--build",
+        help="Build image before deploy. Optional target (default: agent:agent).",
+    ),
+    kind_load: bool = typer.Option(
+        False, "--kind-load", help="Load image to KIND cluster (requires --build)."
+    ),
+    push: bool = typer.Option(
+        False, "--push", help="Push image to registry (requires --build)."
+    ),
     namespace: str = typer.Option(
         None,
         "--namespace",
@@ -181,7 +204,7 @@ def deploy_agent_cmd(
         None, "--description", "-d", help="Agent description."
     ),
     instructions: str = typer.Option(
-        None, "--instructions", "-i", help="Agent instructions."
+        None, "--instructions", help="Agent instructions."
     ),
     mcp_servers: list[str] = typer.Option(None, "--mcp", help="MCP server references."),
     sub_agents: list[str] = typer.Option(
@@ -215,15 +238,38 @@ def deploy_agent_cmd(
 
     Examples:
       kaos agent deploy my-agent --modelapi my-api --model smollm2:135m
-      kaos agent deploy my-agent -a my-api -m gpt-4o --mcp calculator --sub-agent helper
-      kaos agent deploy my-agent -a my-api -m test --mock-response "Hello!" --expose
-      kaos agent deploy my-agent -a my-api -m gpt-4o --otel-endpoint http://otel:4317
-      kaos agent deploy my-agent -a my-api -m gpt-4o --description "My helpful agent"
+      kaos agent deploy my-agent --image my-agent:latest --modelapi my-api --model gpt-4o
+      kaos agent deploy my-agent --image my-agent:latest --build --kind-load --modelapi my-api --model gpt-4o
+      kaos agent deploy my-agent --image my-agent:latest --build agent:bot --modelapi my-api --model gpt-4o
+      kaos agent deploy my-agent -a my-api -m gpt-4o --sub-agent helper --expose
     """
+    import sys
+
+    # Validate --build requires --image
+    if build is not None and not image:
+        typer.echo("Error: --build requires --image to be set", err=True)
+        sys.exit(1)
+
+    # Run build if requested
+    if build is not None:
+        build_target = build if build else "agent:agent"
+        typer.echo(f"🔨 Building {build_target} → {image}...")
+        build_command(
+            target=build_target,
+            image=image,
+            directory=".",
+            kind_load=kind_load,
+            push=push,
+            create_dockerfile=False,
+            platform=None,
+            base_image=None,
+        )
+
     deploy_agent(
         name=name,
         modelapi=modelapi,
         model=model,
+        image=image,
         namespace=namespace,
         description=description,
         instructions=instructions,

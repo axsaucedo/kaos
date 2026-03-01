@@ -6,7 +6,18 @@ from pathlib import Path
 import typer
 
 
-DEFAULT_BASE_IMAGE = "ghcr.io/axsaucedo/kaos-agent:latest"
+def _get_default_base_image() -> str:
+    """Get the default base image using the installed kaos-cli version."""
+    try:
+        from importlib.metadata import version
+
+        ver = version("kaos-cli")
+        if "dev" in ver:
+            return "axsauze/kaos-agent:latest"
+        return f"axsauze/kaos-agent:{ver}"
+    except Exception:
+        return "axsauze/kaos-agent:latest"
+
 
 DOCKERFILE_TEMPLATE = """FROM {base_image}
 
@@ -19,16 +30,16 @@ RUN uv pip install --system --no-cache-dir --no-deps . 2>/dev/null || true
 # Copy custom agent code
 COPY . .
 
-CMD ["pais", "run", "{entry_point}.py"]
+CMD ["pais", "run", "{target}"]
 """
 
 
 def build_command(
-    name: str,
-    tag: str,
+    target: str,
+    image: str,
     directory: str,
-    entry_point: str,
     kind_load: bool,
+    push: bool,
     create_dockerfile: bool,
     platform: str | None,
     base_image: str | None,
@@ -40,10 +51,16 @@ def build_command(
         typer.echo(f"Error: Directory '{directory}' does not exist", err=True)
         sys.exit(1)
 
-    entry_path = source_dir / entry_point
+    # Parse target module:object — resolve to file path for validation
+    if ":" in target:
+        module_part, _ = target.rsplit(":", 1)
+    else:
+        module_part = target
+
+    entry_path = source_dir / f"{module_part}.py"
     if not entry_path.exists():
         typer.echo(
-            f"Error: Entry point '{entry_point}' not found in {directory}", err=True
+            f"Error: Module '{module_part}.py' not found in {directory}", err=True
         )
         sys.exit(1)
 
@@ -61,21 +78,19 @@ def build_command(
     dockerfile_path = source_dir / "Dockerfile"
     generated_dockerfile = False
 
-    entry_name = entry_point.replace(".py", "")
-    resolved_base = base_image or DEFAULT_BASE_IMAGE
+    resolved_base = base_image or _get_default_base_image()
 
     if not dockerfile_path.exists() or create_dockerfile:
         dockerfile_content = DOCKERFILE_TEMPLATE.format(
-            entry_point=entry_name, base_image=resolved_base
+            target=target, base_image=resolved_base
         )
         dockerfile_path.write_text(dockerfile_content)
         generated_dockerfile = True
         typer.echo(f"📝 Generated Dockerfile (base: {resolved_base})")
 
-    image_tag = f"{name}:{tag}"
-    typer.echo(f"🔨 Building image {image_tag}...")
+    typer.echo(f"🔨 Building image {image}...")
 
-    build_args = ["docker", "build", "-t", image_tag, str(source_dir)]
+    build_args = ["docker", "build", "-t", image, str(source_dir)]
 
     if platform:
         build_args.extend(["--platform", platform])
@@ -86,21 +101,31 @@ def build_command(
         typer.echo("Error: Docker build failed", err=True)
         sys.exit(result.returncode)
 
-    typer.echo(f"✅ Built image {image_tag}")
+    typer.echo(f"✅ Built image {image}")
 
     if kind_load:
         typer.echo("📦 Loading image to KIND cluster...")
-        result = subprocess.run(["kind", "load", "docker-image", image_tag])
+        result = subprocess.run(["kind", "load", "docker-image", image])
 
         if result.returncode != 0:
             typer.echo("Error: Failed to load image to KIND", err=True)
             sys.exit(result.returncode)
 
-        typer.echo(f"✅ Loaded {image_tag} to KIND cluster")
+        typer.echo(f"✅ Loaded {image} to KIND cluster")
+
+    if push:
+        typer.echo(f"📤 Pushing image {image}...")
+        result = subprocess.run(["docker", "push", image])
+
+        if result.returncode != 0:
+            typer.echo("Error: Docker push failed", err=True)
+            sys.exit(result.returncode)
+
+        typer.echo(f"✅ Pushed {image}")
 
     if generated_dockerfile and not create_dockerfile:
         dockerfile_path.unlink()
 
     typer.echo(
-        f"\n🎉 Build complete! Next: kaos agent deploy {name} --modelapi <api> --model <model>"
+        f"\n🎉 Build complete! Next: kaos agent deploy <name> --image {image} --modelapi <api> --model <model>"
     )

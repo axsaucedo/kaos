@@ -1,6 +1,5 @@
 """KAOS MCP build command - builds a Docker image from FastMCP server."""
 
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -20,16 +19,16 @@ COPY . .
 
 EXPOSE 8000
 
-CMD ["fastmcp", "run", "{entry_point}:mcp", "--transport", "streamable-http", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["fastmcp", "run", "{target}", "--transport", "streamable-http", "--host", "0.0.0.0", "--port", "8000"]
 """
 
 
 def build_command(
-    name: str,
-    tag: str,
+    target: str,
+    image: str,
     directory: str,
-    entry_point: str,
     kind_load: bool,
+    push: bool,
     create_dockerfile: bool,
     platform: str | None,
 ) -> None:
@@ -40,11 +39,16 @@ def build_command(
         typer.echo(f"Error: Directory '{directory}' does not exist", err=True)
         sys.exit(1)
 
-    # Check for entry point
-    entry_path = source_dir / entry_point
+    # Parse target module:object — resolve to file path for validation
+    if ":" in target:
+        module_part, _ = target.rsplit(":", 1)
+    else:
+        module_part = target
+
+    entry_path = source_dir / f"{module_part}.py"
     if not entry_path.exists():
         typer.echo(
-            f"Error: Entry point '{entry_point}' not found in {directory}", err=True
+            f"Error: Module '{module_part}.py' not found in {directory}", err=True
         )
         sys.exit(1)
 
@@ -57,26 +61,22 @@ def build_command(
         )
         sys.exit(1)
 
-    typer.echo(f"📦 Using pyproject.toml for dependencies")
+    typer.echo("📦 Using pyproject.toml for dependencies")
 
     # Generate or use existing Dockerfile
     dockerfile_path = source_dir / "Dockerfile"
     generated_dockerfile = False
 
-    # Remove .py extension for fastmcp run command
-    entry_name = entry_point.replace(".py", "")
-
     if not dockerfile_path.exists() or create_dockerfile:
-        dockerfile_content = DOCKERFILE_TEMPLATE.format(entry_point=entry_name)
+        dockerfile_content = DOCKERFILE_TEMPLATE.format(target=target)
         dockerfile_path.write_text(dockerfile_content)
         generated_dockerfile = True
-        typer.echo(f"📝 Generated Dockerfile")
+        typer.echo("📝 Generated Dockerfile")
 
     # Build image
-    image_tag = f"{name}:{tag}"
-    typer.echo(f"🔨 Building image {image_tag}...")
+    typer.echo(f"🔨 Building image {image}...")
 
-    build_args = ["docker", "build", "-t", image_tag, str(source_dir)]
+    build_args = ["docker", "build", "-t", image, str(source_dir)]
 
     if platform:
         build_args.extend(["--platform", platform])
@@ -87,23 +87,33 @@ def build_command(
         typer.echo("Error: Docker build failed", err=True)
         sys.exit(result.returncode)
 
-    typer.echo(f"✅ Built image {image_tag}")
+    typer.echo(f"✅ Built image {image}")
 
     # Load to KIND if requested
     if kind_load:
-        typer.echo(f"📦 Loading image to KIND cluster...")
-        result = subprocess.run(["kind", "load", "docker-image", image_tag])
+        typer.echo("📦 Loading image to KIND cluster...")
+        result = subprocess.run(["kind", "load", "docker-image", image])
 
         if result.returncode != 0:
             typer.echo("Error: Failed to load image to KIND", err=True)
             sys.exit(result.returncode)
 
-        typer.echo(f"✅ Loaded {image_tag} to KIND cluster")
+        typer.echo(f"✅ Loaded {image} to KIND cluster")
+
+    if push:
+        typer.echo(f"📤 Pushing image {image}...")
+        result = subprocess.run(["docker", "push", image])
+
+        if result.returncode != 0:
+            typer.echo("Error: Docker push failed", err=True)
+            sys.exit(result.returncode)
+
+        typer.echo(f"✅ Pushed {image}")
 
     # Clean up generated Dockerfile if requested
     if generated_dockerfile and not create_dockerfile:
         dockerfile_path.unlink()
 
     typer.echo(
-        f"\n🎉 Build complete! Next: kaos mcp deploy --name {name} --image {image_tag}"
+        f"\n🎉 Build complete! Next: kaos mcp deploy <name> --image {image}"
     )
