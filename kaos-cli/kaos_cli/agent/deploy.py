@@ -110,9 +110,9 @@ def deploy_agent(
             yaml_content += "    env:\n"
             for env_name, env_value in env_entries:
                 yaml_content += f"    - name: {env_name}\n"
-                # Quote values to prevent YAML interpretation of JSON/special chars
-                escaped = env_value.replace('"', '\\"')
-                yaml_content += f'      value: "{escaped}"\n'
+                # Use YAML single-quoted to preserve backslashes and special chars as-is
+                escaped = env_value.replace("'", "''")
+                yaml_content += f"      value: '{escaped}'\n"
 
     # Dry run: print YAML and exit
     if dry_run:
