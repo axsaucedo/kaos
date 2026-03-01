@@ -92,7 +92,16 @@ def build_command(
     # Load to KIND if requested
     if kind_load:
         typer.echo("📦 Loading image to KIND cluster...")
-        result = subprocess.run(["kind", "load", "docker-image", image])
+        detect = subprocess.run(
+            ["kind", "get", "clusters"],
+            capture_output=True,
+            text=True,
+        )
+        clusters = [c.strip() for c in detect.stdout.strip().split("\n") if c.strip()]
+        cmd = ["kind", "load", "docker-image", image]
+        if len(clusters) == 1:
+            cmd += ["--name", clusters[0]]
+        result = subprocess.run(cmd)
 
         if result.returncode != 0:
             typer.echo("Error: Failed to load image to KIND", err=True)

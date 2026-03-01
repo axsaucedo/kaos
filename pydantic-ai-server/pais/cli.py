@@ -28,6 +28,9 @@ def _discover_agent(module):
 def _import_module_from_file(file_path: str):
     """Import a Python file as a module."""
     path = Path(file_path).resolve()
+    # Auto-add .py extension if file doesn't exist but .py version does
+    if not path.exists() and not path.suffix and path.with_suffix(".py").exists():
+        path = path.with_suffix(".py")
     if not path.exists():
         typer.echo(f"Error: File '{file_path}' not found", err=True)
         raise typer.Exit(1)

@@ -23,9 +23,14 @@ DOCKERFILE_TEMPLATE = """FROM {base_image}
 
 WORKDIR /app
 
-# Install extra dependencies from pyproject.toml (pais is in the base image)
+ENV PATH="/home/agentic/.local/bin:$PATH"
+
+# Install custom agent and its dependencies
 COPY pyproject.toml README.md* ./
-RUN uv pip install --system --no-cache-dir --no-deps . 2>/dev/null || true
+RUN pip install --no-cache-dir . 2>/dev/null || true
+
+# Ensure pais CLI is available (needed for CMD)
+RUN pip install --no-cache-dir "pydantic-ai-server[cli]" 2>/dev/null || true
 
 # Copy custom agent code
 COPY . .
@@ -53,9 +58,10 @@ def build_command(
 
     # Parse target module:object — resolve to file path for validation
     if ":" in target:
-        module_part, _ = target.rsplit(":", 1)
+        module_part, attr_part = target.rsplit(":", 1)
     else:
         module_part = target
+        attr_part = None
 
     entry_path = source_dir / f"{module_part}.py"
     if not entry_path.exists():
@@ -81,8 +87,10 @@ def build_command(
     resolved_base = base_image or _get_default_base_image()
 
     if not dockerfile_path.exists() or create_dockerfile:
+        # Convert module:object target to file.py:object for pais run
+        run_target = f"{module_part}.py:{attr_part}" if attr_part else f"{module_part}.py"
         dockerfile_content = DOCKERFILE_TEMPLATE.format(
-            target=target, base_image=resolved_base
+            target=run_target, base_image=resolved_base
         )
         dockerfile_path.write_text(dockerfile_content)
         generated_dockerfile = True
@@ -105,7 +113,17 @@ def build_command(
 
     if kind_load:
         typer.echo("📦 Loading image to KIND cluster...")
-        result = subprocess.run(["kind", "load", "docker-image", image])
+        # Auto-detect KIND cluster name
+        detect = subprocess.run(
+            ["kind", "get", "clusters"],
+            capture_output=True,
+            text=True,
+        )
+        clusters = [c.strip() for c in detect.stdout.strip().split("\n") if c.strip()]
+        cmd = ["kind", "load", "docker-image", image]
+        if len(clusters) == 1:
+            cmd += ["--name", clusters[0]]
+        result = subprocess.run(cmd)
 
         if result.returncode != 0:
             typer.echo("Error: Failed to load image to KIND", err=True)
