@@ -99,8 +99,7 @@ def deploy_agent(
 
     if mock_responses:
         mock_json = json.dumps(mock_responses)
-        mock_json = mock_json.replace("'", "''")
-        env_entries.append(("DEBUG_MOCK_RESPONSES", f"'{mock_json}'"))
+        env_entries.append(("DEBUG_MOCK_RESPONSES", mock_json))
 
     has_container = image or env_entries
     if has_container:
@@ -111,7 +110,9 @@ def deploy_agent(
             yaml_content += "    env:\n"
             for env_name, env_value in env_entries:
                 yaml_content += f"    - name: {env_name}\n"
-                yaml_content += f"      value: {env_value}\n"
+                # Quote values to prevent YAML interpretation of JSON/special chars
+                escaped = env_value.replace('"', '\\"')
+                yaml_content += f'      value: "{escaped}"\n'
 
     # Dry run: print YAML and exit
     if dry_run:
