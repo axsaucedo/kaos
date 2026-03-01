@@ -50,7 +50,7 @@ REPO_ROOT = os.path.abspath("../../")
 os.environ['REPO_ROOT'] = REPO_ROOT
 
 # Base agent image — set KAOS_AGENT_IMAGE for local/CI builds
-AGENT_IMAGE = os.environ.get("KAOS_AGENT_IMAGE", "ghcr.io/axsaucedo/kaos-agent:latest")
+AGENT_IMAGE = os.environ.get("KAOS_AGENT_IMAGE", "axsauze/kaos-agent:latest")
 os.environ['KAOS_AGENT_IMAGE'] = AGENT_IMAGE
 ```
 
@@ -67,14 +67,14 @@ Use the KAOS CLI to scaffold a new custom agent project:
 !kaos agent init custom-math-agent
 ```
 
-This creates `server.py`, `pyproject.toml`, and `README.md` with a template Pydantic AI agent.
+This creates `agent.py`, `pyproject.toml`, and `README.md` with a template Pydantic AI agent.
 
 ## Step 2: Customize the Agent
 
-Replace the template server with a math agent that has custom tools:
+Replace the template agent with a math agent that has custom tools:
 
 ```python
-%%writefile custom-math-agent/server.py
+%%writefile custom-math-agent/agent.py
 """Custom Agent — Pydantic AI agent with math tools."""
 
 import random
@@ -135,13 +135,13 @@ def random_number(min_val: int = 1, max_val: int = 100) -> str:
 Build the container image using the CLI:
 
 ```python
-!cd custom-math-agent && kaos agent build --name custom-agent --tag test --create-dockerfile --base-image $KAOS_AGENT_IMAGE
+!cd custom-math-agent && kaos agent build --image custom-agent:test --create-dockerfile --base-image $KAOS_AGENT_IMAGE
 ```
 
 For KIND clusters, load the image directly:
 
 ```python
-!kind load docker-image custom-agent:test --name kaos-e2e 2>/dev/null || echo "Not using KIND or image already loaded"
+!cd custom-math-agent && kaos agent build --image custom-agent:test --create-dockerfile --base-image $KAOS_AGENT_IMAGE --kind-load
 ```
 
 ## Step 4: Create a ModelAPI
@@ -157,39 +157,23 @@ kaos modelapi deploy custom-api --mode Proxy --wait
 Deploy the agent with custom image and mock responses that exercise the `add` tool:
 
 ```python
-import json, subprocess
+import json
 
 mock1 = json.dumps({"tool_calls": [{"id": "call_1", "name": "add", "arguments": {"a": 5, "b": 3}}]})
 mock2 = "The result of 5 + 3 is 8."
 mock_responses = json.dumps([mock1, mock2])
+mock_env = f"DEBUG_MOCK_RESPONSES={mock_responses}"
+```
 
-namespace = os.environ["NAMESPACE"]
-yaml_manifest = f"""apiVersion: kaos.tools/v1alpha1
-kind: Agent
-metadata:
-  name: custom-math-agent
-  namespace: {namespace}
-spec:
-  modelAPI: custom-api
-  model: mock-model
-  config:
-    description: Custom math agent with add, multiply, and random tools
-    instructions: You are a helpful math and utility assistant.
-    reasoningLoopMaxSteps: 5
-  container:
-    image: custom-agent:test
-    env:
-    - name: AGENT_LOG_LEVEL
-      value: DEBUG
-    - name: DEBUG_MOCK_RESPONSES
-      value: '{mock_responses}'
-  agentNetwork:
-    access: []
-"""
-
-result = subprocess.run(["kubectl", "apply", "-f", "-"], input=yaml_manifest, capture_output=True, text=True)
-print(result.stdout or result.stderr)
-assert result.returncode == 0, f"kubectl apply failed: {result.stderr}"
+```python
+!kaos agent deploy custom-math-agent \
+    --modelapi custom-api \
+    --model mock-model \
+    --image custom-agent:test \
+    --description "Custom math agent with add, multiply, and random tools" \
+    --instructions "You are a helpful math and utility assistant." \
+    --env "AGENT_LOG_LEVEL=DEBUG" \
+    --env "$mock_env"
 ```
 
 Wait for the agent to be ready:
