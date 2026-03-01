@@ -71,7 +71,7 @@ Both packages use [OIDC trusted publishing](https://docs.pypi.org/trusted-publis
 
 **Config location:** pypi.org → Manage → Publishing → Trusted Publishers
 
-**Critical:** The workflow filename in PyPI config must **exactly match** the GitHub Actions file (`release.yaml`, not `release.yml`).
+**Critical:** The workflow filename in PyPI config must **exactly match** the GitHub Actions file (`release.yaml`, not `release.yml`). The repo field must be just the repo name (`kaos`), not the full `owner/repo` path. The environment field should be `pypi`.
 
 ## Required Secrets
 
