@@ -158,6 +158,96 @@ class TestAgentDeployDryRun:
         log_env = next(e for e in env if e["name"] == "LOG_LEVEL")
         assert log_env["value"] == "DEBUG"
 
+    def test_agent_with_image(self):
+        result = runner.invoke(
+            app,
+            [
+                "agent",
+                "deploy",
+                "custom-agent",
+                "--modelapi",
+                "api",
+                "--model",
+                "gpt-4o",
+                "--image",
+                "my-agent:latest",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0
+        docs = list(yaml.safe_load_all(result.output))
+        agent = docs[0]
+        assert agent["spec"]["container"]["image"] == "my-agent:latest"
+
+    def test_agent_with_image_and_env(self):
+        result = runner.invoke(
+            app,
+            [
+                "agent",
+                "deploy",
+                "custom-agent",
+                "--modelapi",
+                "api",
+                "--model",
+                "gpt-4o",
+                "--image",
+                "my-agent:v2",
+                "--env",
+                "LOG_LEVEL=DEBUG",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0
+        docs = list(yaml.safe_load_all(result.output))
+        agent = docs[0]
+        assert agent["spec"]["container"]["image"] == "my-agent:v2"
+        env = agent["spec"]["container"]["env"]
+        log_env = next(e for e in env if e["name"] == "LOG_LEVEL")
+        assert log_env["value"] == "DEBUG"
+
+    def test_agent_with_image_and_subagents(self):
+        result = runner.invoke(
+            app,
+            [
+                "agent",
+                "deploy",
+                "coord",
+                "--modelapi",
+                "api",
+                "--model",
+                "gpt-4o",
+                "--image",
+                "coord:latest",
+                "--sub-agent",
+                "worker",
+                "--expose",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0
+        docs = list(yaml.safe_load_all(result.output))
+        agent = docs[0]
+        assert agent["spec"]["container"]["image"] == "coord:latest"
+        assert agent["spec"]["agentNetwork"]["expose"] is True
+        assert "worker" in agent["spec"]["agentNetwork"]["access"]
+
+    def test_build_requires_image(self):
+        result = runner.invoke(
+            app,
+            [
+                "agent",
+                "deploy",
+                "test",
+                "--modelapi",
+                "api",
+                "--model",
+                "m1",
+                "--build",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code != 0
+
 
 # ─── ModelAPI deploy dry-run ────────────────────────────────────────────
 
@@ -662,15 +752,15 @@ class TestAgentInit:
         target = str(tmp_path / "my-agent")
         result = runner.invoke(app, ["agent", "init", target])
         assert result.exit_code == 0
-        assert (tmp_path / "my-agent" / "server.py").exists()
+        assert (tmp_path / "my-agent" / "agent.py").exists()
         assert (tmp_path / "my-agent" / "pyproject.toml").exists()
         assert (tmp_path / "my-agent" / "README.md").exists()
 
-    def test_init_server_has_create_agent_server(self, tmp_path):
+    def test_init_agent_has_pydantic_agent(self, tmp_path):
         target = str(tmp_path / "my-agent")
         result = runner.invoke(app, ["agent", "init", target])
         assert result.exit_code == 0
-        content = (tmp_path / "my-agent" / "server.py").read_text()
+        content = (tmp_path / "my-agent" / "agent.py").read_text()
         assert "Agent(" in content
         assert "agent.tool_plain" in content
 
@@ -704,15 +794,16 @@ class TestAgentBuild:
         result = runner.invoke(app, ["agent", "build", "--help"])
         assert result.exit_code == 0
         output = strip_ansi(result.output)
-        assert "--name" in output
-        assert "--tag" in output
+        assert "--image" in output
         assert "--kind-load" in output
+        assert "--push" in output
         assert "--create-dockerfile" in output
+        assert "target" in output.lower()
 
     def test_build_missing_directory(self):
         result = runner.invoke(
             app,
-            ["agent", "build", "--name", "test", "--dir", "/nonexistent"],
+            ["agent", "build", "--image", "test:latest", "--dir", "/nonexistent"],
         )
         assert result.exit_code != 0
 
@@ -720,16 +811,16 @@ class TestAgentBuild:
         (tmp_path / "pyproject.toml").write_text("[project]\nname='test'\n")
         result = runner.invoke(
             app,
-            ["agent", "build", "--name", "test", "--dir", str(tmp_path)],
+            ["agent", "build", "--image", "test:latest", "--dir", str(tmp_path)],
         )
         assert result.exit_code != 0
-        assert "Entry point" in result.output
+        assert "Module" in result.output or "not found" in result.output
 
     def test_build_missing_pyproject(self, tmp_path):
-        (tmp_path / "server.py").write_text("# empty")
+        (tmp_path / "agent.py").write_text("# empty")
         result = runner.invoke(
             app,
-            ["agent", "build", "--name", "test", "--dir", str(tmp_path)],
+            ["agent", "build", "--image", "test:latest", "--dir", str(tmp_path)],
         )
         assert result.exit_code != 0
         assert "pyproject.toml" in result.output

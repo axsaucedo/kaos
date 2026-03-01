@@ -46,7 +46,7 @@ pip install pydantic-ai-server[cli]    # With CLI
 Create a custom agent with pure Pydantic AI — zero boilerplate:
 
 ```python
-# server.py
+# agent.py
 from pydantic_ai import Agent
 
 agent = Agent(
@@ -64,12 +64,12 @@ def greet(name: str) -> str:
 Run it locally:
 
 ```bash
-# Default: discovers Agent in server.py
+# Default: discovers Agent in agent.py
 AGENT_NAME=my-agent MODEL_API_URL=http://localhost:11434 MODEL_NAME=llama3.2 \
   pais run
 
 # With flags
-pais run server.py --host 127.0.0.1 --port 9000 --reload
+pais run agent.py --host 127.0.0.1 --port 9000 --reload
 ```
 
 The `pais run` CLI auto-discovers your `Agent` and wraps it with PAIS (health probes, A2A card, memory, OpenAI-compatible API).
@@ -94,10 +94,10 @@ kaos modelapi deploy my-api --mode Hosted -m smollm2:135m --wait
 
 # 3. Scaffold and build a custom agent
 pais init my-agent && cd my-agent
-pais build --name my-agent --tag v1
+kaos agent build --image my-agent:v1
 
 # 4. Deploy the agent to Kubernetes
-kaos agent deploy my-agent --modelapi my-api --model smollm2:135m --expose --wait
+kaos agent deploy my-agent --image my-agent:v1 --modelapi my-api --model smollm2:135m --expose --wait
 
 # 5. Invoke the agent
 kaos agent invoke my-agent --message "Say hello!"
@@ -106,7 +106,7 @@ kaos agent invoke my-agent --message "Say hello!"
 For KIND clusters, add `--kind-load` when building:
 
 ```bash
-pais build --name my-agent --tag v1 --kind-load
+kaos agent build --image my-agent:v1 --kind-load
 ```
 
 ## Architecture

@@ -33,14 +33,17 @@ def init_mcp(
 
 @app.command(name="build")
 def build_mcp(
-    name: str = typer.Option(..., "--name", "-n", help="Name for the image."),
-    tag: str = typer.Option("latest", "--tag", "-t", help="Tag for the image."),
-    directory: str = typer.Option(".", "--dir", "-d", help="Source directory."),
-    entry_point: str = typer.Option(
-        "server.py", "--entry", "-e", help="Entry point file."
+    target: str = typer.Argument(
+        "server:mcp",
+        help="Module:object target (default: server:mcp). No .py extension.",
     ),
+    image: str = typer.Option(..., "--image", "-i", help="Image name with tag (e.g. my-mcp:latest)."),
+    directory: str = typer.Option(".", "--dir", "-d", help="Source directory."),
     kind_load: bool = typer.Option(
         False, "--kind-load", help="Load image to KIND cluster."
+    ),
+    push: bool = typer.Option(
+        False, "--push", help="Push image to registry after build."
     ),
     create_dockerfile: bool = typer.Option(
         False, "--create-dockerfile", help="Create/overwrite Dockerfile."
@@ -49,13 +52,19 @@ def build_mcp(
         None, "--platform", help="Docker platform (e.g., linux/amd64)."
     ),
 ) -> None:
-    """Build a Docker image from a FastMCP server."""
+    """Build a Docker image from a FastMCP server.
+
+    Examples:
+      kaos mcp build --image my-mcp:latest
+      kaos mcp build server:mcp --image my-mcp:v2 --kind-load
+      kaos mcp build --image reg.io/mcp:v1 --push
+    """
     build_command(
-        name=name,
-        tag=tag,
+        target=target,
+        image=image,
         directory=directory,
-        entry_point=entry_point,
         kind_load=kind_load,
+        push=push,
         create_dockerfile=create_dockerfile,
         platform=platform,
     )
