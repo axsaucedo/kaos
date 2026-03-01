@@ -157,23 +157,26 @@ kaos modelapi deploy custom-api --mode Proxy --wait
 Deploy the agent with custom image and mock responses that exercise the `add` tool:
 
 ```python
-import json
+import json, subprocess, os
 
 mock1 = json.dumps({"tool_calls": [{"id": "call_1", "name": "add", "arguments": {"a": 5, "b": 3}}]})
 mock2 = "The result of 5 + 3 is 8."
 mock_responses = json.dumps([mock1, mock2])
-mock_env = f"DEBUG_MOCK_RESPONSES={mock_responses}"
-```
 
-```python
-!kaos agent deploy custom-math-agent \
-    --modelapi custom-api \
-    --model mock-model \
-    --image custom-agent:test \
-    --description "Custom math agent with add, multiply, and random tools" \
-    --instructions "You are a helpful math and utility assistant." \
-    --env "AGENT_LOG_LEVEL=DEBUG" \
-    --env "$mock_env"
+namespace = os.environ["NAMESPACE"]
+result = subprocess.run([
+    "kaos", "agent", "deploy", "custom-math-agent",
+    "--modelapi", "custom-api",
+    "--model", "mock-model",
+    "--image", "custom-agent:test",
+    "--description", "Custom math agent with add, multiply, and random tools",
+    "--instructions", "You are a helpful math and utility assistant.",
+    "--env", "AGENT_LOG_LEVEL=DEBUG",
+    "--env", f"DEBUG_MOCK_RESPONSES={mock_responses}",
+    "-n", namespace,
+], capture_output=True, text=True)
+print(result.stdout or result.stderr)
+assert result.returncode == 0, f"Deploy failed: {result.stderr}"
 ```
 
 Wait for the agent to be ready:
