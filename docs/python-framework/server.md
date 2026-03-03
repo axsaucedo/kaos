@@ -17,6 +17,7 @@ class AgentServer:
 | `/ready` | GET | Kubernetes readiness probe |
 | `/.well-known/agent.json` | GET | A2A agent card discovery |
 | `/v1/chat/completions` | POST | OpenAI-compatible chat (streaming + non-streaming) |
+| `/` | POST | A2A JSON-RPC 2.0 endpoint (tasks/send, tasks/get, tasks/cancel) |
 | `/memory/events` | GET | List memory events |
 | `/memory/sessions` | GET | List memory sessions |
 
@@ -49,6 +50,43 @@ curl http://localhost:8000/.well-known/agent.json
 ```bash
 curl http://localhost:8000/memory/events?session_id=abc&limit=50
 ```
+
+### POST / (A2A JSON-RPC)
+
+A2A protocol-compliant JSON-RPC 2.0 endpoint for asynchronous task management.
+
+**tasks/send** — Submit a task for async execution:
+```bash
+curl -X POST http://localhost:8000/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "tasks/send",
+    "id": 1,
+    "params": {
+      "message": {
+        "role": "user",
+        "parts": [{"type": "text", "text": "Analyze this data"}]
+      }
+    }
+  }'
+```
+
+**tasks/get** — Poll task state:
+```bash
+curl -X POST http://localhost:8000/ \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc": "2.0", "method": "tasks/get", "id": 2, "params": {"id": "task-uuid"}}'
+```
+
+**tasks/cancel** — Cancel a running task:
+```bash
+curl -X POST http://localhost:8000/ \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc": "2.0", "method": "tasks/cancel", "id": 3, "params": {"id": "task-uuid"}}'
+```
+
+Task states: `submitted` → `working` → `completed` / `failed` / `canceled`
 
 ## AgentServerSettings
 
@@ -83,6 +121,9 @@ class AgentServerSettings(BaseSettings):
     memory_max_sessions: int = 1000
     memory_max_session_events: int = 500
     memory_redis_url: str = ""
+
+    # TaskStore (A2A)
+    task_store_type: str = "local"     # "local" or "null"
 ```
 
 ### Sub-Agent Formats

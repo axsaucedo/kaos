@@ -16,18 +16,20 @@ make format                     # Auto-format code
 ```
 
 ## Project Structure
-- `pais/server.py`: AgentServer, create_agent_server(), routes, _process_message(), logging
-- `pais/serverutils.py`: AgentDeps, AgentCard (Pydantic BaseModel), AgentCardSkill, AgentCardCapabilities, RemoteAgent, AgentServerSettings, _resolve_model, response builders
+- `pais/server.py`: AgentServer, create_agent_server(), routes, _process_message(), task execution, JSON-RPC dispatcher
+- `pais/serverutils.py`: AgentDeps, AgentCard (Pydantic BaseModel), AgentCardSkill, AgentCardCapabilities, RemoteAgent, AgentServerSettings, JsonRpcRequest/Response/Error, _resolve_model, response builders
 - `pais/tools.py`: DelegationToolset (AbstractToolset), execute_delegation, format_progress_event, build_string_mode_handler
 - `pais/memory.py`: Memory ABC, LocalMemory, RedisMemory, NullMemory + build_message_history/store_pydantic_message utilities
+- `pais/taskstore.py`: TaskStore ABC, LocalTaskStore, NullTaskStore, Task/TaskState/TaskStatus/TaskMessage dataclasses
 - `pais/telemetry.py`: OpenTelemetry instrumentation (tracing, metrics, SERVICE_NAME)
 - `pyproject.toml`: Dependencies — `pydantic-ai`, `opentelemetry-*`
 
 **Module layout rationale:**
-- `server.py` owns the server lifecycle: AgentServer class, create_agent_server() factory, request routing
-- `serverutils.py` owns data classes, settings, model resolution, and response formatting helpers
+- `server.py` owns the server lifecycle: AgentServer class, create_agent_server() factory, request routing, task execution engine
+- `serverutils.py` owns data classes, settings, model resolution, JSON-RPC models, and response formatting helpers
 - `tools.py` owns tool extensions: DelegationToolset (AbstractToolset subclass), string-mode model handler, progress event formatting
 - `memory.py` owns persistence: Memory ABC + all backends, plus build_message_history/store_pydantic_message utilities on the base class
+- `taskstore.py` owns A2A task lifecycle: TaskStore ABC + Local/Null backends, Task dataclass with state machine
 
 ## Key Environment Variables
 | Variable | Description |
@@ -48,6 +50,7 @@ make format                     # Auto-format code
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP exporter endpoint |
 | `OTEL_INSTRUMENTATION_VERSION` | Pydantic AI instrumentation version: 1-4 (default: `4`) |
 | `OTEL_EVENT_MODE` | Pydantic AI event mode: `attributes` (default) or `logs` (forces v1) |
+| `TASK_STORE_TYPE` | TaskStore backend: `local` (default) or `null` (disabled) |
 
 ## Architecture
 
@@ -105,7 +108,7 @@ make format                     # Auto-format code
 - Custom tools registered on the Pydantic AI agent can also use `ctx: RunContext[AgentDeps]`
 
 ### Key Classes
-- `AgentServer`: Central server — owns pydantic_ai.Agent, memory, routes, `_process_message()`
+- `AgentServer`: Central server — owns pydantic_ai.Agent, memory, task_store, routes, `_process_message()`
 - `AgentDeps`: Per-run dependencies (session_id, memory) injected via RunContext
 - `DelegationToolset`: AbstractToolset that exposes sub-agents as delegate_to_ tools
 - `RemoteAgent`: HTTP client for sub-agent delegation (stores URL, optional AgentCard)
@@ -113,7 +116,28 @@ make format                     # Auto-format code
 - `AgentCardSkill`: A2A skill with id, name, description, tags, inputModes, outputModes
 - `AgentCardCapabilities`: A2A capabilities (streaming, pushNotifications, stateTransitionHistory)
 - `Memory`: ABC interface for LocalMemory, RedisMemory, NullMemory (includes `close()`)
+- `TaskStore`: ABC interface for LocalTaskStore, NullTaskStore — A2A task lifecycle management
+- `Task`: Task dataclass with id, session_id, state, history, output, timestamps
+- `TaskState`: Enum — submitted, working, completed, failed, canceled
+- `JsonRpcRequest`/`JsonRpcResponse`/`JsonRpcError`: JSON-RPC 2.0 envelope models
 - `_MockResponseState`: Mutable mock response state shared via closure (workaround for ContextVar + FunctionModel issue)
+
+### TaskStore (taskstore.py)
+- `TaskStore` ABC with `create_task()`, `get_task()`, `update_task_state()`, `set_task_output()`, `cancel_task()`, `list_tasks()`
+- `LocalTaskStore`: In-memory dict-based backend (default, single-pod)
+- `NullTaskStore`: No-op implementation — `create_task()` returns a task but nothing is persisted
+- State transitions enforced via `VALID_TRANSITIONS` dict — terminal states (completed, failed, canceled) allow no further transitions
+- `TASK_STORE_TYPE` env var controls backend selection (`local` default, `null` to disable)
+- Task execution: `_submit_task()` → `asyncio.create_task()` → `_execute_task()` → `_process_message()`
+- Running asyncio tasks tracked in `_running_tasks` dict, cleaned up on shutdown
+
+### A2A JSON-RPC Endpoint (POST /)
+- JSON-RPC 2.0 dispatcher at root path, separate from `/v1/chat/completions`
+- Methods: `tasks/send` (create + execute async), `tasks/get` (poll state), `tasks/cancel` (cancel running)
+- Standard error codes: -32700 (parse), -32600 (invalid request), -32601 (method not found), -32602 (invalid params), -32603 (internal), -32001 (task not found)
+- A2A message format: `{role: "user"/"agent", parts: [{type: "text", text: "..."}]}`
+- Agent card `stateTransitionHistory` dynamically reflects active TaskStore (not NullTaskStore)
+- Agent card `supportedProtocols` includes `"jsonrpc"` by default
 
 ## Mock Response Pattern
 For testing, `DEBUG_MOCK_RESPONSES` creates a `FunctionModel` that returns responses in sequence.
@@ -167,5 +191,6 @@ Pydantic AI runs `FunctionModel` handlers in a copied context — `ContextVar` s
 - `GET /ready`: Readiness probe
 - `GET /.well-known/agent.json`: A2A-compliant agent card (discovers tools from MCP servers)
 - `POST /v1/chat/completions`: OpenAI-compatible chat endpoint
+- `POST /`: A2A JSON-RPC 2.0 endpoint (tasks/send, tasks/get, tasks/cancel)
 - `GET /memory/events?session_id=X`: Memory events for a session
 - `GET /memory/sessions`: List all memory sessions

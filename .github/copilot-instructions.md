@@ -49,11 +49,12 @@ kaos system install --gateway-enabled --metallb-enabled --wait
 ## Project Structure
 ```
 pydantic-ai-server/        # Agent runtime (Pydantic AI, pytest, black, ty) — git subtree
-├── pais/             # AgentServer, tools, memory
-│   ├── server.py      # AgentServer, create_agent_server, routes
-│   ├── serverutils.py # AgentDeps, AgentCard (Pydantic), RemoteAgent, AgentServerSettings, model resolution
+├── pais/             # AgentServer, tools, memory, taskstore
+│   ├── server.py      # AgentServer, create_agent_server, routes, task execution, JSON-RPC
+│   ├── serverutils.py # AgentDeps, AgentCard (Pydantic), RemoteAgent, AgentServerSettings, JsonRpc models
 │   ├── tools.py       # DelegationToolset, string-mode handler
 │   ├── memory.py      # Memory ABC, LocalMemory, RedisMemory, NullMemory
+│   ├── taskstore.py   # TaskStore ABC, LocalTaskStore, NullTaskStore, Task/TaskState
 │   └── telemetry.py   # OpenTelemetry instrumentation
 
 mcp-servers/               # Standalone MCP server implementations
@@ -88,10 +89,11 @@ tmp/                       # Local work files (gitignored)
 - `operator/api/v1alpha1/*_types.go`: CRD schemas
 - `operator/controllers/*_controller.go`: Reconciliation logic
 - `operator/chart/`: Helm chart (generated from kustomize)
-- `pydantic-ai-server/pais/server.py`: AgentServer, create_agent_server, routes
-- `pydantic-ai-server/pais/serverutils.py`: AgentDeps, AgentCard (Pydantic BaseModel, A2A-compliant), RemoteAgent, AgentServerSettings, model resolution
+- `pydantic-ai-server/pais/server.py`: AgentServer, create_agent_server, routes, task execution, JSON-RPC dispatcher
+- `pydantic-ai-server/pais/serverutils.py`: AgentDeps, AgentCard (Pydantic BaseModel, A2A-compliant), RemoteAgent, AgentServerSettings, JsonRpc models
 - `pydantic-ai-server/pais/tools.py`: DelegationToolset (AbstractToolset), string-mode handler
 - `pydantic-ai-server/pais/memory.py`: Memory ABC + backends + build_message_history/store_pydantic_message
+- `pydantic-ai-server/pais/taskstore.py`: TaskStore ABC, LocalTaskStore, NullTaskStore, Task/TaskState for A2A task lifecycle
 
 ## Testing Notes
 
