@@ -3,6 +3,7 @@
 import os
 import time
 import json
+import asyncio
 import logging
 import sys
 from typing import Dict, Any, AsyncIterator, List, Optional, Union, TYPE_CHECKING
@@ -44,7 +45,7 @@ from pais.serverutils import (
 
 if TYPE_CHECKING:
     from pais.memory import Memory
-    from pais.taskstore import TaskStore
+    from pais.taskstore import TaskStore, Task
 
 
 def configure_logging(level: str = "INFO", otel_correlation: bool = False) -> None:
@@ -117,6 +118,7 @@ class AgentServer:
         self._mcp_servers = mcp_servers or []
         self._model = model
         self._custom_tools = custom_tools or []
+        self._running_tasks: Dict[str, "asyncio.Task[None]"] = {}
 
         self.app = FastAPI(
             title=f"Agent: {self.settings.agent_name}",
@@ -155,6 +157,11 @@ class AgentServer:
         self._log_startup_config()
         yield
         logger.info("AgentServer shutdown")
+        # Cancel running tasks
+        for task_id, asyncio_task in list(self._running_tasks.items()):
+            if not asyncio_task.done():
+                asyncio_task.cancel()
+                logger.debug(f"Canceled running task {task_id} on shutdown")
         for sub_agent in self._sub_agents.values():
             await sub_agent.close()
         # TODO: Close MCP server connections (MCPServerStreamableHTTP) on shutdown
@@ -424,6 +431,63 @@ class AgentServer:
             logger.error(f"Error processing message: {str(e)}")
             await self.memory.add_event(session_id, "error", str(e))
             yield f"Sorry, I encountered an error: {str(e)}"
+
+    async def _submit_task(self, input_message: str, session_id: Optional[str] = None) -> "Task":
+        """Create a task and spawn async execution. Returns the task in submitted state."""
+        task = await self.task_store.create_task(
+            session_id=session_id,
+            input_message=input_message,
+        )
+        asyncio_task = asyncio.create_task(self._execute_task(task.id, input_message))
+        self._running_tasks[task.id] = asyncio_task
+        asyncio_task.add_done_callback(lambda _: self._running_tasks.pop(task.id, None))
+        logger.info(f"Submitted task {task.id} for session {task.session_id}")
+        return task
+
+    async def _execute_task(self, task_id: str, input_message: str) -> None:
+        """Execute a task asynchronously using _process_message pipeline."""
+        from pais.taskstore import TaskState
+
+        task = await self.task_store.get_task(task_id)
+        if not task:
+            logger.error(f"Task {task_id} not found for execution")
+            return
+
+        # Transition to working
+        updated = await self.task_store.update_task_state(task_id, TaskState.WORKING, "Processing")
+        if not updated:
+            logger.error(f"Failed to transition task {task_id} to working")
+            return
+
+        try:
+            response_content = ""
+            async for chunk in self._process_message(
+                input_message, session_id=task.session_id, stream=False
+            ):
+                response_content += chunk
+
+            await self.task_store.set_task_output(task_id, response_content)
+            await self.task_store.update_task_state(task_id, TaskState.COMPLETED, "Done")
+            logger.info(f"Task {task_id} completed")
+
+        except asyncio.CancelledError:
+            await self.task_store.update_task_state(task_id, TaskState.CANCELED, "Canceled")
+            logger.info(f"Task {task_id} canceled")
+
+        except Exception as e:
+            logger.error(f"Task {task_id} failed: {e}")
+            await self.task_store.update_task_state(task_id, TaskState.FAILED, str(e))
+
+    async def _cancel_task(self, task_id: str) -> bool:
+        """Cancel a running task. Returns True if cancellation was initiated."""
+        result = await self.task_store.cancel_task(task_id)
+        if not result:
+            return False
+
+        asyncio_task = self._running_tasks.get(task_id)
+        if asyncio_task and not asyncio_task.done():
+            asyncio_task.cancel()
+        return True
 
     async def _complete_chat_completion(
         self,
