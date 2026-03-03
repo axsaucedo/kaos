@@ -332,6 +332,9 @@ class AgentServerSettings(BaseSettings):
     memory_max_session_events: int = 500
     memory_redis_url: str = ""
 
+    # Task store configuration
+    task_store_type: str = "local"
+
     # Logging settings
     agent_access_log: bool = False
 

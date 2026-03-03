@@ -44,6 +44,7 @@ from pais.serverutils import (
 
 if TYPE_CHECKING:
     from pais.memory import Memory
+    from pais.taskstore import TaskStore
 
 
 def configure_logging(level: str = "INFO", otel_correlation: bool = False) -> None:
@@ -102,11 +103,14 @@ class AgentServer:
         mcp_servers: Optional[list] = None,
         model: Any = None,
         custom_tools: Optional[list] = None,
+        task_store: Optional["TaskStore"] = None,
     ):
         from pais.memory import NullMemory
+        from pais.taskstore import NullTaskStore
 
         self.settings = settings
         self.memory: "Memory" = memory or NullMemory()
+        self.task_store: "TaskStore" = task_store or NullTaskStore()
         self._agent = pydantic_agent
         self._mock_state = mock_state
         self._sub_agents = sub_agents or {}
@@ -155,6 +159,7 @@ class AgentServer:
             await sub_agent.close()
         # TODO: Close MCP server connections (MCPServerStreamableHTTP) on shutdown
         await self.memory.close()
+        await self.task_store.close()
 
     def _log_startup_config(self):
         """Log agent config at INFO (summary) and DEBUG (full dump)."""
@@ -582,6 +587,15 @@ def _create_memory(settings: AgentServerSettings) -> "Memory":
     )
 
 
+def _create_task_store(settings: AgentServerSettings) -> "TaskStore":
+    """Create task store backend from settings."""
+    from pais.taskstore import LocalTaskStore, NullTaskStore
+
+    if settings.task_store_type == "none":
+        return NullTaskStore()
+    return LocalTaskStore()
+
+
 def _setup_otel_instrumentation(settings: AgentServerSettings) -> None:
     """Initialize OTel SDK and Pydantic AI instrumentation."""
     init_otel(settings.agent_name)
@@ -620,6 +634,7 @@ def create_agent_server(
     if sub_agents is None:
         sub_agents = _parse_sub_agents(settings)
     memory = _create_memory(settings)
+    task_store = _create_task_store(settings)
 
     sub_agents_dict: Dict[str, RemoteAgent] = {a.name: a for a in sub_agents}
 
@@ -679,6 +694,7 @@ def create_agent_server(
         mcp_servers=mcp_servers,
         model=model,
         custom_tools=custom_tools,
+        task_store=task_store,
     )
 
 
