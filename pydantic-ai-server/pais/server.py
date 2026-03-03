@@ -41,6 +41,15 @@ from pais.serverutils import (
     _extract_user_prompt,
     _build_streaming_chunk,
     _build_chat_response,
+    JsonRpcRequest,
+    JsonRpcResponse,
+    JsonRpcError,
+    JSONRPC_PARSE_ERROR,
+    JSONRPC_INVALID_REQUEST,
+    JSONRPC_METHOD_NOT_FOUND,
+    JSONRPC_INVALID_PARAMS,
+    JSONRPC_INTERNAL_ERROR,
+    JSONRPC_TASK_NOT_FOUND,
 )
 
 if TYPE_CHECKING:
@@ -292,6 +301,11 @@ class AgentServer:
                 logger.error(f"Chat completion error: {e}")
                 raise HTTPException(status_code=500, detail=str(e))
 
+        @self.app.post("/")
+        async def jsonrpc_endpoint(request: Request):
+            """A2A JSON-RPC 2.0 endpoint for task lifecycle management."""
+            return await self._handle_jsonrpc(request)
+
     def _probe_response(self, status: str) -> JSONResponse:
         return JSONResponse(
             {"status": status, "name": self.settings.agent_name, "timestamp": int(time.time())}
@@ -488,6 +502,153 @@ class AgentServer:
         if asyncio_task and not asyncio_task.done():
             asyncio_task.cancel()
         return True
+
+    async def _handle_jsonrpc(self, request: Request) -> JSONResponse:
+        """Dispatch JSON-RPC 2.0 requests for A2A task methods."""
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse(
+                JsonRpcResponse(
+                    error=JsonRpcError(code=JSONRPC_PARSE_ERROR, message="Parse error"),
+                ).to_dict()
+            )
+
+        try:
+            rpc_req = JsonRpcRequest(**body)
+        except Exception:
+            return JSONResponse(
+                JsonRpcResponse(
+                    error=JsonRpcError(
+                        code=JSONRPC_INVALID_REQUEST, message="Invalid JSON-RPC request"
+                    ),
+                ).to_dict()
+            )
+
+        method = rpc_req.method
+        params = rpc_req.params or {}
+        rpc_id = rpc_req.id
+
+        if method == "tasks/send":
+            return await self._jsonrpc_tasks_send(params, rpc_id)
+        elif method == "tasks/get":
+            return await self._jsonrpc_tasks_get(params, rpc_id)
+        elif method == "tasks/cancel":
+            return await self._jsonrpc_tasks_cancel(params, rpc_id)
+        else:
+            return JSONResponse(
+                JsonRpcResponse(
+                    id=rpc_id,
+                    error=JsonRpcError(
+                        code=JSONRPC_METHOD_NOT_FOUND,
+                        message=f"Method not found: {method}",
+                    ),
+                ).to_dict()
+            )
+
+    async def _jsonrpc_tasks_send(
+        self, params: Dict[str, Any], rpc_id: Optional[Union[str, int]]
+    ) -> JSONResponse:
+        """Handle tasks/send: create and submit a task."""
+        message = params.get("message")
+        if not message:
+            return JSONResponse(
+                JsonRpcResponse(
+                    id=rpc_id,
+                    error=JsonRpcError(
+                        code=JSONRPC_INVALID_PARAMS,
+                        message="Missing required 'message' parameter",
+                    ),
+                ).to_dict()
+            )
+
+        # Extract text from A2A message format
+        parts = message.get("parts", [])
+        text_parts = [p.get("text", "") for p in parts if p.get("type") == "text"]
+        input_text = " ".join(text_parts) if text_parts else message.get("text", "")
+
+        if not input_text:
+            return JSONResponse(
+                JsonRpcResponse(
+                    id=rpc_id,
+                    error=JsonRpcError(
+                        code=JSONRPC_INVALID_PARAMS,
+                        message="Message must contain text content",
+                    ),
+                ).to_dict()
+            )
+
+        session_id = params.get("sessionId")
+        task = await self._submit_task(input_text, session_id=session_id)
+
+        return JSONResponse(JsonRpcResponse(id=rpc_id, result=task.to_dict()).to_dict())
+
+    async def _jsonrpc_tasks_get(
+        self, params: Dict[str, Any], rpc_id: Optional[Union[str, int]]
+    ) -> JSONResponse:
+        """Handle tasks/get: retrieve task status."""
+        task_id = params.get("id")
+        if not task_id:
+            return JSONResponse(
+                JsonRpcResponse(
+                    id=rpc_id,
+                    error=JsonRpcError(
+                        code=JSONRPC_INVALID_PARAMS,
+                        message="Missing required 'id' parameter",
+                    ),
+                ).to_dict()
+            )
+
+        task = await self.task_store.get_task(task_id)
+        if not task:
+            return JSONResponse(
+                JsonRpcResponse(
+                    id=rpc_id,
+                    error=JsonRpcError(
+                        code=JSONRPC_TASK_NOT_FOUND,
+                        message=f"Task not found: {task_id}",
+                    ),
+                ).to_dict()
+            )
+
+        return JSONResponse(JsonRpcResponse(id=rpc_id, result=task.to_dict()).to_dict())
+
+    async def _jsonrpc_tasks_cancel(
+        self, params: Dict[str, Any], rpc_id: Optional[Union[str, int]]
+    ) -> JSONResponse:
+        """Handle tasks/cancel: cancel a running task."""
+        task_id = params.get("id")
+        if not task_id:
+            return JSONResponse(
+                JsonRpcResponse(
+                    id=rpc_id,
+                    error=JsonRpcError(
+                        code=JSONRPC_INVALID_PARAMS,
+                        message="Missing required 'id' parameter",
+                    ),
+                ).to_dict()
+            )
+
+        canceled = await self._cancel_task(task_id)
+        if not canceled:
+            task = await self.task_store.get_task(task_id)
+            if not task:
+                return JSONResponse(
+                    JsonRpcResponse(
+                        id=rpc_id,
+                        error=JsonRpcError(
+                            code=JSONRPC_TASK_NOT_FOUND,
+                            message=f"Task not found: {task_id}",
+                        ),
+                    ).to_dict()
+                )
+            # Task exists but already terminal
+            return JSONResponse(JsonRpcResponse(id=rpc_id, result=task.to_dict()).to_dict())
+
+        task = await self.task_store.get_task(task_id)
+        return JSONResponse(
+            JsonRpcResponse(id=rpc_id, result=task.to_dict() if task else None).to_dict()
+        )
 
     async def _complete_chat_completion(
         self,

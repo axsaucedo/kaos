@@ -87,6 +87,52 @@ class AgentCard(BaseModel):
         return self.model_dump(by_alias=True)
 
 
+# --- JSON-RPC 2.0 Models for A2A Protocol ---
+
+
+class JsonRpcRequest(BaseModel):
+    """JSON-RPC 2.0 request envelope."""
+
+    jsonrpc: str = "2.0"
+    method: str
+    params: Optional[Dict[str, Any]] = None
+    id: Optional[Union[str, int]] = None
+
+
+class JsonRpcError(BaseModel):
+    """JSON-RPC 2.0 error object."""
+
+    code: int
+    message: str
+    data: Optional[Any] = None
+
+
+class JsonRpcResponse(BaseModel):
+    """JSON-RPC 2.0 response envelope."""
+
+    jsonrpc: str = "2.0"
+    result: Optional[Any] = None
+    error: Optional[JsonRpcError] = None
+    id: Optional[Union[str, int]] = None
+
+    def to_dict(self) -> dict:
+        d: dict = {"jsonrpc": self.jsonrpc, "id": self.id}
+        if self.error is not None:
+            d["error"] = self.error.model_dump()
+        else:
+            d["result"] = self.result
+        return d
+
+
+# JSON-RPC error codes
+JSONRPC_PARSE_ERROR = -32700
+JSONRPC_INVALID_REQUEST = -32600
+JSONRPC_METHOD_NOT_FOUND = -32601
+JSONRPC_INVALID_PARAMS = -32602
+JSONRPC_INTERNAL_ERROR = -32603
+JSONRPC_TASK_NOT_FOUND = -32001
+
+
 class RemoteAgent:
     """Remote agent client for A2A protocol with graceful degradation."""
 

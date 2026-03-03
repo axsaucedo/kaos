@@ -27,6 +27,7 @@ def make_test_server(
     sub_agents: Optional[List[RemoteAgent]] = None,
     max_steps: int = 5,
     memory_context_limit: int = 6,
+    task_store: Optional[Any] = None,
 ) -> AgentServer:
     """Create an AgentServer for testing."""
     if memory is None:
@@ -68,4 +69,5 @@ def make_test_server(
         mock_state=mock_state,
         sub_agents=sub_agents_dict,
         model=model,
+        task_store=task_store,
     )
