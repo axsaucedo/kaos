@@ -69,7 +69,7 @@ jobs:
       matrix:
         shard:
           - name: core
-            files: "e2e/test_base_func_e2e.py e2e/test_modelapi_e2e.py"
+            files: "e2e/test_base_func_e2e.py e2e/test_modelapi_e2e.py e2e/test_a2a_e2e.py"
           - name: mcp
             files: "e2e/test_mcp_tools_e2e.py"
           - name: multi-agent
