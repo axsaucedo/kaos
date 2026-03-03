@@ -302,6 +302,48 @@ class TestAgentCard:
         assert d["capabilities"]["pushNotifications"] is False
         assert "defaultInputModes" in d
         assert "defaultOutputModes" in d
+        assert "supportedProtocols" in d
+        assert "jsonrpc" in d["supportedProtocols"]
+
+    def test_agent_card_supported_protocols_default(self):
+        """Test AgentCard defaults to jsonrpc in supportedProtocols."""
+        card = AgentCard(
+            name="test",
+            description="Test",
+            url="http://localhost",
+            version="0.1.0",
+        )
+        assert card.supported_protocols == ["jsonrpc"]
+        d = card.to_dict()
+        assert d["supportedProtocols"] == ["jsonrpc"]
+
+    @pytest.mark.asyncio
+    async def test_agent_card_state_transition_with_taskstore(self):
+        """Test agent card reflects stateTransitionHistory when TaskStore is active."""
+        from pais.taskstore import LocalTaskStore
+
+        model = TestModel(custom_output_text="test")
+        task_store = LocalTaskStore()
+        server = make_test_server(
+            name="test-agent",
+            model=model,
+            task_store=task_store,
+        )
+        card = await server._get_agent_card("http://localhost:8000")
+        assert card.capabilities.state_transition_history is True
+        d = card.to_dict()
+        assert d["capabilities"]["stateTransitionHistory"] is True
+
+    @pytest.mark.asyncio
+    async def test_agent_card_state_transition_without_taskstore(self):
+        """Test agent card has stateTransitionHistory=False with NullTaskStore."""
+        model = TestModel(custom_output_text="test")
+        server = make_test_server(
+            name="test-agent",
+            model=model,
+        )
+        card = await server._get_agent_card("http://localhost:8000")
+        assert card.capabilities.state_transition_history is False
 
     @pytest.mark.asyncio
     async def test_agent_with_sub_agents(self):

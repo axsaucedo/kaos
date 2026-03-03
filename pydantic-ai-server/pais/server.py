@@ -341,10 +341,13 @@ class AgentServer:
             for n in self._sub_agents
         )
 
+        from pais.taskstore import NullTaskStore
+
+        has_task_store = not isinstance(self.task_store, NullTaskStore)
         capabilities = AgentCardCapabilities(
             streaming=True,
             push_notifications=False,
-            state_transition_history=False,
+            state_transition_history=has_task_store,
         )
 
         return AgentCard(

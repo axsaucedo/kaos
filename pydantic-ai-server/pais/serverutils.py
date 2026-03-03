@@ -80,6 +80,7 @@ class AgentCard(BaseModel):
     protocol_version: str = "0.3.0"
     skills: list[AgentCardSkill] = []
     capabilities: AgentCardCapabilities = AgentCardCapabilities()
+    supported_protocols: list[str] = ["jsonrpc"]
     default_input_modes: list[str] = ["application/json"]
     default_output_modes: list[str] = ["application/json"]
 
