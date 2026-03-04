@@ -150,6 +150,20 @@ class TaskManager:
         """List tasks, optionally filtered by session."""
         return await self._task_store.list_tasks(session_id)
 
+    async def wait_for_completion(
+        self, task_id: str, timeout: float = 60.0, poll_interval: float = 0.1
+    ) -> Optional["Task"]:
+        """Poll until task reaches a terminal state. Returns the completed task or None on timeout."""
+        from pais.taskstore import TERMINAL_STATES
+
+        deadline = asyncio.get_event_loop().time() + timeout
+        while asyncio.get_event_loop().time() < deadline:
+            task = await self._task_store.get_task(task_id)
+            if task and task.status.state in TERMINAL_STATES:
+                return task
+            await asyncio.sleep(poll_interval)
+        return await self._task_store.get_task(task_id)
+
     async def shutdown(self) -> None:
         """Cancel all running tasks and close the task store."""
         for task_id, asyncio_task in list(self._running_tasks.items()):
@@ -188,12 +202,13 @@ async def _handle_jsonrpc(request: Request, task_manager: TaskManager) -> JSONRe
     params = rpc_req.params or {}
     rpc_id = rpc_req.id
 
-    if method == "tasks/send":
-        return await _jsonrpc_tasks_send(task_manager, params, rpc_id)
-    elif method == "tasks/get":
-        return await _jsonrpc_tasks_get(task_manager, params, rpc_id)
-    elif method == "tasks/cancel":
-        return await _jsonrpc_tasks_cancel(task_manager, params, rpc_id)
+    # A2A RC v1.0 PascalCase methods + legacy aliases
+    if method in ("SendMessage", "tasks/send"):
+        return await _jsonrpc_send_message(task_manager, params, rpc_id)
+    elif method in ("GetTask", "tasks/get"):
+        return await _jsonrpc_get_task(task_manager, params, rpc_id)
+    elif method in ("CancelTask", "tasks/cancel"):
+        return await _jsonrpc_cancel_task(task_manager, params, rpc_id)
     else:
         return JSONResponse(
             JsonRpcResponse(
@@ -206,12 +221,19 @@ async def _handle_jsonrpc(request: Request, task_manager: TaskManager) -> JSONRe
         )
 
 
-async def _jsonrpc_tasks_send(
+async def _jsonrpc_send_message(
     task_manager: TaskManager,
     params: Dict[str, Any],
     rpc_id: Optional[Union[str, int]],
 ) -> JSONResponse:
-    """Handle tasks/send: create and submit a task."""
+    """Handle SendMessage: create a task and optionally wait for completion.
+
+    Supports A2A RC v1.0 SendMessageRequest format:
+    - message: {role, parts} (required)
+    - configuration: {blocking: bool} (optional, default false)
+    - contextId: maps to session_id (optional)
+    - sessionId: legacy alias for contextId (optional)
+    """
     message = params.get("message")
     if not message:
         return JSONResponse(
@@ -239,18 +261,29 @@ async def _jsonrpc_tasks_send(
             ).to_dict()
         )
 
-    session_id = params.get("sessionId")
+    # contextId (A2A spec) or sessionId (legacy)
+    session_id = params.get("contextId") or params.get("sessionId")
+
+    # Check blocking mode from configuration
+    config = params.get("configuration", {})
+    blocking = config.get("blocking", False) if isinstance(config, dict) else False
+
     task = await task_manager.submit_task(input_text, session_id=session_id)
+
+    if blocking:
+        completed_task = await task_manager.wait_for_completion(task.id)
+        if completed_task:
+            task = completed_task
 
     return JSONResponse(JsonRpcResponse(id=rpc_id, result=task.to_dict()).to_dict())
 
 
-async def _jsonrpc_tasks_get(
+async def _jsonrpc_get_task(
     task_manager: TaskManager,
     params: Dict[str, Any],
     rpc_id: Optional[Union[str, int]],
 ) -> JSONResponse:
-    """Handle tasks/get: retrieve task status."""
+    """Handle GetTask: retrieve task status."""
     task_id = params.get("id")
     if not task_id:
         return JSONResponse(
@@ -278,12 +311,12 @@ async def _jsonrpc_tasks_get(
     return JSONResponse(JsonRpcResponse(id=rpc_id, result=task.to_dict()).to_dict())
 
 
-async def _jsonrpc_tasks_cancel(
+async def _jsonrpc_cancel_task(
     task_manager: TaskManager,
     params: Dict[str, Any],
     rpc_id: Optional[Union[str, int]],
 ) -> JSONResponse:
-    """Handle tasks/cancel: cancel a running task."""
+    """Handle CancelTask: cancel a running task."""
     task_id = params.get("id")
     if not task_id:
         return JSONResponse(

@@ -359,3 +359,163 @@ class TestJsonRpcEndpoint:
             history = result["history"]
             assert any(m["role"] == "user" for m in history)
             assert any(m["role"] == "agent" for m in history)
+
+
+class TestA2ASpecCompliantMethods:
+    """Tests for A2A RC v1.0 PascalCase method names and features."""
+
+    @pytest.mark.asyncio
+    async def test_send_message_basic(self):
+        """Test SendMessage creates a task."""
+        server = _make_server_with_taskstore()
+        transport = ASGITransport(app=server.app)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post(
+                "/",
+                json={
+                    "jsonrpc": "2.0",
+                    "method": "SendMessage",
+                    "id": 1,
+                    "params": {
+                        "message": {
+                            "role": "user",
+                            "parts": [{"type": "text", "text": "Hello via SendMessage"}],
+                        }
+                    },
+                },
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "result" in data
+        assert data["result"]["status"]["state"] == "submitted"
+
+    @pytest.mark.asyncio
+    async def test_get_task_method(self):
+        """Test GetTask retrieves a task."""
+        server = _make_server_with_taskstore()
+        transport = ASGITransport(app=server.app)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            send_resp = await client.post(
+                "/",
+                json={
+                    "jsonrpc": "2.0",
+                    "method": "SendMessage",
+                    "id": 1,
+                    "params": {
+                        "message": {
+                            "role": "user",
+                            "parts": [{"type": "text", "text": "Test"}],
+                        }
+                    },
+                },
+            )
+            task_id = send_resp.json()["result"]["id"]
+
+            get_resp = await client.post(
+                "/",
+                json={
+                    "jsonrpc": "2.0",
+                    "method": "GetTask",
+                    "id": 2,
+                    "params": {"id": task_id},
+                },
+            )
+
+        data = get_resp.json()
+        assert "result" in data
+        assert data["result"]["id"] == task_id
+
+    @pytest.mark.asyncio
+    async def test_cancel_task_method(self):
+        """Test CancelTask cancels a task."""
+        server = _make_server_with_taskstore()
+        transport = ASGITransport(app=server.app)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            send_resp = await client.post(
+                "/",
+                json={
+                    "jsonrpc": "2.0",
+                    "method": "SendMessage",
+                    "id": 1,
+                    "params": {
+                        "message": {
+                            "role": "user",
+                            "parts": [{"type": "text", "text": "Cancel me"}],
+                        }
+                    },
+                },
+            )
+            task_id = send_resp.json()["result"]["id"]
+
+            cancel_resp = await client.post(
+                "/",
+                json={
+                    "jsonrpc": "2.0",
+                    "method": "CancelTask",
+                    "id": 2,
+                    "params": {"id": task_id},
+                },
+            )
+
+        data = cancel_resp.json()
+        assert data["result"]["status"]["state"] in ("canceled", "completed")
+
+    @pytest.mark.asyncio
+    async def test_send_message_blocking(self):
+        """Test SendMessage with blocking=true waits for completion."""
+        server = _make_server_with_taskstore()
+        transport = ASGITransport(app=server.app)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post(
+                "/",
+                json={
+                    "jsonrpc": "2.0",
+                    "method": "SendMessage",
+                    "id": 1,
+                    "params": {
+                        "message": {
+                            "role": "user",
+                            "parts": [{"type": "text", "text": "Blocking request"}],
+                        },
+                        "configuration": {"blocking": True},
+                    },
+                },
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        result = data["result"]
+        assert result["status"]["state"] == "completed"
+        agent_msgs = [m for m in result["history"] if m["role"] == "agent"]
+        assert len(agent_msgs) >= 1
+
+    @pytest.mark.asyncio
+    async def test_send_message_with_context_id(self):
+        """Test SendMessage with contextId maps to session_id."""
+        server = _make_server_with_taskstore()
+        transport = ASGITransport(app=server.app)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            response = await client.post(
+                "/",
+                json={
+                    "jsonrpc": "2.0",
+                    "method": "SendMessage",
+                    "id": 1,
+                    "params": {
+                        "message": {
+                            "role": "user",
+                            "parts": [{"type": "text", "text": "With context"}],
+                        },
+                        "contextId": "my-context-123",
+                    },
+                },
+            )
+
+        data = response.json()
+        assert data["result"]["sessionId"] == "my-context-123"
