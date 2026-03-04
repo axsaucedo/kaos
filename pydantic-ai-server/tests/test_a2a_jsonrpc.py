@@ -519,3 +519,34 @@ class TestA2ASpecCompliantMethods:
 
         data = response.json()
         assert data["result"]["sessionId"] == "my-context-123"
+
+
+class TestTaskManagerObservability:
+    """Tests for TaskManager OTel instrumentation."""
+
+    @pytest.mark.asyncio
+    async def test_task_manager_creates_spans(self):
+        """Verify TaskManager methods create OTel spans (no-op when not initialized)."""
+        from pais.a2a import TaskManager
+
+        task_store = LocalTaskStore()
+
+        async def mock_process(msg, session_id="", stream=False):
+            yield "result"
+
+        manager = TaskManager(task_store, mock_process)
+        task = await manager.submit_task("test message")
+        assert task.status.state == TaskState.SUBMITTED
+
+        completed = await manager.wait_for_completion(task.id, timeout=5.0)
+        assert completed is not None
+        assert completed.status.state == TaskState.COMPLETED
+
+    @pytest.mark.asyncio
+    async def test_get_task_metrics_returns_none_when_disabled(self):
+        """Verify get_task_metrics returns (None, None) when OTel not initialized."""
+        from pais.a2a import get_task_metrics
+
+        counter, histogram = get_task_metrics()
+        assert counter is None
+        assert histogram is None

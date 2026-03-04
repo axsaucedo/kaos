@@ -8,16 +8,43 @@ Provides:
 
 import asyncio
 import logging
-from typing import Dict, Any, Optional, Union, Callable, AsyncIterator, TYPE_CHECKING
+import time
+from typing import Dict, Any, Optional, Union, Callable, AsyncIterator, Tuple, TYPE_CHECKING
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+from opentelemetry import trace as trace_api, metrics
+
+from pais.telemetry import SERVICE_NAME, is_otel_enabled
 
 if TYPE_CHECKING:
     from pais.taskstore import TaskStore, Task
 
 logger = logging.getLogger(__name__)
+
+# Lazily initialized task metrics
+_task_counter: Optional[metrics.Counter] = None
+_task_duration: Optional[metrics.Histogram] = None
+
+
+def get_task_metrics() -> Tuple[Optional[metrics.Counter], Optional[metrics.Histogram]]:
+    """Lazily initialize and return (task_counter, task_duration). (None, None) when disabled."""
+    global _task_counter, _task_duration
+
+    if not is_otel_enabled():
+        return None, None
+
+    if _task_counter is None:
+        meter = metrics.get_meter(SERVICE_NAME)
+        _task_counter = meter.create_counter(
+            "kaos.tasks", description="Task lifecycle events", unit="1"
+        )
+        _task_duration = meter.create_histogram(
+            "kaos.task.duration", description="Task execution duration", unit="ms"
+        )
+
+    return _task_counter, _task_duration
 
 
 # --- JSON-RPC 2.0 Models ---
@@ -88,59 +115,106 @@ class TaskManager:
 
     async def submit_task(self, input_message: str, session_id: Optional[str] = None) -> "Task":
         """Create a task and spawn async execution. Returns the task in submitted state."""
-        task = await self._task_store.create_task(
-            session_id=session_id,
-            input_message=input_message,
-        )
-        asyncio_task = asyncio.create_task(self._execute_task(task.id, input_message))
-        self._running_tasks[task.id] = asyncio_task
-        asyncio_task.add_done_callback(lambda _: self._running_tasks.pop(task.id, None))
-        logger.info(f"Submitted task {task.id} for session {task.session_id}")
-        return task
+        tracer = trace_api.get_tracer(SERVICE_NAME)
+        task_counter, _ = get_task_metrics()
+
+        with tracer.start_as_current_span(
+            "kaos.task.submit",
+            attributes={"task.session_id": session_id or ""},
+        ):
+            task = await self._task_store.create_task(
+                session_id=session_id,
+                input_message=input_message,
+            )
+            asyncio_task = asyncio.create_task(self._execute_task(task.id, input_message))
+            self._running_tasks[task.id] = asyncio_task
+            asyncio_task.add_done_callback(lambda _: self._running_tasks.pop(task.id, None))
+            logger.info(f"Submitted task {task.id} for session {task.session_id}")
+
+            if task_counter:
+                task_counter.add(1, {"state": "submitted"})
+
+            return task
 
     async def _execute_task(self, task_id: str, input_message: str) -> None:
         """Execute a task asynchronously using the process callback."""
         from pais.taskstore import TaskState
 
-        task = await self._task_store.get_task(task_id)
-        if not task:
-            logger.error(f"Task {task_id} not found for execution")
-            return
+        tracer = trace_api.get_tracer(SERVICE_NAME)
+        task_counter, task_duration = get_task_metrics()
+        start_time = time.perf_counter()
 
-        updated = await self._task_store.update_task_state(task_id, TaskState.WORKING, "Processing")
-        if not updated:
-            logger.error(f"Failed to transition task {task_id} to working")
-            return
+        with tracer.start_as_current_span(
+            "kaos.task.execute",
+            attributes={"task.id": task_id},
+        ) as span:
+            task = await self._task_store.get_task(task_id)
+            if not task:
+                logger.error(f"Task {task_id} not found for execution")
+                return
 
-        try:
-            response_content = ""
-            async for chunk in self._process_fn(
-                input_message, session_id=task.session_id, stream=False
-            ):
-                response_content += chunk
+            updated = await self._task_store.update_task_state(
+                task_id, TaskState.WORKING, "Processing"
+            )
+            if not updated:
+                logger.error(f"Failed to transition task {task_id} to working")
+                return
 
-            await self._task_store.set_task_output(task_id, response_content)
-            await self._task_store.update_task_state(task_id, TaskState.COMPLETED, "Done")
-            logger.info(f"Task {task_id} completed")
+            try:
+                response_content = ""
+                async for chunk in self._process_fn(
+                    input_message, session_id=task.session_id, stream=False
+                ):
+                    response_content += chunk
 
-        except asyncio.CancelledError:
-            await self._task_store.update_task_state(task_id, TaskState.CANCELED, "Canceled")
-            logger.info(f"Task {task_id} canceled")
+                await self._task_store.set_task_output(task_id, response_content)
+                await self._task_store.update_task_state(task_id, TaskState.COMPLETED, "Done")
+                logger.info(f"Task {task_id} completed")
+                span.set_attribute("task.state", "completed")
+                if task_counter:
+                    task_counter.add(1, {"state": "completed"})
 
-        except Exception as e:
-            logger.error(f"Task {task_id} failed: {e}")
-            await self._task_store.update_task_state(task_id, TaskState.FAILED, str(e))
+            except asyncio.CancelledError:
+                await self._task_store.update_task_state(task_id, TaskState.CANCELED, "Canceled")
+                logger.info(f"Task {task_id} canceled")
+                span.set_attribute("task.state", "canceled")
+                if task_counter:
+                    task_counter.add(1, {"state": "canceled"})
+
+            except Exception as e:
+                logger.error(f"Task {task_id} failed: {e}")
+                await self._task_store.update_task_state(task_id, TaskState.FAILED, str(e))
+                span.set_attribute("task.state", "failed")
+                span.record_exception(e)
+                if task_counter:
+                    task_counter.add(1, {"state": "failed"})
+
+            finally:
+                duration_ms = (time.perf_counter() - start_time) * 1000
+                if task_duration:
+                    task_duration.record(duration_ms, {"task.id": task_id})
 
     async def cancel_task(self, task_id: str) -> bool:
         """Cancel a running task. Returns True if cancellation was initiated."""
-        result = await self._task_store.cancel_task(task_id)
-        if not result:
-            return False
+        tracer = trace_api.get_tracer(SERVICE_NAME)
+        task_counter, _ = get_task_metrics()
 
-        asyncio_task = self._running_tasks.get(task_id)
-        if asyncio_task and not asyncio_task.done():
-            asyncio_task.cancel()
-        return True
+        with tracer.start_as_current_span(
+            "kaos.task.cancel",
+            attributes={"task.id": task_id},
+        ):
+            result = await self._task_store.cancel_task(task_id)
+            if not result:
+                return False
+
+            asyncio_task = self._running_tasks.get(task_id)
+            if asyncio_task and not asyncio_task.done():
+                asyncio_task.cancel()
+
+            if task_counter:
+                task_counter.add(1, {"state": "cancel_requested"})
+
+            return True
 
     async def get_task(self, task_id: str) -> Optional["Task"]:
         """Retrieve a task by ID."""
