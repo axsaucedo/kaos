@@ -113,7 +113,12 @@ class TaskManager:
     def task_store(self) -> "TaskStore":
         return self._task_store
 
-    async def submit_task(self, input_message: str, session_id: Optional[str] = None) -> "Task":
+    async def submit_task(
+        self,
+        input_message: str,
+        session_id: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> "Task":
         """Create a task and spawn async execution. Returns the task in submitted state."""
         tracer = trace_api.get_tracer(SERVICE_NAME)
         task_counter, _ = get_task_metrics()
@@ -125,6 +130,7 @@ class TaskManager:
             task = await self._task_store.create_task(
                 session_id=session_id,
                 input_message=input_message,
+                metadata=metadata,
             )
             asyncio_task = asyncio.create_task(self._execute_task(task.id, input_message))
             self._running_tasks[task.id] = asyncio_task
@@ -161,9 +167,18 @@ class TaskManager:
                 return
 
             try:
+                # If metadata marks this as a delegation, pass as task-delegation role
+                # so _prepare_run stores task_delegation_received memory event
+                is_delegation = task.metadata.get("delegation", False)
+                message_arg: Any = (
+                    [{"role": "task-delegation", "content": input_message}]
+                    if is_delegation
+                    else input_message
+                )
+
                 response_content = ""
                 async for chunk in self._process_fn(
-                    input_message, session_id=task.session_id, stream=False
+                    message_arg, session_id=task.session_id, stream=False
                 ):
                     response_content += chunk
 
@@ -342,7 +357,11 @@ async def _jsonrpc_send_message(
     config = params.get("configuration", {})
     blocking = config.get("blocking", False) if isinstance(config, dict) else False
 
-    task = await task_manager.submit_task(input_text, session_id=session_id)
+    # Extract message metadata (e.g. delegation flag)
+    message_metadata = message.get("metadata")
+    task_metadata = dict(message_metadata) if isinstance(message_metadata, dict) else None
+
+    task = await task_manager.submit_task(input_text, session_id=session_id, metadata=task_metadata)
 
     if blocking:
         completed_task = await task_manager.wait_for_completion(task.id)

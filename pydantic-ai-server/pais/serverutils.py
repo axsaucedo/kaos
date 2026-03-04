@@ -169,6 +169,7 @@ class RemoteAgent:
                     "message": {
                         "role": "user",
                         "parts": [{"type": "text", "text": text}],
+                        "metadata": {"delegation": True},
                     },
                     "configuration": {"blocking": True},
                 },
