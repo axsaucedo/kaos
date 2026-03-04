@@ -41,20 +41,12 @@ from pais.serverutils import (
     _extract_user_prompt,
     _build_streaming_chunk,
     _build_chat_response,
-    JsonRpcRequest,
-    JsonRpcResponse,
-    JsonRpcError,
-    JSONRPC_PARSE_ERROR,
-    JSONRPC_INVALID_REQUEST,
-    JSONRPC_METHOD_NOT_FOUND,
-    JSONRPC_INVALID_PARAMS,
-    JSONRPC_INTERNAL_ERROR,
-    JSONRPC_TASK_NOT_FOUND,
 )
+from pais.a2a import TaskManager, setup_a2a_routes
 
 if TYPE_CHECKING:
     from pais.memory import Memory
-    from pais.taskstore import TaskStore, Task
+    from pais.taskstore import TaskStore
 
 
 def configure_logging(level: str = "INFO", otel_correlation: bool = False) -> None:
@@ -120,14 +112,16 @@ class AgentServer:
 
         self.settings = settings
         self.memory: "Memory" = memory or NullMemory()
-        self.task_store: "TaskStore" = task_store or NullTaskStore()
         self._agent = pydantic_agent
         self._mock_state = mock_state
         self._sub_agents = sub_agents or {}
         self._mcp_servers = mcp_servers or []
         self._model = model
         self._custom_tools = custom_tools or []
-        self._running_tasks: Dict[str, "asyncio.Task[None]"] = {}
+
+        store: "TaskStore" = task_store or NullTaskStore()
+        self.task_manager = TaskManager(store, self._process_message)
+        self.task_store = store
 
         self.app = FastAPI(
             title=f"Agent: {self.settings.agent_name}",
@@ -136,6 +130,7 @@ class AgentServer:
         )
 
         self._setup_routes()
+        setup_a2a_routes(self.app, self.task_manager)
         self._setup_telemetry()
         logger.info(
             f"AgentServer initialized for {self.settings.agent_name} on port {self.settings.agent_port}"
@@ -166,16 +161,11 @@ class AgentServer:
         self._log_startup_config()
         yield
         logger.info("AgentServer shutdown")
-        # Cancel running tasks
-        for task_id, asyncio_task in list(self._running_tasks.items()):
-            if not asyncio_task.done():
-                asyncio_task.cancel()
-                logger.debug(f"Canceled running task {task_id} on shutdown")
+        await self.task_manager.shutdown()
         for sub_agent in self._sub_agents.values():
             await sub_agent.close()
         # TODO: Close MCP server connections (MCPServerStreamableHTTP) on shutdown
         await self.memory.close()
-        await self.task_store.close()
 
     def _log_startup_config(self):
         """Log agent config at INFO (summary) and DEBUG (full dump)."""
@@ -300,11 +290,6 @@ class AgentServer:
             except Exception as e:
                 logger.error(f"Chat completion error: {e}")
                 raise HTTPException(status_code=500, detail=str(e))
-
-        @self.app.post("/")
-        async def jsonrpc_endpoint(request: Request):
-            """A2A JSON-RPC 2.0 endpoint for task lifecycle management."""
-            return await self._handle_jsonrpc(request)
 
     def _probe_response(self, status: str) -> JSONResponse:
         return JSONResponse(
@@ -448,210 +433,6 @@ class AgentServer:
             logger.error(f"Error processing message: {str(e)}")
             await self.memory.add_event(session_id, "error", str(e))
             yield f"Sorry, I encountered an error: {str(e)}"
-
-    async def _submit_task(self, input_message: str, session_id: Optional[str] = None) -> "Task":
-        """Create a task and spawn async execution. Returns the task in submitted state."""
-        task = await self.task_store.create_task(
-            session_id=session_id,
-            input_message=input_message,
-        )
-        asyncio_task = asyncio.create_task(self._execute_task(task.id, input_message))
-        self._running_tasks[task.id] = asyncio_task
-        asyncio_task.add_done_callback(lambda _: self._running_tasks.pop(task.id, None))
-        logger.info(f"Submitted task {task.id} for session {task.session_id}")
-        return task
-
-    async def _execute_task(self, task_id: str, input_message: str) -> None:
-        """Execute a task asynchronously using _process_message pipeline."""
-        from pais.taskstore import TaskState
-
-        task = await self.task_store.get_task(task_id)
-        if not task:
-            logger.error(f"Task {task_id} not found for execution")
-            return
-
-        # Transition to working
-        updated = await self.task_store.update_task_state(task_id, TaskState.WORKING, "Processing")
-        if not updated:
-            logger.error(f"Failed to transition task {task_id} to working")
-            return
-
-        try:
-            response_content = ""
-            async for chunk in self._process_message(
-                input_message, session_id=task.session_id, stream=False
-            ):
-                response_content += chunk
-
-            await self.task_store.set_task_output(task_id, response_content)
-            await self.task_store.update_task_state(task_id, TaskState.COMPLETED, "Done")
-            logger.info(f"Task {task_id} completed")
-
-        except asyncio.CancelledError:
-            await self.task_store.update_task_state(task_id, TaskState.CANCELED, "Canceled")
-            logger.info(f"Task {task_id} canceled")
-
-        except Exception as e:
-            logger.error(f"Task {task_id} failed: {e}")
-            await self.task_store.update_task_state(task_id, TaskState.FAILED, str(e))
-
-    async def _cancel_task(self, task_id: str) -> bool:
-        """Cancel a running task. Returns True if cancellation was initiated."""
-        result = await self.task_store.cancel_task(task_id)
-        if not result:
-            return False
-
-        asyncio_task = self._running_tasks.get(task_id)
-        if asyncio_task and not asyncio_task.done():
-            asyncio_task.cancel()
-        return True
-
-    async def _handle_jsonrpc(self, request: Request) -> JSONResponse:
-        """Dispatch JSON-RPC 2.0 requests for A2A task methods."""
-        try:
-            body = await request.json()
-        except Exception:
-            return JSONResponse(
-                JsonRpcResponse(
-                    error=JsonRpcError(code=JSONRPC_PARSE_ERROR, message="Parse error"),
-                ).to_dict()
-            )
-
-        try:
-            rpc_req = JsonRpcRequest(**body)
-        except Exception:
-            return JSONResponse(
-                JsonRpcResponse(
-                    error=JsonRpcError(
-                        code=JSONRPC_INVALID_REQUEST, message="Invalid JSON-RPC request"
-                    ),
-                ).to_dict()
-            )
-
-        method = rpc_req.method
-        params = rpc_req.params or {}
-        rpc_id = rpc_req.id
-
-        if method == "tasks/send":
-            return await self._jsonrpc_tasks_send(params, rpc_id)
-        elif method == "tasks/get":
-            return await self._jsonrpc_tasks_get(params, rpc_id)
-        elif method == "tasks/cancel":
-            return await self._jsonrpc_tasks_cancel(params, rpc_id)
-        else:
-            return JSONResponse(
-                JsonRpcResponse(
-                    id=rpc_id,
-                    error=JsonRpcError(
-                        code=JSONRPC_METHOD_NOT_FOUND,
-                        message=f"Method not found: {method}",
-                    ),
-                ).to_dict()
-            )
-
-    async def _jsonrpc_tasks_send(
-        self, params: Dict[str, Any], rpc_id: Optional[Union[str, int]]
-    ) -> JSONResponse:
-        """Handle tasks/send: create and submit a task."""
-        message = params.get("message")
-        if not message:
-            return JSONResponse(
-                JsonRpcResponse(
-                    id=rpc_id,
-                    error=JsonRpcError(
-                        code=JSONRPC_INVALID_PARAMS,
-                        message="Missing required 'message' parameter",
-                    ),
-                ).to_dict()
-            )
-
-        # Extract text from A2A message format
-        parts = message.get("parts", [])
-        text_parts = [p.get("text", "") for p in parts if p.get("type") == "text"]
-        input_text = " ".join(text_parts) if text_parts else message.get("text", "")
-
-        if not input_text:
-            return JSONResponse(
-                JsonRpcResponse(
-                    id=rpc_id,
-                    error=JsonRpcError(
-                        code=JSONRPC_INVALID_PARAMS,
-                        message="Message must contain text content",
-                    ),
-                ).to_dict()
-            )
-
-        session_id = params.get("sessionId")
-        task = await self._submit_task(input_text, session_id=session_id)
-
-        return JSONResponse(JsonRpcResponse(id=rpc_id, result=task.to_dict()).to_dict())
-
-    async def _jsonrpc_tasks_get(
-        self, params: Dict[str, Any], rpc_id: Optional[Union[str, int]]
-    ) -> JSONResponse:
-        """Handle tasks/get: retrieve task status."""
-        task_id = params.get("id")
-        if not task_id:
-            return JSONResponse(
-                JsonRpcResponse(
-                    id=rpc_id,
-                    error=JsonRpcError(
-                        code=JSONRPC_INVALID_PARAMS,
-                        message="Missing required 'id' parameter",
-                    ),
-                ).to_dict()
-            )
-
-        task = await self.task_store.get_task(task_id)
-        if not task:
-            return JSONResponse(
-                JsonRpcResponse(
-                    id=rpc_id,
-                    error=JsonRpcError(
-                        code=JSONRPC_TASK_NOT_FOUND,
-                        message=f"Task not found: {task_id}",
-                    ),
-                ).to_dict()
-            )
-
-        return JSONResponse(JsonRpcResponse(id=rpc_id, result=task.to_dict()).to_dict())
-
-    async def _jsonrpc_tasks_cancel(
-        self, params: Dict[str, Any], rpc_id: Optional[Union[str, int]]
-    ) -> JSONResponse:
-        """Handle tasks/cancel: cancel a running task."""
-        task_id = params.get("id")
-        if not task_id:
-            return JSONResponse(
-                JsonRpcResponse(
-                    id=rpc_id,
-                    error=JsonRpcError(
-                        code=JSONRPC_INVALID_PARAMS,
-                        message="Missing required 'id' parameter",
-                    ),
-                ).to_dict()
-            )
-
-        canceled = await self._cancel_task(task_id)
-        if not canceled:
-            task = await self.task_store.get_task(task_id)
-            if not task:
-                return JSONResponse(
-                    JsonRpcResponse(
-                        id=rpc_id,
-                        error=JsonRpcError(
-                            code=JSONRPC_TASK_NOT_FOUND,
-                            message=f"Task not found: {task_id}",
-                        ),
-                    ).to_dict()
-                )
-            # Task exists but already terminal
-            return JSONResponse(JsonRpcResponse(id=rpc_id, result=task.to_dict()).to_dict())
-
-        task = await self.task_store.get_task(task_id)
-        return JSONResponse(
-            JsonRpcResponse(id=rpc_id, result=task.to_dict() if task else None).to_dict()
-        )
 
     async def _complete_chat_completion(
         self,
