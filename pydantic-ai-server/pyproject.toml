@@ -37,6 +37,7 @@ dev = [
     "python-dotenv>=1.0.0",
     "test-mcp-echo-server>=0.1.0",
     "black>=24.0.0",
+    "respx>=0.22.0",
 ]
 
 [build-system]

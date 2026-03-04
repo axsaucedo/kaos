@@ -106,6 +106,7 @@ class RemoteAgent:
         self.card_url = url.rstrip("/")
         self.agent_card: Optional[AgentCard] = None
         self._active = False
+        self._supports_a2a = False
         self._client = httpx.AsyncClient(timeout=self.REQUEST_TIMEOUT)
         logger.info(f"RemoteAgent initialized: {name} -> {url}")
 
@@ -123,8 +124,12 @@ class RemoteAgent:
                 skills=[AgentCardSkill(**s) for s in data.get("skills", [])],
                 capabilities=AgentCardCapabilities(**data.get("capabilities", {})),
             )
+            protocols = data.get("supportedProtocols", [])
+            self._supports_a2a = "jsonrpc" in protocols
             self._active = True
-            logger.info(f"RemoteAgent {self.name} active: {self.agent_card.description}")
+            logger.info(
+                f"RemoteAgent {self.name} active: a2a={self._supports_a2a}, {self.agent_card.description}"
+            )
             return True
         except Exception as e:
             self._active = False
@@ -136,6 +141,61 @@ class RemoteAgent:
             if not await self._init():
                 raise RuntimeError(f"Agent {self.name} unavailable at {self.card_url}")
 
+        last_user_msg = ""
+        for m in reversed(messages):
+            if m.get("role") == "user":
+                last_user_msg = m.get("content", "")
+                break
+
+        if self._supports_a2a and last_user_msg:
+            try:
+                return await self._send_a2a_message(last_user_msg)
+            except Exception as e:
+                logger.warning(f"RemoteAgent {self.name} A2A failed, falling back to chat: {e}")
+
+        return await self._send_chat_completion(messages)
+
+    async def _send_a2a_message(self, text: str) -> str:
+        """Send message via A2A SendMessage (blocking mode)."""
+        headers: Dict[str, str] = {"Content-Type": "application/json"}
+        inject(headers)
+        response = await self._client.post(
+            f"{self.card_url}/",
+            json={
+                "jsonrpc": "2.0",
+                "method": "SendMessage",
+                "id": 1,
+                "params": {
+                    "message": {
+                        "role": "user",
+                        "parts": [{"type": "text", "text": text}],
+                    },
+                    "configuration": {"blocking": True},
+                },
+            },
+            headers=headers,
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        if "error" in data:
+            raise RuntimeError(f"A2A error: {data['error'].get('message', 'unknown')}")
+
+        result = data.get("result", {})
+        artifacts = result.get("artifacts", [])
+        for artifact in artifacts:
+            for part in artifact.get("parts", []):
+                if part.get("type") == "text":
+                    return part["text"]
+
+        output = result.get("output", "")
+        if output:
+            return output
+
+        return result.get("status", {}).get("message", "")
+
+    async def _send_chat_completion(self, messages: List[Dict[str, str]]) -> str:
+        """Send message via OpenAI-compatible chat completions endpoint."""
         try:
             headers: Dict[str, str] = {}
             inject(headers)
