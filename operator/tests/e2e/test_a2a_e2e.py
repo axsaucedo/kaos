@@ -2,9 +2,10 @@
 
 Tests the A2A JSON-RPC protocol via Gateway API:
 - Agent card stateTransitionHistory and supportedProtocols
-- tasks/send creates and executes a task
-- tasks/get polls task state until completion
-- tasks/cancel cancels a running task
+- SendMessage creates and executes a task (with legacy tasks/send alias)
+- GetTask polls task state until completion (with legacy tasks/get alias)
+- CancelTask cancels a running task (with legacy tasks/cancel alias)
+- SendMessage blocking mode for synchronous completion
 """
 
 import asyncio
@@ -85,7 +86,7 @@ async def test_a2a_agent_card_capabilities(
 
 @pytest.mark.asyncio
 async def test_a2a_task_lifecycle(test_namespace: str, shared_modelapi: str):
-    """Test full A2A task lifecycle: send → poll → completed."""
+    """Test full A2A task lifecycle: SendMessage → GetTask poll → completed."""
     agent_name = "a2a-lifecycle-agent"
     agent_spec = create_a2a_agent(
         test_namespace,
@@ -101,12 +102,12 @@ async def test_a2a_task_lifecycle(test_namespace: str, shared_modelapi: str):
     await async_wait_for_healthy(agent_url)
 
     async with httpx.AsyncClient(timeout=60.0) as client:
-        # 1. tasks/send
+        # 1. SendMessage (non-blocking)
         send_resp = await client.post(
             f"{agent_url}/",
             json={
                 "jsonrpc": "2.0",
-                "method": "tasks/send",
+                "method": "SendMessage",
                 "id": 1,
                 "params": {
                     "message": {
@@ -125,7 +126,7 @@ async def test_a2a_task_lifecycle(test_namespace: str, shared_modelapi: str):
         assert task_id is not None
         assert session_id is not None
 
-        # 2. Poll tasks/get until completion
+        # 2. Poll GetTask until completion
         final_result = None
         for _ in range(60):
             await asyncio.sleep(0.5)
@@ -133,7 +134,7 @@ async def test_a2a_task_lifecycle(test_namespace: str, shared_modelapi: str):
                 f"{agent_url}/",
                 json={
                     "jsonrpc": "2.0",
-                    "method": "tasks/get",
+                    "method": "GetTask",
                     "id": 2,
                     "params": {"id": task_id},
                 },
@@ -156,6 +157,46 @@ async def test_a2a_task_lifecycle(test_namespace: str, shared_modelapi: str):
         agent_msgs = [m for m in history if m["role"] == "agent"]
         assert len(user_msgs) >= 1
         assert len(agent_msgs) >= 1
+
+
+@pytest.mark.asyncio
+async def test_a2a_send_message_blocking(test_namespace: str, shared_modelapi: str):
+    """Test SendMessage with blocking mode returns completed task synchronously."""
+    agent_name = "a2a-blocking-agent"
+    agent_spec = create_a2a_agent(
+        test_namespace,
+        shared_modelapi,
+        agent_name=agent_name,
+        mock_responses=["Blocking response complete."],
+    )
+    create_custom_resource(agent_spec, test_namespace)
+    wait_for_deployment(test_namespace, f"agent-{agent_name}", timeout=120)
+
+    agent_url = gateway_url(test_namespace, "agent", agent_name)
+    wait_for_resource_ready(agent_url)
+    await async_wait_for_healthy(agent_url)
+
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        resp = await client.post(
+            f"{agent_url}/",
+            json={
+                "jsonrpc": "2.0",
+                "method": "SendMessage",
+                "id": 1,
+                "params": {
+                    "message": {
+                        "role": "user",
+                        "parts": [{"type": "text", "text": "Answer in blocking mode"}],
+                    },
+                    "configuration": {"blocking": True},
+                },
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "result" in data, f"Expected result, got: {data}"
+        assert data["result"]["status"]["state"] == "completed"
+        assert data["result"].get("output", "") or len(data["result"].get("artifacts", [])) > 0 or len(data["result"].get("history", [])) >= 2
 
 
 @pytest.mark.asyncio
@@ -190,12 +231,12 @@ async def test_a2a_jsonrpc_error_handling(test_namespace: str, shared_modelapi: 
         assert "error" in data
         assert data["error"]["code"] == -32601  # METHOD_NOT_FOUND
 
-        # tasks/get with missing id
+        # GetTask with missing id
         resp = await client.post(
             f"{agent_url}/",
             json={
                 "jsonrpc": "2.0",
-                "method": "tasks/get",
+                "method": "GetTask",
                 "id": 2,
                 "params": {},
             },
@@ -204,12 +245,12 @@ async def test_a2a_jsonrpc_error_handling(test_namespace: str, shared_modelapi: 
         assert "error" in data
         assert data["error"]["code"] == -32602  # INVALID_PARAMS
 
-        # tasks/get with nonexistent task id
+        # GetTask with nonexistent task id
         resp = await client.post(
             f"{agent_url}/",
             json={
                 "jsonrpc": "2.0",
-                "method": "tasks/get",
+                "method": "GetTask",
                 "id": 3,
                 "params": {"id": "nonexistent-task-id"},
             },
