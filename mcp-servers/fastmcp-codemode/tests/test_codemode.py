@@ -1,60 +1,77 @@
-"""Tests for FastMCP Code Mode server."""
+"""Tests for FastMCP CodeMode aggregator server."""
 
+import json
 import os
-import importlib
 
 import pytest
+from fastmcp import Client, FastMCP
 
 
 def test_codemode_server_imports():
-    """Verify server module imports without error."""
-    import server
+    """Verify core imports work."""
+    from server import build_server, mcp
 
-    assert server.mcp is not None
-    assert server.mcp.name == "FastMCP CodeMode Server"
-
-
-def test_codemode_loads_tools_from_env(monkeypatch):
-    """Verify tools are loaded from MCP_TOOLS_STRING and wrapped by CodeMode."""
-    monkeypatch.setenv(
-        "MCP_TOOLS_STRING",
-        'def add(a: int, b: int) -> int:\n    """Add."""\n    return a + b\n',
-    )
-    import server
-
-    importlib.reload(server)
-    assert server.mcp is not None
+    assert mcp is not None
+    assert callable(build_server)
 
 
-def test_codemode_empty_env(monkeypatch):
-    """Verify server handles empty MCP_TOOLS_STRING gracefully."""
-    monkeypatch.setenv("MCP_TOOLS_STRING", "")
-    import server
+def test_codemode_no_config(monkeypatch):
+    """Server starts with no MCP_SERVERS_CONFIG — zero upstream servers."""
+    monkeypatch.delenv("MCP_SERVERS_CONFIG", raising=False)
+    from server import build_server
 
-    importlib.reload(server)
-    assert server.mcp is not None
+    mcp = build_server()
+    assert mcp.name == "FastMCP CodeMode Aggregator"
+
+
+def test_codemode_empty_servers(monkeypatch):
+    """Server handles empty servers list."""
+    monkeypatch.setenv("MCP_SERVERS_CONFIG", json.dumps({"servers": []}))
+    from server import build_server
+
+    mcp = build_server()
+    assert mcp.name == "FastMCP CodeMode Aggregator"
 
 
 @pytest.mark.asyncio
-async def test_codemode_exposes_meta_tools(monkeypatch):
-    """Verify CodeMode exposes search/get_schema/execute instead of raw tools."""
-    monkeypatch.setenv(
-        "MCP_TOOLS_STRING",
-        'def add(a: int, b: int) -> int:\n    """Add."""\n    return a + b\n'
-        'def multiply(x: int, y: int) -> int:\n    """Multiply."""\n    return x * y\n',
-    )
-    import server
+async def test_codemode_mounts_and_exposes_meta_tools():
+    """Aggregator mounts upstream servers and exposes CodeMode meta-tools."""
+    from fastmcp.experimental.transforms.code_mode import CodeMode
 
-    importlib.reload(server)
+    upstream = FastMCP("Upstream")
 
-    from fastmcp import Client
+    @upstream.tool
+    def echo(msg: str) -> str:
+        """Echo a message."""
+        return msg
 
-    async with Client(server.mcp) as client:
+    aggregator = FastMCP("Test Aggregator", transforms=[CodeMode()])
+    aggregator.mount(upstream, namespace="test")
+
+    async with Client(aggregator) as client:
         tools = await client.list_tools()
         tool_names = {t.name for t in tools}
         assert "search" in tool_names
         assert "get_schema" in tool_names
         assert "execute" in tool_names
-        # Raw tools should NOT be exposed directly
-        assert "add" not in tool_names
-        assert "multiply" not in tool_names
+        assert len(tool_names) == 3
+
+
+@pytest.mark.asyncio
+async def test_codemode_search_finds_namespaced_tools():
+    """Search meta-tool discovers tools from mounted upstream servers."""
+    from fastmcp.experimental.transforms.code_mode import CodeMode
+
+    upstream = FastMCP("CalcServer")
+
+    @upstream.tool
+    def add(a: int, b: int) -> int:
+        """Add two numbers."""
+        return a + b
+
+    aggregator = FastMCP("Test Aggregator", transforms=[CodeMode()])
+    aggregator.mount(upstream, namespace="calc")
+
+    async with Client(aggregator) as client:
+        result = await client.call_tool("search", {"query": "add numbers"})
+        assert "calc_add" in str(result)

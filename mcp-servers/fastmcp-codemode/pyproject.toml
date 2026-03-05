@@ -1,11 +1,11 @@
 [project]
 name = "kaos-mcp-fastmcp-codemode"
 version = "0.1.0.dev0"
-description = "FastMCP Code Mode Server - Python tools with CodeMode transform"
+description = "FastMCP Code Mode Server - MCP server aggregator with CodeMode transform"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "fastmcp>=3.1.0",
+    "fastmcp[code-mode]>=3.1.0",
 ]
 
 [project.optional-dependencies]
