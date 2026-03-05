@@ -97,18 +97,22 @@ spec:
 
 ## MCP Server Implementation
 
-The `mcp-servers/python-string/` module provides the `python-string` runtime:
+The `mcp-servers/python-string/` module provides the `python-string` runtime using FastMCP 3.0:
 
 ```python
-from mcptools.server import MCPServer, MCPServerSettings
+from fastmcp import FastMCP
 
-settings = MCPServerSettings(
-    mcp_host="0.0.0.0",
-    mcp_port=8000,
-    mcp_tools_string="def echo(text: str) -> str: return text"
-)
-server = MCPServer(settings)
-server.run(transport="streamable-http")
+mcp = FastMCP("Python-String MCP Server")
+
+# Tools are loaded from MCP_TOOLS_STRING env var at startup
+# Example tool:
+@mcp.tool()
+def echo(text: str) -> str:
+    """Echo the input text."""
+    return text
+
+if __name__ == "__main__":
+    mcp.run(transport="streamable-http", host="0.0.0.0", port=8000)
 ```
 
 Tools are registered from the `MCP_TOOLS_STRING` environment variable at startup.
