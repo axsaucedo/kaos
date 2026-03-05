@@ -17,7 +17,7 @@ jupyter:
 
 > **Try it yourself!** This example is available as an executable [Jupyter notebook](/examples/fastmcp-codemode.ipynb).
 
-This example demonstrates the **fastmcp-codemode** runtime, which wraps Python tool functions with FastMCP's [CodeMode](https://gofastmcp.com/servers/transforms/code-mode) transform. Instead of exposing individual tools, agents get meta-tools (`search`, `get_schema`, `execute`) that enable discovering and chaining tool calls via Python code execution in a sandbox.
+This example demonstrates the **fastmcp-codemode** runtime, which aggregates multiple KAOS MCP servers and wraps them with FastMCP's [CodeMode](https://gofastmcp.com/servers/transforms/code-mode) transform. Instead of exposing individual tools from each server, agents get meta-tools (`search`, `get_schema`, `execute`) that enable discovering and chaining cross-server tool calls via Python code execution in a sandbox.
 
 ## Understanding FastMCP Code Mode
 
@@ -26,16 +26,18 @@ With traditional MCP, each tool call is a round-trip through the LLM:
 ```
 LLM: "I'll call add(42, 8)"      -> Tool executes -> Result
 LLM: "Now I'll call multiply"    -> Tool executes -> Result
+LLM: "Now I'll call uppercase"   -> Tool executes -> Result
 LLM: "Here's the final answer"
 ```
 
-With FastMCP Code Mode, the agent writes Python code that chains operations in one call:
+With FastMCP Code Mode, the agent writes Python code that chains operations across multiple servers in one call:
 
 ```python .noeval
-# The LLM generates this Python code which runs in a sandbox:
-result_add = await call_tool("add", {"a": 42, "b": 8})
-result_mul = await call_tool("multiply", {"x": result_add, "y": 2})
-return result_mul
+# The LLM generates Python code that runs in a sandbox:
+result_add = await call_tool("calc_add", {"a": 42, "b": 8})
+result_mul = await call_tool("calc_multiply", {"x": result_add, "y": 2})
+result_upper = await call_tool("text_uppercase", {"text": f"answer is {result_mul}"})
+return result_upper
 ```
 
 This reduces:
@@ -48,14 +50,22 @@ This reduces:
 ```mermaid
 graph LR
     A[User Request] --> B[Agent]
-    B --> C[FastMCP CodeMode Server]
-    C --> D[search meta-tool]
-    C --> E[get_schema meta-tool]
-    C --> F[execute meta-tool]
-    F --> G[Python sandbox]
-    G --> H[add tool]
-    G --> I[multiply tool]
-    G --> J[power tool]
+    B --> C[FastMCP CodeMode Gateway]
+    C --> D[Calculator MCP]
+    C --> E[Text Utils MCP]
+```
+
+### How it works
+The `fastmcp-codemode` runtime uses FastMCP's `create_proxy()` and `mount()` to connect to upstream KAOS MCP servers via HTTP. Each server's tools are namespaced (e.g., `calc_add`, `text_uppercase`), and the CodeMode transform wraps everything into three meta-tools.
+
+The config lists upstream server endpoints:
+```json .noeval
+{
+  "servers": [
+    {"name": "calc", "url": "http://mcpserver-calculator:8000/mcp"},
+    {"name": "text", "url": "http://mcpserver-textutils:8000/mcp"}
+  ]
+}
 ```
 
 ## Prerequisites
@@ -84,9 +94,11 @@ Create a ModelAPI in Proxy mode:
 kaos modelapi deploy codemode-api --mode Proxy --wait
 ```
 
-## Step 2: Create the FastMCP CodeMode Server
+## Step 2: Create Upstream MCP Servers
 
-Deploy an MCPServer using the `fastmcp-codemode` runtime with calculator tools:
+Deploy two MCP servers that the CodeMode gateway will aggregate.
+
+### Calculator MCP Server
 
 ```bash
 export CALC_FUNCS='
@@ -103,50 +115,95 @@ def power(base: int, exponent: int) -> int:
     return base ** exponent
 '
 
-kaos mcp deploy calculator-codemode \
-    --runtime fastmcp-codemode \
+kaos mcp deploy calculator \
+    --runtime python-string \
     --params "$CALC_FUNCS" \
     --wait
 ```
 
-## Step 3: Create the Agent
-
-Create an agent connected to the CodeMode server. The mock responses demonstrate the Code Mode flow — the agent discovers tools via `search`, then writes Python code that chains operations using the `execute` meta-tool:
+### Text Utils MCP Server
 
 ```bash
-# Mock response: agent calls search to discover tools, then execute to chain them
+kubectl apply -f - << EOF
+apiVersion: kaos.tools/v1alpha1
+kind: MCPServer
+metadata:
+  name: textutils
+spec:
+  runtime: python-string
+  params: |
+    def uppercase(text: str) -> str:
+        """Convert text to uppercase."""
+        return text.upper()
+
+    def word_count(text: str) -> int:
+        """Count the number of words in text."""
+        return len(text.split())
+EOF
+
+kubectl wait mcpserver/textutils --for=jsonpath='{.status.ready}'=true --timeout=180s
+```
+
+## Step 3: Create the FastMCP CodeMode Gateway
+
+Create the gateway that aggregates both upstream servers with CodeMode:
+
+```bash
+export CODEMODE_CONFIG='
+{
+  "servers": [
+    {
+      "name": "calc",
+      "url": "http://mcpserver-calculator.'$NAMESPACE'.svc.cluster.local:8000/mcp"
+    },
+    {
+      "name": "text",
+      "url": "http://mcpserver-textutils.'$NAMESPACE'.svc.cluster.local:8000/mcp"
+    }
+  ]
+}'
+
+kaos mcp deploy codemode-gateway --runtime fastmcp-codemode --params "$CODEMODE_CONFIG" --wait
+```
+
+## Step 4: Create the Agent
+
+Create an agent connected to the CodeMode gateway. The mock responses demonstrate the Code Mode flow — the agent discovers tools via `search`, then writes Python code that chains operations across both upstream servers using the `execute` meta-tool:
+
+```bash
+# Mock response: agent calls execute to chain operations across calc and text servers
 MOCK_CODE="{\
   \"tool_calls\": [{\
     \"id\": \"call_1\",\
     \"name\": \"execute\",\
     \"arguments\": {\
-      \"code\": \"result_add = await call_tool('add', {'a': 42, 'b': 8}); result_mul = await call_tool('multiply', {'x': result_add, 'y': 2}); result_pow = await call_tool('power', {'base': result_mul, 'exponent': 2}); return result_pow\"\
+      \"code\": \"result_add = await call_tool('calc_add', {'a': 42, 'b': 8}); result_mul = await call_tool('calc_multiply', {'x': 50, 'y': 2}); result_upper = await call_tool('text_uppercase', {'text': f'answer is {result_mul}'}); return result_upper\"\
     }\
   }]\
 }"
 
-MOCK_FINAL='I executed a calculation chain using Code Mode: (42+8)=50, 50*2=100, 100^2=10000. The final result is 10000.'
+MOCK_FINAL='I executed a cross-server calculation chain using Code Mode: (42+8)=50, 50*2=100, then formatted via text server. The final result is "ANSWER IS 100".'
 
 kaos agent deploy codemode-agent \
     --modelapi codemode-api \
     --model mock-model \
-    --mcp calculator-codemode \
-    --instructions "You use Code Mode to chain calculations efficiently via Python code execution." \
+    --mcp codemode-gateway \
+    --instructions "You use Code Mode to chain calculations across multiple MCP servers efficiently via Python code execution." \
     --mock-response "$MOCK_CODE" \
     --mock-response "$MOCK_FINAL" \
     --expose \
     --wait
 ```
 
-## Step 4: Invoke the Agent
+## Step 5: Invoke the Agent
 
-Send a request that triggers multi-tool orchestration:
+Send a request that triggers cross-server tool chaining:
 
 ```bash
-kaos agent invoke codemode-agent --message "Calculate (42+8)*2, then square the result"
+kaos agent invoke codemode-agent --message "Calculate (42+8)*2, then format the result in uppercase"
 ```
 
-## Step 5: Verify Agent Status
+## Step 6: Verify Agent Status
 
 Check that the agent has discovered the Code Mode meta-tools:
 
@@ -160,7 +217,7 @@ Verify the output shows A2A capabilities:
 kaos agent status codemode-agent --json | grep -q "streaming" || exit 1
 ```
 
-## Step 6: Verify Memory Events
+## Step 7: Verify Memory Events
 
 Check that tool calls were recorded in memory:
 
@@ -185,6 +242,6 @@ kubectl delete namespace $NAMESPACE --wait=false
 
 ## Next Steps
 
-- [Unified MCP Gateway](/examples/unified-mcp-gateway) - Aggregate multiple MCP servers with pctx Code Mode
+- [Unified MCP Gateway](/examples/unified-mcp-gateway) - Aggregate multiple MCP servers with pctx Code Mode (TypeScript sandbox)
 - [MCPServer CRD Reference](/operator/mcpserver-crd) - Full runtime documentation
 - [FastMCP Code Mode docs](https://gofastmcp.com/servers/transforms/code-mode) - Upstream documentation
