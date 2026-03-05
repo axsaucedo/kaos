@@ -75,7 +75,7 @@ make format                     # Auto-format code
 - Pydantic AI uses native function calling by default
 - `TOOL_CALL_MODE=string`: FunctionModel wrapper injects tool descriptions into system prompt, parses JSON tool calls from text
 - `TOOL_CALL_MODE=auto|native`: Standard Pydantic AI native function calling (default)
-- MCP tools: `MCPServerStreamableHTTP(url + "/mcp")` — `/mcp` path appended for FastMCP servers
+- MCP tools: `MCPServerStreamableHTTP(url + "/mcp")` — `/mcp` path appended for FastMCP 3.0 servers
 - `max_steps` controls model call limit via `UsageLimits(request_limit=max_steps)` (not `retries`)
 
 ### String Mode (tools.py)
