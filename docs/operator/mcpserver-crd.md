@@ -59,7 +59,7 @@ Runtime identifier for the MCP server. Can be:
 | Value | Description |
 |-------|-------------|
 | `python-string` | Python code execution via MCP_TOOLS_STRING |
-| `fastmcp-codemode` | Python tools with FastMCP CodeMode transform |
+| `fastmcp-codemode` | MCP server aggregator with FastMCP CodeMode transform |
 | `pctx-codemode` | Unified MCP aggregator with Code Mode |
 | `kubernetes` | Kubernetes CRUD operations |
 | `slack` | Slack integration |
@@ -74,7 +74,7 @@ Runtime-specific configuration passed to the container. The delivery method depe
 | Runtime | Params Environment Variable |
 |---------|---------------------------|
 | `python-string` | `MCP_TOOLS_STRING` |
-| `fastmcp-codemode` | `MCP_TOOLS_STRING` |
+| `fastmcp-codemode` | `MCP_SERVERS_CONFIG` |
 | `pctx-codemode` | `PCTX_CONFIG` |
 | `kubernetes` | `MCP_PARAMS` |
 | `slack` | `MCP_PARAMS` |
@@ -167,9 +167,10 @@ spec:
 
 ### fastmcp-codemode
 
-Python tools with [FastMCP CodeMode](https://gofastmcp.com/servers/transforms/code-mode) transform. Same input as `python-string` but tools are wrapped with CodeMode, exposing meta-tools (`search`, `get_schema`, `execute`) instead of individual tool schemas.
+MCP server aggregator with [FastMCP CodeMode](https://gofastmcp.com/servers/transforms/code-mode) transform. Connects to multiple upstream KAOS MCP servers via HTTP proxy and wraps their tools with CodeMode, exposing meta-tools (`search`, `get_schema`, `execute`) instead of individual tool schemas.
 
-- LLMs discover tools via `search` and write Python code to chain calls via `execute`
+- Aggregates multiple MCP servers (KAOS-managed or external) via HTTP
+- LLMs discover tools via `search` and write Python code to chain cross-server calls via `execute`
 - Code runs in a sandboxed Python environment
 - Reduces token usage and LLM round-trips for multi-step operations
 
@@ -177,13 +178,12 @@ Python tools with [FastMCP CodeMode](https://gofastmcp.com/servers/transforms/co
 spec:
   runtime: fastmcp-codemode
   params: |
-    def add(a: int, b: int) -> int:
-        """Add two numbers together."""
-        return a + b
-
-    def multiply(x: int, y: int) -> int:
-        """Multiply two numbers."""
-        return x * y
+    {
+      "servers": [
+        {"name": "calc", "url": "http://mcpserver-calculator:8000/mcp"},
+        {"name": "text", "url": "http://mcpserver-textutils:8000/mcp"}
+      ]
+    }
 ```
 
 ### pctx-codemode

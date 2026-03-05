@@ -58,7 +58,7 @@ pydantic-ai-server/        # Agent runtime (Pydantic AI, pytest, black, ty) — 
 
 mcp-servers/               # Standalone MCP server implementations
 ├── python-string/         # Python code execution runtime
-└── fastmcp-codemode/      # Python tools with CodeMode transform
+└── fastmcp-codemode/      # MCP server aggregator with CodeMode transform
 
 kaos-cli/                  # CLI tool
 ├── kaos_cli/system/       # System commands (install, create-rbac)
