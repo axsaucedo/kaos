@@ -171,14 +171,24 @@ jobs:
           cache-to: type=gha,scope=mcp-python-string-e2e,mode=max
           github-token: ${{ github.token }}
 
-      - name: Build MCP pctx image
+      - name: Build MCP pctx-codemode image
         uses: docker/build-push-action@v6
         with:
-          context: ./mcp-servers/pctx
+          context: ./mcp-servers/pctx-codemode
           load: true
-          tags: ${{ env.REGISTRY }}/kaos-mcp-pctx:${{ env.AGENT_TAG }}
-          cache-from: type=gha,scope=mcp-pctx-e2e
-          cache-to: type=gha,scope=mcp-pctx-e2e,mode=max
+          tags: ${{ env.REGISTRY }}/kaos-mcp-pctx-codemode:${{ env.AGENT_TAG }}
+          cache-from: type=gha,scope=mcp-pctx-codemode-e2e
+          cache-to: type=gha,scope=mcp-pctx-codemode-e2e,mode=max
+          github-token: ${{ github.token }}
+
+      - name: Build MCP fastmcp-codemode image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./mcp-servers/fastmcp-codemode
+          load: true
+          tags: ${{ env.REGISTRY }}/kaos-mcp-fastmcp-codemode:${{ env.AGENT_TAG }}
+          cache-from: type=gha,scope=mcp-fastmcp-codemode-e2e
+          cache-to: type=gha,scope=mcp-fastmcp-codemode-e2e,mode=max
           github-token: ${{ github.token }}
 
 
@@ -189,7 +199,8 @@ jobs:
           kind load docker-image ${{ env.REGISTRY }}/kaos-agent:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }} &
           kind load docker-image ${{ env.REGISTRY }}/kaos-mcp-server:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }} &
           kind load docker-image ${{ env.REGISTRY }}/kaos-mcp-python-string:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }} &
-          kind load docker-image ${{ env.REGISTRY }}/kaos-mcp-pctx:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }} &
+          kind load docker-image ${{ env.REGISTRY }}/kaos-mcp-pctx-codemode:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }} &
+          kind load docker-image ${{ env.REGISTRY }}/kaos-mcp-fastmcp-codemode:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }} &
           kind load docker-image ghcr.io/berriai/litellm:main-stable --name ${{ env.KIND_CLUSTER_NAME }} &
           kind load docker-image alpine/ollama:latest --name ${{ env.KIND_CLUSTER_NAME }} &
           kind load docker-image redis:7-alpine --name ${{ env.KIND_CLUSTER_NAME }} &

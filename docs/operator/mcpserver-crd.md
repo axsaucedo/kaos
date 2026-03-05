@@ -59,7 +59,8 @@ Runtime identifier for the MCP server. Can be:
 | Value | Description |
 |-------|-------------|
 | `python-string` | Python code execution via MCP_TOOLS_STRING |
-| `pctx` | Unified MCP aggregator with Code Mode |
+| `fastmcp-codemode` | MCP server aggregator with FastMCP CodeMode transform |
+| `pctx-codemode` | Unified MCP aggregator with Code Mode |
 | `kubernetes` | Kubernetes CRUD operations |
 | `slack` | Slack integration |
 | `custom` | User-provided container image |
@@ -73,7 +74,8 @@ Runtime-specific configuration passed to the container. The delivery method depe
 | Runtime | Params Environment Variable |
 |---------|---------------------------|
 | `python-string` | `MCP_TOOLS_STRING` |
-| `pctx` | `PCTX_CONFIG` |
+| `fastmcp-codemode` | `MCP_SERVERS_CONFIG` |
+| `pctx-codemode` | `PCTX_CONFIG` |
 | `kubernetes` | `MCP_PARAMS` |
 | `slack` | `MCP_PARAMS` |
 
@@ -163,7 +165,28 @@ spec:
         return f"Echo: {message}"
 ```
 
-### pctx
+### fastmcp-codemode
+
+MCP server aggregator with [FastMCP CodeMode](https://gofastmcp.com/servers/transforms/code-mode) transform. Connects to multiple upstream KAOS MCP servers via HTTP proxy and wraps their tools with CodeMode, exposing meta-tools (`search`, `get_schema`, `execute`) instead of individual tool schemas.
+
+- Aggregates multiple MCP servers (KAOS-managed or external) via HTTP
+- LLMs discover tools via `search` and write Python code to chain cross-server calls via `execute`
+- Code runs in a sandboxed Python environment
+- Reduces token usage and LLM round-trips for multi-step operations
+
+```yaml
+spec:
+  runtime: fastmcp-codemode
+  params: |
+    {
+      "servers": [
+        {"name": "calc", "url": "http://mcpserver-calculator:8000/mcp"},
+        {"name": "text", "url": "http://mcpserver-textutils:8000/mcp"}
+      ]
+    }
+```
+
+### pctx-codemode
 
 Unified MCP aggregator with Code Mode. Aggregates multiple upstream MCP servers into a single interface with efficient code execution.
 
@@ -174,7 +197,7 @@ Based on [pctx (Port of Context)](https://github.com/portofcontext/pctx), this r
 
 ```yaml
 spec:
-  runtime: pctx
+  runtime: pctx-codemode
   params: |
     {
       "name": "unified-mcp",
@@ -292,7 +315,7 @@ spec:
         return a - b
 ```
 
-### Unified MCP Server (pctx)
+### Unified MCP Server (pctx-codemode)
 
 Aggregate multiple MCP servers into a single endpoint with Code Mode:
 
@@ -302,7 +325,7 @@ kind: MCPServer
 metadata:
   name: unified-tools
 spec:
-  runtime: pctx
+  runtime: pctx-codemode
   params: |
     {
       "name": "unified-tools",

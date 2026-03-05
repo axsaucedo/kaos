@@ -1,4 +1,4 @@
-# pctx MCP Server Runtime
+# pctx-codemode MCP Server Runtime
 
 Unified MCP aggregator with Code Mode based on [pctx](https://github.com/portofcontext/pctx).
 
@@ -19,7 +19,7 @@ kind: MCPServer
 metadata:
   name: unified-mcp
 spec:
-  runtime: pctx
+  runtime: pctx-codemode
   params: |
     {
       "name": "unified-mcp",

@@ -353,14 +353,15 @@ jobs:
           sed -i "s|axsauze/kaos-agent:[0-9]*\.[0-9]*\.[0-9]*[^\"]*|axsauze/kaos-agent:$NEXT_DEV|g" operator/chart/values.yaml
           sed -i "s|axsauze/kaos-mcp-server:[0-9]*\.[0-9]*\.[0-9]*[^\"]*|axsauze/kaos-mcp-server:$NEXT_DEV|g" operator/chart/values.yaml
           sed -i "s|axsauze/kaos-mcp-python-string:[0-9]*\.[0-9]*\.[0-9]*[^\"]*|axsauze/kaos-mcp-python-string:$NEXT_DEV|g" operator/chart/values.yaml
-          sed -i "s|axsauze/kaos-mcp-pctx:[0-9]*\.[0-9]*\.[0-9]*[^\"]*|axsauze/kaos-mcp-pctx:$NEXT_DEV|g" operator/chart/values.yaml
+          sed -i "s|axsauze/kaos-mcp-pctx-codemode:[0-9]*\.[0-9]*\.[0-9]*[^\"]*|axsauze/kaos-mcp-pctx-codemode:$NEXT_DEV|g" operator/chart/values.yaml
+          sed -i "s|axsauze/kaos-mcp-fastmcp-codemode:[0-9]*\.[0-9]*\.[0-9]*[^\"]*|axsauze/kaos-mcp-fastmcp-codemode:$NEXT_DEV|g" operator/chart/values.yaml
 
           echo "Updated files:"
           cat VERSION
           grep "^version" pydantic-ai-server/pyproject.toml
           grep "^version" kaos-cli/pyproject.toml
           grep "^version:\|^appVersion:" operator/chart/Chart.yaml
-          grep -E "tag:|kaos-(agent|mcp-server|mcp-python-string|mcp-pctx):" operator/chart/values.yaml
+          grep -E "tag:|kaos-(agent|mcp-server|mcp-python-string|mcp-pctx-codemode|mcp-fastmcp-codemode):" operator/chart/values.yaml
 
       - name: Create Pull Request
         if: steps.check-bump.outputs.skip != 'true'

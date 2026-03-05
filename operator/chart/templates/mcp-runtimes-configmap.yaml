@@ -17,11 +17,18 @@ data:
         paramsEnvVar: MCP_TOOLS_STRING
         transport: http
         
-      pctx:
+      pctx-codemode:
         type: nodejs
-        image: {{ .Values.defaultImages.mcpPctx }}
+        image: {{ .Values.defaultImages.mcpPctxCodemode }}
         description: "Unified MCP aggregator with Code Mode (pctx)"
         paramsEnvVar: PCTX_CONFIG
+        transport: http
+
+      fastmcp-codemode:
+        type: python
+        image: {{ .Values.defaultImages.mcpFastmcpCodemode }}
+        description: "MCP server aggregator with FastMCP CodeMode transform"
+        paramsEnvVar: MCP_SERVERS_CONFIG
         transport: http
         
       # === ECOSYSTEM RUNTIMES (external images) ===
