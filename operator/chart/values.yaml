@@ -33,7 +33,7 @@ defaultImages:
   agentRuntime: axsauze/kaos-agent:0.3.2-dev
   mcpServer: axsauze/kaos-mcp-server:0.3.2-dev
   mcpPythonString: axsauze/kaos-mcp-python-string:0.3.2-dev
-  mcpPctx: axsauze/kaos-mcp-pctx:0.3.2-dev
+  mcpPctxCodemode: axsauze/kaos-mcp-pctx-codemode:0.3.2-dev
   mcpFastmcpCodemode: axsauze/kaos-mcp-fastmcp-codemode:0.3.2-dev
   mcpKubernetes: quay.io/containers/kubernetes_mcp_server:latest
   mcpSlack: zencoderai/slack-mcp:latest

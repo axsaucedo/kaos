@@ -1,4 +1,4 @@
-# pctx MCP Server - Unified MCP aggregator with Code Mode
+# pctx-codemode MCP Server - Unified MCP aggregator with Code Mode
 # Based on https://github.com/portofcontext/pctx
 FROM node:22-slim
 

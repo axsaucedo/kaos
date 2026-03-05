@@ -91,10 +91,10 @@ class TestExamplesViaJupytext:
         assert result.returncode == 0, f"Example execution failed: {result.stderr}"
 
     def test_unified_mcp_gateway_example(self):
-        """Execute the Unified MCP Gateway (pctx) example.
+        """Execute the Unified MCP Gateway (pctx-codemode) example.
         
-        Tests: pctx aggregation, Code Mode, multi-server routing
-        Note: Uses longer timeout (420s) due to multiple MCP servers + pctx gateway
+        Tests: pctx-codemode aggregation, Code Mode, multi-server routing
+        Note: Uses longer timeout (420s) due to multiple MCP servers + pctx-codemode gateway
         """
         example_file = DOCS_EXAMPLES_PATH / "unified-mcp-gateway.md"
         assert example_file.exists(), f"Example file not found: {example_file}"

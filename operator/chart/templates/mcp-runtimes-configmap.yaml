@@ -17,9 +17,9 @@ data:
         paramsEnvVar: MCP_TOOLS_STRING
         transport: http
         
-      pctx:
+      pctx-codemode:
         type: nodejs
-        image: {{ .Values.defaultImages.mcpPctx }}
+        image: {{ .Values.defaultImages.mcpPctxCodemode }}
         description: "Unified MCP aggregator with Code Mode (pctx)"
         paramsEnvVar: PCTX_CONFIG
         transport: http

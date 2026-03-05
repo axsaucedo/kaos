@@ -85,7 +85,7 @@ First, let's set up the environment and create a namespace:
 
 ```python
 import os
-os.environ['NAMESPACE'] = 'pctx-gateway-example'
+os.environ['NAMESPACE'] = 'pctx-codemode-gateway-example'
 ```
 
 ```bash
@@ -180,7 +180,7 @@ export PCTX_CONFIG='
   ]
 }'
 
-kaos mcp deploy unified-gateway --runtime pctx --params "$PCTX_CONFIG" --wait
+kaos mcp deploy unified-gateway --runtime pctx-codemode --params "$PCTX_CONFIG" --wait
 ```
 
 ## Step 4: Create the Agent

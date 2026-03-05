@@ -59,7 +59,7 @@ Runtime identifier for the MCP server. Can be:
 | Value | Description |
 |-------|-------------|
 | `python-string` | Python code execution via MCP_TOOLS_STRING |
-| `pctx` | Unified MCP aggregator with Code Mode |
+| `pctx-codemode` | Unified MCP aggregator with Code Mode |
 | `kubernetes` | Kubernetes CRUD operations |
 | `slack` | Slack integration |
 | `custom` | User-provided container image |
@@ -73,7 +73,7 @@ Runtime-specific configuration passed to the container. The delivery method depe
 | Runtime | Params Environment Variable |
 |---------|---------------------------|
 | `python-string` | `MCP_TOOLS_STRING` |
-| `pctx` | `PCTX_CONFIG` |
+| `pctx-codemode` | `PCTX_CONFIG` |
 | `kubernetes` | `MCP_PARAMS` |
 | `slack` | `MCP_PARAMS` |
 
@@ -163,7 +163,7 @@ spec:
         return f"Echo: {message}"
 ```
 
-### pctx
+### pctx-codemode
 
 Unified MCP aggregator with Code Mode. Aggregates multiple upstream MCP servers into a single interface with efficient code execution.
 
@@ -174,7 +174,7 @@ Based on [pctx (Port of Context)](https://github.com/portofcontext/pctx), this r
 
 ```yaml
 spec:
-  runtime: pctx
+  runtime: pctx-codemode
   params: |
     {
       "name": "unified-mcp",
@@ -292,7 +292,7 @@ spec:
         return a - b
 ```
 
-### Unified MCP Server (pctx)
+### Unified MCP Server (pctx-codemode)
 
 Aggregate multiple MCP servers into a single endpoint with Code Mode:
 
@@ -302,7 +302,7 @@ kind: MCPServer
 metadata:
   name: unified-tools
 spec:
-  runtime: pctx
+  runtime: pctx-codemode
   params: |
     {
       "name": "unified-tools",
