@@ -23,6 +23,13 @@ data:
         description: "Unified MCP aggregator with Code Mode (pctx)"
         paramsEnvVar: PCTX_CONFIG
         transport: http
+
+      fastmcp-codemode:
+        type: python
+        image: {{ .Values.defaultImages.mcpFastmcpCodemode }}
+        description: "Python tools with FastMCP CodeMode transform"
+        paramsEnvVar: MCP_TOOLS_STRING
+        transport: http
         
       # === ECOSYSTEM RUNTIMES (external images) ===
       
