@@ -33,7 +33,7 @@ version = "0.1.0"
 description = "A FastMCP server created with kaos mcp init"
 requires-python = ">=3.11"
 dependencies = [
-    "fastmcp>=2.0.0",
+    "fastmcp>=3.1.0",
 ]
 
 [build-system]
