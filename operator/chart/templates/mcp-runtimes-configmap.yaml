@@ -27,8 +27,8 @@ data:
       fastmcp-codemode:
         type: python
         image: {{ .Values.defaultImages.mcpFastmcpCodemode }}
-        description: "Python tools with FastMCP CodeMode transform"
-        paramsEnvVar: MCP_TOOLS_STRING
+        description: "MCP server aggregator with FastMCP CodeMode transform"
+        paramsEnvVar: MCP_SERVERS_CONFIG
         transport: http
         
       # === ECOSYSTEM RUNTIMES (external images) ===
