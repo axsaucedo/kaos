@@ -82,7 +82,7 @@ make e2e-test                     # Run E2E tests
 
 ### Test Structure
 - `conftest.py`: Fixtures, namespace management, Gateway URL setup
-- `test_a2a_e2e.py`: A2A JSON-RPC endpoint tests (SendMessage, GetTask, CancelTask, blocking mode)
+- `test_a2a_e2e.py`: A2A JSON-RPC endpoint tests (SendMessage, GetTask, CancelTask)
 - `test_agentic_loop_e2e.py`: Agent with MCP tools tests
 - `test_mcp_tools_e2e.py`: MCPServer runtime tests (python-string)
 - `test_modelapi_e2e.py`: ModelAPI CRD tests

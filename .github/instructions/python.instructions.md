@@ -18,8 +18,7 @@ make format                     # Auto-format code
 ## Project Structure
 - `pais/server.py`: AgentServer, create_agent_server(), routes, _process_message(), logging
 - `pais/serverutils.py`: AgentDeps, AgentCard (Pydantic BaseModel), AgentCardSkill, AgentCardCapabilities, RemoteAgent (A2A + chat delegation), AgentServerSettings, _resolve_model, response builders
-- `pais/a2a.py`: TaskManager, JSON-RPC models/dispatcher/handlers, setup_a2a_routes()
-- `pais/taskstore.py`: TaskStore ABC, Task, TaskState, LocalTaskStore, NullTaskStore
+- `pais/a2a.py`: TaskManager ABC, LocalTaskManager, NullTaskManager, Task/TaskState data model, JSON-RPC models/dispatcher/handlers, setup_a2a_routes()
 - `pais/tools.py`: DelegationToolset (AbstractToolset), execute_delegation, format_progress_event, build_string_mode_handler
 - `pais/memory.py`: Memory ABC, LocalMemory, RedisMemory, NullMemory + build_message_history/store_pydantic_message utilities
 - `pais/telemetry.py`: OpenTelemetry instrumentation (tracing, metrics, SERVICE_NAME)
@@ -28,8 +27,7 @@ make format                     # Auto-format code
 **Module layout rationale:**
 - `server.py` owns the server lifecycle: AgentServer class, create_agent_server() factory, request routing
 - `serverutils.py` owns data classes, settings, model resolution, RemoteAgent (A2A + chat delegation), response formatting helpers
-- `a2a.py` owns A2A protocol: TaskManager (orchestration), JSON-RPC models/dispatcher/handlers, route setup
-- `taskstore.py` owns pure storage: TaskStore ABC + Local/Null backends, Task dataclass with state machine
+- `a2a.py` owns A2A protocol: TaskManager ABC + LocalTaskManager/NullTaskManager, Task data model, JSON-RPC models/dispatcher/handlers, route setup
 - `tools.py` owns tool extensions: DelegationToolset (AbstractToolset subclass), string-mode model handler, progress event formatting
 - `memory.py` owns persistence: Memory ABC + all backends, plus build_message_history/store_pydantic_message utilities on the base class
 
@@ -52,7 +50,7 @@ make format                     # Auto-format code
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | OTLP exporter endpoint |
 | `OTEL_INSTRUMENTATION_VERSION` | Pydantic AI instrumentation version: 1-4 (default: `4`) |
 | `OTEL_EVENT_MODE` | Pydantic AI event mode: `attributes` (default) or `logs` (forces v1) |
-| `TASK_STORE_TYPE` | TaskStore backend: `local` (default) or `null` (disabled) |
+| `TASK_STORE_TYPE` | TaskManager backend: `local` (default) or `null` (disabled) |
 
 ## Architecture
 
@@ -100,7 +98,7 @@ make format                     # Auto-format code
 - `build_message_history(session_id, context_limit)`: KAOS events → Pydantic AI `ModelRequest`/`ModelResponse` messages
 - `store_pydantic_message(session_id, msg)`: Pydantic AI messages → KAOS memory events
 - Memory event types for delegation: `delegation_request`/`delegation_response` (not `tool_call`/`tool_result`)
-- Incoming task-delegation: detected via `task-delegation` role → stored as `task_delegation_received`
+- All delegation messages stored as `user_message` events (no special delegation role)
 - `memory_context_limit` caps history size passed to model (default 6)
 - Streaming and non-streaming paths both persist tool/delegation events via `result.new_messages()`
 
@@ -113,10 +111,11 @@ make format                     # Auto-format code
 - `AgentServer`: Central server — owns pydantic_ai.Agent, memory, routes, `_process_message()`
 - `AgentDeps`: Per-run dependencies (session_id, memory) injected via RunContext
 - `DelegationToolset`: AbstractToolset that exposes sub-agents as delegate_to_ tools
-- `RemoteAgent`: HTTP client for sub-agent delegation — tries A2A SendMessage (blocking) first, falls back to /v1/chat/completions
-- `TaskManager`: Orchestration layer wrapping TaskStore — submit, execute, cancel, wait_for_completion with OTel spans/metrics
-- `TaskStore`: ABC interface for LocalTaskStore, NullTaskStore — pure storage backend
-- `Task`: Task dataclass with id, session_id, state, history, output, timestamps
+- `RemoteAgent`: HTTP client for sub-agent delegation — tries A2A SendMessage first, falls back to /v1/chat/completions
+- `TaskManager`: ABC for task lifecycle — `send_message()`, `get_task()`, `cancel_task()`, `wait_for_completion()`, `shutdown()`
+- `LocalTaskManager`: In-memory implementation with synchronous execution, OTel instrumentation
+- `NullTaskManager`: No-op implementation (like NullMemory)
+- `Task`: Task dataclass with id, session_id, status, history, metadata, timestamps
 - `TaskState`: Enum — submitted, working, completed, failed, canceled
 - `AgentCard`: A2A-compliant discovery card (Pydantic BaseModel with `alias_generator=to_camel`, `.to_dict()` uses `model_dump(by_alias=True)`)
 - `AgentCardSkill`: A2A skill with id, name, description, tags, inputModes, outputModes
@@ -125,30 +124,29 @@ make format                     # Auto-format code
 - `JsonRpcRequest`/`JsonRpcResponse`/`JsonRpcError`: JSON-RPC 2.0 envelope models (in a2a.py)
 - `_MockResponseState`: Mutable mock response state shared via closure (workaround for ContextVar + FunctionModel issue)
 
-### TaskStore & TaskManager
-- **TaskStore** ABC = pure storage: `create_task()`, `get_task()`, `update_task_state()`, `set_task_output()`, `cancel_task()`, `list_tasks()`
-- **TaskManager** = orchestration: `submit_task()`, `_execute_task()`, `cancel_task()`, `wait_for_completion()`, `shutdown()`
-- `LocalTaskStore`: In-memory dict-based backend (default, single-pod)
-- `NullTaskStore`: No-op implementation — `create_task()` returns a task but nothing is persisted
-- State transitions enforced via `VALID_TRANSITIONS` dict — terminal states (completed, failed, canceled) allow no further transitions
+### TaskManager
+- **TaskManager** ABC: `send_message()`, `get_task()`, `cancel_task()`, `wait_for_completion()`, `shutdown()`
+- **LocalTaskManager**: In-memory dict storage, synchronous process_fn execution, OTel spans/metrics
+- **NullTaskManager**: No-op — `send_message()` returns a stub task, nothing persisted
+- State transitions enforced via `VALID_TRANSITIONS` dict — terminal states allow no further transitions
 - `TASK_STORE_TYPE` env var controls backend selection (`local` default, `null` to disable)
-- TaskManager instrumented with OTel spans (`kaos.task.submit`, `kaos.task.execute`, `kaos.task.cancel`) and metrics (`kaos.tasks` counter, `kaos.task.duration` histogram)
+- Instrumented with OTel spans (`kaos.task.submit`, `kaos.task.execute`, `kaos.task.cancel`) and metrics (`kaos.tasks` counter, `kaos.task.duration` histogram)
 
 ### A2A JSON-RPC Endpoint (POST /) — a2a.py
 - JSON-RPC 2.0 dispatcher at root path, separate from `/v1/chat/completions`
 - A2A RC v1.0 methods: `SendMessage`, `GetTask`, `CancelTask` (PascalCase)
 - Legacy aliases: `tasks/send`, `tasks/get`, `tasks/cancel` (backward compatible)
-- `SendMessage` supports `configuration.blocking: true` for synchronous completion
+- `SendMessage` executes synchronously — always returns completed/failed task
 - `contextId` param maps to session_id
 - Standard error codes: -32700 (parse), -32600 (invalid request), -32601 (method not found), -32602 (invalid params), -32603 (internal), -32001 (task not found)
 - A2A message format: `{role: "user"/"agent", parts: [{type: "text", text: "..."}]}`
-- Agent card `stateTransitionHistory` dynamically reflects active TaskStore (not NullTaskStore)
+- Agent card `stateTransitionHistory` dynamically reflects active TaskManager (not NullTaskManager)
 
 ### A2A Delegation (RemoteAgent)
 - `RemoteAgent.process_message()` checks `supportedProtocols` from agent card
-- If `"jsonrpc"` present: tries A2A `SendMessage` with `configuration.blocking: true`
+- If `"jsonrpc"` present: tries A2A `SendMessage`
 - Falls back to `/v1/chat/completions` if A2A fails or unsupported
-- Response extraction: artifacts → output → status.message
+- Response extraction: artifacts → output → history (last agent message) → status.message
 
 ## Mock Response Pattern
 For testing, `DEBUG_MOCK_RESPONSES` creates a `FunctionModel` that returns responses in sequence.
