@@ -11,7 +11,7 @@ from httpx import AsyncClient, ASGITransport
 from pydantic_ai.models.test import TestModel
 
 from tests.helpers import make_test_server
-from pais.taskstore import LocalTaskStore, TaskState
+from pais.a2a import TaskState
 from pais.memory import LocalMemory
 
 
@@ -54,9 +54,8 @@ class TestA2AIntegrationLifecycle:
     async def test_task_execution_stores_memory_events(self):
         """Verify task execution writes events to memory backend."""
         memory = LocalMemory()
-        task_store = LocalTaskStore()
         model = TestModel(custom_output_text="Memory integration result")
-        server = make_test_server(model=model, task_store=task_store, memory=memory)
+        server = make_test_server(model=model, task_manager_type="local", memory=memory)
         transport = ASGITransport(app=server.app)
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -74,9 +73,8 @@ class TestA2AIntegrationLifecycle:
     @pytest.mark.asyncio
     async def test_multiple_concurrent_tasks(self):
         """Test multiple tasks can execute concurrently."""
-        task_store = LocalTaskStore()
         model = TestModel(custom_output_text="Concurrent result")
-        server = make_test_server(model=model, task_store=task_store)
+        server = make_test_server(model=model, task_manager_type="local")
         transport = ASGITransport(app=server.app)
 
         task_ids = []
@@ -100,9 +98,8 @@ class TestA2AIntegrationLifecycle:
     @pytest.mark.asyncio
     async def test_task_with_shared_session(self):
         """Test multiple tasks sharing a sessionId."""
-        task_store = LocalTaskStore()
         model = TestModel(custom_output_text="Session result")
-        server = make_test_server(model=model, task_store=task_store)
+        server = make_test_server(model=model, task_manager_type="local")
         transport = ASGITransport(app=server.app)
 
         shared_session = "shared-session-id"
@@ -127,9 +124,8 @@ class TestA2AIntegrationLifecycle:
     @pytest.mark.asyncio
     async def test_cancel_submitted_task(self):
         """Test cancelling a task that was submitted."""
-        task_store = LocalTaskStore()
         model = TestModel(custom_output_text="Should not complete")
-        server = make_test_server(model=model, task_store=task_store)
+        server = make_test_server(model=model, task_manager_type="local")
         transport = ASGITransport(app=server.app)
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -147,9 +143,8 @@ class TestA2AIntegrationLifecycle:
     @pytest.mark.asyncio
     async def test_agent_card_via_http_with_taskstore(self):
         """Test agent card endpoint reflects A2A capabilities."""
-        task_store = LocalTaskStore()
         model = TestModel(custom_output_text="test")
-        server = make_test_server(name="a2a-agent", model=model, task_store=task_store)
+        server = make_test_server(name="a2a-agent", model=model, task_manager_type="local")
         transport = ASGITransport(app=server.app)
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -178,9 +173,8 @@ class TestA2AIntegrationLifecycle:
     @pytest.mark.asyncio
     async def test_tasks_send_then_get_has_consistent_data(self):
         """Verify tasks/get returns consistent task data after completion."""
-        task_store = LocalTaskStore()
         model = TestModel(custom_output_text="Final answer here")
-        server = make_test_server(model=model, task_store=task_store)
+        server = make_test_server(model=model, task_manager_type="local")
         transport = ASGITransport(app=server.app)
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -210,14 +204,13 @@ class TestA2AIntegrationLifecycle:
         _process_message catches errors and yields an error string,
         so the task still transitions to completed (not failed).
         """
-        task_store = LocalTaskStore()
         from pydantic_ai.models.function import FunctionModel
 
         def error_handler(messages, info):
             raise RuntimeError("Simulated model error")
 
         model = FunctionModel(error_handler)
-        server = make_test_server(model=model, task_store=task_store)
+        server = make_test_server(model=model, task_manager_type="local")
         transport = ASGITransport(app=server.app)
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -231,16 +224,15 @@ class TestA2AIntegrationLifecycle:
         assert any("error" in str(m).lower() for m in agent_msgs)
 
     @pytest.mark.asyncio
-    async def test_jsonrpc_without_taskstore_returns_error(self):
-        """Test JSON-RPC endpoint returns error when TaskStore is NullTaskStore."""
+    async def test_jsonrpc_without_task_manager_returns_result(self):
+        """Test JSON-RPC endpoint with NullTaskManager returns a stub task."""
         model = TestModel(custom_output_text="test")
-        server = make_test_server(model=model)  # No task_store = NullTaskStore
+        server = make_test_server(model=model)  # No task_manager_type = NullTaskManager
         transport = ASGITransport(app=server.app)
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.post("/", json=_send_message("Hello"))
             data = resp.json()
 
-        # tasks/send should still work — NullTaskStore returns None from get/create
-        # so the endpoint should return an internal error since task creation fails
-        assert "error" in data or "result" in data
+        # NullTaskManager.send_message returns a stub task
+        assert "result" in data

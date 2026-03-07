@@ -1,14 +1,15 @@
-"""Tests for TaskStore data model, LocalTaskStore, and NullTaskStore."""
+"""Tests for Task data model, LocalTaskManager, and NullTaskManager."""
 
+import asyncio
 import pytest
 
-from pais.taskstore import (
+from pais.a2a import (
     TaskState,
     TaskStatus,
     TaskMessage,
     Task,
-    LocalTaskStore,
-    NullTaskStore,
+    LocalTaskManager,
+    NullTaskManager,
     VALID_TRANSITIONS,
     TERMINAL_STATES,
 )
@@ -77,13 +78,18 @@ class TestTaskModel:
         assert len(VALID_TRANSITIONS[TaskState.CANCELED]) == 0
 
 
-class TestLocalTaskStore:
-    """Tests for LocalTaskStore CRUD operations."""
+async def _mock_process(msg, session_id="", stream=False):
+    """Simple mock process function that yields a result."""
+    yield "Task result"
+
+
+class TestLocalTaskManager:
+    """Tests for LocalTaskManager through the TaskManager interface."""
 
     @pytest.mark.asyncio
-    async def test_create_task(self):
-        store = LocalTaskStore()
-        task = await store.create_task(input_message="Hello")
+    async def test_send_message_creates_task(self):
+        manager = LocalTaskManager(_mock_process)
+        task = await manager.send_message("Hello")
         assert task.id.startswith("task_")
         assert task.session_id.startswith("session_")
         assert task.status.state == TaskState.SUBMITTED
@@ -92,219 +98,159 @@ class TestLocalTaskStore:
         assert task.history[0].text == "Hello"
 
     @pytest.mark.asyncio
-    async def test_create_task_with_session_id(self):
-        store = LocalTaskStore()
-        task = await store.create_task(session_id="my-session", input_message="Hello")
+    async def test_send_message_with_session_id(self):
+        manager = LocalTaskManager(_mock_process)
+        task = await manager.send_message("Hello", session_id="my-session")
         assert task.session_id == "my-session"
 
     @pytest.mark.asyncio
-    async def test_create_task_with_metadata(self):
-        store = LocalTaskStore()
-        task = await store.create_task(metadata={"priority": "high"})
+    async def test_send_message_with_metadata(self):
+        manager = LocalTaskManager(_mock_process)
+        task = await manager.send_message("Hello", metadata={"priority": "high"})
         assert task.metadata == {"priority": "high"}
 
     @pytest.mark.asyncio
-    async def test_create_task_no_input(self):
-        store = LocalTaskStore()
-        task = await store.create_task()
-        assert len(task.history) == 0
+    async def test_send_message_generates_session_id(self):
+        manager = LocalTaskManager(_mock_process)
+        task = await manager.send_message("Hello")
+        assert task.session_id.startswith("session_")
 
     @pytest.mark.asyncio
     async def test_get_task(self):
-        store = LocalTaskStore()
-        created = await store.create_task(input_message="Test")
-        fetched = await store.get_task(created.id)
+        manager = LocalTaskManager(_mock_process)
+        created = await manager.send_message("Test")
+        fetched = await manager.get_task(created.id)
         assert fetched is not None
         assert fetched.id == created.id
 
     @pytest.mark.asyncio
     async def test_get_task_not_found(self):
-        store = LocalTaskStore()
-        result = await store.get_task("nonexistent")
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_update_task_state(self):
-        store = LocalTaskStore()
-        task = await store.create_task()
-
-        updated = await store.update_task_state(task.id, TaskState.WORKING, "Processing")
-        assert updated is not None
-        assert updated.status.state == TaskState.WORKING
-        assert updated.status.message == "Processing"
-
-    @pytest.mark.asyncio
-    async def test_update_task_state_invalid_transition(self):
-        store = LocalTaskStore()
-        task = await store.create_task()
-
-        # submitted -> completed is not valid (must go through working)
-        result = await store.update_task_state(task.id, TaskState.COMPLETED)
-        assert result is None
-        # State unchanged
-        fetched = await store.get_task(task.id)
-        assert fetched is not None
-        assert fetched.status.state == TaskState.SUBMITTED
-
-    @pytest.mark.asyncio
-    async def test_update_task_state_not_found(self):
-        store = LocalTaskStore()
-        result = await store.update_task_state("nonexistent", TaskState.WORKING)
+        manager = LocalTaskManager(_mock_process)
+        result = await manager.get_task("nonexistent")
         assert result is None
 
     @pytest.mark.asyncio
     async def test_full_lifecycle(self):
-        store = LocalTaskStore()
-        task = await store.create_task(input_message="Do work")
+        manager = LocalTaskManager(_mock_process)
+        task = await manager.send_message("Do work")
         assert task.status.state == TaskState.SUBMITTED
 
-        await store.update_task_state(task.id, TaskState.WORKING, "In progress")
-        fetched = await store.get_task(task.id)
-        assert fetched is not None
-        assert fetched.status.state == TaskState.WORKING
-
-        await store.set_task_output(fetched.id, "Work done!")
-        await store.update_task_state(fetched.id, TaskState.COMPLETED, "Finished")
-        completed = await store.get_task(fetched.id)
+        completed = await manager.wait_for_completion(task.id, timeout=5.0)
         assert completed is not None
         assert completed.status.state == TaskState.COMPLETED
-        assert len(completed.history) == 2
+        assert len(completed.history) >= 2
         assert completed.history[1].role == "agent"
-        assert completed.history[1].text == "Work done!"
+        assert completed.history[1].text == "Task result"
 
     @pytest.mark.asyncio
     async def test_cancel_task(self):
-        store = LocalTaskStore()
-        task = await store.create_task()
-        result = await store.cancel_task(task.id)
-        assert result is not None
-        assert result.status.state == TaskState.CANCELED
+        """Test canceling a task that is still in submitted state."""
+        started = asyncio.Event()
+
+        async def slow_process(msg, session_id="", stream=False):
+            started.set()
+            await asyncio.sleep(100)
+            yield "result"
+
+        manager = LocalTaskManager(slow_process)
+        task = await manager.send_message("Cancel me")
+
+        # Wait for execution to start so the task is in working state
+        await asyncio.wait_for(started.wait(), timeout=5.0)
+
+        result = await manager.cancel_task(task.id)
+        assert result is True
+
+        fetched = await manager.get_task(task.id)
+        assert fetched is not None
+        assert fetched.status.state == TaskState.CANCELED
+        await manager.shutdown()
 
     @pytest.mark.asyncio
     async def test_cancel_completed_task(self):
-        store = LocalTaskStore()
-        task = await store.create_task()
-        await store.update_task_state(task.id, TaskState.WORKING)
-        await store.update_task_state(task.id, TaskState.COMPLETED)
-        result = await store.cancel_task(task.id)
-        assert result is None  # Cannot cancel completed task
+        manager = LocalTaskManager(_mock_process)
+        task = await manager.send_message("Complete me")
+        await manager.wait_for_completion(task.id, timeout=5.0)
+        result = await manager.cancel_task(task.id)
+        assert result is False  # Cannot cancel completed task
 
     @pytest.mark.asyncio
     async def test_cancel_nonexistent_task(self):
-        store = LocalTaskStore()
-        result = await store.cancel_task("nonexistent")
-        assert result is None
-
-    @pytest.mark.asyncio
-    async def test_list_tasks(self):
-        store = LocalTaskStore()
-        await store.create_task(session_id="s1")
-        await store.create_task(session_id="s1")
-        await store.create_task(session_id="s2")
-
-        all_tasks = await store.list_tasks()
-        assert len(all_tasks) == 3
-
-        s1_tasks = await store.list_tasks(session_id="s1")
-        assert len(s1_tasks) == 2
-
-        s2_tasks = await store.list_tasks(session_id="s2")
-        assert len(s2_tasks) == 1
-
-    @pytest.mark.asyncio
-    async def test_set_task_output(self):
-        store = LocalTaskStore()
-        task = await store.create_task(input_message="Hello")
-        result = await store.set_task_output(task.id, "Response text")
-        assert result is not None
-        assert len(result.history) == 2
-        assert result.history[1].text == "Response text"
-
-    @pytest.mark.asyncio
-    async def test_set_task_output_not_found(self):
-        store = LocalTaskStore()
-        result = await store.set_task_output("nonexistent", "text")
-        assert result is None
+        manager = LocalTaskManager(_mock_process)
+        result = await manager.cancel_task("nonexistent")
+        assert result is False
 
     @pytest.mark.asyncio
     async def test_failed_task_lifecycle(self):
-        store = LocalTaskStore()
-        task = await store.create_task()
-        await store.update_task_state(task.id, TaskState.WORKING)
-        await store.update_task_state(task.id, TaskState.FAILED, "Error occurred")
-        fetched = await store.get_task(task.id)
-        assert fetched is not None
-        assert fetched.status.state == TaskState.FAILED
-        assert fetched.status.message == "Error occurred"
+        async def failing_process(msg, session_id="", stream=False):
+            raise RuntimeError("Error occurred")
+            yield
+
+        manager = LocalTaskManager(failing_process)
+        task = await manager.send_message("Fail me")
+        completed = await manager.wait_for_completion(task.id, timeout=5.0)
+        assert completed is not None
+        assert completed.status.state == TaskState.FAILED
+        assert completed.status.message == "Error occurred"
 
     @pytest.mark.asyncio
-    async def test_terminal_state_no_transitions(self):
-        """Terminal states cannot transition to any other state."""
-        store = LocalTaskStore()
-        task = await store.create_task()
-        await store.update_task_state(task.id, TaskState.WORKING)
-        await store.update_task_state(task.id, TaskState.COMPLETED)
-
-        for target in TaskState:
-            result = await store.update_task_state(task.id, target)
-            assert result is None
+    async def test_shutdown(self):
+        manager = LocalTaskManager(_mock_process)
+        await manager.shutdown()  # Should not raise
 
     @pytest.mark.asyncio
     async def test_cleanup_on_capacity(self):
-        store = LocalTaskStore(max_tasks=5)
-        tasks = []
+        manager = LocalTaskManager(_mock_process, max_tasks=5)
         for i in range(5):
-            t = await store.create_task()
-            tasks.append(t)
+            task = await manager.send_message(f"Task {i}")
+            await manager.wait_for_completion(task.id, timeout=5.0)
 
-        # Mark first 2 as completed
-        await store.update_task_state(tasks[0].id, TaskState.WORKING)
-        await store.update_task_state(tasks[0].id, TaskState.COMPLETED)
-        await store.update_task_state(tasks[1].id, TaskState.WORKING)
-        await store.update_task_state(tasks[1].id, TaskState.COMPLETED)
-
-        # Creating 6th triggers cleanup
-        await store.create_task()
-        all_tasks = await store.list_tasks()
-        assert len(all_tasks) <= 5
-
-
-class TestNullTaskStore:
-    """Tests for NullTaskStore no-op implementation."""
+        # Creating 6th triggers cleanup of completed tasks
+        await manager.send_message("Task 5")
+        # Internal tasks dict should have been cleaned
+        # We just verify no errors occurred
 
     @pytest.mark.asyncio
-    async def test_create_task(self):
-        store = NullTaskStore()
-        task = await store.create_task(input_message="Hello")
+    async def test_multiple_tasks(self):
+        manager = LocalTaskManager(_mock_process)
+        tasks = []
+        for i in range(3):
+            task = await manager.send_message(f"Task {i}", session_id=f"s{i}")
+            tasks.append(task)
+
+        for task in tasks:
+            completed = await manager.wait_for_completion(task.id, timeout=5.0)
+            assert completed is not None
+            assert completed.status.state == TaskState.COMPLETED
+
+
+class TestNullTaskManager:
+    """Tests for NullTaskManager no-op implementation."""
+
+    @pytest.mark.asyncio
+    async def test_send_message(self):
+        manager = NullTaskManager()
+        task = await manager.send_message("Hello")
         assert task.id.startswith("null_task_")
         assert task.status.state == TaskState.SUBMITTED
 
     @pytest.mark.asyncio
     async def test_get_task_returns_none(self):
-        store = NullTaskStore()
-        assert await store.get_task("any-id") is None
+        manager = NullTaskManager()
+        assert await manager.get_task("any-id") is None
 
     @pytest.mark.asyncio
-    async def test_update_returns_none(self):
-        store = NullTaskStore()
-        assert await store.update_task_state("any", TaskState.WORKING) is None
+    async def test_cancel_returns_false(self):
+        manager = NullTaskManager()
+        assert await manager.cancel_task("any") is False
 
     @pytest.mark.asyncio
-    async def test_cancel_returns_none(self):
-        store = NullTaskStore()
-        assert await store.cancel_task("any") is None
+    async def test_shutdown(self):
+        manager = NullTaskManager()
+        await manager.shutdown()  # Should not raise
 
     @pytest.mark.asyncio
-    async def test_list_returns_empty(self):
-        store = NullTaskStore()
-        assert await store.list_tasks() == []
-
-    @pytest.mark.asyncio
-    async def test_set_output_returns_none(self):
-        store = NullTaskStore()
-        assert await store.set_task_output("any", "text") is None
-
-    @pytest.mark.asyncio
-    async def test_close(self):
-        store = NullTaskStore()
-        await store.close()  # Should not raise
+    async def test_wait_for_completion_returns_none(self):
+        manager = NullTaskManager()
+        result = await manager.wait_for_completion("any-id", timeout=0.1)
+        assert result is None

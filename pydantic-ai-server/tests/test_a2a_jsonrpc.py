@@ -10,14 +10,13 @@ from httpx import AsyncClient, ASGITransport
 from pydantic_ai.models.test import TestModel
 
 from tests.helpers import make_test_server
-from pais.taskstore import LocalTaskStore, TaskState
+from pais.a2a import TaskState
 
 
-def _make_server_with_taskstore(**kwargs):
-    """Create a test server with a LocalTaskStore."""
-    task_store = LocalTaskStore()
+def _make_server_with_task_manager(**kwargs):
+    """Create a test server with a LocalTaskManager."""
     model = kwargs.pop("model", TestModel(custom_output_text="Task completed successfully"))
-    server = make_test_server(model=model, task_store=task_store, **kwargs)
+    server = make_test_server(model=model, task_manager_type="local", **kwargs)
     return server
 
 
@@ -27,7 +26,7 @@ class TestJsonRpcEndpoint:
     @pytest.mark.asyncio
     async def test_tasks_send_basic(self):
         """Test tasks/send creates a task and returns submitted state."""
-        server = _make_server_with_taskstore()
+        server = _make_server_with_task_manager()
         transport = ASGITransport(app=server.app)
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -60,7 +59,7 @@ class TestJsonRpcEndpoint:
     @pytest.mark.asyncio
     async def test_tasks_send_with_session_id(self):
         """Test tasks/send with explicit sessionId."""
-        server = _make_server_with_taskstore()
+        server = _make_server_with_task_manager()
         transport = ASGITransport(app=server.app)
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -86,7 +85,7 @@ class TestJsonRpcEndpoint:
     @pytest.mark.asyncio
     async def test_tasks_send_missing_message(self):
         """Test tasks/send returns error when message is missing."""
-        server = _make_server_with_taskstore()
+        server = _make_server_with_task_manager()
         transport = ASGITransport(app=server.app)
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -107,7 +106,7 @@ class TestJsonRpcEndpoint:
     @pytest.mark.asyncio
     async def test_tasks_send_empty_text(self):
         """Test tasks/send returns error when message has no text."""
-        server = _make_server_with_taskstore()
+        server = _make_server_with_task_manager()
         transport = ASGITransport(app=server.app)
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -128,7 +127,7 @@ class TestJsonRpcEndpoint:
     @pytest.mark.asyncio
     async def test_tasks_get_after_completion(self):
         """Test tasks/get returns completed task with output."""
-        server = _make_server_with_taskstore()
+        server = _make_server_with_task_manager()
         transport = ASGITransport(app=server.app)
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -173,7 +172,7 @@ class TestJsonRpcEndpoint:
     @pytest.mark.asyncio
     async def test_tasks_get_not_found(self):
         """Test tasks/get returns error for unknown task."""
-        server = _make_server_with_taskstore()
+        server = _make_server_with_task_manager()
         transport = ASGITransport(app=server.app)
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -194,7 +193,7 @@ class TestJsonRpcEndpoint:
     @pytest.mark.asyncio
     async def test_tasks_get_missing_id(self):
         """Test tasks/get returns error when id is missing."""
-        server = _make_server_with_taskstore()
+        server = _make_server_with_task_manager()
         transport = ASGITransport(app=server.app)
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -215,7 +214,7 @@ class TestJsonRpcEndpoint:
     @pytest.mark.asyncio
     async def test_tasks_cancel_not_found(self):
         """Test tasks/cancel returns error for unknown task."""
-        server = _make_server_with_taskstore()
+        server = _make_server_with_task_manager()
         transport = ASGITransport(app=server.app)
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -236,7 +235,7 @@ class TestJsonRpcEndpoint:
     @pytest.mark.asyncio
     async def test_tasks_cancel_missing_id(self):
         """Test tasks/cancel returns error when id is missing."""
-        server = _make_server_with_taskstore()
+        server = _make_server_with_task_manager()
         transport = ASGITransport(app=server.app)
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -257,7 +256,7 @@ class TestJsonRpcEndpoint:
     @pytest.mark.asyncio
     async def test_unknown_method(self):
         """Test unknown method returns method not found error."""
-        server = _make_server_with_taskstore()
+        server = _make_server_with_task_manager()
         transport = ASGITransport(app=server.app)
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -277,7 +276,7 @@ class TestJsonRpcEndpoint:
     @pytest.mark.asyncio
     async def test_invalid_json(self):
         """Test invalid JSON returns parse error."""
-        server = _make_server_with_taskstore()
+        server = _make_server_with_task_manager()
         transport = ASGITransport(app=server.app)
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -294,7 +293,7 @@ class TestJsonRpcEndpoint:
     @pytest.mark.asyncio
     async def test_invalid_jsonrpc_structure(self):
         """Test invalid JSON-RPC structure returns error."""
-        server = _make_server_with_taskstore()
+        server = _make_server_with_task_manager()
         transport = ASGITransport(app=server.app)
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -310,7 +309,7 @@ class TestJsonRpcEndpoint:
     @pytest.mark.asyncio
     async def test_full_lifecycle_send_poll_complete(self):
         """Test complete task lifecycle: send → poll → completed."""
-        server = _make_server_with_taskstore()
+        server = _make_server_with_task_manager()
         transport = ASGITransport(app=server.app)
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -367,7 +366,7 @@ class TestA2ASpecCompliantMethods:
     @pytest.mark.asyncio
     async def test_send_message_basic(self):
         """Test SendMessage creates a task."""
-        server = _make_server_with_taskstore()
+        server = _make_server_with_task_manager()
         transport = ASGITransport(app=server.app)
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -394,7 +393,7 @@ class TestA2ASpecCompliantMethods:
     @pytest.mark.asyncio
     async def test_get_task_method(self):
         """Test GetTask retrieves a task."""
-        server = _make_server_with_taskstore()
+        server = _make_server_with_task_manager()
         transport = ASGITransport(app=server.app)
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -431,7 +430,7 @@ class TestA2ASpecCompliantMethods:
     @pytest.mark.asyncio
     async def test_cancel_task_method(self):
         """Test CancelTask cancels a task."""
-        server = _make_server_with_taskstore()
+        server = _make_server_with_task_manager()
         transport = ASGITransport(app=server.app)
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -467,7 +466,7 @@ class TestA2ASpecCompliantMethods:
     @pytest.mark.asyncio
     async def test_send_message_blocking(self):
         """Test SendMessage with blocking=true waits for completion."""
-        server = _make_server_with_taskstore()
+        server = _make_server_with_task_manager()
         transport = ASGITransport(app=server.app)
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -497,7 +496,7 @@ class TestA2ASpecCompliantMethods:
     @pytest.mark.asyncio
     async def test_send_message_with_context_id(self):
         """Test SendMessage with contextId maps to session_id."""
-        server = _make_server_with_taskstore()
+        server = _make_server_with_task_manager()
         transport = ASGITransport(app=server.app)
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -526,16 +525,14 @@ class TestTaskManagerObservability:
 
     @pytest.mark.asyncio
     async def test_task_manager_creates_spans(self):
-        """Verify TaskManager methods create OTel spans (no-op when not initialized)."""
-        from pais.a2a import TaskManager
-
-        task_store = LocalTaskStore()
+        """Verify LocalTaskManager methods create OTel spans (no-op when not initialized)."""
+        from pais.a2a import LocalTaskManager
 
         async def mock_process(msg, session_id="", stream=False):
             yield "result"
 
-        manager = TaskManager(task_store, mock_process)
-        task = await manager.submit_task("test message")
+        manager = LocalTaskManager(mock_process)
+        task = await manager.send_message("test message")
         assert task.status.state == TaskState.SUBMITTED
 
         completed = await manager.wait_for_completion(task.id, timeout=5.0)

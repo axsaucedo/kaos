@@ -42,11 +42,15 @@ from pais.serverutils import (
     _build_streaming_chunk,
     _build_chat_response,
 )
-from pais.a2a import TaskManager, setup_a2a_routes
+from pais.a2a import (
+    TaskManager,
+    LocalTaskManager,
+    NullTaskManager,
+    setup_a2a_routes,
+)
 
 if TYPE_CHECKING:
     from pais.memory import Memory
-    from pais.taskstore import TaskStore
 
 
 def configure_logging(level: str = "INFO", otel_correlation: bool = False) -> None:
@@ -105,10 +109,9 @@ class AgentServer:
         mcp_servers: Optional[list] = None,
         model: Any = None,
         custom_tools: Optional[list] = None,
-        task_store: Optional["TaskStore"] = None,
+        task_manager_type: str = "none",
     ):
         from pais.memory import NullMemory
-        from pais.taskstore import NullTaskStore
 
         self.settings = settings
         self.memory: "Memory" = memory or NullMemory()
@@ -119,9 +122,10 @@ class AgentServer:
         self._model = model
         self._custom_tools = custom_tools or []
 
-        store: "TaskStore" = task_store or NullTaskStore()
-        self.task_manager = TaskManager(store, self._process_message)
-        self.task_store = store
+        if task_manager_type == "local":
+            self.task_manager: TaskManager = LocalTaskManager(self._process_message)
+        else:
+            self.task_manager = NullTaskManager()
 
         self.app = FastAPI(
             title=f"Agent: {self.settings.agent_name}",
@@ -326,9 +330,7 @@ class AgentServer:
             for n in self._sub_agents
         )
 
-        from pais.taskstore import NullTaskStore
-
-        has_task_store = not isinstance(self.task_store, NullTaskStore)
+        has_task_store = not isinstance(self.task_manager, NullTaskManager)
         capabilities = AgentCardCapabilities(
             streaming=True,
             push_notifications=False,
@@ -596,13 +598,11 @@ def _create_memory(settings: AgentServerSettings) -> "Memory":
     )
 
 
-def _create_task_store(settings: AgentServerSettings) -> "TaskStore":
-    """Create task store backend from settings."""
-    from pais.taskstore import LocalTaskStore, NullTaskStore
-
+def _get_task_manager_type(settings: AgentServerSettings) -> str:
+    """Determine task manager type from settings."""
     if settings.task_store_type == "none":
-        return NullTaskStore()
-    return LocalTaskStore()
+        return "none"
+    return "local"
 
 
 def _setup_otel_instrumentation(settings: AgentServerSettings) -> None:
@@ -643,7 +643,7 @@ def create_agent_server(
     if sub_agents is None:
         sub_agents = _parse_sub_agents(settings)
     memory = _create_memory(settings)
-    task_store = _create_task_store(settings)
+    task_manager_type = _get_task_manager_type(settings)
 
     sub_agents_dict: Dict[str, RemoteAgent] = {a.name: a for a in sub_agents}
 
@@ -703,7 +703,7 @@ def create_agent_server(
         mcp_servers=mcp_servers,
         model=model,
         custom_tools=custom_tools,
-        task_store=task_store,
+        task_manager_type=task_manager_type,
     )
 
 

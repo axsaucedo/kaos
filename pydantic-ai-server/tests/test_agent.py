@@ -319,15 +319,12 @@ class TestAgentCard:
 
     @pytest.mark.asyncio
     async def test_agent_card_state_transition_with_taskstore(self):
-        """Test agent card reflects stateTransitionHistory when TaskStore is active."""
-        from pais.taskstore import LocalTaskStore
-
+        """Test agent card reflects stateTransitionHistory when TaskManager is active."""
         model = TestModel(custom_output_text="test")
-        task_store = LocalTaskStore()
         server = make_test_server(
             name="test-agent",
             model=model,
-            task_store=task_store,
+            task_manager_type="local",
         )
         card = await server._get_agent_card("http://localhost:8000")
         assert card.capabilities.state_transition_history is True
@@ -336,7 +333,7 @@ class TestAgentCard:
 
     @pytest.mark.asyncio
     async def test_agent_card_state_transition_without_taskstore(self):
-        """Test agent card has stateTransitionHistory=False with NullTaskStore."""
+        """Test agent card has stateTransitionHistory=False with NullTaskManager."""
         model = TestModel(custom_output_text="test")
         server = make_test_server(
             name="test-agent",
