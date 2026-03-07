@@ -1,6 +1,5 @@
 """Tests for Task data model, LocalTaskManager, and NullTaskManager."""
 
-import asyncio
 import pytest
 
 from pais.a2a import (
@@ -92,10 +91,11 @@ class TestLocalTaskManager:
         task = await manager.send_message("Hello")
         assert task.id.startswith("task_")
         assert task.session_id.startswith("session_")
-        assert task.status.state == TaskState.SUBMITTED
-        assert len(task.history) == 1
+        assert task.status.state == TaskState.COMPLETED
+        assert len(task.history) == 2
         assert task.history[0].role == "user"
         assert task.history[0].text == "Hello"
+        assert task.history[1].role == "agent"
 
     @pytest.mark.asyncio
     async def test_send_message_with_session_id(self):
@@ -133,44 +133,27 @@ class TestLocalTaskManager:
     async def test_full_lifecycle(self):
         manager = LocalTaskManager(_mock_process)
         task = await manager.send_message("Do work")
-        assert task.status.state == TaskState.SUBMITTED
-
-        completed = await manager.wait_for_completion(task.id, timeout=5.0)
-        assert completed is not None
-        assert completed.status.state == TaskState.COMPLETED
-        assert len(completed.history) >= 2
-        assert completed.history[1].role == "agent"
-        assert completed.history[1].text == "Task result"
+        # Synchronous execution: task is completed immediately
+        assert task.status.state == TaskState.COMPLETED
+        assert len(task.history) >= 2
+        assert task.history[1].role == "agent"
+        assert task.history[1].text == "Task result"
 
     @pytest.mark.asyncio
-    async def test_cancel_task(self):
-        """Test canceling a task that is still in submitted state."""
-        started = asyncio.Event()
-
-        async def slow_process(msg, session_id="", stream=False):
-            started.set()
-            await asyncio.sleep(100)
-            yield "result"
-
-        manager = LocalTaskManager(slow_process)
+    async def test_cancel_completed_task_not_possible(self):
+        """Test that canceling a completed task returns False (sync execution completes immediately)."""
+        manager = LocalTaskManager(_mock_process)
         task = await manager.send_message("Cancel me")
-
-        # Wait for execution to start so the task is in working state
-        await asyncio.wait_for(started.wait(), timeout=5.0)
-
+        # Task is already completed due to synchronous execution
+        assert task.status.state == TaskState.COMPLETED
         result = await manager.cancel_task(task.id)
-        assert result is True
-
-        fetched = await manager.get_task(task.id)
-        assert fetched is not None
-        assert fetched.status.state == TaskState.CANCELED
-        await manager.shutdown()
+        assert result is False
 
     @pytest.mark.asyncio
     async def test_cancel_completed_task(self):
         manager = LocalTaskManager(_mock_process)
         task = await manager.send_message("Complete me")
-        await manager.wait_for_completion(task.id, timeout=5.0)
+        assert task.status.state == TaskState.COMPLETED
         result = await manager.cancel_task(task.id)
         assert result is False  # Cannot cancel completed task
 
@@ -188,10 +171,9 @@ class TestLocalTaskManager:
 
         manager = LocalTaskManager(failing_process)
         task = await manager.send_message("Fail me")
-        completed = await manager.wait_for_completion(task.id, timeout=5.0)
-        assert completed is not None
-        assert completed.status.state == TaskState.FAILED
-        assert completed.status.message == "Error occurred"
+        # Synchronous execution: task is failed immediately
+        assert task.status.state == TaskState.FAILED
+        assert task.status.message == "Error occurred"
 
     @pytest.mark.asyncio
     async def test_shutdown(self):
@@ -202,12 +184,10 @@ class TestLocalTaskManager:
     async def test_cleanup_on_capacity(self):
         manager = LocalTaskManager(_mock_process, max_tasks=5)
         for i in range(5):
-            task = await manager.send_message(f"Task {i}")
-            await manager.wait_for_completion(task.id, timeout=5.0)
+            await manager.send_message(f"Task {i}")
 
         # Creating 6th triggers cleanup of completed tasks
         await manager.send_message("Task 5")
-        # Internal tasks dict should have been cleaned
         # We just verify no errors occurred
 
     @pytest.mark.asyncio
@@ -219,9 +199,7 @@ class TestLocalTaskManager:
             tasks.append(task)
 
         for task in tasks:
-            completed = await manager.wait_for_completion(task.id, timeout=5.0)
-            assert completed is not None
-            assert completed.status.state == TaskState.COMPLETED
+            assert task.status.state == TaskState.COMPLETED
 
 
 class TestNullTaskManager:

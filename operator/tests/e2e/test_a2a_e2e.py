@@ -1,14 +1,12 @@
-"""End-to-end tests for A2A TaskStore and JSON-RPC endpoint.
+"""End-to-end tests for A2A JSON-RPC endpoint.
 
 Tests the A2A JSON-RPC protocol via Gateway API:
 - Agent card stateTransitionHistory and supportedProtocols
-- SendMessage creates and executes a task (with legacy tasks/send alias)
-- GetTask polls task state until completion (with legacy tasks/get alias)
-- CancelTask cancels a running task (with legacy tasks/cancel alias)
-- SendMessage blocking mode for synchronous completion
+- SendMessage creates and executes a task synchronously
+- GetTask retrieves task state
+- CancelTask handles completed tasks
 """
 
-import asyncio
 import json
 import pytest
 import httpx
@@ -86,7 +84,7 @@ async def test_a2a_agent_card_capabilities(
 
 @pytest.mark.asyncio
 async def test_a2a_task_lifecycle(test_namespace: str, shared_modelapi: str):
-    """Test full A2A task lifecycle: SendMessage → GetTask poll → completed."""
+    """Test A2A task lifecycle: SendMessage returns completed task, GetTask retrieves it."""
     agent_name = "a2a-lifecycle-agent"
     agent_spec = create_a2a_agent(
         test_namespace,
@@ -102,7 +100,7 @@ async def test_a2a_task_lifecycle(test_namespace: str, shared_modelapi: str):
     await async_wait_for_healthy(agent_url)
 
     async with httpx.AsyncClient(timeout=60.0) as client:
-        # 1. SendMessage (non-blocking)
+        # 1. SendMessage (synchronous execution: returns completed task)
         send_resp = await client.post(
             f"{agent_url}/",
             json={
@@ -120,38 +118,29 @@ async def test_a2a_task_lifecycle(test_namespace: str, shared_modelapi: str):
         assert send_resp.status_code == 200
         send_data = send_resp.json()
         assert "result" in send_data, f"Expected result, got: {send_data}"
-        assert send_data["result"]["status"]["state"] == "submitted"
+        assert send_data["result"]["status"]["state"] == "completed"
         task_id = send_data["result"]["id"]
         session_id = send_data["result"]["sessionId"]
         assert task_id is not None
         assert session_id is not None
 
-        # 2. Poll GetTask until completion
-        final_result = None
-        for _ in range(60):
-            await asyncio.sleep(0.5)
-            get_resp = await client.post(
-                f"{agent_url}/",
-                json={
-                    "jsonrpc": "2.0",
-                    "method": "GetTask",
-                    "id": 2,
-                    "params": {"id": task_id},
-                },
-            )
-            assert get_resp.status_code == 200
-            get_data = get_resp.json()
-            assert "result" in get_data
-            state = get_data["result"]["status"]["state"]
-            if state in ("completed", "failed", "canceled"):
-                final_result = get_data["result"]
-                break
-
-        assert final_result is not None, "Task did not complete within timeout"
-        assert final_result["status"]["state"] == "completed"
+        # 2. GetTask to verify persistence
+        get_resp = await client.post(
+            f"{agent_url}/",
+            json={
+                "jsonrpc": "2.0",
+                "method": "GetTask",
+                "id": 2,
+                "params": {"id": task_id},
+            },
+        )
+        assert get_resp.status_code == 200
+        get_data = get_resp.json()
+        assert "result" in get_data
+        assert get_data["result"]["status"]["state"] == "completed"
 
         # 3. Verify history has user + agent messages
-        history = final_result["history"]
+        history = get_data["result"]["history"]
         assert len(history) >= 2
         user_msgs = [m for m in history if m["role"] == "user"]
         agent_msgs = [m for m in history if m["role"] == "agent"]
@@ -160,14 +149,14 @@ async def test_a2a_task_lifecycle(test_namespace: str, shared_modelapi: str):
 
 
 @pytest.mark.asyncio
-async def test_a2a_send_message_blocking(test_namespace: str, shared_modelapi: str):
-    """Test SendMessage with blocking mode returns completed task synchronously."""
-    agent_name = "a2a-blocking-agent"
+async def test_a2a_send_message_with_session(test_namespace: str, shared_modelapi: str):
+    """Test SendMessage with contextId returns completed task with correct session."""
+    agent_name = "a2a-session-agent"
     agent_spec = create_a2a_agent(
         test_namespace,
         shared_modelapi,
         agent_name=agent_name,
-        mock_responses=["Blocking response complete."],
+        mock_responses=["Session response complete."],
     )
     create_custom_resource(agent_spec, test_namespace)
     wait_for_deployment(test_namespace, f"agent-{agent_name}", timeout=120)
@@ -176,6 +165,7 @@ async def test_a2a_send_message_blocking(test_namespace: str, shared_modelapi: s
     wait_for_resource_ready(agent_url)
     await async_wait_for_healthy(agent_url)
 
+    session_id = "test-session-123"
     async with httpx.AsyncClient(timeout=120.0) as client:
         resp = await client.post(
             f"{agent_url}/",
@@ -186,9 +176,9 @@ async def test_a2a_send_message_blocking(test_namespace: str, shared_modelapi: s
                 "params": {
                     "message": {
                         "role": "user",
-                        "parts": [{"type": "text", "text": "Answer in blocking mode"}],
+                        "parts": [{"type": "text", "text": "Test with session"}],
                     },
-                    "configuration": {"blocking": True},
+                    "contextId": session_id,
                 },
             },
         )
@@ -196,7 +186,8 @@ async def test_a2a_send_message_blocking(test_namespace: str, shared_modelapi: s
         data = resp.json()
         assert "result" in data, f"Expected result, got: {data}"
         assert data["result"]["status"]["state"] == "completed"
-        assert data["result"].get("output", "") or len(data["result"].get("artifacts", [])) > 0 or len(data["result"].get("history", [])) >= 2
+        assert data["result"]["sessionId"] == session_id
+        assert len(data["result"].get("history", [])) >= 2
 
 
 @pytest.mark.asyncio

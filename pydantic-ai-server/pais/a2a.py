@@ -9,7 +9,6 @@ Provides:
 - setup_a2a_routes(): Mounts A2A endpoints on a FastAPI app
 """
 
-import asyncio
 import uuid
 import logging
 import time
@@ -192,7 +191,7 @@ class TaskManager(ABC):
 
 
 class LocalTaskManager(TaskManager):
-    """In-process task manager with internal dict storage and async execution.
+    """In-process task manager with internal dict storage and synchronous execution.
 
     Encapsulates task creation, state management, execution via process_fn,
     and OTel instrumentation. The process_fn is called to actually process
@@ -202,7 +201,6 @@ class LocalTaskManager(TaskManager):
     def __init__(self, process_fn: ProcessFn, max_tasks: int = 10000):
         self._process_fn = process_fn
         self._tasks: Dict[str, Task] = {}
-        self._running_tasks: Dict[str, "asyncio.Task[None]"] = {}
         self.max_tasks = max_tasks
         logger.info(f"LocalTaskManager initialized: max_tasks={max_tasks}")
 
@@ -212,7 +210,7 @@ class LocalTaskManager(TaskManager):
         session_id: Optional[str] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Task:
-        """Create a task, spawn async execution, and return the task in submitted state."""
+        """Create a task, execute inline, and return the completed task."""
         tracer = trace_api.get_tracer(SERVICE_NAME)
         task_counter, _ = get_task_metrics()
 
@@ -221,15 +219,13 @@ class LocalTaskManager(TaskManager):
             attributes={"task.session_id": session_id or ""},
         ):
             task = self._create_task(session_id, text, metadata)
-            asyncio_task = asyncio.create_task(self._execute_task(task.id, text))
-            self._running_tasks[task.id] = asyncio_task
-            asyncio_task.add_done_callback(lambda _: self._running_tasks.pop(task.id, None))
             logger.info(f"Submitted task {task.id} for session {task.session_id}")
 
             if task_counter:
                 task_counter.add(1, {"state": "submitted"})
 
-            return task
+        await self._execute_task(task.id, text)
+        return task
 
     async def get_task(self, task_id: str) -> Optional[Task]:
         return self._tasks.get(task_id)
@@ -250,10 +246,6 @@ class LocalTaskManager(TaskManager):
             if not self._transition(task_id, TaskState.CANCELED, "Canceled by request"):
                 return False
 
-            asyncio_task = self._running_tasks.get(task_id)
-            if asyncio_task and not asyncio_task.done():
-                asyncio_task.cancel()
-
             if task_counter:
                 task_counter.add(1, {"state": "cancel_requested"})
 
@@ -262,21 +254,12 @@ class LocalTaskManager(TaskManager):
     async def wait_for_completion(
         self, task_id: str, timeout: float = 60.0, poll_interval: float = 0.1
     ) -> Optional[Task]:
-        """Poll until task reaches a terminal state."""
-        deadline = asyncio.get_event_loop().time() + timeout
-        while asyncio.get_event_loop().time() < deadline:
-            task = self._tasks.get(task_id)
-            if task and task.status.state in TERMINAL_STATES:
-                return task
-            await asyncio.sleep(poll_interval)
+        """Return task — already completed since execution is synchronous."""
         return self._tasks.get(task_id)
 
     async def shutdown(self) -> None:
-        """Cancel all running tasks."""
-        for task_id, asyncio_task in list(self._running_tasks.items()):
-            if not asyncio_task.done():
-                asyncio_task.cancel()
-                logger.debug(f"Canceled running task {task_id} on shutdown")
+        """Clean up resources."""
+        logger.debug("LocalTaskManager shutdown")
 
     # --- Internal methods ---
 
@@ -348,7 +331,6 @@ class LocalTaskManager(TaskManager):
                 return
 
             try:
-
                 response_content = ""
                 async for chunk in self._process_fn(
                     input_message, session_id=task.session_id, stream=False
@@ -361,13 +343,6 @@ class LocalTaskManager(TaskManager):
                 span.set_attribute("task.state", "completed")
                 if task_counter:
                     task_counter.add(1, {"state": "completed"})
-
-            except asyncio.CancelledError:
-                self._transition(task_id, TaskState.CANCELED, "Canceled")
-                logger.info(f"Task {task_id} canceled")
-                span.set_attribute("task.state", "canceled")
-                if task_counter:
-                    task_counter.add(1, {"state": "canceled"})
 
             except Exception as e:
                 logger.error(f"Task {task_id} failed: {e}")
@@ -560,10 +535,6 @@ async def _jsonrpc_send_message(
     # contextId (A2A spec) or sessionId (legacy)
     session_id = params.get("contextId") or params.get("sessionId")
 
-    # Check blocking mode from configuration
-    config = params.get("configuration", {})
-    blocking = config.get("blocking", False) if isinstance(config, dict) else False
-
     # Extract message metadata (e.g. delegation flag)
     message_metadata = message.get("metadata")
     task_metadata = dict(message_metadata) if isinstance(message_metadata, dict) else None
@@ -571,11 +542,6 @@ async def _jsonrpc_send_message(
     task = await task_manager.send_message(
         input_text, session_id=session_id, metadata=task_metadata
     )
-
-    if blocking:
-        completed_task = await task_manager.wait_for_completion(task.id)
-        if completed_task:
-            task = completed_task
 
     return JSONResponse(JsonRpcResponse(id=rpc_id, result=task.to_dict()).to_dict())
 

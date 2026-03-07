@@ -1,10 +1,9 @@
-"""Integration tests for A2A TaskStore + JSON-RPC endpoint.
+"""Integration tests for A2A TaskManager + JSON-RPC endpoint.
 
 Tests full HTTP lifecycle scenarios including memory integration,
 concurrent tasks, cancellation, and agent card discovery.
 """
 
-import asyncio
 import pytest
 
 from httpx import AsyncClient, ASGITransport
@@ -27,24 +26,16 @@ def _jsonrpc(method: str, params: Optional[dict] = None, req_id: int = 1) -> dic
 
 
 def _send_message(text: str, session_id: Optional[str] = None, req_id: int = 1) -> dict:
-    """Build a tasks/send JSON-RPC request."""
+    """Build a SendMessage JSON-RPC request."""
     params = {"message": {"role": "user", "parts": [{"type": "text", "text": text}]}}
     if session_id:
         params["sessionId"] = session_id
-    return _jsonrpc("tasks/send", params, req_id)
+    return _jsonrpc("SendMessage", params, req_id)
 
 
-async def _poll_until_done(client: AsyncClient, task_id: str, timeout: float = 5.0):
-    """Poll tasks/get until task reaches a terminal state."""
-    deadline = asyncio.get_event_loop().time() + timeout
-    while asyncio.get_event_loop().time() < deadline:
-        resp = await client.post("/", json=_jsonrpc("tasks/get", {"id": task_id}))
-        result = resp.json()["result"]
-        state = result["status"]["state"]
-        if state in ("completed", "failed", "canceled"):
-            return result
-        await asyncio.sleep(0.1)
-    raise TimeoutError(f"Task {task_id} did not complete within {timeout}s")
+def _get_result(response) -> dict:
+    """Extract task result from JSON-RPC response."""
+    return response.json()["result"]
 
 
 class TestA2AIntegrationLifecycle:
@@ -60,9 +51,9 @@ class TestA2AIntegrationLifecycle:
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.post("/", json=_send_message("Store this in memory"))
-            task_id = resp.json()["result"]["id"]
-            session_id = resp.json()["result"]["sessionId"]
-            result = await _poll_until_done(client, task_id)
+            result = _get_result(resp)
+            task_id = result["id"]
+            session_id = result["sessionId"]
 
         assert result["status"]["state"] == "completed"
 
@@ -71,25 +62,17 @@ class TestA2AIntegrationLifecycle:
         assert session is not None
 
     @pytest.mark.asyncio
-    async def test_multiple_concurrent_tasks(self):
-        """Test multiple tasks can execute concurrently."""
+    async def test_multiple_tasks(self):
+        """Test multiple tasks execute successfully."""
         model = TestModel(custom_output_text="Concurrent result")
         server = make_test_server(model=model, task_manager_type="local")
         transport = ASGITransport(app=server.app)
 
-        task_ids = []
+        results = []
         async with AsyncClient(transport=transport, base_url="http://test") as client:
-            # Send 3 tasks concurrently
             for i in range(3):
                 resp = await client.post("/", json=_send_message(f"Task {i}", req_id=i + 1))
-                data = resp.json()
-                assert "result" in data
-                task_ids.append(data["result"]["id"])
-
-            # Poll all until done
-            results = []
-            for tid in task_ids:
-                result = await _poll_until_done(client, tid)
+                result = _get_result(resp)
                 results.append(result)
 
         assert all(r["status"]["state"] == "completed" for r in results)
@@ -107,38 +90,36 @@ class TestA2AIntegrationLifecycle:
             resp1 = await client.post(
                 "/", json=_send_message("First", session_id=shared_session, req_id=1)
             )
-            tid1 = resp1.json()["result"]["id"]
-            await _poll_until_done(client, tid1)
+            result1 = _get_result(resp1)
 
             resp2 = await client.post(
                 "/", json=_send_message("Second", session_id=shared_session, req_id=2)
             )
-            tid2 = resp2.json()["result"]["id"]
-            result2 = await _poll_until_done(client, tid2)
+            result2 = _get_result(resp2)
 
         # Both tasks share the same session
-        assert resp1.json()["result"]["sessionId"] == shared_session
+        assert result1["sessionId"] == shared_session
         assert result2["sessionId"] == shared_session
-        assert tid1 != tid2
+        assert result1["id"] != result2["id"]
 
     @pytest.mark.asyncio
-    async def test_cancel_submitted_task(self):
-        """Test cancelling a task that was submitted."""
-        model = TestModel(custom_output_text="Should not complete")
+    async def test_cancel_completed_task(self):
+        """Test cancelling a task that already completed (sync execution)."""
+        model = TestModel(custom_output_text="Already done")
         server = make_test_server(model=model, task_manager_type="local")
         transport = ASGITransport(app=server.app)
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.post("/", json=_send_message("Cancel me"))
-            task_id = resp.json()["result"]["id"]
+            task_id = _get_result(resp)["id"]
 
             cancel_resp = await client.post(
-                "/", json=_jsonrpc("tasks/cancel", {"id": task_id}, req_id=2)
+                "/", json=_jsonrpc("CancelTask", {"id": task_id}, req_id=2)
             )
             data = cancel_resp.json()
 
-        # Task may have already completed (TestModel is fast) or be canceled
-        assert data["result"]["status"]["state"] in ("canceled", "completed")
+        # Task already completed (synchronous execution), cancel returns completed state
+        assert data["result"]["status"]["state"] == "completed"
 
     @pytest.mark.asyncio
     async def test_agent_card_via_http_with_taskstore(self):
@@ -171,19 +152,21 @@ class TestA2AIntegrationLifecycle:
         assert card["capabilities"]["stateTransitionHistory"] is False
 
     @pytest.mark.asyncio
-    async def test_tasks_send_then_get_has_consistent_data(self):
-        """Verify tasks/get returns consistent task data after completion."""
+    async def test_send_then_get_has_consistent_data(self):
+        """Verify GetTask returns consistent task data after completion."""
         model = TestModel(custom_output_text="Final answer here")
         server = make_test_server(model=model, task_manager_type="local")
         transport = ASGITransport(app=server.app)
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.post("/", json=_send_message("Input query"))
-            send_result = resp.json()["result"]
+            send_result = _get_result(resp)
             task_id = send_result["id"]
             session_id = send_result["sessionId"]
 
-            result = await _poll_until_done(client, task_id)
+            # Get task via GetTask
+            get_resp = await client.post("/", json=_jsonrpc("GetTask", {"id": task_id}, req_id=2))
+            result = _get_result(get_resp)
 
         assert result["id"] == task_id
         assert result["sessionId"] == session_id
@@ -215,8 +198,7 @@ class TestA2AIntegrationLifecycle:
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.post("/", json=_send_message("Trigger error"))
-            task_id = resp.json()["result"]["id"]
-            result = await _poll_until_done(client, task_id, timeout=10.0)
+            result = _get_result(resp)
 
         # _process_message catches the error and yields it as text
         assert result["status"]["state"] == "completed"

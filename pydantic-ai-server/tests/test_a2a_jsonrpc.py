@@ -3,7 +3,6 @@
 Tests the JSON-RPC 2.0 dispatcher with tasks/send, tasks/get, tasks/cancel.
 """
 
-import asyncio
 import pytest
 
 from httpx import AsyncClient, ASGITransport
@@ -25,7 +24,7 @@ class TestJsonRpcEndpoint:
 
     @pytest.mark.asyncio
     async def test_tasks_send_basic(self):
-        """Test tasks/send creates a task and returns submitted state."""
+        """Test tasks/send creates and completes a task."""
         server = _make_server_with_task_manager()
         transport = ASGITransport(app=server.app)
 
@@ -52,8 +51,8 @@ class TestJsonRpcEndpoint:
         assert "result" in data
         result = data["result"]
         assert "id" in result
-        assert result["status"]["state"] == "submitted"
-        assert len(result["history"]) == 1
+        assert result["status"]["state"] == "completed"
+        assert len(result["history"]) >= 2
         assert result["history"][0]["role"] == "user"
 
     @pytest.mark.asyncio
@@ -131,7 +130,7 @@ class TestJsonRpcEndpoint:
         transport = ASGITransport(app=server.app)
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
-            # Send task
+            # Send task (synchronous execution: returns completed)
             send_resp = await client.post(
                 "/",
                 json={
@@ -147,22 +146,19 @@ class TestJsonRpcEndpoint:
                 },
             )
             task_id = send_resp.json()["result"]["id"]
+            assert send_resp.json()["result"]["status"]["state"] == "completed"
 
-            # Wait for async execution to complete
-            for _ in range(50):
-                await asyncio.sleep(0.1)
-                get_resp = await client.post(
-                    "/",
-                    json={
-                        "jsonrpc": "2.0",
-                        "method": "tasks/get",
-                        "id": 2,
-                        "params": {"id": task_id},
-                    },
-                )
-                data = get_resp.json()
-                if data["result"]["status"]["state"] in ("completed", "failed"):
-                    break
+            # Get task to verify persistence
+            get_resp = await client.post(
+                "/",
+                json={
+                    "jsonrpc": "2.0",
+                    "method": "tasks/get",
+                    "id": 2,
+                    "params": {"id": task_id},
+                },
+            )
+            data = get_resp.json()
 
         assert data["result"]["status"]["state"] == "completed"
         assert len(data["result"]["history"]) >= 2
@@ -307,13 +303,13 @@ class TestJsonRpcEndpoint:
         assert data["error"]["code"] == -32600  # INVALID_REQUEST
 
     @pytest.mark.asyncio
-    async def test_full_lifecycle_send_poll_complete(self):
-        """Test complete task lifecycle: send → poll → completed."""
+    async def test_full_lifecycle_send_get_complete(self):
+        """Test complete task lifecycle: send → get → verify completed."""
         server = _make_server_with_task_manager()
         transport = ASGITransport(app=server.app)
 
         async with AsyncClient(transport=transport, base_url="http://test") as client:
-            # 1. Send task
+            # 1. Send task (synchronous execution: returns completed)
             send_resp = await client.post(
                 "/",
                 json={
@@ -329,33 +325,28 @@ class TestJsonRpcEndpoint:
                 },
             )
             assert send_resp.status_code == 200
-            task_id = send_resp.json()["result"]["id"]
-            session_id = send_resp.json()["result"]["sessionId"]
+            result = send_resp.json()["result"]
+            task_id = result["id"]
+            session_id = result["sessionId"]
             assert task_id is not None
             assert session_id is not None
+            assert result["status"]["state"] == "completed"
 
-            # 2. Poll until completed
-            final_state = None
-            for _ in range(50):
-                await asyncio.sleep(0.1)
-                get_resp = await client.post(
-                    "/",
-                    json={
-                        "jsonrpc": "2.0",
-                        "method": "tasks/get",
-                        "id": "req-2",
-                        "params": {"id": task_id},
-                    },
-                )
-                result = get_resp.json()["result"]
-                final_state = result["status"]["state"]
-                if final_state in ("completed", "failed"):
-                    break
-
-            assert final_state == "completed"
+            # 2. Get task to verify persistence
+            get_resp = await client.post(
+                "/",
+                json={
+                    "jsonrpc": "2.0",
+                    "method": "tasks/get",
+                    "id": "req-2",
+                    "params": {"id": task_id},
+                },
+            )
+            get_result = get_resp.json()["result"]
+            assert get_result["status"]["state"] == "completed"
 
             # 3. Verify history has user + agent messages
-            history = result["history"]
+            history = get_result["history"]
             assert any(m["role"] == "user" for m in history)
             assert any(m["role"] == "agent" for m in history)
 
@@ -388,7 +379,7 @@ class TestA2ASpecCompliantMethods:
         assert response.status_code == 200
         data = response.json()
         assert "result" in data
-        assert data["result"]["status"]["state"] == "submitted"
+        assert data["result"]["status"]["state"] == "completed"
 
     @pytest.mark.asyncio
     async def test_get_task_method(self):
@@ -464,8 +455,8 @@ class TestA2ASpecCompliantMethods:
         assert data["result"]["status"]["state"] in ("canceled", "completed")
 
     @pytest.mark.asyncio
-    async def test_send_message_blocking(self):
-        """Test SendMessage with blocking=true waits for completion."""
+    async def test_send_message_returns_completed(self):
+        """Test SendMessage returns completed task (synchronous execution)."""
         server = _make_server_with_task_manager()
         transport = ASGITransport(app=server.app)
 
@@ -479,9 +470,8 @@ class TestA2ASpecCompliantMethods:
                     "params": {
                         "message": {
                             "role": "user",
-                            "parts": [{"type": "text", "text": "Blocking request"}],
+                            "parts": [{"type": "text", "text": "Sync request"}],
                         },
-                        "configuration": {"blocking": True},
                     },
                 },
             )
@@ -533,11 +523,8 @@ class TestTaskManagerObservability:
 
         manager = LocalTaskManager(mock_process)
         task = await manager.send_message("test message")
-        assert task.status.state == TaskState.SUBMITTED
-
-        completed = await manager.wait_for_completion(task.id, timeout=5.0)
-        assert completed is not None
-        assert completed.status.state == TaskState.COMPLETED
+        # Synchronous execution: task is completed immediately
+        assert task.status.state == TaskState.COMPLETED
 
     @pytest.mark.asyncio
     async def test_get_task_metrics_returns_none_when_disabled(self):

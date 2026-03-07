@@ -156,7 +156,7 @@ class RemoteAgent:
         return await self._send_chat_completion(messages)
 
     async def _send_a2a_message(self, text: str) -> str:
-        """Send message via A2A SendMessage (blocking mode)."""
+        """Send message via A2A SendMessage."""
         headers: Dict[str, str] = {"Content-Type": "application/json"}
         inject(headers)
         response = await self._client.post(
@@ -171,7 +171,6 @@ class RemoteAgent:
                         "parts": [{"type": "text", "text": text}],
                         "metadata": {"delegation": True},
                     },
-                    "configuration": {"blocking": True},
                 },
             },
             headers=headers,
@@ -192,6 +191,15 @@ class RemoteAgent:
         output = result.get("output", "")
         if output:
             return output
+
+        # Extract from history (last agent message)
+        history = result.get("history", [])
+        for msg in reversed(history):
+            if msg.get("role") == "agent":
+                parts = msg.get("parts", [])
+                for part in parts:
+                    if part.get("type") == "text" and part.get("text"):
+                        return part["text"]
 
         return result.get("status", {}).get("message", "")
 
