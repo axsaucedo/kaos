@@ -201,7 +201,10 @@ class RemoteAgent:
                     if part.get("type") == "text" and part.get("text"):
                         return part["text"]
 
-        return result.get("status", {}).get("message", "")
+        fallback = result.get("status", {}).get("message", "")
+        if not fallback:
+            logger.warning(f"A2A response from {self.name} had no extractable text content")
+        return fallback
 
     async def _send_chat_completion(self, messages: List[Dict[str, str]]) -> str:
         """Send message via OpenAI-compatible chat completions endpoint."""

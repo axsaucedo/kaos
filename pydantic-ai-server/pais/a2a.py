@@ -388,7 +388,7 @@ class NullTaskManager(TaskManager):
         return Task(
             id=task_id,
             session_id=session_id or "null-session",
-            status=TaskStatus(state=TaskState.SUBMITTED),
+            status=TaskStatus(state=TaskState.COMPLETED),
         )
 
     async def get_task(self, task_id: str) -> Optional[Task]:

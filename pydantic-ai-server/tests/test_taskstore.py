@@ -210,7 +210,7 @@ class TestNullTaskManager:
         manager = NullTaskManager()
         task = await manager.send_message("Hello")
         assert task.id.startswith("null_task_")
-        assert task.status.state == TaskState.SUBMITTED
+        assert task.status.state == TaskState.COMPLETED
 
     @pytest.mark.asyncio
     async def test_get_task_returns_none(self):
