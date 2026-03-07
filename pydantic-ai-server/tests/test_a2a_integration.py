@@ -19,7 +19,7 @@ from typing import Optional
 
 def _jsonrpc(method: str, params: Optional[dict] = None, req_id: int = 1) -> dict:
     """Build a JSON-RPC request payload."""
-    payload = {"jsonrpc": "2.0", "method": method, "id": req_id}
+    payload: dict = {"jsonrpc": "2.0", "method": method, "id": req_id}
     if params is not None:
         payload["params"] = params
     return payload
@@ -27,7 +27,7 @@ def _jsonrpc(method: str, params: Optional[dict] = None, req_id: int = 1) -> dic
 
 def _send_message(text: str, session_id: Optional[str] = None, req_id: int = 1) -> dict:
     """Build a SendMessage JSON-RPC request."""
-    params = {"message": {"role": "user", "parts": [{"type": "text", "text": text}]}}
+    params: dict = {"message": {"role": "user", "parts": [{"type": "text", "text": text}]}}
     if session_id:
         params["sessionId"] = session_id
     return _jsonrpc("SendMessage", params, req_id)
