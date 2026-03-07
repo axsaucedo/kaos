@@ -444,9 +444,9 @@ class TestMultiAgentCluster:
         assert remote.agent_card.name == "worker-1"
         assert remote.agent_card.capabilities.streaming is True
 
-        # process_message - now takes messages list with task-delegation role
+        # process_message - takes messages list with user role
         response = await remote.process_message(
-            [{"role": "task-delegation", "content": "Say hello from remote. Be brief."}]
+            [{"role": "user", "content": "Say hello from remote. Be brief."}]
         )
         assert len(response) > 0
 

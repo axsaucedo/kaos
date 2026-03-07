@@ -348,18 +348,10 @@ class LocalTaskManager(TaskManager):
                 return
 
             try:
-                # If metadata marks this as a delegation, pass as task-delegation role
-                # so _prepare_run stores task_delegation_received memory event
-                is_delegation = task.metadata.get("delegation", False)
-                message_arg: Any = (
-                    [{"role": "task-delegation", "content": input_message}]
-                    if is_delegation
-                    else input_message
-                )
 
                 response_content = ""
                 async for chunk in self._process_fn(
-                    message_arg, session_id=task.session_id, stream=False
+                    input_message, session_id=task.session_id, stream=False
                 ):
                     response_content += chunk
 

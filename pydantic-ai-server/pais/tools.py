@@ -133,12 +133,12 @@ async def execute_delegation(
                 events = await memory.get_session_events(session_id)
                 context_events = events[-memory_context_limit:] if events else []
                 for event in context_events:
-                    if event.event_type in ("user_message", "task_delegation_received"):
+                    if event.event_type == "user_message":
                         messages.append({"role": "user", "content": str(event.content)})
                     elif event.event_type == "agent_response":
                         messages.append({"role": "assistant", "content": str(event.content)})
 
-            messages.append({"role": "task-delegation", "content": task})
+            messages.append({"role": "user", "content": task})
             result = await sub_agent.process_message(messages)
             success = True
             return result

@@ -244,15 +244,15 @@ async def test_delegation_with_memory_verification(
             worker_memory["total"] > initial_worker_count
         ), "Worker should have new events"
 
-        # Check worker has task_delegation_received event
-        delegation_received = [
+        # Check worker has user_message event from delegation
+        user_messages = [
             e
             for e in worker_memory["events"]
-            if e["event_type"] == "task_delegation_received"
+            if e["event_type"] == "user_message"
         ]
         assert (
-            len(delegation_received) >= 1
-        ), f"Worker should have task_delegation_received event"
+            len(user_messages) >= 1
+        ), f"Worker should have user_message event from delegation"
 
 
 @pytest.mark.asyncio
@@ -339,11 +339,11 @@ async def test_agent_processes_with_memory_events(
 
         assert memory["total"] > initial_count, "Worker should have new memory events"
 
-        # Should have task_delegation_received from delegation
+        # Should have user_message from delegation
         event_types = [e["event_type"] for e in memory["events"]]
         assert (
-            "task_delegation_received" in event_types
-        ), f"Expected task_delegation_received in {event_types}"
+            "user_message" in event_types
+        ), f"Expected user_message in {event_types}"
 
         # Verify our unique ID is in the events
         all_content = " ".join(str(e["content"]) for e in memory["events"])

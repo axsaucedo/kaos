@@ -348,10 +348,10 @@ class TestDelegation:
         # Verify context was forwarded (should include user/assistant messages before delegation)
         assert len(captured_messages) > 1, f"Expected context + delegation, got {captured_messages}"
         roles = [m["role"] for m in captured_messages]
-        assert "task-delegation" in roles
-        # Should have at least one context message before the delegation
-        deleg_idx = roles.index("task-delegation")
-        assert deleg_idx > 0, "Expected context messages before delegation"
+        assert "user" in roles
+        # Should have context messages — last user message is the delegation task
+        user_indices = [i for i, r in enumerate(roles) if r == "user"]
+        assert len(user_indices) >= 2, "Expected context messages before delegation"
 
 
 class TestMemoryWithToolCalls:
@@ -424,7 +424,7 @@ class TestMemoryWithToolCalls:
 
     @pytest.mark.asyncio
     async def test_delegation_prompt_replayed_in_history(self):
-        """Test that task_delegation_received events appear in message history."""
+        """Test that delegation messages appear in message history."""
         memory = LocalMemory()
         model = TestModel(custom_output_text="Delegation response")
         server = make_test_server(
@@ -434,8 +434,8 @@ class TestMemoryWithToolCalls:
             instructions="Test agent",
         )
 
-        # Simulate a delegation message
-        delegation_msg = [{"role": "task-delegation", "content": "Delegated task"}]
+        # Simulate a delegation message (now uses user role — delegation detection via A2A metadata)
+        delegation_msg = [{"role": "user", "content": "Delegated task"}]
         async for _ in server._process_message(delegation_msg, session_id="deleg-hist"):
             pass
 
@@ -947,13 +947,13 @@ class TestUserPromptExtraction:
         assert len(response) > 0
 
     @pytest.mark.asyncio
-    async def test_task_delegation_role(self):
-        """Test extracting prompt from task-delegation role."""
+    async def test_user_role_message(self):
+        """Test extracting prompt from user role messages."""
         model = TestModel(custom_output_text="Task received")
         server = make_test_server(name="task-agent", model=model, instructions="Test agent")
 
         messages = [
-            {"role": "task-delegation", "content": "Process this task"},
+            {"role": "user", "content": "Process this task"},
         ]
 
         response = ""

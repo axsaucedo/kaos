@@ -266,14 +266,12 @@ class AgentServer:
                 else:
                     session_id = await self.memory.create_session("agent", "user")
 
-                # Validate at least one user or task-delegation message exists
-                has_valid_message = any(
-                    msg.get("role") in ["user", "task-delegation"] for msg in messages
-                )
+                # Validate at least one user message exists
+                has_valid_message = any(msg.get("role") == "user" for msg in messages)
                 if not has_valid_message:
                     raise HTTPException(
                         status_code=400,
-                        detail="No user or task-delegation message found",
+                        detail="No user message found",
                     )
 
                 # Extract parent trace context for distributed tracing
@@ -359,12 +357,7 @@ class AgentServer:
         session_id = await self.memory.get_or_create_session(session_id, "agent", "user")
 
         user_prompt = _extract_user_prompt(message)
-        is_delegation = isinstance(message, list) and any(
-            msg.get("role") == "task-delegation" for msg in message
-        )
-        await self.memory.add_event(
-            session_id, "task_delegation_received" if is_delegation else "user_message", user_prompt
-        )
+        await self.memory.add_event(session_id, "user_message", user_prompt)
 
         message_history = await self.memory.build_message_history(
             session_id, self.settings.memory_context_limit

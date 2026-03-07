@@ -314,8 +314,7 @@ def _extract_user_prompt(message: Union[str, List[Dict[str, str]]]) -> str:
     if isinstance(message, str):
         return message
     for msg in reversed(message):
-        role = msg.get("role", "user")
-        if role in ("user", "task-delegation"):
+        if msg.get("role") == "user":
             return msg.get("content", "")
     return ""
 
