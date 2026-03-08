@@ -156,7 +156,7 @@ class Memory(ABC):
         if not events or len(events) <= 1:
             return None
 
-        prompt_types = ("user_message", "task_delegation_received")
+        prompt_types = ("user_message",)
         exclude_idx = next(
             (i for i in range(len(events) - 1, -1, -1) if events[i].event_type in prompt_types),
             None,

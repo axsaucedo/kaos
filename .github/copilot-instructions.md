@@ -49,9 +49,10 @@ kaos system install --gateway-enabled --metallb-enabled --wait
 ## Project Structure
 ```
 pydantic-ai-server/        # Agent runtime (Pydantic AI, pytest, black, ty) — git subtree
-├── pais/             # AgentServer, tools, memory
+├── pais/             # AgentServer, tools, memory, A2A
 │   ├── server.py      # AgentServer, create_agent_server, routes
-│   ├── serverutils.py # AgentDeps, AgentCard (Pydantic), RemoteAgent, AgentServerSettings, model resolution
+│   ├── serverutils.py # AgentDeps, AgentCard (Pydantic), RemoteAgent (A2A + chat delegation), AgentServerSettings
+│   ├── a2a.py         # TaskManager ABC, LocalTaskManager, NullTaskManager, Task data model, JSON-RPC, setup_a2a_routes
 │   ├── tools.py       # DelegationToolset, string-mode handler
 │   ├── memory.py      # Memory ABC, LocalMemory, RedisMemory, NullMemory
 │   └── telemetry.py   # OpenTelemetry instrumentation
@@ -90,7 +91,8 @@ tmp/                       # Local work files (gitignored)
 - `operator/controllers/*_controller.go`: Reconciliation logic
 - `operator/chart/`: Helm chart (generated from kustomize)
 - `pydantic-ai-server/pais/server.py`: AgentServer, create_agent_server, routes
-- `pydantic-ai-server/pais/serverutils.py`: AgentDeps, AgentCard (Pydantic BaseModel, A2A-compliant), RemoteAgent, AgentServerSettings, model resolution
+- `pydantic-ai-server/pais/serverutils.py`: AgentDeps, AgentCard (Pydantic BaseModel, A2A-compliant), RemoteAgent (A2A + chat delegation), AgentServerSettings
+- `pydantic-ai-server/pais/a2a.py`: TaskManager ABC, LocalTaskManager, NullTaskManager, Task data model, JSON-RPC, setup_a2a_routes
 - `pydantic-ai-server/pais/tools.py`: DelegationToolset (AbstractToolset), string-mode handler
 - `pydantic-ai-server/pais/memory.py`: Memory ABC + backends + build_message_history/store_pydantic_message
 

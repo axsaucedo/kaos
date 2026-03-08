@@ -270,15 +270,15 @@ async def test_multi_agent_delegation_with_memory(
 
         assert worker_memory["total"] > initial_count
 
-        # Check for task_delegation_received event (new event type for delegated tasks)
-        delegation_received = [
+        # Check for user_message event from delegation
+        user_messages = [
             e
             for e in worker_memory["events"]
-            if e["event_type"] == "task_delegation_received"
+            if e["event_type"] == "user_message"
         ]
         assert (
-            len(delegation_received) >= 1
-        ), f"Worker should have task_delegation_received event"
+            len(user_messages) >= 1
+        ), f"Worker should have user_message event from delegation"
 
 
 @pytest.mark.asyncio

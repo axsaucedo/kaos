@@ -41,6 +41,12 @@ from pais.serverutils import (
     _build_streaming_chunk,
     _build_chat_response,
 )
+from pais.a2a import (
+    TaskManager,
+    LocalTaskManager,
+    NullTaskManager,
+    setup_a2a_routes,
+)
 
 if TYPE_CHECKING:
     from pais.memory import Memory
@@ -102,6 +108,7 @@ class AgentServer:
         mcp_servers: Optional[list] = None,
         model: Any = None,
         custom_tools: Optional[list] = None,
+        task_manager_type: str = "none",
     ):
         from pais.memory import NullMemory
 
@@ -114,6 +121,11 @@ class AgentServer:
         self._model = model
         self._custom_tools = custom_tools or []
 
+        if task_manager_type == "local":
+            self.task_manager: TaskManager = LocalTaskManager(self._process_message)
+        else:
+            self.task_manager = NullTaskManager()
+
         self.app = FastAPI(
             title=f"Agent: {self.settings.agent_name}",
             description=self.settings.agent_description,
@@ -121,6 +133,7 @@ class AgentServer:
         )
 
         self._setup_routes()
+        setup_a2a_routes(self.app, self.task_manager)
         self._setup_telemetry()
         logger.info(
             f"AgentServer initialized for {self.settings.agent_name} on port {self.settings.agent_port}"
@@ -151,6 +164,7 @@ class AgentServer:
         self._log_startup_config()
         yield
         logger.info("AgentServer shutdown")
+        await self.task_manager.shutdown()
         for sub_agent in self._sub_agents.values():
             await sub_agent.close()
         # TODO: Close MCP server connections (MCPServerStreamableHTTP) on shutdown
@@ -251,14 +265,12 @@ class AgentServer:
                 else:
                     session_id = await self.memory.create_session("agent", "user")
 
-                # Validate at least one user or task-delegation message exists
-                has_valid_message = any(
-                    msg.get("role") in ["user", "task-delegation"] for msg in messages
-                )
+                # Validate at least one user message exists
+                has_valid_message = any(msg.get("role") == "user" for msg in messages)
                 if not has_valid_message:
                     raise HTTPException(
                         status_code=400,
-                        detail="No user or task-delegation message found",
+                        detail="No user message found",
                     )
 
                 # Extract parent trace context for distributed tracing
@@ -315,10 +327,11 @@ class AgentServer:
             for n in self._sub_agents
         )
 
+        has_task_store = not isinstance(self.task_manager, NullTaskManager)
         capabilities = AgentCardCapabilities(
             streaming=True,
             push_notifications=False,
-            state_transition_history=False,
+            state_transition_history=has_task_store,
         )
 
         return AgentCard(
@@ -343,12 +356,7 @@ class AgentServer:
         session_id = await self.memory.get_or_create_session(session_id, "agent", "user")
 
         user_prompt = _extract_user_prompt(message)
-        is_delegation = isinstance(message, list) and any(
-            msg.get("role") == "task-delegation" for msg in message
-        )
-        await self.memory.add_event(
-            session_id, "task_delegation_received" if is_delegation else "user_message", user_prompt
-        )
+        await self.memory.add_event(session_id, "user_message", user_prompt)
 
         message_history = await self.memory.build_message_history(
             session_id, self.settings.memory_context_limit
@@ -582,6 +590,13 @@ def _create_memory(settings: AgentServerSettings) -> "Memory":
     )
 
 
+def _get_task_manager_type(settings: AgentServerSettings) -> str:
+    """Determine task manager type from settings."""
+    if settings.task_store_type == "none":
+        return "none"
+    return "local"
+
+
 def _setup_otel_instrumentation(settings: AgentServerSettings) -> None:
     """Initialize OTel SDK and Pydantic AI instrumentation."""
     init_otel(settings.agent_name)
@@ -620,6 +635,7 @@ def create_agent_server(
     if sub_agents is None:
         sub_agents = _parse_sub_agents(settings)
     memory = _create_memory(settings)
+    task_manager_type = _get_task_manager_type(settings)
 
     sub_agents_dict: Dict[str, RemoteAgent] = {a.name: a for a in sub_agents}
 
@@ -679,6 +695,7 @@ def create_agent_server(
         mcp_servers=mcp_servers,
         model=model,
         custom_tools=custom_tools,
+        task_manager_type=task_manager_type,
     )
 
 

@@ -302,6 +302,45 @@ class TestAgentCard:
         assert d["capabilities"]["pushNotifications"] is False
         assert "defaultInputModes" in d
         assert "defaultOutputModes" in d
+        assert "supportedProtocols" in d
+        assert "jsonrpc" in d["supportedProtocols"]
+
+    def test_agent_card_supported_protocols_default(self):
+        """Test AgentCard defaults to jsonrpc in supportedProtocols."""
+        card = AgentCard(
+            name="test",
+            description="Test",
+            url="http://localhost",
+            version="0.1.0",
+        )
+        assert card.supported_protocols == ["jsonrpc"]
+        d = card.to_dict()
+        assert d["supportedProtocols"] == ["jsonrpc"]
+
+    @pytest.mark.asyncio
+    async def test_agent_card_state_transition_with_taskstore(self):
+        """Test agent card reflects stateTransitionHistory when TaskManager is active."""
+        model = TestModel(custom_output_text="test")
+        server = make_test_server(
+            name="test-agent",
+            model=model,
+            task_manager_type="local",
+        )
+        card = await server._get_agent_card("http://localhost:8000")
+        assert card.capabilities.state_transition_history is True
+        d = card.to_dict()
+        assert d["capabilities"]["stateTransitionHistory"] is True
+
+    @pytest.mark.asyncio
+    async def test_agent_card_state_transition_without_taskstore(self):
+        """Test agent card has stateTransitionHistory=False with NullTaskManager."""
+        model = TestModel(custom_output_text="test")
+        server = make_test_server(
+            name="test-agent",
+            model=model,
+        )
+        card = await server._get_agent_card("http://localhost:8000")
+        assert card.capabilities.state_transition_history is False
 
     @pytest.mark.asyncio
     async def test_agent_with_sub_agents(self):
@@ -542,6 +581,136 @@ class TestRemoteAgent:
         assert remote.name == "test-remote"
         assert remote.card_url == "http://localhost:9999"
         assert not remote._active
+        assert not remote._supports_a2a
+        await remote.close()
+
+    @pytest.mark.asyncio
+    async def test_a2a_support_detected_from_agent_card(self):
+        """Test RemoteAgent detects A2A support from agent card supportedProtocols."""
+        import respx
+
+        remote = RemoteAgent(name="a2a-agent", card_url="http://a2a-test:8000")
+        with respx.mock:
+            respx.get("http://a2a-test:8000/.well-known/agent.json").respond(
+                json={
+                    "name": "a2a-agent",
+                    "description": "A2A test agent",
+                    "url": "http://a2a-test:8000",
+                    "version": "1.0",
+                    "supportedProtocols": ["jsonrpc"],
+                    "capabilities": {},
+                }
+            )
+            success = await remote._init()
+            assert success
+            assert remote._supports_a2a is True
+        await remote.close()
+
+    @pytest.mark.asyncio
+    async def test_a2a_not_supported_without_jsonrpc(self):
+        """Test RemoteAgent does not use A2A when jsonrpc not in supportedProtocols."""
+        import respx
+
+        remote = RemoteAgent(name="legacy-agent", card_url="http://legacy:8000")
+        with respx.mock:
+            respx.get("http://legacy:8000/.well-known/agent.json").respond(
+                json={
+                    "name": "legacy-agent",
+                    "description": "Legacy agent",
+                    "url": "http://legacy:8000",
+                    "version": "1.0",
+                    "supportedProtocols": [],
+                    "capabilities": {},
+                }
+            )
+            success = await remote._init()
+            assert success
+            assert remote._supports_a2a is False
+        await remote.close()
+
+    @pytest.mark.asyncio
+    async def test_process_message_uses_a2a_when_supported(self):
+        """Test process_message uses A2A SendMessage when agent supports it."""
+        import respx
+
+        remote = RemoteAgent(name="a2a-worker", card_url="http://a2a-worker:8000")
+        with respx.mock:
+            respx.get("http://a2a-worker:8000/.well-known/agent.json").respond(
+                json={
+                    "name": "a2a-worker",
+                    "description": "Worker",
+                    "url": "http://a2a-worker:8000",
+                    "version": "1.0",
+                    "supportedProtocols": ["jsonrpc"],
+                    "capabilities": {},
+                }
+            )
+            respx.post("http://a2a-worker:8000/").respond(
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "result": {
+                        "id": "task-1",
+                        "status": {"state": "completed", "message": "Done"},
+                        "artifacts": [{"parts": [{"type": "text", "text": "A2A response"}]}],
+                    },
+                }
+            )
+            result = await remote.process_message([{"role": "user", "content": "Hello via A2A"}])
+            assert result == "A2A response"
+        await remote.close()
+
+    @pytest.mark.asyncio
+    async def test_process_message_falls_back_to_chat(self):
+        """Test process_message falls back to chat completions when A2A fails."""
+        import respx
+
+        remote = RemoteAgent(name="flaky-agent", card_url="http://flaky:8000")
+        with respx.mock:
+            respx.get("http://flaky:8000/.well-known/agent.json").respond(
+                json={
+                    "name": "flaky-agent",
+                    "description": "Flaky",
+                    "url": "http://flaky:8000",
+                    "version": "1.0",
+                    "supportedProtocols": ["jsonrpc"],
+                    "capabilities": {},
+                }
+            )
+            respx.post("http://flaky:8000/").respond(status_code=500)
+            respx.post("http://flaky:8000/v1/chat/completions").respond(
+                json={
+                    "choices": [{"message": {"content": "Fallback response", "role": "assistant"}}]
+                }
+            )
+            result = await remote.process_message(
+                [{"role": "user", "content": "Hello with fallback"}]
+            )
+            assert result == "Fallback response"
+        await remote.close()
+
+    @pytest.mark.asyncio
+    async def test_process_message_uses_chat_when_no_a2a(self):
+        """Test process_message uses chat completions when A2A not supported."""
+        import respx
+
+        remote = RemoteAgent(name="chat-only", card_url="http://chat-only:8000")
+        with respx.mock:
+            respx.get("http://chat-only:8000/.well-known/agent.json").respond(
+                json={
+                    "name": "chat-only",
+                    "description": "Chat only",
+                    "url": "http://chat-only:8000",
+                    "version": "1.0",
+                    "supportedProtocols": [],
+                    "capabilities": {},
+                }
+            )
+            respx.post("http://chat-only:8000/v1/chat/completions").respond(
+                json={"choices": [{"message": {"content": "Chat response", "role": "assistant"}}]}
+            )
+            result = await remote.process_message([{"role": "user", "content": "Hello chat"}])
+            assert result == "Chat response"
         await remote.close()
 
 
