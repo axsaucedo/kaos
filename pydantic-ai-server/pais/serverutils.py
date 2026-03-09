@@ -407,6 +407,13 @@ class AgentServerSettings(BaseSettings):
     # Task store configuration
     task_store_type: str = "local"
 
+    # Autonomous execution settings
+    autonomous_enabled: bool = False
+    autonomous_goal: str = ""
+    autonomous_max_iterations: int = 10
+    autonomous_max_runtime_seconds: int = 300
+    autonomous_max_tool_calls: int = 50
+
     # Logging settings
     agent_access_log: bool = False
 

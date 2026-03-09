@@ -132,6 +132,10 @@ class AgentServer:
         else:
             self.task_manager = NullTaskManager()
 
+        # Wire up autonomous execution callback
+        if isinstance(self.task_manager, LocalTaskManager):
+            self.task_manager.set_autonomous_fn(self._run_autonomous)
+
         self.app = FastAPI(
             title=f"Agent: {self.settings.agent_name}",
             description=self.settings.agent_description,
@@ -168,6 +172,27 @@ class AgentServer:
     @asynccontextmanager
     async def _lifespan(self, app: FastAPI):
         self._log_startup_config()
+
+        # Start autonomous execution if configured
+        if self.settings.autonomous_enabled and self.settings.autonomous_goal:
+            logger.info(
+                f"Starting autonomous execution: "
+                f"goal_preview={self.settings.autonomous_goal[:100]} "
+                f"max_iterations={self.settings.autonomous_max_iterations}"
+            )
+            budgets = AutonomousBudgets(
+                max_iterations=self.settings.autonomous_max_iterations,
+                max_runtime_seconds=self.settings.autonomous_max_runtime_seconds,
+                max_tool_calls=self.settings.autonomous_max_tool_calls,
+            )
+            await self.task_manager.submit_autonomous(
+                goal=self.settings.autonomous_goal,
+                budgets=budgets,
+                metadata={"trigger": "startup"},
+            )
+        elif self.settings.autonomous_enabled and not self.settings.autonomous_goal:
+            logger.warning("autonomous_enabled=True but no autonomous_goal set, skipping")
+
         yield
         logger.info("AgentServer shutdown")
         await self.task_manager.shutdown()
@@ -186,7 +211,8 @@ class AgentServer:
             f"model={self._model} memory={type(self.memory).__name__} "
             f"max_steps={self.settings.agentic_loop_max_steps} mcp_servers={mcp_count} "
             f"sub_agents={sub_agents} otel={otel} "
-            f"custom_tools={len(self._custom_tools)}"
+            f"custom_tools={len(self._custom_tools)} "
+            f"autonomous={'enabled' if self.settings.autonomous_enabled else 'disabled'}"
         )
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(f"AgentServerSettings: {self.settings.model_dump()}")
