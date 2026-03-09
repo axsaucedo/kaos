@@ -218,3 +218,113 @@ class TestA2AIntegrationLifecycle:
 
         # NullTaskManager.send_message returns a stub task
         assert "result" in data
+
+
+class TestA2AAutonomousMode:
+    """Tests for autonomous mode via A2A SendMessage."""
+
+    @pytest.mark.asyncio
+    async def test_send_message_autonomous_mode(self):
+        """Send with mode=autonomous returns task immediately."""
+        import json
+        import os
+        import asyncio
+
+        os.environ["DEBUG_MOCK_RESPONSES"] = json.dumps(["Goal achieved."])
+        try:
+            server = make_test_server(task_manager_type="local")
+            # Populate mock responses then disable reset for autonomous
+            if server._mock_state:
+                server._mock_state.reset()
+                server._mock_state = None
+            transport = ASGITransport(app=server.app)
+
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post(
+                    "/",
+                    json=_jsonrpc(
+                        "SendMessage",
+                        {
+                            "message": {
+                                "role": "user",
+                                "parts": [{"type": "text", "text": "Analyze data"}],
+                            },
+                            "configuration": {"mode": "autonomous"},
+                        },
+                    ),
+                )
+                data = resp.json()
+                assert "result" in data
+                task = data["result"]
+                assert task["mode"] == "autonomous"
+                task_id = task["id"]
+
+                # Wait for completion
+                await asyncio.sleep(0.5)
+                resp2 = await client.post("/", json=_jsonrpc("GetTask", {"id": task_id}))
+                task2 = resp2.json()["result"]
+                assert task2["status"]["state"] == "completed"
+        finally:
+            os.environ.pop("DEBUG_MOCK_RESPONSES", None)
+
+    @pytest.mark.asyncio
+    async def test_send_message_autonomous_with_budgets(self):
+        """Custom budgets are passed through correctly."""
+        import json
+        import os
+        import asyncio
+
+        os.environ["DEBUG_MOCK_RESPONSES"] = json.dumps(["Done."])
+        try:
+            server = make_test_server(task_manager_type="local")
+            if server._mock_state:
+                server._mock_state.reset()
+                server._mock_state = None
+            transport = ASGITransport(app=server.app)
+
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post(
+                    "/",
+                    json=_jsonrpc(
+                        "SendMessage",
+                        {
+                            "message": {
+                                "role": "user",
+                                "parts": [{"type": "text", "text": "Quick task"}],
+                            },
+                            "configuration": {
+                                "mode": "autonomous",
+                                "budgets": {
+                                    "maxIterations": 3,
+                                    "maxRuntimeSeconds": 60,
+                                    "maxToolCalls": 10,
+                                },
+                            },
+                        },
+                    ),
+                )
+                data = resp.json()
+                assert "result" in data
+                task_id = data["result"]["id"]
+
+                await asyncio.sleep(0.5)
+                resp2 = await client.post("/", json=_jsonrpc("GetTask", {"id": task_id}))
+                assert resp2.json()["result"]["status"]["state"] == "completed"
+        finally:
+            os.environ.pop("DEBUG_MOCK_RESPONSES", None)
+
+    @pytest.mark.asyncio
+    async def test_send_message_default_mode_interactive(self):
+        """Verify existing behavior unchanged (synchronous completion)."""
+        from pydantic_ai.models.test import TestModel
+
+        model = TestModel(custom_output_text="Sync result")
+        server = make_test_server(model=model, task_manager_type="local")
+        transport = ASGITransport(app=server.app)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post("/", json=_send_message("Hello"))
+            data = resp.json()
+            task = data["result"]
+            assert task["mode"] == "interactive"
+            assert task["status"]["state"] == "completed"

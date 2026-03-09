@@ -742,9 +742,27 @@ async def _jsonrpc_send_message(
     message_metadata = message.get("metadata")
     task_metadata = dict(message_metadata) if isinstance(message_metadata, dict) else None
 
-    task = await task_manager.send_message(
-        input_text, session_id=session_id, metadata=task_metadata
-    )
+    # Check for autonomous mode
+    config = params.get("configuration", {})
+    mode = config.get("mode", "interactive")
+
+    if mode == "autonomous":
+        budgets_raw = config.get("budgets", {})
+        budgets = AutonomousBudgets(
+            max_iterations=budgets_raw.get("maxIterations", 10),
+            max_runtime_seconds=budgets_raw.get("maxRuntimeSeconds", 300),
+            max_tool_calls=budgets_raw.get("maxToolCalls", 50),
+        )
+        task = await task_manager.submit_autonomous(
+            goal=input_text,
+            session_id=session_id,
+            budgets=budgets,
+            metadata=task_metadata,
+        )
+    else:
+        task = await task_manager.send_message(
+            input_text, session_id=session_id, metadata=task_metadata
+        )
 
     return JSONResponse(JsonRpcResponse(id=rpc_id, result=task.to_dict()).to_dict())
 
