@@ -101,7 +101,7 @@ async def test_autonomous_a2a_send_message(
 
     mcp_spec = create_echo_mcp(test_namespace, mcp_name)
     create_custom_resource(mcp_spec, test_namespace)
-    wait_for_deployment(test_namespace, f"mcp-{mcp_name}", timeout=120)
+    wait_for_deployment(test_namespace, f"mcpserver-{mcp_name}", timeout=120)
 
     agent_spec = create_autonomous_agent(
         test_namespace,
@@ -226,7 +226,7 @@ async def test_autonomous_budget_enforcement(
 
     mcp_spec = create_echo_mcp(test_namespace, mcp_name)
     create_custom_resource(mcp_spec, test_namespace)
-    wait_for_deployment(test_namespace, f"mcp-{mcp_name}", timeout=120)
+    wait_for_deployment(test_namespace, f"mcpserver-{mcp_name}", timeout=120)
 
     agent_spec = create_autonomous_agent(
         test_namespace,
