@@ -45,6 +45,11 @@ from pais.a2a import (
     TaskManager,
     LocalTaskManager,
     NullTaskManager,
+    AutonomousBudgets,
+    TERMINAL_STATES,
+    EVENT_AUTONOMOUS_ITERATION_STARTED,
+    EVENT_AUTONOMOUS_ITERATION_COMPLETED,
+    EVENT_AUTONOMOUS_BUDGET_EXHAUSTED,
     setup_a2a_routes,
 )
 
@@ -120,6 +125,7 @@ class AgentServer:
         self._mcp_servers = mcp_servers or []
         self._model = model
         self._custom_tools = custom_tools or []
+        self._last_run_had_tool_calls = False
 
         if task_manager_type == "local":
             self.task_manager: TaskManager = LocalTaskManager(self._process_message)
@@ -381,6 +387,7 @@ class AgentServer:
             if stream:
                 full_response = ""
                 step = 0
+                had_tool_calls = False
                 async with self._agent.iter(
                     user_prompt,
                     message_history=message_history,
@@ -395,6 +402,7 @@ class AgentServer:
                             )
                             if has_tools:
                                 step += 1
+                                had_tool_calls = True
                             for part in node.model_response.parts:
                                 if isinstance(part, ToolCallPart):
                                     yield format_progress_event(
@@ -406,6 +414,7 @@ class AgentServer:
                     full_response = str(run.result.output)
                     yield full_response
 
+                self._last_run_had_tool_calls = had_tool_calls
                 await self.memory.add_event(session_id, "agent_response", full_response)
                 new_msgs = run.result.new_messages() if run.result else []
                 for msg in new_msgs:
@@ -418,6 +427,11 @@ class AgentServer:
                     deps=deps,
                 )
                 content = str(result.output) if result.output else ""
+                self._last_run_had_tool_calls = any(
+                    isinstance(p, ToolCallPart)
+                    for msg in result.new_messages()
+                    for p in getattr(msg, "parts", [])
+                )
                 await self.memory.add_event(session_id, "agent_response", content)
                 for msg in result.new_messages():
                     await self.memory.store_pydantic_message(session_id, msg)
@@ -427,6 +441,123 @@ class AgentServer:
             logger.error(f"Error processing message: {str(e)}")
             await self.memory.add_event(session_id, "error", str(e))
             yield f"Sorry, I encountered an error: {str(e)}"
+
+    async def _run_autonomous(
+        self,
+        goal: str,
+        session_id: str,
+        budgets: AutonomousBudgets,
+        task_id: str,
+    ) -> str:
+        """Execute an autonomous self-loop: iterate _process_message until done or budget exhausted."""
+        tracer = trace_api.get_tracer(SERVICE_NAME)
+
+        with tracer.start_as_current_span(
+            "kaos.autonomous.run",
+            attributes={
+                "autonomous.task_id": task_id,
+                "autonomous.session_id": session_id,
+                "autonomous.max_iterations": budgets.max_iterations,
+                "autonomous.max_runtime_seconds": budgets.max_runtime_seconds,
+                "autonomous.max_tool_calls": budgets.max_tool_calls,
+            },
+        ):
+            iteration = 0
+            total_tool_calls = 0
+            start_time = time.monotonic()
+            last_response = ""
+
+            # Get task for event logging
+            task = await self.task_manager.get_task(task_id)
+
+            while True:
+                # Check cancellation
+                current_task = await self.task_manager.get_task(task_id)
+                if current_task and current_task.status.state in TERMINAL_STATES:
+                    logger.info(f"Autonomous run {task_id} stopped: task in terminal state")
+                    break
+
+                # Check iteration budget
+                if iteration >= budgets.max_iterations:
+                    msg = f"Budget exhausted: max_iterations ({budgets.max_iterations}) reached"
+                    logger.info(f"Autonomous run {task_id}: {msg}")
+                    if task:
+                        task.add_event(
+                            EVENT_AUTONOMOUS_BUDGET_EXHAUSTED,
+                            {"reason": "max_iterations", "iterations": iteration},
+                        )
+                    return msg
+
+                # Check runtime budget
+                elapsed = time.monotonic() - start_time
+                if elapsed >= budgets.max_runtime_seconds:
+                    msg = f"Budget exhausted: max_runtime_seconds ({budgets.max_runtime_seconds}s) reached"
+                    logger.info(f"Autonomous run {task_id}: {msg}")
+                    if task:
+                        task.add_event(
+                            EVENT_AUTONOMOUS_BUDGET_EXHAUSTED,
+                            {"reason": "max_runtime_seconds", "elapsed": round(elapsed, 1)},
+                        )
+                    return msg
+
+                # Check tool call budget
+                if total_tool_calls >= budgets.max_tool_calls:
+                    msg = f"Budget exhausted: max_tool_calls ({budgets.max_tool_calls}) reached"
+                    logger.info(f"Autonomous run {task_id}: {msg}")
+                    if task:
+                        task.add_event(
+                            EVENT_AUTONOMOUS_BUDGET_EXHAUSTED,
+                            {"reason": "max_tool_calls", "total_tool_calls": total_tool_calls},
+                        )
+                    return msg
+
+                # Build iteration message
+                if iteration == 0:
+                    message = goal
+                else:
+                    message = (
+                        f"Continue working toward the goal. This is iteration {iteration + 1}. "
+                        "Review your progress and decide next steps. If the goal is fully achieved, "
+                        "respond with your final answer without making any tool calls."
+                    )
+
+                # Emit iteration started event
+                if task:
+                    task.add_event(EVENT_AUTONOMOUS_ITERATION_STARTED, {"iteration": iteration})
+
+                # Run one iteration (non-streaming)
+                with tracer.start_as_current_span(
+                    "kaos.autonomous.iteration",
+                    attributes={"autonomous.iteration": iteration},
+                ):
+                    response_chunks: list[str] = []
+                    async for chunk in self._process_message(message, session_id, stream=False):
+                        response_chunks.append(chunk)
+                    last_response = "".join(response_chunks)
+
+                # Track tool calls from this iteration
+                if self._last_run_had_tool_calls:
+                    total_tool_calls += 1
+
+                # Emit iteration completed event
+                if task:
+                    task.add_event(
+                        EVENT_AUTONOMOUS_ITERATION_COMPLETED,
+                        {
+                            "iteration": iteration,
+                            "had_tool_calls": self._last_run_had_tool_calls,
+                            "response_preview": last_response[:200],
+                        },
+                    )
+
+                iteration += 1
+
+                # Completion detection: if no tool calls, agent gave a final answer
+                if not self._last_run_had_tool_calls:
+                    logger.info(f"Autonomous run {task_id} completed after {iteration} iterations")
+                    return last_response
+
+            return last_response
 
     async def _complete_chat_completion(
         self,
