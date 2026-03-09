@@ -1,7 +1,7 @@
 """A2A protocol module: TaskManager ABC, LocalTaskManager, JSON-RPC dispatcher, and route setup.
 
 Provides:
-- Task data model (TaskState, TaskStatus, TaskMessage, Task)
+- Task data model (TaskState, TaskStatus, TaskMessage, TaskEvent, Task, AutonomousBudgets)
 - TaskManager ABC: send_message, get_task, cancel_task, shutdown
 - LocalTaskManager: in-process execution with internal dict storage and OTel
 - NullTaskManager: no-op implementation
@@ -98,6 +98,44 @@ class TaskMessage:
 
 
 @dataclass
+class TaskEvent:
+    """Append-only event log entry for task lifecycle tracking."""
+
+    id: str
+    type: str
+    timestamp: str  # ISO 8601 UTC
+    data: Dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "type": self.type,
+            "timestamp": self.timestamp,
+            "data": self.data,
+        }
+
+
+# Event type constants (module-level strings, not enum — extensible)
+EVENT_TASK_SUBMITTED = "task.submitted"
+EVENT_TASK_WORKING = "task.working"
+EVENT_TASK_COMPLETED = "task.completed"
+EVENT_TASK_FAILED = "task.failed"
+EVENT_TASK_CANCELED = "task.canceled"
+EVENT_AUTONOMOUS_ITERATION_STARTED = "autonomous.iteration.started"
+EVENT_AUTONOMOUS_ITERATION_COMPLETED = "autonomous.iteration.completed"
+EVENT_AUTONOMOUS_BUDGET_EXHAUSTED = "autonomous.budget.exhausted"
+
+
+@dataclass
+class AutonomousBudgets:
+    """Budget limits for autonomous execution runs."""
+
+    max_iterations: int = 10
+    max_runtime_seconds: int = 300
+    max_tool_calls: int = 50
+
+
+@dataclass
 class Task:
     """A2A Task representing a unit of work with lifecycle tracking."""
 
@@ -107,6 +145,20 @@ class Task:
     history: List[TaskMessage] = field(default_factory=list)
     artifacts: List[Dict[str, Any]] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
+    events: List[TaskEvent] = field(default_factory=list)
+    mode: str = "interactive"  # "interactive" or "autonomous"
+    output: str = ""
+
+    def add_event(self, event_type: str, data: Optional[Dict[str, Any]] = None) -> TaskEvent:
+        """Create and append a TaskEvent with auto-generated id and timestamp."""
+        event = TaskEvent(
+            id=uuid.uuid4().hex[:12],
+            type=event_type,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            data=data or {},
+        )
+        self.events.append(event)
+        return event
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -116,6 +168,9 @@ class Task:
             "history": [m.to_dict() for m in self.history],
             "artifacts": self.artifacts,
             "metadata": self.metadata,
+            "events": [e.to_dict() for e in self.events],
+            "mode": self.mode,
+            "output": self.output,
         }
 
 
