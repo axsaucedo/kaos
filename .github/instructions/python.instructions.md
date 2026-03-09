@@ -51,6 +51,11 @@ make format                     # Auto-format code
 | `OTEL_INSTRUMENTATION_VERSION` | Pydantic AI instrumentation version: 1-4 (default: `4`) |
 | `OTEL_EVENT_MODE` | Pydantic AI event mode: `attributes` (default) or `logs` (forces v1) |
 | `TASK_STORE_TYPE` | TaskManager backend: `local` (default) or `null` (disabled) |
+| `AUTONOMOUS_ENABLED` | Enable startup-activated autonomous mode (default: `false`) |
+| `AUTONOMOUS_GOAL` | Goal for startup-activated autonomous execution |
+| `AUTONOMOUS_MAX_ITERATIONS` | Max autonomous loop iterations (default: `10`) |
+| `AUTONOMOUS_MAX_RUNTIME_SECONDS` | Max wall-clock time for autonomous run (default: `300`) |
+| `AUTONOMOUS_MAX_TOOL_CALLS` | Max cumulative tool calls across autonomous iterations (default: `50`) |
 
 ## Architecture
 
@@ -125,18 +130,31 @@ make format                     # Auto-format code
 - `_MockResponseState`: Mutable mock response state shared via closure (workaround for ContextVar + FunctionModel issue)
 
 ### TaskManager
-- **TaskManager** ABC: `send_message()`, `get_task()`, `cancel_task()`, `wait_for_completion()`, `shutdown()`
-- **LocalTaskManager**: In-memory dict storage, synchronous process_fn execution, OTel spans/metrics
+- **TaskManager** ABC: `send_message()`, `submit_autonomous()`, `get_task()`, `cancel_task()`, `wait_for_completion()`, `shutdown()`
+- **LocalTaskManager**: In-memory dict storage, synchronous process_fn execution, async autonomous execution, OTel spans/metrics
 - **NullTaskManager**: No-op — `send_message()` returns a stub task, nothing persisted
 - State transitions enforced via `VALID_TRANSITIONS` dict — terminal states allow no further transitions
 - `TASK_STORE_TYPE` env var controls backend selection (`local` default, `null` to disable)
 - Instrumented with OTel spans (`kaos.task.submit`, `kaos.task.execute`, `kaos.task.cancel`) and metrics (`kaos.tasks` counter, `kaos.task.duration` histogram)
+- `submit_autonomous()`: Creates task with mode="autonomous", spawns `asyncio.create_task` for background execution
+- `_running_tasks: Dict[str, asyncio.Task]` tracks running async tasks; `shutdown()` cancels all
+
+### Autonomous Execution
+- `AgentServer._run_autonomous(goal, session_id, budgets, task_id)`: Core self-loop engine
+- Iteratively calls `_process_message()` with budget enforcement (iterations, time, tool calls)
+- Completion detection: if no tool calls occurred in an iteration, agent is done
+- `_last_run_had_tool_calls` flag set in `_process_message` to track tool usage
+- Two activation modes:
+  1. **Startup-activated**: `AUTONOMOUS_ENABLED=true` + `AUTONOMOUS_GOAL` → lifespan spawns task
+  2. **A2A-triggered**: `SendMessage` with `configuration.mode: "autonomous"` + optional `budgets`
+- `AutonomousBudgets` dataclass: `max_iterations` (10), `max_runtime_seconds` (300), `max_tool_calls` (50)
+- `TaskEvent` append-only event log per task: submitted, working, iteration.started/completed, budget.exhausted, completed/failed/canceled
 
 ### A2A JSON-RPC Endpoint (POST /) — a2a.py
 - JSON-RPC 2.0 dispatcher at root path, separate from `/v1/chat/completions`
 - A2A RC v1.0 methods: `SendMessage`, `GetTask`, `CancelTask` (PascalCase)
 - Legacy aliases: `tasks/send`, `tasks/get`, `tasks/cancel` (backward compatible)
-- `SendMessage` executes synchronously — always returns completed/failed task
+- `SendMessage` supports two modes: synchronous (default) returns completed/failed task, autonomous (`configuration.mode: "autonomous"`) spawns background task
 - `contextId` param maps to session_id
 - Standard error codes: -32700 (parse), -32600 (invalid request), -32601 (method not found), -32602 (invalid params), -32603 (internal), -32001 (task not found)
 - A2A message format: `{role: "user"/"agent", parts: [{type: "text", text: "..."}]}`
