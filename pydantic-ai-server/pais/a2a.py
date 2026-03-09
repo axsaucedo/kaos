@@ -9,12 +9,14 @@ Provides:
 - setup_a2a_routes(): Mounts A2A endpoints on a FastAPI app
 """
 
+import asyncio
 import uuid
 import logging
 import time
 from abc import ABC, abstractmethod
 from enum import Enum
 from typing import (
+    Awaitable,
     Dict,
     Any,
     Optional,
@@ -202,6 +204,7 @@ def get_task_metrics() -> Tuple[Optional[metrics.Counter], Optional[metrics.Hist
 # --- TaskManager ABC ---
 
 ProcessFn = Callable[..., AsyncIterator[str]]
+AutonomousFn = Callable[[str, str, AutonomousBudgets, str], Awaitable[str]]
 
 
 class TaskManager(ABC):
@@ -219,6 +222,17 @@ class TaskManager(ABC):
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Task:
         """Submit a message and return a Task. Execution strategy is implementation-defined."""
+        ...
+
+    @abstractmethod
+    async def submit_autonomous(
+        self,
+        goal: str,
+        session_id: Optional[str] = None,
+        budgets: Optional[AutonomousBudgets] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Task:
+        """Submit an autonomous run. Returns Task immediately (may be in-progress)."""
         ...
 
     @abstractmethod
@@ -255,9 +269,15 @@ class LocalTaskManager(TaskManager):
 
     def __init__(self, process_fn: ProcessFn, max_tasks: int = 10000):
         self._process_fn = process_fn
+        self._autonomous_fn: Optional[AutonomousFn] = None
         self._tasks: Dict[str, Task] = {}
+        self._running_tasks: Dict[str, asyncio.Task] = {}
         self.max_tasks = max_tasks
         logger.info(f"LocalTaskManager initialized: max_tasks={max_tasks}")
+
+    def set_autonomous_fn(self, fn: AutonomousFn) -> None:
+        """Set the autonomous execution callback (avoids circular dependency)."""
+        self._autonomous_fn = fn
 
     async def send_message(
         self,
@@ -282,6 +302,45 @@ class LocalTaskManager(TaskManager):
         await self._execute_task(task.id, text)
         return task
 
+    async def submit_autonomous(
+        self,
+        goal: str,
+        session_id: Optional[str] = None,
+        budgets: Optional[AutonomousBudgets] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Task:
+        """Submit an autonomous run. Spawns background task, returns immediately."""
+        if not self._autonomous_fn:
+            raise RuntimeError("Autonomous function not set. Call set_autonomous_fn() first.")
+
+        tracer = trace_api.get_tracer(SERVICE_NAME)
+        task_counter, _ = get_task_metrics()
+        effective_budgets = budgets or AutonomousBudgets()
+
+        with tracer.start_as_current_span(
+            "kaos.task.submit_autonomous",
+            attributes={
+                "task.session_id": session_id or "",
+                "task.mode": "autonomous",
+            },
+        ):
+            task = self._create_task(session_id, goal, metadata)
+            task.mode = "autonomous"
+            task.add_event(EVENT_TASK_SUBMITTED, {"goal_preview": goal[:200]})
+            logger.info(f"Submitted autonomous task {task.id}")
+
+            if task_counter:
+                task_counter.add(1, {"state": "submitted", "mode": "autonomous"})
+
+        self._transition(task.id, TaskState.WORKING, "Autonomous execution started")
+        task.add_event(EVENT_TASK_WORKING, {})
+
+        bg_task = asyncio.create_task(
+            self._execute_autonomous(task.id, goal, task.session_id, effective_budgets)
+        )
+        self._running_tasks[task.id] = bg_task
+        return task
+
     async def get_task(self, task_id: str) -> Optional[Task]:
         return self._tasks.get(task_id)
 
@@ -301,6 +360,11 @@ class LocalTaskManager(TaskManager):
             if not self._transition(task_id, TaskState.CANCELED, "Canceled by request"):
                 return False
 
+            # Cancel background asyncio task if running
+            bg = self._running_tasks.pop(task_id, None)
+            if bg and not bg.done():
+                bg.cancel()
+
             if task_counter:
                 task_counter.add(1, {"state": "cancel_requested"})
 
@@ -309,11 +373,24 @@ class LocalTaskManager(TaskManager):
     async def wait_for_completion(
         self, task_id: str, timeout: float = 60.0, poll_interval: float = 0.1
     ) -> Optional[Task]:
-        """Return task — already completed since execution is synchronous."""
+        """Wait for task to reach terminal state, polling at intervals."""
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
+            task = self._tasks.get(task_id)
+            if task and task.status.state in TERMINAL_STATES:
+                return task
+            await asyncio.sleep(poll_interval)
         return self._tasks.get(task_id)
 
     async def shutdown(self) -> None:
-        """Clean up resources."""
+        """Cancel all running tasks and clean up."""
+        for task_id, bg in list(self._running_tasks.items()):
+            if not bg.done():
+                bg.cancel()
+        # Wait briefly for cancellations
+        if self._running_tasks:
+            await asyncio.gather(*self._running_tasks.values(), return_exceptions=True)
+            self._running_tasks.clear()
         logger.debug("LocalTaskManager shutdown")
 
     # --- Internal methods ---
@@ -412,6 +489,62 @@ class LocalTaskManager(TaskManager):
                 if task_duration:
                     task_duration.record(duration_ms, {"task.id": task_id})
 
+    async def _execute_autonomous(
+        self,
+        task_id: str,
+        goal: str,
+        session_id: str,
+        budgets: AutonomousBudgets,
+    ) -> None:
+        """Background execution wrapper for autonomous runs."""
+        tracer = trace_api.get_tracer(SERVICE_NAME)
+        task_counter, task_duration = get_task_metrics()
+        start_time = time.perf_counter()
+
+        with tracer.start_as_current_span(
+            "kaos.task.execute",
+            attributes={"task.id": task_id, "task.mode": "autonomous"},
+        ) as span:
+            task = self._tasks.get(task_id)
+            if not task:
+                logger.error(f"Autonomous task {task_id} not found")
+                return
+
+            try:
+                assert self._autonomous_fn is not None
+                output = await self._autonomous_fn(goal, session_id, budgets, task_id)
+                task.output = output
+                task.history.append(TaskMessage(role="agent", text=output))
+                self._transition(task_id, TaskState.COMPLETED, "Done")
+                task.add_event(EVENT_TASK_COMPLETED, {"output_preview": output[:200]})
+                logger.info(f"Autonomous task {task_id} completed")
+                span.set_attribute("task.state", "completed")
+                if task_counter:
+                    task_counter.add(1, {"state": "completed", "mode": "autonomous"})
+
+            except asyncio.CancelledError:
+                self._transition(task_id, TaskState.CANCELED, "Canceled")
+                if task:
+                    task.add_event(EVENT_TASK_CANCELED, {})
+                logger.info(f"Autonomous task {task_id} canceled")
+                span.set_attribute("task.state", "canceled")
+
+            except Exception as e:
+                logger.error(f"Autonomous task {task_id} failed: {e}")
+                self._transition(task_id, TaskState.FAILED, str(e))
+                if task:
+                    task.add_event(EVENT_TASK_FAILED, {"error": str(e)})
+                span.set_attribute("task.state", "failed")
+                span.record_exception(e)
+                if task_counter:
+                    task_counter.add(1, {"state": "failed", "mode": "autonomous"})
+
+            finally:
+                self._running_tasks.pop(task_id, None)
+                duration_ms = (time.perf_counter() - start_time) * 1000
+                if task_duration:
+                    task_duration.record(duration_ms, {"task.id": task_id, "mode": "autonomous"})
+
     def _cleanup_if_needed(self) -> None:
         if len(self._tasks) >= self.max_tasks:
             terminal = [
@@ -444,6 +577,21 @@ class NullTaskManager(TaskManager):
             id=task_id,
             session_id=session_id or "null-session",
             status=TaskStatus(state=TaskState.COMPLETED),
+        )
+
+    async def submit_autonomous(
+        self,
+        goal: str,
+        session_id: Optional[str] = None,
+        budgets: Optional[AutonomousBudgets] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Task:
+        task_id = f"null_task_{uuid.uuid4().hex[:8]}"
+        return Task(
+            id=task_id,
+            session_id=session_id or "null-session",
+            status=TaskStatus(state=TaskState.COMPLETED),
+            mode="autonomous",
         )
 
     async def get_task(self, task_id: str) -> Optional[Task]:

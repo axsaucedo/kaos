@@ -347,6 +347,83 @@ class TestLocalTaskManager:
             assert task.status.state == TaskState.COMPLETED
 
 
+class TestLocalTaskManagerAutonomous:
+    """Tests for LocalTaskManager.submit_autonomous and async execution."""
+
+    @pytest.mark.asyncio
+    async def test_submit_autonomous_creates_task(self):
+        async def mock_autonomous(goal, session_id, budgets, task_id):
+            return f"Done: {goal}"
+
+        manager = LocalTaskManager(_mock_process)
+        manager.set_autonomous_fn(mock_autonomous)
+        task = await manager.submit_autonomous("Analyze data")
+        assert task.mode == "autonomous"
+        assert task.status.state in {TaskState.WORKING, TaskState.COMPLETED}
+
+    @pytest.mark.asyncio
+    async def test_submit_autonomous_executes_to_completion(self):
+        async def mock_autonomous(goal, session_id, budgets, task_id):
+            return f"Completed: {goal}"
+
+        manager = LocalTaskManager(_mock_process)
+        manager.set_autonomous_fn(mock_autonomous)
+        task = await manager.submit_autonomous("Run analysis")
+        completed = await manager.wait_for_completion(task.id, timeout=5.0)
+        assert completed is not None
+        assert completed.status.state == TaskState.COMPLETED
+        assert completed.output == "Completed: Run analysis"
+
+    @pytest.mark.asyncio
+    async def test_submit_autonomous_failure_handling(self):
+        async def failing_autonomous(goal, session_id, budgets, task_id):
+            raise RuntimeError("Analysis failed")
+
+        manager = LocalTaskManager(_mock_process)
+        manager.set_autonomous_fn(failing_autonomous)
+        task = await manager.submit_autonomous("Fail task")
+        completed = await manager.wait_for_completion(task.id, timeout=5.0)
+        assert completed is not None
+        assert completed.status.state == TaskState.FAILED
+        assert completed.status.message is not None
+        assert "Analysis failed" in completed.status.message
+
+    @pytest.mark.asyncio
+    async def test_submit_autonomous_events(self):
+        async def mock_autonomous(goal, session_id, budgets, task_id):
+            return "Done"
+
+        manager = LocalTaskManager(_mock_process)
+        manager.set_autonomous_fn(mock_autonomous)
+        task = await manager.submit_autonomous("Test events")
+        completed = await manager.wait_for_completion(task.id, timeout=5.0)
+        assert completed is not None
+        event_types = [e.type for e in completed.events]
+        assert EVENT_TASK_SUBMITTED in event_types
+        assert EVENT_TASK_COMPLETED in event_types
+
+    @pytest.mark.asyncio
+    async def test_submit_autonomous_no_fn_raises(self):
+        manager = LocalTaskManager(_mock_process)
+        with pytest.raises(RuntimeError, match="Autonomous function not set"):
+            await manager.submit_autonomous("No function")
+
+    @pytest.mark.asyncio
+    async def test_shutdown_cancels_running_autonomous(self):
+        import asyncio
+
+        async def slow_autonomous(goal, session_id, budgets, task_id):
+            await asyncio.sleep(10)
+            return "Should not reach"
+
+        manager = LocalTaskManager(_mock_process)
+        manager.set_autonomous_fn(slow_autonomous)
+        task = await manager.submit_autonomous("Long task")
+        assert task.id in manager._running_tasks
+        await manager.shutdown()
+        assert len(manager._running_tasks) == 0
+
+
 class TestNullTaskManager:
     """Tests for NullTaskManager no-op implementation."""
 
@@ -356,6 +433,14 @@ class TestNullTaskManager:
         task = await manager.send_message("Hello")
         assert task.id.startswith("null_task_")
         assert task.status.state == TaskState.COMPLETED
+
+    @pytest.mark.asyncio
+    async def test_submit_autonomous(self):
+        manager = NullTaskManager()
+        task = await manager.submit_autonomous("Do something")
+        assert task.id.startswith("null_task_")
+        assert task.status.state == TaskState.COMPLETED
+        assert task.mode == "autonomous"
 
     @pytest.mark.asyncio
     async def test_get_task_returns_none(self):
