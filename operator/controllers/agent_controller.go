@@ -544,6 +544,41 @@ func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *
 		}
 	}
 
+	// Autonomous configuration
+	if agent.Spec.Config != nil && agent.Spec.Config.Autonomous != nil {
+		auto := agent.Spec.Config.Autonomous
+		if auto.Enabled {
+			env = append(env, corev1.EnvVar{
+				Name:  "AUTONOMOUS_ENABLED",
+				Value: "true",
+			})
+		}
+		if auto.Goal != "" {
+			env = append(env, corev1.EnvVar{
+				Name:  "AUTONOMOUS_GOAL",
+				Value: auto.Goal,
+			})
+		}
+		if auto.MaxIterations != nil {
+			env = append(env, corev1.EnvVar{
+				Name:  "AUTONOMOUS_MAX_ITERATIONS",
+				Value: fmt.Sprintf("%d", *auto.MaxIterations),
+			})
+		}
+		if auto.MaxRuntimeSeconds != nil {
+			env = append(env, corev1.EnvVar{
+				Name:  "AUTONOMOUS_MAX_RUNTIME_SECONDS",
+				Value: fmt.Sprintf("%d", *auto.MaxRuntimeSeconds),
+			})
+		}
+		if auto.MaxToolCalls != nil {
+			env = append(env, corev1.EnvVar{
+				Name:  "AUTONOMOUS_MAX_TOOL_CALLS",
+				Value: fmt.Sprintf("%d", *auto.MaxToolCalls),
+			})
+		}
+	}
+
 	// MCP Servers configuration
 	if len(mcpServers) > 0 {
 		mcpNames := make([]string, 0, len(mcpServers))

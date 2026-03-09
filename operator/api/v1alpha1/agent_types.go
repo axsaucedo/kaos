@@ -130,6 +130,42 @@ type AgentConfig struct {
 	// Telemetry configures OpenTelemetry instrumentation
 	// +kubebuilder:validation:Optional
 	Telemetry *TelemetryConfig `json:"telemetry,omitempty"`
+
+	// Autonomous configures autonomous (self-looping) execution
+	// +kubebuilder:validation:Optional
+	Autonomous *AutonomousConfig `json:"autonomous,omitempty"`
+}
+
+// +kubebuilder:object:generate=true
+
+// AutonomousConfig configures autonomous (self-looping) agent execution.
+type AutonomousConfig struct {
+	// Enabled activates autonomous execution on agent startup
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+
+	// Goal is the objective the agent works toward autonomously.
+	// Required when enabled is true.
+	// +optional
+	Goal string `json:"goal,omitempty"`
+
+	// MaxIterations is the maximum number of autonomous loop iterations (default: 10)
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=1000
+	MaxIterations *int32 `json:"maxIterations,omitempty"`
+
+	// MaxRuntimeSeconds is the maximum wall-clock time for the autonomous run (default: 300)
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=86400
+	MaxRuntimeSeconds *int32 `json:"maxRuntimeSeconds,omitempty"`
+
+	// MaxToolCalls is the maximum cumulative tool calls across all iterations (default: 50)
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=10000
+	MaxToolCalls *int32 `json:"maxToolCalls,omitempty"`
 }
 
 // +kubebuilder:object:generate=true

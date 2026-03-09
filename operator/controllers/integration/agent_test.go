@@ -698,4 +698,129 @@ var _ = Describe("Agent Controller", func() {
 		}
 		Expect(foundModelName).To(Equal("openai/gpt-4-turbo"))
 	})
+
+	It("should set autonomous env vars when autonomous config is enabled", func() {
+		modelAPIName := uniqueAgentName("auto-modelapi")
+		agentName := uniqueAgentName("auto-agent")
+
+		modelAPI := &kaosv1alpha1.ModelAPI{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      modelAPIName,
+				Namespace: namespace,
+			},
+			Spec: kaosv1alpha1.ModelAPISpec{
+				Mode: kaosv1alpha1.ModelAPIModeProxy,
+				ProxyConfig: &kaosv1alpha1.ProxyConfig{
+					Models: []string{"mock-model"},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, modelAPI)).To(Succeed())
+		defer func() {
+			k8sClient.Delete(ctx, modelAPI)
+		}()
+
+		maxIter := int32(20)
+		maxRuntime := int32(600)
+		maxTools := int32(100)
+		agent := &kaosv1alpha1.Agent{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      agentName,
+				Namespace: namespace,
+			},
+			Spec: kaosv1alpha1.AgentSpec{
+				ModelAPI:            modelAPIName,
+				Model:               "mock-model",
+				WaitForDependencies: boolPtr(false),
+				Config: &kaosv1alpha1.AgentConfig{
+					Autonomous: &kaosv1alpha1.AutonomousConfig{
+						Enabled:           true,
+						Goal:              "Monitor system health",
+						MaxIterations:     &maxIter,
+						MaxRuntimeSeconds: &maxRuntime,
+						MaxToolCalls:      &maxTools,
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, agent)).To(Succeed())
+		defer func() {
+			k8sClient.Delete(ctx, agent)
+		}()
+
+		deployment := &appsv1.Deployment{}
+		Eventually(func() error {
+			return k8sClient.Get(ctx, types.NamespacedName{
+				Name:      fmt.Sprintf("agent-%s", agentName),
+				Namespace: namespace,
+			}, deployment)
+		}, timeout, interval).Should(Succeed())
+
+		container := deployment.Spec.Template.Spec.Containers[0]
+		envMap := make(map[string]string)
+		for _, env := range container.Env {
+			envMap[env.Name] = env.Value
+		}
+		Expect(envMap["AUTONOMOUS_ENABLED"]).To(Equal("true"))
+		Expect(envMap["AUTONOMOUS_GOAL"]).To(Equal("Monitor system health"))
+		Expect(envMap["AUTONOMOUS_MAX_ITERATIONS"]).To(Equal("20"))
+		Expect(envMap["AUTONOMOUS_MAX_RUNTIME_SECONDS"]).To(Equal("600"))
+		Expect(envMap["AUTONOMOUS_MAX_TOOL_CALLS"]).To(Equal("100"))
+	})
+
+	It("should not set autonomous env vars when config is nil", func() {
+		modelAPIName := uniqueAgentName("noauto-modelapi")
+		agentName := uniqueAgentName("noauto-agent")
+
+		modelAPI := &kaosv1alpha1.ModelAPI{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      modelAPIName,
+				Namespace: namespace,
+			},
+			Spec: kaosv1alpha1.ModelAPISpec{
+				Mode: kaosv1alpha1.ModelAPIModeProxy,
+				ProxyConfig: &kaosv1alpha1.ProxyConfig{
+					Models: []string{"mock-model"},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, modelAPI)).To(Succeed())
+		defer func() {
+			k8sClient.Delete(ctx, modelAPI)
+		}()
+
+		agent := &kaosv1alpha1.Agent{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      agentName,
+				Namespace: namespace,
+			},
+			Spec: kaosv1alpha1.AgentSpec{
+				ModelAPI:            modelAPIName,
+				Model:               "mock-model",
+				WaitForDependencies: boolPtr(false),
+			},
+		}
+		Expect(k8sClient.Create(ctx, agent)).To(Succeed())
+		defer func() {
+			k8sClient.Delete(ctx, agent)
+		}()
+
+		deployment := &appsv1.Deployment{}
+		Eventually(func() error {
+			return k8sClient.Get(ctx, types.NamespacedName{
+				Name:      fmt.Sprintf("agent-%s", agentName),
+				Namespace: namespace,
+			}, deployment)
+		}, timeout, interval).Should(Succeed())
+
+		container := deployment.Spec.Template.Spec.Containers[0]
+		envMap := make(map[string]string)
+		for _, env := range container.Env {
+			envMap[env.Name] = env.Value
+		}
+		_, hasEnabled := envMap["AUTONOMOUS_ENABLED"]
+		_, hasGoal := envMap["AUTONOMOUS_GOAL"]
+		Expect(hasEnabled).To(BeFalse())
+		Expect(hasGoal).To(BeFalse())
+	})
 })
