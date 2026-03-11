@@ -156,6 +156,8 @@ spec:
       intervalSeconds: 0           # 0-3600 (pause between iterations)
 ```
 
+**Validation:** Setting `enabled: true` without a `goal` will cause the operator to set the Agent status to `Failed` and the Python server will raise a `ValueError` on startup, resulting in a CrashLoopBackOff.
+
 ## Completion Detection
 
 The autonomous loop detects completion by checking whether the agent made any tool calls during an iteration:

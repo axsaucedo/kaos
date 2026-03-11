@@ -293,16 +293,16 @@ class TestStartupAutonomous:
             assert len(tasks) == 0
 
     @pytest.mark.asyncio
-    async def test_startup_autonomous_skipped_without_goal(self):
-        """No autonomous task when enabled but goal is empty."""
+    async def test_startup_autonomous_raises_without_goal(self):
+        """Startup raises ValueError when enabled but goal is empty."""
         _set_mock_responses(["Should not run."])
         server = _make_autonomous_server()
         server.settings.autonomous_enabled = True
         server.settings.autonomous_goal = ""
 
-        async with server._lifespan(server.app):
-            tasks = [t for t in server.task_manager._tasks.values() if t.mode == "autonomous"]
-            assert len(tasks) == 0
+        with pytest.raises(ValueError, match="autonomous_enabled=True requires autonomous_goal"):
+            async with server._lifespan(server.app):
+                pass
 
     def test_autonomous_settings_from_env(self):
         """Verify env vars map to AgentServerSettings fields."""

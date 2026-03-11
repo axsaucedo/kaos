@@ -823,4 +823,68 @@ var _ = Describe("Agent Controller", func() {
 		Expect(hasEnabled).To(BeFalse())
 		Expect(hasGoal).To(BeFalse())
 	})
+
+	It("should set Failed status when autonomous enabled without goal", func() {
+		modelAPIName := uniqueAgentName("autonogoal-modelapi")
+		agentName := uniqueAgentName("autonogoal-agent")
+
+		modelAPI := &kaosv1alpha1.ModelAPI{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      modelAPIName,
+				Namespace: namespace,
+			},
+			Spec: kaosv1alpha1.ModelAPISpec{
+				Mode: kaosv1alpha1.ModelAPIModeProxy,
+				ProxyConfig: &kaosv1alpha1.ProxyConfig{
+					Models: []string{"mock-model"},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, modelAPI)).To(Succeed())
+		defer func() {
+			k8sClient.Delete(ctx, modelAPI)
+		}()
+
+		agent := &kaosv1alpha1.Agent{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      agentName,
+				Namespace: namespace,
+			},
+			Spec: kaosv1alpha1.AgentSpec{
+				ModelAPI:            modelAPIName,
+				Model:               "mock-model",
+				WaitForDependencies: boolPtr(false),
+				Config: &kaosv1alpha1.AgentConfig{
+					Autonomous: &kaosv1alpha1.AutonomousConfig{
+						Enabled: true,
+						Goal:    "",
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, agent)).To(Succeed())
+		defer func() {
+			k8sClient.Delete(ctx, agent)
+		}()
+
+		// Should eventually have Failed phase
+		Eventually(func() string {
+			updated := &kaosv1alpha1.Agent{}
+			err := k8sClient.Get(ctx, types.NamespacedName{
+				Name:      agentName,
+				Namespace: namespace,
+			}, updated)
+			if err != nil {
+				return ""
+			}
+			return updated.Status.Phase
+		}, timeout, interval).Should(Equal("Failed"))
+
+		updated := &kaosv1alpha1.Agent{}
+		Expect(k8sClient.Get(ctx, types.NamespacedName{
+			Name:      agentName,
+			Namespace: namespace,
+		}, updated)).To(Succeed())
+		Expect(updated.Status.Message).To(ContainSubstring("autonomous.goal"))
+	})
 })

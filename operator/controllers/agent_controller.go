@@ -103,6 +103,18 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		log.Info("WARNING: telemetry.enabled=true but endpoint is empty; telemetry will not function", "agent", agent.Name)
 	}
 
+	// Validate autonomous configuration
+	if agent.Spec.Config != nil && agent.Spec.Config.Autonomous != nil {
+		auto := agent.Spec.Config.Autonomous
+		if auto.Enabled && auto.Goal == "" {
+			agent.Status.Phase = "Failed"
+			agent.Status.Message = "autonomous.enabled=true requires autonomous.goal to be set"
+			agent.Status.Ready = false
+			r.Status().Update(ctx, agent)
+			return ctrl.Result{RequeueAfter: 30 * time.Second}, nil
+		}
+	}
+
 	// Resolve ModelAPI reference
 	modelapi := &kaosv1alpha1.ModelAPI{}
 	err := r.Get(ctx, types.NamespacedName{Name: agent.Spec.ModelAPI, Namespace: agent.Namespace}, modelapi)

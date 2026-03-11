@@ -193,7 +193,9 @@ class AgentServer:
                 metadata={"trigger": "startup"},
             )
         elif self.settings.autonomous_enabled and not self.settings.autonomous_goal:
-            logger.warning("autonomous_enabled=True but no autonomous_goal set, skipping")
+            raise ValueError(
+                "autonomous_enabled=True requires autonomous_goal to be set"
+            )
 
         yield
         logger.info("AgentServer shutdown")
