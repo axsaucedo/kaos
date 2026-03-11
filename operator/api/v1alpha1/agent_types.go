@@ -166,6 +166,12 @@ type AutonomousConfig struct {
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=10000
 	MaxToolCalls *int32 `json:"maxToolCalls,omitempty"`
+
+	// IntervalSeconds is the pause between autonomous loop iterations (default: 0, no pause)
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=3600
+	IntervalSeconds *int32 `json:"intervalSeconds,omitempty"`
 }
 
 // +kubebuilder:object:generate=true

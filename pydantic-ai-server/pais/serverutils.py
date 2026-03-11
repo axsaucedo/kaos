@@ -413,6 +413,7 @@ class AgentServerSettings(BaseSettings):
     autonomous_max_iterations: int = 10
     autonomous_max_runtime_seconds: int = 300
     autonomous_max_tool_calls: int = 50
+    autonomous_interval_seconds: int = 0
 
     # Logging settings
     agent_access_log: bool = False

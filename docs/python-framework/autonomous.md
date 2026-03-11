@@ -100,6 +100,7 @@ Budgets prevent runaway execution:
 | `maxIterations` | 10 | Maximum outer-loop iterations (0 = unlimited) |
 | `maxRuntimeSeconds` | 300 | Wall-clock timeout in seconds (0 = unlimited) |
 | `maxToolCalls` | 50 | Cumulative tool calls across all iterations (0 = unlimited) |
+| `intervalSeconds` | 0 | Pause between iterations in seconds (0 = no pause) |
 
 Budgets are checked at the **start** of each iteration (before execution). When a budget is exhausted, the task completes with a budget-exceeded message and a `autonomous.budget.exhausted` event.
 
@@ -139,6 +140,7 @@ Events are returned in `GetTask` responses:
 | `AUTONOMOUS_MAX_ITERATIONS` | `10` | Max iterations |
 | `AUTONOMOUS_MAX_RUNTIME_SECONDS` | `300` | Max wall-clock time |
 | `AUTONOMOUS_MAX_TOOL_CALLS` | `50` | Max cumulative tool calls |
+| `AUTONOMOUS_INTERVAL_SECONDS` | `0` | Pause between iterations (seconds) |
 
 ## CRD Configuration
 
@@ -151,6 +153,7 @@ spec:
       maxIterations: 10            # 0-1000 (0 = unlimited)
       maxRuntimeSeconds: 300       # 0-86400 (0 = unlimited)
       maxToolCalls: 50             # 0-10000 (0 = unlimited)
+      intervalSeconds: 0           # 0-3600 (pause between iterations)
 ```
 
 ## Completion Detection

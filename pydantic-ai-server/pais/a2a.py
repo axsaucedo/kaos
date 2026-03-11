@@ -138,6 +138,7 @@ class AutonomousBudgets:
     max_iterations: int = 10
     max_runtime_seconds: int = 300
     max_tool_calls: int = 50
+    interval_seconds: int = 0
 
 
 @dataclass
@@ -755,6 +756,7 @@ async def _jsonrpc_send_message(
             max_iterations=budgets_raw.get("maxIterations", 10),
             max_runtime_seconds=budgets_raw.get("maxRuntimeSeconds", 300),
             max_tool_calls=budgets_raw.get("maxToolCalls", 50),
+            interval_seconds=budgets_raw.get("intervalSeconds", 0),
         )
         task = await task_manager.submit_autonomous(
             goal=input_text,

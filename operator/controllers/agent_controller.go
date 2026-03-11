@@ -577,6 +577,12 @@ func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *
 				Value: fmt.Sprintf("%d", *auto.MaxToolCalls),
 			})
 		}
+		if auto.IntervalSeconds != nil {
+			env = append(env, corev1.EnvVar{
+				Name:  "AUTONOMOUS_INTERVAL_SECONDS",
+				Value: fmt.Sprintf("%d", *auto.IntervalSeconds),
+			})
+		}
 	}
 
 	// MCP Servers configuration

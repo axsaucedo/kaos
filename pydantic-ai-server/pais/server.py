@@ -3,6 +3,7 @@
 import os
 import time
 import json
+import asyncio
 import logging
 import sys
 from typing import Dict, Any, AsyncIterator, List, Optional, Union, TYPE_CHECKING
@@ -184,6 +185,7 @@ class AgentServer:
                 max_iterations=self.settings.autonomous_max_iterations,
                 max_runtime_seconds=self.settings.autonomous_max_runtime_seconds,
                 max_tool_calls=self.settings.autonomous_max_tool_calls,
+                interval_seconds=self.settings.autonomous_interval_seconds,
             )
             await self.task_manager.submit_autonomous(
                 goal=self.settings.autonomous_goal,
@@ -486,6 +488,7 @@ class AgentServer:
                 "autonomous.max_iterations": budgets.max_iterations,
                 "autonomous.max_runtime_seconds": budgets.max_runtime_seconds,
                 "autonomous.max_tool_calls": budgets.max_tool_calls,
+                "autonomous.interval_seconds": budgets.interval_seconds,
             },
         ):
             iteration = 0
@@ -582,6 +585,10 @@ class AgentServer:
                 if not self._last_run_had_tool_calls:
                     logger.info(f"Autonomous run {task_id} completed after {iteration} iterations")
                     return last_response
+
+                # Inter-iteration interval
+                if budgets.interval_seconds > 0:
+                    await asyncio.sleep(budgets.interval_seconds)
 
             return last_response
 

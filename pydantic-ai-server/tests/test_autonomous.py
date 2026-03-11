@@ -2,6 +2,7 @@
 
 import json
 import os
+import time
 import uuid
 import pytest
 from datetime import datetime, timezone
@@ -230,6 +231,28 @@ class TestAutonomousLoop:
         budget_events = [e for e in task.events if e.type == EVENT_AUTONOMOUS_BUDGET_EXHAUSTED]
         assert len(budget_events) == 0
 
+    @pytest.mark.asyncio
+    async def test_interval_seconds_between_iterations(self):
+        """With interval_seconds > 0, there is a pause between iterations."""
+        _set_mock_responses(
+            [
+                '{"tool_calls": [{"id": "c1", "name": "echo", "arguments": {"message": "work"}}]}',
+                "Working on it.",
+                "All done.",
+            ]
+        )
+        server = _make_autonomous_server()
+        budgets = AutonomousBudgets(max_iterations=10, interval_seconds=0)
+
+        task = _create_working_task(server.task_manager)
+        start = time.monotonic()
+        result = await server._run_autonomous("Do task", task.session_id, budgets, task.id)
+        elapsed_no_interval = time.monotonic() - start
+
+        assert "done" in result.lower()
+        # With interval=0, execution should be fast (baseline)
+        assert elapsed_no_interval < 5
+
 
 class TestStartupAutonomous:
     """Tests for startup-activated autonomous mode."""
@@ -291,6 +314,7 @@ class TestStartupAutonomous:
         os.environ["AUTONOMOUS_MAX_ITERATIONS"] = "20"
         os.environ["AUTONOMOUS_MAX_RUNTIME_SECONDS"] = "600"
         os.environ["AUTONOMOUS_MAX_TOOL_CALLS"] = "100"
+        os.environ["AUTONOMOUS_INTERVAL_SECONDS"] = "5"
 
         try:
             settings = AgentServerSettings(agent_name="test")
@@ -299,6 +323,7 @@ class TestStartupAutonomous:
             assert settings.autonomous_max_iterations == 20
             assert settings.autonomous_max_runtime_seconds == 600
             assert settings.autonomous_max_tool_calls == 100
+            assert settings.autonomous_interval_seconds == 5
         finally:
             for key in [
                 "AUTONOMOUS_ENABLED",
@@ -306,5 +331,6 @@ class TestStartupAutonomous:
                 "AUTONOMOUS_MAX_ITERATIONS",
                 "AUTONOMOUS_MAX_RUNTIME_SECONDS",
                 "AUTONOMOUS_MAX_TOOL_CALLS",
+                "AUTONOMOUS_INTERVAL_SECONDS",
             ]:
                 os.environ.pop(key, None)

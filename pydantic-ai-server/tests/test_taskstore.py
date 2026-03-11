@@ -161,12 +161,16 @@ class TestAutonomousBudgets:
         assert budgets.max_iterations == 10
         assert budgets.max_runtime_seconds == 300
         assert budgets.max_tool_calls == 50
+        assert budgets.interval_seconds == 0
 
     def test_custom_values(self):
-        budgets = AutonomousBudgets(max_iterations=5, max_runtime_seconds=60, max_tool_calls=20)
+        budgets = AutonomousBudgets(
+            max_iterations=5, max_runtime_seconds=60, max_tool_calls=20, interval_seconds=10
+        )
         assert budgets.max_iterations == 5
         assert budgets.max_runtime_seconds == 60
         assert budgets.max_tool_calls == 20
+        assert budgets.interval_seconds == 10
 
 
 class TestTaskExtendedFields:
