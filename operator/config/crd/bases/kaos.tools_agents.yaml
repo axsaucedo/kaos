@@ -87,24 +87,24 @@ spec:
                         type: string
                       maxIterations:
                         description: 'MaxIterations is the maximum number of autonomous
-                          loop iterations (default: 10)'
+                          loop iterations (default: 10, 0 = unlimited)'
                         format: int32
                         maximum: 1000
-                        minimum: 1
+                        minimum: 0
                         type: integer
                       maxRuntimeSeconds:
                         description: 'MaxRuntimeSeconds is the maximum wall-clock
-                          time for the autonomous run (default: 300)'
+                          time for the autonomous run (default: 300, 0 = unlimited)'
                         format: int32
                         maximum: 86400
-                        minimum: 1
+                        minimum: 0
                         type: integer
                       maxToolCalls:
                         description: 'MaxToolCalls is the maximum cumulative tool
-                          calls across all iterations (default: 50)'
+                          calls across all iterations (default: 50, 0 = unlimited)'
                         format: int32
                         maximum: 10000
-                        minimum: 1
+                        minimum: 0
                         type: integer
                     type: object
                   description:

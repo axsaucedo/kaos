@@ -503,8 +503,8 @@ class AgentServer:
                     logger.info(f"Autonomous run {task_id} stopped: task in terminal state")
                     break
 
-                # Check iteration budget
-                if iteration >= budgets.max_iterations:
+                # Check iteration budget (0 = unlimited)
+                if budgets.max_iterations > 0 and iteration >= budgets.max_iterations:
                     msg = f"Budget exhausted: max_iterations ({budgets.max_iterations}) reached"
                     logger.info(f"Autonomous run {task_id}: {msg}")
                     if task:
@@ -514,9 +514,9 @@ class AgentServer:
                         )
                     return msg
 
-                # Check runtime budget
+                # Check runtime budget (0 = unlimited)
                 elapsed = time.monotonic() - start_time
-                if elapsed >= budgets.max_runtime_seconds:
+                if budgets.max_runtime_seconds > 0 and elapsed >= budgets.max_runtime_seconds:
                     msg = f"Budget exhausted: max_runtime_seconds ({budgets.max_runtime_seconds}s) reached"
                     logger.info(f"Autonomous run {task_id}: {msg}")
                     if task:
@@ -526,8 +526,8 @@ class AgentServer:
                         )
                     return msg
 
-                # Check tool call budget
-                if total_tool_calls >= budgets.max_tool_calls:
+                # Check tool call budget (0 = unlimited)
+                if budgets.max_tool_calls > 0 and total_tool_calls >= budgets.max_tool_calls:
                     msg = f"Budget exhausted: max_tool_calls ({budgets.max_tool_calls}) reached"
                     logger.info(f"Autonomous run {task_id}: {msg}")
                     if task:

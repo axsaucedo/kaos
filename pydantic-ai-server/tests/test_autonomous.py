@@ -208,6 +208,28 @@ class TestAutonomousLoop:
         assert len(budget_events) == 1
         assert budget_events[0].data["reason"] == "max_iterations"
 
+    @pytest.mark.asyncio
+    async def test_unlimited_iterations_completes_naturally(self):
+        """With max_iterations=0 (unlimited), loop exits via completion detection."""
+        _set_mock_responses(
+            [
+                '{"tool_calls": [{"id": "c1", "name": "echo", "arguments": {"message": "work"}}]}',
+                "Working on it.",
+                "All done, goal achieved.",
+            ]
+        )
+        server = _make_autonomous_server()
+        budgets = AutonomousBudgets(max_iterations=0, max_runtime_seconds=0, max_tool_calls=0)
+
+        task = _create_working_task(server.task_manager)
+        result = await server._run_autonomous("Complete task", task.session_id, budgets, task.id)
+
+        assert "done" in result.lower() or "achieved" in result.lower()
+        task = await server.task_manager.get_task(task.id)
+        assert task is not None
+        budget_events = [e for e in task.events if e.type == EVENT_AUTONOMOUS_BUDGET_EXHAUSTED]
+        assert len(budget_events) == 0
+
 
 class TestStartupAutonomous:
     """Tests for startup-activated autonomous mode."""

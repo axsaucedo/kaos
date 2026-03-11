@@ -149,21 +149,21 @@ type AutonomousConfig struct {
 	// +optional
 	Goal string `json:"goal,omitempty"`
 
-	// MaxIterations is the maximum number of autonomous loop iterations (default: 10)
+	// MaxIterations is the maximum number of autonomous loop iterations (default: 10, 0 = unlimited)
 	// +optional
-	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=1000
 	MaxIterations *int32 `json:"maxIterations,omitempty"`
 
-	// MaxRuntimeSeconds is the maximum wall-clock time for the autonomous run (default: 300)
+	// MaxRuntimeSeconds is the maximum wall-clock time for the autonomous run (default: 300, 0 = unlimited)
 	// +optional
-	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=86400
 	MaxRuntimeSeconds *int32 `json:"maxRuntimeSeconds,omitempty"`
 
-	// MaxToolCalls is the maximum cumulative tool calls across all iterations (default: 50)
+	// MaxToolCalls is the maximum cumulative tool calls across all iterations (default: 50, 0 = unlimited)
 	// +optional
-	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=10000
 	MaxToolCalls *int32 `json:"maxToolCalls,omitempty"`
 }

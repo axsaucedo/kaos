@@ -130,7 +130,10 @@ EVENT_AUTONOMOUS_BUDGET_EXHAUSTED = "autonomous.budget.exhausted"
 
 @dataclass
 class AutonomousBudgets:
-    """Budget limits for autonomous execution runs."""
+    """Budget limits for autonomous execution runs.
+
+    A value of 0 means unlimited (no limit enforced) for that budget.
+    """
 
     max_iterations: int = 10
     max_runtime_seconds: int = 300
