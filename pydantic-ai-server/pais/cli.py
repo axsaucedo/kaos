@@ -108,7 +108,7 @@ def init(
 ) -> None:
     """Initialize a new custom Pydantic AI agent project."""
     try:
-        from kaos_cli.agent.init import init_command  # type: ignore[import-untyped]
+        from kaos_cli.agent.init import init_command  # type: ignore[import-untyped]  # ty: ignore[unresolved-import]
 
         init_command(directory=directory, force=force)
     except ImportError:
