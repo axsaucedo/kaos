@@ -369,7 +369,11 @@ async def test_autonomous_startup_activated(
         # Verify memory has the autonomous session with actual content
         memory_resp = await client.get(f"{agent_url}/memory/sessions")
         assert memory_resp.status_code == 200
-        sessions = memory_resp.json()
+        sessions_data = memory_resp.json()
+        if isinstance(sessions_data, dict):
+            sessions = sessions_data.get("sessions", [])
+        else:
+            sessions = sessions_data
         assert isinstance(sessions, list), f"Expected list, got: {type(sessions)}: {sessions}"
         assert len(sessions) >= 1, "Expected at least one session from startup autonomous run"
 
