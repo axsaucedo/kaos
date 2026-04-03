@@ -181,11 +181,11 @@ class TestA2AIntegrationLifecycle:
         assert any("Input query" in str(m) for m in user_msgs)
 
     @pytest.mark.asyncio
-    async def test_task_with_model_error_completes_with_error_output(self):
-        """Test task completes with error message when model raises exception.
+    async def test_task_with_model_error_results_in_failed_task(self):
+        """Test task transitions to failed when model raises exception.
 
-        _process_message catches errors and yields an error string,
-        so the task still transitions to completed (not failed).
+        _run_agent propagates the error to _execute_task, which catches it
+        and transitions the task to FAILED state.
         """
         from pydantic_ai.models.function import FunctionModel
 
@@ -200,10 +200,8 @@ class TestA2AIntegrationLifecycle:
             resp = await client.post("/", json=_send_message("Trigger error"))
             result = _get_result(resp)
 
-        # _process_message catches the error and yields it as text
-        assert result["status"]["state"] == "completed"
-        agent_msgs = [m for m in result["history"] if m["role"] == "agent"]
-        assert any("error" in str(m).lower() for m in agent_msgs)
+        assert result["status"]["state"] == "failed"
+        assert "error" in result["status"]["message"].lower()
 
     @pytest.mark.asyncio
     async def test_jsonrpc_without_task_manager_returns_result(self):

@@ -1,18 +1,12 @@
-"""Tests for autonomous execution loop (_run_autonomous)."""
+"""Tests for autonomous execution via LocalTaskManager."""
 
 import json
 import os
 import time
-import uuid
 import pytest
-from datetime import datetime, timezone
 
 from pais.a2a import (
-    Task,
-    TaskState,
-    TaskStatus,
     AutonomousBudgets,
-    LocalTaskManager,
     EVENT_AUTONOMOUS_ITERATION_STARTED,
     EVENT_AUTONOMOUS_ITERATION_COMPLETED,
     EVENT_AUTONOMOUS_BUDGET_EXHAUSTED,
@@ -29,19 +23,8 @@ def _clear_mock_responses():
     os.environ.pop("DEBUG_MOCK_RESPONSES", None)
 
 
-def _create_working_task(manager: LocalTaskManager) -> Task:
-    """Create a task in WORKING state without consuming mock responses."""
-    task = manager._create_task(
-        session_id=f"session_{uuid.uuid4().hex[:8]}",
-        input_message=None,
-        metadata={"trigger": "test"},
-    )
-    manager._transition(task.id, TaskState.WORKING)
-    return task
-
-
 def _make_autonomous_server():
-    """Create a test server with a dummy echo tool for autonomous tests."""
+    """Create a test server with an echo tool for autonomous tests."""
     server = make_test_server(task_manager_type="local")
 
     @server._agent.tool_plain
@@ -49,8 +32,6 @@ def _make_autonomous_server():
         """Echo the message back."""
         return f"Echo: {message}"
 
-    # Populate mock responses once, then disable reset so autonomous iterations
-    # consume responses cumulatively across _process_message calls
     if server._mock_state:
         server._mock_state.reset()
         server._mock_state = None
@@ -59,7 +40,7 @@ def _make_autonomous_server():
 
 
 class TestAutonomousLoop:
-    """Tests for AgentServer._run_autonomous()."""
+    """Tests for autonomous execution via TaskManager.submit_autonomous()."""
 
     def setup_method(self):
         _clear_mock_responses()
@@ -69,15 +50,20 @@ class TestAutonomousLoop:
 
     @pytest.mark.asyncio
     async def test_single_iteration_no_tools(self):
-        """Agent responds with pure text (no tools) — loop terminates after 1 iteration."""
+        """Agent responds with pure text — loop terminates after 1 iteration."""
         _set_mock_responses(["The goal is achieved."])
         server = _make_autonomous_server()
-        budgets = AutonomousBudgets(max_iterations=10)
 
-        task = _create_working_task(server.task_manager)
-        result = await server._run_autonomous("Analyze the data", task.session_id, budgets, task.id)
+        task = await server.task_manager.submit_autonomous(
+            "Analyze the data", budgets=AutonomousBudgets(max_iterations=10)
+        )
+        completed = await server.task_manager.wait_for_completion(task.id, timeout=5.0)
+        assert completed is not None
+        assert completed.output is not None
+        assert len(completed.output) > 0
 
-        assert len(result) > 0
+        started = [e for e in completed.events if e.type == EVENT_AUTONOMOUS_ITERATION_STARTED]
+        assert len(started) == 1
 
     @pytest.mark.asyncio
     async def test_budget_max_iterations(self):
@@ -93,13 +79,16 @@ class TestAutonomousLoop:
             ]
         )
         server = _make_autonomous_server()
-        budgets = AutonomousBudgets(max_iterations=2, max_tool_calls=100)
 
-        task = _create_working_task(server.task_manager)
-        result = await server._run_autonomous("Process all data", task.session_id, budgets, task.id)
-
-        assert "budget exhausted" in result.lower()
-        assert "max_iterations" in result.lower()
+        task = await server.task_manager.submit_autonomous(
+            "Process all data",
+            budgets=AutonomousBudgets(max_iterations=2, max_tool_calls=100),
+        )
+        completed = await server.task_manager.wait_for_completion(task.id, timeout=5.0)
+        assert completed is not None
+        budget_events = [e for e in completed.events if e.type == EVENT_AUTONOMOUS_BUDGET_EXHAUSTED]
+        assert len(budget_events) == 1
+        assert budget_events[0].data["reason"] == "max_iterations"
 
     @pytest.mark.asyncio
     async def test_budget_max_tool_calls(self):
@@ -113,55 +102,18 @@ class TestAutonomousLoop:
             ]
         )
         server = _make_autonomous_server()
-        budgets = AutonomousBudgets(max_iterations=100, max_tool_calls=1, max_runtime_seconds=300)
 
-        task = _create_working_task(server.task_manager)
-        result = await server._run_autonomous("Scan everything", task.session_id, budgets, task.id)
-
-        assert "budget exhausted" in result.lower()
-        assert "max_tool_calls" in result.lower()
-
-    @pytest.mark.asyncio
-    async def test_events_emitted(self):
-        """Verify task events are emitted during autonomous execution."""
-        _set_mock_responses(
-            [
-                '{"tool_calls": [{"id": "c1", "name": "echo", "arguments": {"message": "work"}}]}',
-                "Still working.",
-                "All done, here is the final report.",
-            ]
+        task = await server.task_manager.submit_autonomous(
+            "Scan everything",
+            budgets=AutonomousBudgets(
+                max_iterations=100, max_tool_calls=1, max_runtime_seconds=300
+            ),
         )
-        server = _make_autonomous_server()
-        budgets = AutonomousBudgets(max_iterations=10)
-
-        task = _create_working_task(server.task_manager)
-        await server._run_autonomous("Complete the task", task.session_id, budgets, task.id)
-
-        task = await server.task_manager.get_task(task.id)
-        assert task is not None
-
-        event_types = [e.type for e in task.events]
-        assert EVENT_AUTONOMOUS_ITERATION_STARTED in event_types
-        assert EVENT_AUTONOMOUS_ITERATION_COMPLETED in event_types
-
-    @pytest.mark.asyncio
-    async def test_completion_detection(self):
-        """Agent with no tool calls on first iteration = immediate completion."""
-        _set_mock_responses(["Task is already done, no action needed."])
-        server = _make_autonomous_server()
-        budgets = AutonomousBudgets(max_iterations=5)
-
-        task = _create_working_task(server.task_manager)
-        result = await server._run_autonomous("Check status", task.session_id, budgets, task.id)
-
-        assert len(result) > 0
-
-        task = await server.task_manager.get_task(task.id)
-        assert task is not None
-        started = [e for e in task.events if e.type == EVENT_AUTONOMOUS_ITERATION_STARTED]
-        completed = [e for e in task.events if e.type == EVENT_AUTONOMOUS_ITERATION_COMPLETED]
-        assert len(started) == 1
-        assert len(completed) == 1
+        completed = await server.task_manager.wait_for_completion(task.id, timeout=5.0)
+        assert completed is not None
+        budget_events = [e for e in completed.events if e.type == EVENT_AUTONOMOUS_BUDGET_EXHAUSTED]
+        assert len(budget_events) == 1
+        assert budget_events[0].data["reason"] == "max_tool_calls"
 
     @pytest.mark.asyncio
     async def test_multi_iteration_then_completion(self):
@@ -176,38 +128,45 @@ class TestAutonomousLoop:
             ]
         )
         server = _make_autonomous_server()
-        budgets = AutonomousBudgets(max_iterations=10)
 
-        task = _create_working_task(server.task_manager)
-        result = await server._run_autonomous("Run all steps", task.session_id, budgets, task.id)
+        task = await server.task_manager.submit_autonomous(
+            "Run all steps",
+            budgets=AutonomousBudgets(max_iterations=10),
+        )
+        completed = await server.task_manager.wait_for_completion(task.id, timeout=5.0)
+        assert completed is not None
+        assert "final report" in completed.output.lower() or "complete" in completed.output.lower()
 
-        assert "final report" in result.lower() or "complete" in result.lower()
-
-        task = await server.task_manager.get_task(task.id)
-        assert task is not None
-        started = [e for e in task.events if e.type == EVENT_AUTONOMOUS_ITERATION_STARTED]
+        started = [e for e in completed.events if e.type == EVENT_AUTONOMOUS_ITERATION_STARTED]
         assert len(started) == 3
 
     @pytest.mark.asyncio
-    async def test_budget_exhausted_event(self):
-        """Verify budget exhaustion emits the correct event."""
+    async def test_events_emitted(self):
+        """Verify task events during autonomous execution."""
         _set_mock_responses(
             [
                 '{"tool_calls": [{"id": "c1", "name": "echo", "arguments": {"message": "work"}}]}',
-                "Need more.",
+                "Still working.",
+                "All done, here is the final report.",
             ]
         )
         server = _make_autonomous_server()
-        budgets = AutonomousBudgets(max_iterations=1)
 
-        task = _create_working_task(server.task_manager)
-        await server._run_autonomous("Infinite task", task.session_id, budgets, task.id)
+        task = await server.task_manager.submit_autonomous(
+            "Complete the task",
+            budgets=AutonomousBudgets(max_iterations=10),
+        )
+        completed = await server.task_manager.wait_for_completion(task.id, timeout=5.0)
+        assert completed is not None
 
-        task = await server.task_manager.get_task(task.id)
-        assert task is not None
-        budget_events = [e for e in task.events if e.type == EVENT_AUTONOMOUS_BUDGET_EXHAUSTED]
-        assert len(budget_events) == 1
-        assert budget_events[0].data["reason"] == "max_iterations"
+        event_types = [e.type for e in completed.events]
+        assert EVENT_AUTONOMOUS_ITERATION_STARTED in event_types
+        assert EVENT_AUTONOMOUS_ITERATION_COMPLETED in event_types
+
+        completed_events = [
+            e for e in completed.events if e.type == EVENT_AUTONOMOUS_ITERATION_COMPLETED
+        ]
+        assert any(e.data.get("tool_call_count", 0) > 0 for e in completed_events)
 
     @pytest.mark.asyncio
     async def test_unlimited_iterations_completes_naturally(self):
@@ -220,15 +179,15 @@ class TestAutonomousLoop:
             ]
         )
         server = _make_autonomous_server()
-        budgets = AutonomousBudgets(max_iterations=0, max_runtime_seconds=0, max_tool_calls=0)
 
-        task = _create_working_task(server.task_manager)
-        result = await server._run_autonomous("Complete task", task.session_id, budgets, task.id)
-
-        assert "done" in result.lower() or "achieved" in result.lower()
-        task = await server.task_manager.get_task(task.id)
-        assert task is not None
-        budget_events = [e for e in task.events if e.type == EVENT_AUTONOMOUS_BUDGET_EXHAUSTED]
+        task = await server.task_manager.submit_autonomous(
+            "Complete task",
+            budgets=AutonomousBudgets(max_iterations=0, max_runtime_seconds=0, max_tool_calls=0),
+        )
+        completed = await server.task_manager.wait_for_completion(task.id, timeout=5.0)
+        assert completed is not None
+        assert "done" in completed.output.lower() or "achieved" in completed.output.lower()
+        budget_events = [e for e in completed.events if e.type == EVENT_AUTONOMOUS_BUDGET_EXHAUSTED]
         assert len(budget_events) == 0
 
     @pytest.mark.asyncio
@@ -242,16 +201,14 @@ class TestAutonomousLoop:
             ]
         )
         server = _make_autonomous_server()
-        budgets = AutonomousBudgets(max_iterations=10, interval_seconds=0)
 
-        task = _create_working_task(server.task_manager)
-        start = time.monotonic()
-        result = await server._run_autonomous("Do task", task.session_id, budgets, task.id)
-        elapsed_no_interval = time.monotonic() - start
-
-        assert "done" in result.lower()
-        # With interval=0, execution should be fast (baseline)
-        assert elapsed_no_interval < 5
+        task = await server.task_manager.submit_autonomous(
+            "Do task",
+            budgets=AutonomousBudgets(max_iterations=10, interval_seconds=0),
+        )
+        completed = await server.task_manager.wait_for_completion(task.id, timeout=5.0)
+        assert completed is not None
+        assert "done" in completed.output.lower()
 
 
 class TestStartupAutonomous:
@@ -273,11 +230,9 @@ class TestStartupAutonomous:
         server.settings.autonomous_max_iterations = 5
 
         async with server._lifespan(server.app):
-            # wait briefly for background task
             import asyncio
 
             await asyncio.sleep(0.5)
-            # Check that a task was submitted
             tasks = [t for t in server.task_manager._tasks.values() if t.mode == "autonomous"]
             assert len(tasks) >= 1
 

@@ -226,9 +226,9 @@ class TestTaskExtendedFields:
         assert d["output"] == ""
 
 
-async def _mock_process(msg, session_id="", stream=False):
-    """Simple mock process function that yields a result."""
-    yield "Task result"
+async def _mock_process(msg, session_id=""):
+    """Simple mock process function that returns (response, tool_call_count)."""
+    return ("Task result", 0)
 
 
 class TestLocalTaskManager:
@@ -314,13 +314,11 @@ class TestLocalTaskManager:
 
     @pytest.mark.asyncio
     async def test_failed_task_lifecycle(self):
-        async def failing_process(msg, session_id="", stream=False):
+        async def failing_process(msg, session_id=""):
             raise RuntimeError("Error occurred")
-            yield
 
         manager = LocalTaskManager(failing_process)
         task = await manager.send_message("Fail me")
-        # Synchronous execution: task is failed immediately
         assert task.status.state == TaskState.FAILED
         assert task.status.message == "Error occurred"
 
@@ -352,39 +350,31 @@ class TestLocalTaskManager:
 
 
 class TestLocalTaskManagerAutonomous:
-    """Tests for LocalTaskManager.submit_autonomous and async execution."""
+    """Tests for LocalTaskManager.submit_autonomous with integrated loop."""
 
     @pytest.mark.asyncio
     async def test_submit_autonomous_creates_task(self):
-        async def mock_autonomous(goal, session_id, budgets, task_id):
-            return f"Done: {goal}"
-
         manager = LocalTaskManager(_mock_process)
-        manager.set_autonomous_fn(mock_autonomous)
         task = await manager.submit_autonomous("Analyze data")
         assert task.mode == "autonomous"
         assert task.status.state in {TaskState.WORKING, TaskState.COMPLETED}
 
     @pytest.mark.asyncio
     async def test_submit_autonomous_executes_to_completion(self):
-        async def mock_autonomous(goal, session_id, budgets, task_id):
-            return f"Completed: {goal}"
-
         manager = LocalTaskManager(_mock_process)
-        manager.set_autonomous_fn(mock_autonomous)
         task = await manager.submit_autonomous("Run analysis")
         completed = await manager.wait_for_completion(task.id, timeout=5.0)
         assert completed is not None
         assert completed.status.state == TaskState.COMPLETED
-        assert completed.output == "Completed: Run analysis"
+        assert completed.output is not None
+        assert "Task result" in completed.output
 
     @pytest.mark.asyncio
     async def test_submit_autonomous_failure_handling(self):
-        async def failing_autonomous(goal, session_id, budgets, task_id):
+        async def failing_process(msg, session_id):
             raise RuntimeError("Analysis failed")
 
-        manager = LocalTaskManager(_mock_process)
-        manager.set_autonomous_fn(failing_autonomous)
+        manager = LocalTaskManager(failing_process)
         task = await manager.submit_autonomous("Fail task")
         completed = await manager.wait_for_completion(task.id, timeout=5.0)
         assert completed is not None
@@ -394,34 +384,43 @@ class TestLocalTaskManagerAutonomous:
 
     @pytest.mark.asyncio
     async def test_submit_autonomous_events(self):
-        async def mock_autonomous(goal, session_id, budgets, task_id):
-            return "Done"
-
         manager = LocalTaskManager(_mock_process)
-        manager.set_autonomous_fn(mock_autonomous)
         task = await manager.submit_autonomous("Test events")
         completed = await manager.wait_for_completion(task.id, timeout=5.0)
         assert completed is not None
         event_types = [e.type for e in completed.events]
         assert EVENT_TASK_SUBMITTED in event_types
+        assert EVENT_AUTONOMOUS_ITERATION_STARTED in event_types
         assert EVENT_TASK_COMPLETED in event_types
 
     @pytest.mark.asyncio
-    async def test_submit_autonomous_no_fn_raises(self):
-        manager = LocalTaskManager(_mock_process)
-        with pytest.raises(RuntimeError, match="Autonomous function not set"):
-            await manager.submit_autonomous("No function")
+    async def test_submit_autonomous_budget_exhaustion(self):
+        call_count = 0
+
+        async def tool_calling_process(msg, session_id):
+            nonlocal call_count
+            call_count += 1
+            return (f"Iteration {call_count}", 1)
+
+        manager = LocalTaskManager(tool_calling_process)
+        task = await manager.submit_autonomous(
+            "Keep going", budgets=AutonomousBudgets(max_iterations=2)
+        )
+        completed = await manager.wait_for_completion(task.id, timeout=5.0)
+        assert completed is not None
+        assert completed.status.state == TaskState.COMPLETED
+        event_types = [e.type for e in completed.events]
+        assert EVENT_AUTONOMOUS_BUDGET_EXHAUSTED in event_types
 
     @pytest.mark.asyncio
     async def test_shutdown_cancels_running_autonomous(self):
         import asyncio
 
-        async def slow_autonomous(goal, session_id, budgets, task_id):
+        async def slow_process(msg, session_id):
             await asyncio.sleep(10)
-            return "Should not reach"
+            return ("Should not reach", 0)
 
-        manager = LocalTaskManager(_mock_process)
-        manager.set_autonomous_fn(slow_autonomous)
+        manager = LocalTaskManager(slow_process)
         task = await manager.submit_autonomous("Long task")
         assert task.id in manager._running_tasks
         await manager.shutdown()

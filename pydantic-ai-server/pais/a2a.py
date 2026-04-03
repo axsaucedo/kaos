@@ -22,7 +22,6 @@ from typing import (
     Optional,
     Union,
     Callable,
-    AsyncIterator,
     List,
     Tuple,
 )
@@ -207,8 +206,7 @@ def get_task_metrics() -> Tuple[Optional[metrics.Counter], Optional[metrics.Hist
 
 # --- TaskManager ABC ---
 
-ProcessFn = Callable[..., AsyncIterator[str]]
-AutonomousFn = Callable[[str, str, AutonomousBudgets, str], Awaitable[str]]
+ProcessFn = Callable[[Union[str, List[Dict[str, str]]], str], Awaitable[Tuple[str, int]]]
 
 
 class TaskManager(ABC):
@@ -267,21 +265,15 @@ class LocalTaskManager(TaskManager):
     """In-process task manager with internal dict storage and synchronous execution.
 
     Encapsulates task creation, state management, execution via process_fn,
-    and OTel instrumentation. The process_fn is called to actually process
-    messages (typically AgentServer._process_message).
+    and OTel instrumentation. process_fn(message, session_id) -> (response, tool_call_count).
     """
 
     def __init__(self, process_fn: ProcessFn, max_tasks: int = 10000):
         self._process_fn = process_fn
-        self._autonomous_fn: Optional[AutonomousFn] = None
         self._tasks: Dict[str, Task] = {}
         self._running_tasks: Dict[str, asyncio.Task] = {}
         self.max_tasks = max_tasks
         logger.info(f"LocalTaskManager initialized: max_tasks={max_tasks}")
-
-    def set_autonomous_fn(self, fn: AutonomousFn) -> None:
-        """Set the autonomous execution callback (avoids circular dependency)."""
-        self._autonomous_fn = fn
 
     async def send_message(
         self,
@@ -314,9 +306,6 @@ class LocalTaskManager(TaskManager):
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Task:
         """Submit an autonomous run. Spawns background task, returns immediately."""
-        if not self._autonomous_fn:
-            raise RuntimeError("Autonomous function not set. Call set_autonomous_fn() first.")
-
         tracer = trace_api.get_tracer(SERVICE_NAME)
         task_counter, _ = get_task_metrics()
         effective_budgets = budgets or AutonomousBudgets()
@@ -448,7 +437,7 @@ class LocalTaskManager(TaskManager):
         return True
 
     async def _execute_task(self, task_id: str, input_message: str) -> None:
-        """Execute a task asynchronously using the process callback."""
+        """Execute a task synchronously using process_fn."""
         tracer = trace_api.get_tracer(SERVICE_NAME)
         task_counter, task_duration = get_task_metrics()
         start_time = time.perf_counter()
@@ -467,11 +456,7 @@ class LocalTaskManager(TaskManager):
                 return
 
             try:
-                response_content = ""
-                async for chunk in self._process_fn(
-                    input_message, session_id=task.session_id, stream=False
-                ):
-                    response_content += chunk
+                response_content, _ = await self._process_fn(input_message, task.session_id)
 
                 task.history.append(TaskMessage(role="agent", text=response_content))
                 self._transition(task_id, TaskState.COMPLETED, "Done")
@@ -500,14 +485,21 @@ class LocalTaskManager(TaskManager):
         session_id: str,
         budgets: AutonomousBudgets,
     ) -> None:
-        """Background execution wrapper for autonomous runs."""
+        """Execute autonomous self-loop: iterate process_fn until done or budget exhausted."""
         tracer = trace_api.get_tracer(SERVICE_NAME)
         task_counter, task_duration = get_task_metrics()
         start_time = time.perf_counter()
 
         with tracer.start_as_current_span(
-            "kaos.task.execute",
-            attributes={"task.id": task_id, "task.mode": "autonomous"},
+            "kaos.autonomous.run",
+            attributes={
+                "autonomous.task_id": task_id,
+                "autonomous.session_id": session_id,
+                "autonomous.max_iterations": budgets.max_iterations,
+                "autonomous.max_runtime_seconds": budgets.max_runtime_seconds,
+                "autonomous.max_tool_calls": budgets.max_tool_calls,
+                "autonomous.interval_seconds": budgets.interval_seconds,
+            },
         ) as span:
             task = self._tasks.get(task_id)
             if not task:
@@ -515,12 +507,110 @@ class LocalTaskManager(TaskManager):
                 return
 
             try:
-                assert self._autonomous_fn is not None
-                output = await self._autonomous_fn(goal, session_id, budgets, task_id)
-                task.output = output
-                task.history.append(TaskMessage(role="agent", text=output))
+                iteration = 0
+                total_tool_calls = 0
+                loop_start = time.monotonic()
+                last_response = ""
+
+                while True:
+                    # Check cancellation
+                    current_task = self._tasks.get(task_id)
+                    if current_task and current_task.status.state in TERMINAL_STATES:
+                        logger.info(f"Autonomous run {task_id} stopped: task in terminal state")
+                        break
+
+                    # Check iteration budget (0 = unlimited)
+                    if budgets.max_iterations > 0 and iteration >= budgets.max_iterations:
+                        msg = f"Budget exhausted: max_iterations ({budgets.max_iterations}) reached"
+                        logger.info(f"Autonomous run {task_id}: {msg}")
+                        task.add_event(
+                            EVENT_AUTONOMOUS_BUDGET_EXHAUSTED,
+                            {"reason": "max_iterations", "iterations": iteration},
+                        )
+                        last_response = msg
+                        break
+
+                    # Check runtime budget (0 = unlimited)
+                    elapsed = time.monotonic() - loop_start
+                    if budgets.max_runtime_seconds > 0 and elapsed >= budgets.max_runtime_seconds:
+                        msg = f"Budget exhausted: max_runtime_seconds ({budgets.max_runtime_seconds}s) reached"
+                        logger.info(f"Autonomous run {task_id}: {msg}")
+                        task.add_event(
+                            EVENT_AUTONOMOUS_BUDGET_EXHAUSTED,
+                            {
+                                "reason": "max_runtime_seconds",
+                                "elapsed": round(elapsed, 1),
+                            },
+                        )
+                        last_response = msg
+                        break
+
+                    # Check tool call budget (0 = unlimited)
+                    if budgets.max_tool_calls > 0 and total_tool_calls >= budgets.max_tool_calls:
+                        msg = f"Budget exhausted: max_tool_calls ({budgets.max_tool_calls}) reached"
+                        logger.info(f"Autonomous run {task_id}: {msg}")
+                        task.add_event(
+                            EVENT_AUTONOMOUS_BUDGET_EXHAUSTED,
+                            {
+                                "reason": "max_tool_calls",
+                                "total_tool_calls": total_tool_calls,
+                            },
+                        )
+                        last_response = msg
+                        break
+
+                    # Build iteration message
+                    if iteration == 0:
+                        message = goal
+                    else:
+                        message = (
+                            f"Continue working toward the goal. This is iteration {iteration + 1}. "
+                            "Review your progress and decide next steps. If the goal is fully achieved, "
+                            "respond with your final answer without making any tool calls."
+                        )
+
+                    task.add_event(EVENT_AUTONOMOUS_ITERATION_STARTED, {"iteration": iteration})
+
+                    # Run one iteration
+                    with tracer.start_as_current_span(
+                        "kaos.autonomous.iteration",
+                        attributes={"autonomous.iteration": iteration},
+                    ):
+                        last_response, tool_call_count = await self._process_fn(message, session_id)
+
+                    if tool_call_count > 0:
+                        total_tool_calls += tool_call_count
+
+                    task.add_event(
+                        EVENT_AUTONOMOUS_ITERATION_COMPLETED,
+                        {
+                            "iteration": iteration,
+                            "had_tool_calls": tool_call_count > 0,
+                            "tool_call_count": tool_call_count,
+                            "response_preview": last_response[:200],
+                        },
+                    )
+
+                    iteration += 1
+
+                    # Completion detection: if no tool calls, agent gave a final answer
+                    if tool_call_count == 0:
+                        logger.info(
+                            f"Autonomous run {task_id} completed after {iteration} iterations"
+                        )
+                        break
+
+                    # Inter-iteration interval
+                    if budgets.interval_seconds > 0:
+                        await asyncio.sleep(budgets.interval_seconds)
+
+                task.output = last_response
+                task.history.append(TaskMessage(role="agent", text=last_response))
                 self._transition(task_id, TaskState.COMPLETED, "Done")
-                task.add_event(EVENT_TASK_COMPLETED, {"output_preview": output[:200]})
+                task.add_event(
+                    EVENT_TASK_COMPLETED,
+                    {"output_preview": last_response[:200]},
+                )
                 logger.info(f"Autonomous task {task_id} completed")
                 span.set_attribute("task.state", "completed")
                 if task_counter:

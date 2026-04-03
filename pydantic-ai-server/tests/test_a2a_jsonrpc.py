@@ -518,8 +518,8 @@ class TestTaskManagerObservability:
         """Verify LocalTaskManager methods create OTel spans (no-op when not initialized)."""
         from pais.a2a import LocalTaskManager
 
-        async def mock_process(msg, session_id="", stream=False):
-            yield "result"
+        async def mock_process(msg, session_id=""):
+            return ("result", 0)
 
         manager = LocalTaskManager(mock_process)
         task = await manager.send_message("test message")
