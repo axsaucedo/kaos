@@ -126,8 +126,6 @@ class AgentServer:
         self._mcp_servers = mcp_servers or []
         self._model = model
         self._custom_tools = custom_tools or []
-        self._last_run_had_tool_calls = False
-
         if task_manager_type == "local":
             self.task_manager: TaskManager = LocalTaskManager(self._process_message)
         else:
@@ -399,6 +397,33 @@ class AgentServer:
         usage_limits = UsageLimits(request_limit=self.settings.agentic_loop_max_steps)
         return user_prompt, message_history, deps, usage_limits
 
+    async def _run_agent(
+        self,
+        message: Union[str, List[Dict[str, str]]],
+        session_id: str,
+    ) -> tuple[str, int]:
+        """Core non-streaming agent execution. Returns (response_text, tool_call_count)."""
+        user_prompt, message_history, deps, usage_limits = await self._prepare_run(
+            message, session_id
+        )
+        result = await self._agent.run(
+            user_prompt,
+            message_history=message_history,
+            usage_limits=usage_limits,
+            deps=deps,
+        )
+        content = str(result.output) if result.output else ""
+        tool_call_count = sum(
+            1
+            for msg in result.new_messages()
+            for p in getattr(msg, "parts", [])
+            if isinstance(p, ToolCallPart)
+        )
+        await self.memory.add_event(session_id, "agent_response", content)
+        for msg in result.new_messages():
+            await self.memory.store_pydantic_message(session_id, msg)
+        return content, tool_call_count
+
     async def _process_message(
         self,
         message: Union[str, List[Dict[str, str]]],
@@ -406,16 +431,15 @@ class AgentServer:
         stream: bool = False,
     ) -> AsyncIterator[str]:
         """Yields content chunks (streaming) or single complete response."""
-        user_prompt, message_history, deps, usage_limits = await self._prepare_run(
-            message, session_id
-        )
         logger.debug(f"Processing message for session {session_id}, streaming={stream}")
 
         try:
             if stream:
+                user_prompt, message_history, deps, usage_limits = await self._prepare_run(
+                    message, session_id
+                )
                 full_response = ""
                 step = 0
-                had_tool_calls = False
                 async with self._agent.iter(
                     user_prompt,
                     message_history=message_history,
@@ -430,11 +454,12 @@ class AgentServer:
                             )
                             if has_tools:
                                 step += 1
-                                had_tool_calls = True
                             for part in node.model_response.parts:
                                 if isinstance(part, ToolCallPart):
                                     yield format_progress_event(
-                                        part, step, self.settings.agentic_loop_max_steps
+                                        part,
+                                        step,
+                                        self.settings.agentic_loop_max_steps,
                                     )
                         node = await run.next(node)
 
@@ -442,27 +467,12 @@ class AgentServer:
                     full_response = str(run.result.output)
                     yield full_response
 
-                self._last_run_had_tool_calls = had_tool_calls
                 await self.memory.add_event(session_id, "agent_response", full_response)
                 new_msgs = run.result.new_messages() if run.result else []
                 for msg in new_msgs:
                     await self.memory.store_pydantic_message(session_id, msg)
             else:
-                result = await self._agent.run(
-                    user_prompt,
-                    message_history=message_history,
-                    usage_limits=usage_limits,
-                    deps=deps,
-                )
-                content = str(result.output) if result.output else ""
-                self._last_run_had_tool_calls = any(
-                    isinstance(p, ToolCallPart)
-                    for msg in result.new_messages()
-                    for p in getattr(msg, "parts", [])
-                )
-                await self.memory.add_event(session_id, "agent_response", content)
-                for msg in result.new_messages():
-                    await self.memory.store_pydantic_message(session_id, msg)
+                content, _ = await self._run_agent(message, session_id)
                 yield content
 
         except Exception as e:
@@ -559,14 +569,11 @@ class AgentServer:
                     "kaos.autonomous.iteration",
                     attributes={"autonomous.iteration": iteration},
                 ):
-                    response_chunks: list[str] = []
-                    async for chunk in self._process_message(message, session_id, stream=False):
-                        response_chunks.append(chunk)
-                    last_response = "".join(response_chunks)
+                    last_response, tool_call_count = await self._run_agent(message, session_id)
 
                 # Track tool calls from this iteration
-                if self._last_run_had_tool_calls:
-                    total_tool_calls += 1
+                if tool_call_count > 0:
+                    total_tool_calls += tool_call_count
 
                 # Emit iteration completed event
                 if task:
@@ -574,7 +581,8 @@ class AgentServer:
                         EVENT_AUTONOMOUS_ITERATION_COMPLETED,
                         {
                             "iteration": iteration,
-                            "had_tool_calls": self._last_run_had_tool_calls,
+                            "had_tool_calls": tool_call_count > 0,
+                            "tool_call_count": tool_call_count,
                             "response_preview": last_response[:200],
                         },
                     )
@@ -582,7 +590,7 @@ class AgentServer:
                 iteration += 1
 
                 # Completion detection: if no tool calls, agent gave a final answer
-                if not self._last_run_had_tool_calls:
+                if tool_call_count == 0:
                     logger.info(f"Autonomous run {task_id} completed after {iteration} iterations")
                     return last_response
 
