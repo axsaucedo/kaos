@@ -223,15 +223,26 @@ class TestA2AAutonomousMode:
 
     @pytest.mark.asyncio
     async def test_send_message_autonomous_mode(self):
-        """Send with mode=autonomous returns task immediately."""
+        """Send with mode=autonomous: validates task lifecycle, events, and output."""
         import json
         import os
         import asyncio
 
-        os.environ["DEBUG_MOCK_RESPONSES"] = json.dumps(["Goal achieved."])
+        os.environ["DEBUG_MOCK_RESPONSES"] = json.dumps(
+            [
+                '{"tool_calls": [{"id": "c1", "name": "echo", "arguments": {"message": "checking"}}]}',
+                "Still working.",
+                "Analysis complete. All systems healthy.",
+            ]
+        )
         try:
             server = make_test_server(task_manager_type="local")
-            # Populate mock responses then disable reset for autonomous
+
+            @server._agent.tool_plain
+            def echo(message: str) -> str:
+                """Echo the message back."""
+                return f"Echo: {message}"
+
             if server._mock_state:
                 server._mock_state.reset()
                 server._mock_state = None
@@ -257,24 +268,51 @@ class TestA2AAutonomousMode:
                 assert task["mode"] == "autonomous"
                 task_id = task["id"]
 
-                # Wait for completion
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(1.0)
                 resp2 = await client.post("/", json=_jsonrpc("GetTask", {"id": task_id}))
                 task2 = resp2.json()["result"]
                 assert task2["status"]["state"] == "completed"
+
+                # Validate events show iteration lifecycle
+                event_types = [e["type"] for e in task2.get("events", [])]
+                assert "task.submitted" in event_types
+                assert "autonomous.iteration.started" in event_types
+                assert "autonomous.iteration.completed" in event_types
+                assert "task.completed" in event_types
+
+                # Validate output content
+                assert task2.get("output") is not None
+                assert "analysis complete" in task2["output"].lower() or len(task2["output"]) > 0
+
+                # Validate history has agent response
+                agent_msgs = [m for m in task2["history"] if m["role"] == "agent"]
+                assert len(agent_msgs) > 0
         finally:
             os.environ.pop("DEBUG_MOCK_RESPONSES", None)
 
     @pytest.mark.asyncio
     async def test_send_message_autonomous_with_budgets(self):
-        """Custom budgets are passed through correctly."""
+        """Custom budgets enforce limits and produce budget exhaustion events."""
         import json
         import os
         import asyncio
 
-        os.environ["DEBUG_MOCK_RESPONSES"] = json.dumps(["Done."])
+        os.environ["DEBUG_MOCK_RESPONSES"] = json.dumps(
+            [
+                '{"tool_calls": [{"id": "c1", "name": "echo", "arguments": {"message": "iter1"}}]}',
+                "Still going.",
+                '{"tool_calls": [{"id": "c2", "name": "echo", "arguments": {"message": "iter2"}}]}',
+                "More work.",
+            ]
+        )
         try:
             server = make_test_server(task_manager_type="local")
+
+            @server._agent.tool_plain
+            def echo(message: str) -> str:
+                """Echo the message back."""
+                return f"Echo: {message}"
+
             if server._mock_state:
                 server._mock_state.reset()
                 server._mock_state = None
@@ -288,14 +326,14 @@ class TestA2AAutonomousMode:
                         {
                             "message": {
                                 "role": "user",
-                                "parts": [{"type": "text", "text": "Quick task"}],
+                                "parts": [{"type": "text", "text": "Keep working"}],
                             },
                             "configuration": {
                                 "mode": "autonomous",
                                 "budgets": {
-                                    "maxIterations": 3,
+                                    "maxIterations": 1,
                                     "maxRuntimeSeconds": 60,
-                                    "maxToolCalls": 10,
+                                    "maxToolCalls": 100,
                                 },
                             },
                         },
@@ -305,9 +343,17 @@ class TestA2AAutonomousMode:
                 assert "result" in data
                 task_id = data["result"]["id"]
 
-                await asyncio.sleep(0.5)
+                await asyncio.sleep(1.0)
                 resp2 = await client.post("/", json=_jsonrpc("GetTask", {"id": task_id}))
-                assert resp2.json()["result"]["status"]["state"] == "completed"
+                task2 = resp2.json()["result"]
+                assert task2["status"]["state"] == "completed"
+
+                event_types = [e["type"] for e in task2.get("events", [])]
+                assert "autonomous.budget.exhausted" in event_types
+                budget_events = [
+                    e for e in task2["events"] if e["type"] == "autonomous.budget.exhausted"
+                ]
+                assert budget_events[0]["data"]["reason"] == "max_iterations"
         finally:
             os.environ.pop("DEBUG_MOCK_RESPONSES", None)
 
