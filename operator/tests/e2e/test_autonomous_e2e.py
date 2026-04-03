@@ -186,6 +186,27 @@ async def test_autonomous_a2a_send_message(
         assert "autonomous.iteration.started" in event_types
         assert "task.completed" in event_types
 
+        # Verify at least 2 iterations occurred (tool call then final)
+        iteration_starts = [e for e in events if e["type"] == "autonomous.iteration.started"]
+        assert len(iteration_starts) >= 2, f"Expected >=2 iterations, got {len(iteration_starts)}"
+
+        # Verify history contains agent response with final output
+        history = get_data["result"].get("history", [])
+        agent_msgs = [m for m in history if m["role"] == "agent"]
+        assert len(agent_msgs) >= 1
+        final_text = agent_msgs[-1]["parts"][0]["text"]
+        assert "Goal fully achieved" in final_text
+
+        # Verify memory has the session
+        session_id = get_data["result"]["sessionId"]
+        memory_resp = await client.get(
+            f"{agent_url}/memory/events",
+            params={"session_id": session_id},
+        )
+        assert memory_resp.status_code == 200
+        memory_events = memory_resp.json()
+        assert len(memory_events) >= 2, "Expected memory events from autonomous iterations"
+
 
 @pytest.mark.asyncio
 async def test_autonomous_budget_enforcement(
@@ -290,10 +311,18 @@ async def test_autonomous_budget_enforcement(
 
         assert state == "completed"
 
-        # Verify budget exhaustion event
+        # Verify budget exhaustion event with reason
         events = get_data["result"].get("events", [])
         event_types = [e["type"] for e in events]
         assert "autonomous.budget.exhausted" in event_types
+
+        budget_event = next(e for e in events if e["type"] == "autonomous.budget.exhausted")
+        assert "max_iterations" in budget_event.get("reason", ""), \
+            f"Expected max_iterations reason, got: {budget_event}"
+
+        # Verify only 1 iteration occurred
+        iteration_starts = [e for e in events if e["type"] == "autonomous.iteration.started"]
+        assert len(iteration_starts) == 1, f"Expected 1 iteration, got {len(iteration_starts)}"
 
 
 @pytest.mark.asyncio
@@ -336,8 +365,23 @@ async def test_autonomous_startup_activated(
         health_resp = await client.get(f"{agent_url}/health")
         assert health_resp.status_code == 200
 
-        # Verify memory has the autonomous session
+        # Verify memory has the autonomous session with actual content
         memory_resp = await client.get(f"{agent_url}/memory/sessions")
         assert memory_resp.status_code == 200
         sessions = memory_resp.json()
         assert len(sessions) >= 1, "Expected at least one session from startup autonomous run"
+
+        # Verify memory events in the session contain the goal and response
+        session_id = sessions[0]
+        events_resp = await client.get(
+            f"{agent_url}/memory/events",
+            params={"session_id": session_id},
+        )
+        assert events_resp.status_code == 200
+        events = events_resp.json()
+        assert len(events) >= 2, "Expected at least goal + response events"
+
+        # Verify the agent produced a response matching the mock
+        event_contents = [e.get("content", "") for e in events]
+        has_response = any("System health check complete" in c for c in event_contents)
+        assert has_response, f"Expected mock response in events, got: {event_contents}"
