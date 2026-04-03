@@ -4,7 +4,7 @@ KAOS supports **autonomous (self-looping) agent execution** — agents that work
 
 ## Overview
 
-In autonomous mode, an agent repeatedly calls its agentic loop (`_process_message`) until either:
+In autonomous mode, an agent repeatedly calls `_run_agent` until either:
 - The goal is achieved (agent responds without making tool calls)
 - A budget limit is reached (iterations, time, or tool calls)
 - The task is canceled
@@ -173,11 +173,13 @@ This leverages the fact that Pydantic AI runs the full agentic loop internally p
 graph TD
     A[Trigger] -->|Startup or A2A| B[TaskManager.submit_autonomous]
     B --> C[asyncio.create_task]
-    C --> D[AgentServer._run_autonomous]
+    C --> D[LocalTaskManager._execute_autonomous]
     D --> E{Check Budgets}
-    E -->|OK| F[_process_message iteration]
+    E -->|OK| F[process_fn / _run_agent iteration]
     F --> G{Tool calls?}
     G -->|Yes| E
     G -->|No| H[Task Completed]
     E -->|Exceeded| I[Budget Exhausted]
 ```
+
+The autonomous loop is fully owned by `LocalTaskManager._execute_autonomous`. The server provides `_run_agent(message, session_id) → (response_text, tool_call_count)` as the `process_fn` callback. This separation allows future distributed TaskManager implementations to manage execution differently while using the same agent execution primitive.

@@ -16,7 +16,7 @@ make format                     # Auto-format code
 ```
 
 ## Project Structure
-- `pais/server.py`: AgentServer, create_agent_server(), routes, _process_message(), logging
+- `pais/server.py`: AgentServer, create_agent_server(), routes, _run_agent(), _process_message(), logging
 - `pais/serverutils.py`: AgentDeps, AgentCard (Pydantic BaseModel), AgentCardSkill, AgentCardCapabilities, RemoteAgent (A2A + chat delegation), AgentServerSettings, _resolve_model, response builders
 - `pais/a2a.py`: TaskManager ABC, LocalTaskManager, NullTaskManager, Task/TaskState data model, JSON-RPC models/dispatcher/handlers, setup_a2a_routes()
 - `pais/tools.py`: DelegationToolset (AbstractToolset), execute_delegation, format_progress_event, build_string_mode_handler
@@ -113,7 +113,7 @@ make format                     # Auto-format code
 - Custom tools registered on the Pydantic AI agent can also use `ctx: RunContext[AgentDeps]`
 
 ### Key Classes
-- `AgentServer`: Central server — owns pydantic_ai.Agent, memory, routes, `_process_message()`
+- `AgentServer`: Central server — owns pydantic_ai.Agent, memory, routes, `_run_agent()`, `_process_message()`
 - `AgentDeps`: Per-run dependencies (session_id, memory) injected via RunContext
 - `DelegationToolset`: AbstractToolset that exposes sub-agents as delegate_to_ tools
 - `RemoteAgent`: HTTP client for sub-agent delegation — tries A2A SendMessage first, falls back to /v1/chat/completions
@@ -140,10 +140,10 @@ make format                     # Auto-format code
 - `_running_tasks: Dict[str, asyncio.Task]` tracks running async tasks; `shutdown()` cancels all
 
 ### Autonomous Execution
-- `AgentServer._run_autonomous(goal, session_id, budgets, task_id)`: Core self-loop engine
-- Iteratively calls `_process_message()` with budget enforcement (iterations, time, tool calls)
-- Completion detection: if no tool calls occurred in an iteration, agent is done
-- `_last_run_had_tool_calls` flag set in `_process_message` to track tool usage
+- `LocalTaskManager._execute_autonomous(task, budgets)`: Core self-loop engine (owned by TaskManager)
+- Iteratively calls `process_fn(message, session_id) → (response_text, tool_call_count)` with budget enforcement
+- Completion detection: if `tool_call_count == 0` in an iteration, agent is done
+- `AgentServer._run_agent(message, session_id) → (str, int)`: Shared helper used as `process_fn` callback
 - Two activation modes:
   1. **Startup-activated**: `AUTONOMOUS_ENABLED=true` + `AUTONOMOUS_GOAL` → lifespan spawns task
   2. **A2A-triggered**: `SendMessage` with `configuration.mode: "autonomous"` + optional `budgets`
