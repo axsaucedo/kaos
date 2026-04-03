@@ -185,16 +185,16 @@ kaos mcp deploy unified-gateway --runtime pctx-codemode --params "$PCTX_CONFIG" 
 
 ## Step 4: Create the Agent
 
-Create an agent connected to the pctx gateway. The mock responses demonstrate Code Mode - the agent writes TypeScript that calls multiple tools in sequence using pctx's `execute` tool:
+Create an agent connected to the pctx gateway. The mock responses demonstrate Code Mode - the agent writes TypeScript that calls multiple tools in sequence using pctx's `execute_typescript` tool:
 
 ```bash
 # Define the mock code response with native tool_calls format
-# pctx exposes the "execute" tool for running TypeScript code
+# pctx exposes the "execute_typescript" tool for running TypeScript code
 # Note: Use spaces or escaped tabs (\\t) - literal tabs break JSON parsing
 MOCK_CODE="{\
   \"tool_calls\": [{\
     \"id\": \"call_1\",\
-    \"name\": \"execute\",\
+    \"name\": \"execute_typescript\",\
     \"arguments\": {\
       \"code\": \"\
           async function run() {\
@@ -257,12 +257,12 @@ Verify a tool_call event exists and no errors were recorded:
 ```bash
 # Check tool_call event exists
 kaos agent memory gateway-agent --json | grep -q "tool_call" || exit 1
+# Check tool_result event exists (proves tool executed)
+kaos agent memory gateway-agent --json | grep -q "tool_result" || exit 1
 # Check no tool errors occurred
 kaos agent memory gateway-agent --json | grep -q "tool_error" && exit 1 || true
-# Check no pctx errors occurred
-kaos agent memory gateway-agent --json | grep -q '"success": false' && exit 1 || true
-# Check that there was an explicit pass on pctx
-kaos agent memory gateway-agent --json | grep -q '"success": true' || exit 1
+# Check pctx execution was successful
+kaos agent memory gateway-agent --json | grep -q "Executed Successfully" || exit 1
 ```
 
 ## Cleanup

@@ -354,6 +354,10 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	agent.Status.Message = fmt.Sprintf("Deployment ready replicas: %d/%d", deployment.Status.ReadyReplicas, *deployment.Spec.Replicas)
 
 	if err := r.Status().Update(ctx, agent); err != nil {
+		if apierrors.IsConflict(err) {
+			log.Info("conflict updating status, will retry on next reconcile")
+			return ctrl.Result{}, nil
+		}
 		log.Error(err, "failed to update status")
 		return ctrl.Result{}, err
 	}
