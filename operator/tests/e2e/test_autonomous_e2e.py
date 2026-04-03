@@ -317,7 +317,8 @@ async def test_autonomous_budget_enforcement(
         assert "autonomous.budget.exhausted" in event_types
 
         budget_event = next(e for e in events if e["type"] == "autonomous.budget.exhausted")
-        assert "max_iterations" in budget_event.get("reason", ""), \
+        budget_data = budget_event.get("data", {})
+        assert "max_iterations" in budget_data.get("reason", ""), \
             f"Expected max_iterations reason, got: {budget_event}"
 
         # Verify only 1 iteration occurred
@@ -358,7 +359,7 @@ async def test_autonomous_startup_activated(
     # Give it time to execute, then verify via the agent's health/memory endpoints.
     import asyncio
 
-    await asyncio.sleep(5)
+    await asyncio.sleep(10)
 
     # Verify agent is healthy (still running after autonomous task)
     async with httpx.AsyncClient(timeout=60.0) as client:
@@ -369,13 +370,14 @@ async def test_autonomous_startup_activated(
         memory_resp = await client.get(f"{agent_url}/memory/sessions")
         assert memory_resp.status_code == 200
         sessions = memory_resp.json()
+        assert isinstance(sessions, list), f"Expected list, got: {type(sessions)}: {sessions}"
         assert len(sessions) >= 1, "Expected at least one session from startup autonomous run"
 
         # Verify memory events in the session contain the goal and response
-        session_id = sessions[0]
+        first_session = sessions[0]
         events_resp = await client.get(
             f"{agent_url}/memory/events",
-            params={"session_id": session_id},
+            params={"session_id": first_session},
         )
         assert events_resp.status_code == 200
         events = events_resp.json()

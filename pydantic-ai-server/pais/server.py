@@ -122,7 +122,8 @@ class AgentServer:
         self._model = model
         self._custom_tools = custom_tools or []
         if task_manager_type == "local":
-            self.task_manager: TaskManager = LocalTaskManager(self._run_agent)
+            setup_fn = self._mock_state.reset if self._mock_state else None
+            self.task_manager: TaskManager = LocalTaskManager(self._run_agent, setup_fn=setup_fn)
         else:
             self.task_manager = NullTaskManager()
 
@@ -372,8 +373,6 @@ class AgentServer:
         session_id: str,
     ) -> tuple:
         """Setup for agent run: memory event, history, deps. Returns (user_prompt, message_history, deps, usage_limits)."""
-        if self._mock_state:
-            self._mock_state.reset()
 
         # Ensure session exists in memory (idempotent)
         session_id = await self.memory.get_or_create_session(session_id, "agent", "user")
@@ -423,6 +422,10 @@ class AgentServer:
     ) -> AsyncIterator[str]:
         """Yields content chunks (streaming) or single complete response."""
         logger.debug(f"Processing message for session {session_id}, streaming={stream}")
+
+        # Reset mock state for each external request (not autonomous iterations)
+        if self._mock_state:
+            self._mock_state.reset()
 
         try:
             if stream:

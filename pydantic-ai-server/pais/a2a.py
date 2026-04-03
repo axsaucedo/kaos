@@ -268,8 +268,14 @@ class LocalTaskManager(TaskManager):
     and OTel instrumentation. process_fn(message, session_id) -> (response, tool_call_count).
     """
 
-    def __init__(self, process_fn: ProcessFn, max_tasks: int = 10000):
+    def __init__(
+        self,
+        process_fn: ProcessFn,
+        max_tasks: int = 10000,
+        setup_fn: Optional[Callable[[], None]] = None,
+    ):
         self._process_fn = process_fn
+        self._setup_fn = setup_fn
         self._tasks: Dict[str, Task] = {}
         self._running_tasks: Dict[str, asyncio.Task] = {}
         self.max_tasks = max_tasks
@@ -438,6 +444,9 @@ class LocalTaskManager(TaskManager):
 
     async def _execute_task(self, task_id: str, input_message: str) -> None:
         """Execute a task synchronously using process_fn."""
+        if self._setup_fn:
+            self._setup_fn()
+
         tracer = trace_api.get_tracer(SERVICE_NAME)
         task_counter, task_duration = get_task_metrics()
         start_time = time.perf_counter()
@@ -486,6 +495,9 @@ class LocalTaskManager(TaskManager):
         budgets: AutonomousBudgets,
     ) -> None:
         """Execute autonomous self-loop: iterate process_fn until done or budget exhausted."""
+        if self._setup_fn:
+            self._setup_fn()
+
         tracer = trace_api.get_tracer(SERVICE_NAME)
         task_counter, task_duration = get_task_metrics()
         start_time = time.perf_counter()
