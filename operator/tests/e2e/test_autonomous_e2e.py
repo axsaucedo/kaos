@@ -204,7 +204,8 @@ async def test_autonomous_a2a_send_message(
             params={"session_id": session_id},
         )
         assert memory_resp.status_code == 200
-        memory_events = memory_resp.json()
+        memory_data = memory_resp.json()
+        memory_events = memory_data.get("events", []) if isinstance(memory_data, dict) else memory_data
         assert len(memory_events) >= 2, "Expected memory events from autonomous iterations"
 
 
@@ -384,10 +385,14 @@ async def test_autonomous_startup_activated(
             params={"session_id": first_session},
         )
         assert events_resp.status_code == 200
-        events = events_resp.json()
+        events_data = events_resp.json()
+        if isinstance(events_data, dict):
+            events = events_data.get("events", [])
+        else:
+            events = events_data
         assert len(events) >= 2, "Expected at least goal + response events"
 
         # Verify the agent produced a response matching the mock
-        event_contents = [e.get("content", "") for e in events]
+        event_contents = [e.get("content", "") if isinstance(e, dict) else str(e) for e in events]
         has_response = any("System health check complete" in c for c in event_contents)
         assert has_response, f"Expected mock response in events, got: {event_contents}"
