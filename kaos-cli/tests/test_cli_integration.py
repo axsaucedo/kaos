@@ -346,6 +346,38 @@ class TestAgentDeployAutonomous:
         assert "config" not in agent["spec"]
 
 
+# ─── Agent A2A commands ────────────────────────────────────────────────
+
+
+class TestAgentA2ACommands:
+    def test_a2a_help(self):
+        result = runner.invoke(app, ["agent", "a2a", "--help"])
+        assert result.exit_code == 0
+        assert "send" in result.output
+        assert "get" in result.output
+        assert "cancel" in result.output
+
+    def test_a2a_send_help(self):
+        result = runner.invoke(app, ["agent", "a2a", "send", "--help"])
+        assert result.exit_code == 0
+        assert "--message" in result.output
+        assert "--mode" in result.output
+        assert "--session-id" in result.output
+        assert "--json" in result.output
+
+    def test_a2a_get_help(self):
+        result = runner.invoke(app, ["agent", "a2a", "get", "--help"])
+        assert result.exit_code == 0
+        assert "--task-id" in result.output
+        assert "--json" in result.output
+
+    def test_a2a_cancel_help(self):
+        result = runner.invoke(app, ["agent", "a2a", "cancel", "--help"])
+        assert result.exit_code == 0
+        assert "--task-id" in result.output
+        assert "--json" in result.output
+
+
 # ─── ModelAPI deploy dry-run ────────────────────────────────────────────
 
 

@@ -15,11 +15,13 @@ from kaos_cli.agent.memory import memory_command
 from kaos_cli.agent.init import init_command
 from kaos_cli.agent.build import build_command
 from kaos_cli.agent.run import run_command
+from kaos_cli.agent.a2a import app as a2a_app
 
 app = typer.Typer(
     help="Agent management commands.",
     no_args_is_help=True,
 )
+app.add_typer(a2a_app, name="a2a")
 
 
 @app.command(name="init")
