@@ -8,7 +8,7 @@ from pais.a2a import (
     TaskMessage,
     TaskEvent,
     Task,
-    AutonomousBudgets,
+    TaskBudgets,
     LocalTaskManager,
     NullTaskManager,
     VALID_TRANSITIONS,
@@ -153,18 +153,18 @@ class TestTaskEvent:
         assert event.data == {}
 
 
-class TestAutonomousBudgets:
-    """Tests for AutonomousBudgets dataclass."""
+class TestTaskBudgets:
+    """Tests for TaskBudgets dataclass."""
 
     def test_defaults(self):
-        budgets = AutonomousBudgets()
+        budgets = TaskBudgets()
         assert budgets.max_iterations == 10
         assert budgets.max_runtime_seconds == 300
         assert budgets.max_tool_calls == 50
         assert budgets.interval_seconds == 0
 
     def test_custom_values(self):
-        budgets = AutonomousBudgets(
+        budgets = TaskBudgets(
             max_iterations=5, max_runtime_seconds=60, max_tool_calls=20, interval_seconds=10
         )
         assert budgets.max_iterations == 5
@@ -403,9 +403,7 @@ class TestLocalTaskManagerAutonomous:
             return (f"Iteration {call_count}", 1)
 
         manager = LocalTaskManager(tool_calling_process)
-        task = await manager.submit_autonomous(
-            "Keep going", budgets=AutonomousBudgets(max_iterations=2)
-        )
+        task = await manager.submit_autonomous("Keep going", budgets=TaskBudgets(max_iterations=2))
         completed = await manager.wait_for_completion(task.id, timeout=5.0)
         assert completed is not None
         assert completed.status.state == TaskState.COMPLETED

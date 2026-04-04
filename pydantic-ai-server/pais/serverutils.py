@@ -407,13 +407,16 @@ class AgentServerSettings(BaseSettings):
     # Task store configuration
     task_store_type: str = "local"
 
-    # Autonomous execution settings
+    # Autonomous execution settings (CRD continuous mode)
     autonomous_enabled: bool = False
     autonomous_goal: str = ""
-    autonomous_max_iterations: int = 10
-    autonomous_max_runtime_seconds: int = 300
-    autonomous_max_tool_calls: int = 50
     autonomous_interval_seconds: int = 0
+    autonomous_max_iter_runtime_seconds: int = 60
+
+    # Task budget settings (A2A async task defaults)
+    task_max_iterations: int = 10
+    task_max_runtime_seconds: int = 300
+    task_max_tool_calls: int = 50
 
     # Logging settings
     agent_access_log: bool = False

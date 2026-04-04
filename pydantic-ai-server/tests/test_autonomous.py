@@ -6,7 +6,7 @@ import time
 import pytest
 
 from pais.a2a import (
-    AutonomousBudgets,
+    TaskBudgets,
     EVENT_AUTONOMOUS_ITERATION_STARTED,
     EVENT_AUTONOMOUS_ITERATION_COMPLETED,
     EVENT_AUTONOMOUS_BUDGET_EXHAUSTED,
@@ -55,7 +55,7 @@ class TestAutonomousLoop:
         server = _make_autonomous_server()
 
         task = await server.task_manager.submit_autonomous(
-            "Analyze the data", budgets=AutonomousBudgets(max_iterations=10)
+            "Analyze the data", budgets=TaskBudgets(max_iterations=10)
         )
         completed = await server.task_manager.wait_for_completion(task.id, timeout=5.0)
         assert completed is not None
@@ -82,7 +82,7 @@ class TestAutonomousLoop:
 
         task = await server.task_manager.submit_autonomous(
             "Process all data",
-            budgets=AutonomousBudgets(max_iterations=2, max_tool_calls=100),
+            budgets=TaskBudgets(max_iterations=2, max_tool_calls=100),
         )
         completed = await server.task_manager.wait_for_completion(task.id, timeout=5.0)
         assert completed is not None
@@ -105,9 +105,7 @@ class TestAutonomousLoop:
 
         task = await server.task_manager.submit_autonomous(
             "Scan everything",
-            budgets=AutonomousBudgets(
-                max_iterations=100, max_tool_calls=1, max_runtime_seconds=300
-            ),
+            budgets=TaskBudgets(max_iterations=100, max_tool_calls=1, max_runtime_seconds=300),
         )
         completed = await server.task_manager.wait_for_completion(task.id, timeout=5.0)
         assert completed is not None
@@ -131,7 +129,7 @@ class TestAutonomousLoop:
 
         task = await server.task_manager.submit_autonomous(
             "Run all steps",
-            budgets=AutonomousBudgets(max_iterations=10),
+            budgets=TaskBudgets(max_iterations=10),
         )
         completed = await server.task_manager.wait_for_completion(task.id, timeout=5.0)
         assert completed is not None
@@ -154,7 +152,7 @@ class TestAutonomousLoop:
 
         task = await server.task_manager.submit_autonomous(
             "Complete the task",
-            budgets=AutonomousBudgets(max_iterations=10),
+            budgets=TaskBudgets(max_iterations=10),
         )
         completed = await server.task_manager.wait_for_completion(task.id, timeout=5.0)
         assert completed is not None
@@ -182,7 +180,7 @@ class TestAutonomousLoop:
 
         task = await server.task_manager.submit_autonomous(
             "Complete task",
-            budgets=AutonomousBudgets(max_iterations=0, max_runtime_seconds=0, max_tool_calls=0),
+            budgets=TaskBudgets(max_iterations=0, max_runtime_seconds=0, max_tool_calls=0),
         )
         completed = await server.task_manager.wait_for_completion(task.id, timeout=5.0)
         assert completed is not None
@@ -204,7 +202,7 @@ class TestAutonomousLoop:
 
         task = await server.task_manager.submit_autonomous(
             "Do task",
-            budgets=AutonomousBudgets(max_iterations=10, interval_seconds=0),
+            budgets=TaskBudgets(max_iterations=10, interval_seconds=0),
         )
         completed = await server.task_manager.wait_for_completion(task.id, timeout=5.0)
         assert completed is not None
@@ -227,13 +225,12 @@ class TestStartupAutonomous:
         server = _make_autonomous_server()
         server.settings.autonomous_enabled = True
         server.settings.autonomous_goal = "Monitor the system"
-        server.settings.autonomous_max_iterations = 5
 
         async with server._lifespan(server.app):
             import asyncio
 
             await asyncio.sleep(0.5)
-            tasks = [t for t in server.task_manager._tasks.values() if t.mode == "autonomous"]
+            tasks = [t for t in server.task_manager._tasks.values() if t.mode == "continuous"]
             assert len(tasks) >= 1
 
     @pytest.mark.asyncio
@@ -244,7 +241,11 @@ class TestStartupAutonomous:
         server.settings.autonomous_enabled = False
 
         async with server._lifespan(server.app):
-            tasks = [t for t in server.task_manager._tasks.values() if t.mode == "autonomous"]
+            tasks = [
+                t
+                for t in server.task_manager._tasks.values()
+                if t.mode in ("autonomous", "continuous")
+            ]
             assert len(tasks) == 0
 
     @pytest.mark.asyncio
@@ -266,26 +267,29 @@ class TestStartupAutonomous:
         os.environ["AGENT_NAME"] = "test"
         os.environ["AUTONOMOUS_ENABLED"] = "true"
         os.environ["AUTONOMOUS_GOAL"] = "Scan the network"
-        os.environ["AUTONOMOUS_MAX_ITERATIONS"] = "20"
-        os.environ["AUTONOMOUS_MAX_RUNTIME_SECONDS"] = "600"
-        os.environ["AUTONOMOUS_MAX_TOOL_CALLS"] = "100"
+        os.environ["AUTONOMOUS_MAX_ITER_RUNTIME_SECONDS"] = "120"
         os.environ["AUTONOMOUS_INTERVAL_SECONDS"] = "5"
+        os.environ["TASK_MAX_ITERATIONS"] = "20"
+        os.environ["TASK_MAX_RUNTIME_SECONDS"] = "600"
+        os.environ["TASK_MAX_TOOL_CALLS"] = "100"
 
         try:
             settings = AgentServerSettings(agent_name="test")
             assert settings.autonomous_enabled is True
             assert settings.autonomous_goal == "Scan the network"
-            assert settings.autonomous_max_iterations == 20
-            assert settings.autonomous_max_runtime_seconds == 600
-            assert settings.autonomous_max_tool_calls == 100
+            assert settings.autonomous_max_iter_runtime_seconds == 120
             assert settings.autonomous_interval_seconds == 5
+            assert settings.task_max_iterations == 20
+            assert settings.task_max_runtime_seconds == 600
+            assert settings.task_max_tool_calls == 100
         finally:
             for key in [
                 "AUTONOMOUS_ENABLED",
                 "AUTONOMOUS_GOAL",
-                "AUTONOMOUS_MAX_ITERATIONS",
-                "AUTONOMOUS_MAX_RUNTIME_SECONDS",
-                "AUTONOMOUS_MAX_TOOL_CALLS",
+                "AUTONOMOUS_MAX_ITER_RUNTIME_SECONDS",
                 "AUTONOMOUS_INTERVAL_SECONDS",
+                "TASK_MAX_ITERATIONS",
+                "TASK_MAX_RUNTIME_SECONDS",
+                "TASK_MAX_TOOL_CALLS",
             ]:
                 os.environ.pop(key, None)

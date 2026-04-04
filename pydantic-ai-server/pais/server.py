@@ -45,7 +45,7 @@ from pais.a2a import (
     TaskManager,
     LocalTaskManager,
     NullTaskManager,
-    AutonomousBudgets,
+    ContinuousConfig,
     setup_a2a_routes,
 )
 
@@ -167,19 +167,19 @@ class AgentServer:
         # Start autonomous execution if configured
         if self.settings.autonomous_enabled and self.settings.autonomous_goal:
             logger.info(
-                f"Starting autonomous execution: "
+                f"Starting continuous autonomous execution: "
                 f"goal_preview={self.settings.autonomous_goal[:100]} "
-                f"max_iterations={self.settings.autonomous_max_iterations}"
+                f"interval={self.settings.autonomous_interval_seconds}s"
             )
-            budgets = AutonomousBudgets(
-                max_iterations=self.settings.autonomous_max_iterations,
-                max_runtime_seconds=self.settings.autonomous_max_runtime_seconds,
-                max_tool_calls=self.settings.autonomous_max_tool_calls,
+            continuous_config = ContinuousConfig(
+                goal=self.settings.autonomous_goal,
                 interval_seconds=self.settings.autonomous_interval_seconds,
+                max_iter_runtime_seconds=self.settings.autonomous_max_iter_runtime_seconds,
             )
             await self.task_manager.submit_autonomous(
                 goal=self.settings.autonomous_goal,
-                budgets=budgets,
+                continuous=True,
+                continuous_config=continuous_config,
                 metadata={"trigger": "startup"},
             )
         elif self.settings.autonomous_enabled and not self.settings.autonomous_goal:
