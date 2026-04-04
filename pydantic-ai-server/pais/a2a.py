@@ -618,15 +618,17 @@ class LocalTaskManager(TaskManager):
 
                 task.output = last_response
                 task.history.append(TaskMessage(role="agent", text=last_response))
-                self._transition(task_id, TaskState.COMPLETED, "Done")
-                task.add_event(
-                    EVENT_TASK_COMPLETED,
-                    {"output_preview": last_response[:200]},
-                )
-                logger.info(f"Autonomous task {task_id} completed")
-                span.set_attribute("task.state", "completed")
-                if task_counter:
-                    task_counter.add(1, {"state": "completed", "mode": "autonomous"})
+                current_state = self._tasks.get(task_id)
+                if current_state and current_state.status.state not in TERMINAL_STATES:
+                    self._transition(task_id, TaskState.COMPLETED, "Done")
+                    task.add_event(
+                        EVENT_TASK_COMPLETED,
+                        {"output_preview": last_response[:200]},
+                    )
+                    logger.info(f"Autonomous task {task_id} completed")
+                    span.set_attribute("task.state", "completed")
+                    if task_counter:
+                        task_counter.add(1, {"state": "completed", "mode": "autonomous"})
 
             except asyncio.CancelledError:
                 self._transition(task_id, TaskState.CANCELED, "Canceled")
