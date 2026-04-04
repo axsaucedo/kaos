@@ -45,7 +45,7 @@ from pais.a2a import (
     TaskManager,
     LocalTaskManager,
     NullTaskManager,
-    ContinuousConfig,
+    AutonomousConfig,
     setup_a2a_routes,
 )
 
@@ -164,26 +164,23 @@ class AgentServer:
     async def _lifespan(self, app: FastAPI):
         self._log_startup_config()
 
-        # Start autonomous execution if configured
-        if self.settings.autonomous_enabled and self.settings.autonomous_goal:
+        # Start autonomous execution if goal is configured
+        if self.settings.autonomous_goal:
             logger.info(
-                f"Starting continuous autonomous execution: "
+                f"Starting autonomous execution: "
                 f"goal_preview={self.settings.autonomous_goal[:100]} "
                 f"interval={self.settings.autonomous_interval_seconds}s"
             )
-            continuous_config = ContinuousConfig(
+            autonomous_config = AutonomousConfig(
                 goal=self.settings.autonomous_goal,
                 interval_seconds=self.settings.autonomous_interval_seconds,
                 max_iter_runtime_seconds=self.settings.autonomous_max_iter_runtime_seconds,
             )
             await self.task_manager.submit_autonomous(
                 goal=self.settings.autonomous_goal,
-                continuous=True,
-                continuous_config=continuous_config,
+                autonomous_config=autonomous_config,
                 metadata={"trigger": "startup"},
             )
-        elif self.settings.autonomous_enabled and not self.settings.autonomous_goal:
-            raise ValueError("autonomous_enabled=True requires autonomous_goal to be set")
 
         yield
         logger.info("AgentServer shutdown")
@@ -204,7 +201,7 @@ class AgentServer:
             f"max_steps={self.settings.agentic_loop_max_steps} mcp_servers={mcp_count} "
             f"sub_agents={sub_agents} otel={otel} "
             f"custom_tools={len(self._custom_tools)} "
-            f"autonomous={'enabled' if self.settings.autonomous_enabled else 'disabled'}"
+            f"autonomous={'goal set' if self.settings.autonomous_goal else 'disabled'}"
         )
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(f"AgentServerSettings: {self.settings.model_dump()}")

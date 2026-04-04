@@ -407,8 +407,7 @@ class AgentServerSettings(BaseSettings):
     # Task store configuration
     task_store_type: str = "local"
 
-    # Autonomous execution settings (CRD continuous mode)
-    autonomous_enabled: bool = False
+    # Autonomous execution settings (CRD mode — goal presence activates)
     autonomous_goal: str = ""
     autonomous_interval_seconds: int = 0
     autonomous_max_iter_runtime_seconds: int = 60

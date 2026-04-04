@@ -220,52 +220,34 @@ class TestStartupAutonomous:
 
     @pytest.mark.asyncio
     async def test_startup_autonomous_triggered(self):
-        """Autonomous execution is triggered during lifespan when enabled."""
+        """Autonomous execution is triggered during lifespan when goal is set."""
         _set_mock_responses(["Goal achieved."])
         server = _make_autonomous_server()
-        server.settings.autonomous_enabled = True
         server.settings.autonomous_goal = "Monitor the system"
 
         async with server._lifespan(server.app):
             import asyncio
 
             await asyncio.sleep(0.5)
-            tasks = [t for t in server.task_manager._tasks.values() if t.mode == "continuous"]
+            tasks = [t for t in server.task_manager._tasks.values() if t.autonomous]
             assert len(tasks) >= 1
 
     @pytest.mark.asyncio
-    async def test_startup_autonomous_skipped_when_disabled(self):
-        """No autonomous task is created when disabled."""
+    async def test_startup_autonomous_skipped_when_no_goal(self):
+        """No autonomous task is created when goal is empty."""
         _set_mock_responses(["Should not run."])
         server = _make_autonomous_server()
-        server.settings.autonomous_enabled = False
-
-        async with server._lifespan(server.app):
-            tasks = [
-                t
-                for t in server.task_manager._tasks.values()
-                if t.mode in ("autonomous", "continuous")
-            ]
-            assert len(tasks) == 0
-
-    @pytest.mark.asyncio
-    async def test_startup_autonomous_raises_without_goal(self):
-        """Startup raises ValueError when enabled but goal is empty."""
-        _set_mock_responses(["Should not run."])
-        server = _make_autonomous_server()
-        server.settings.autonomous_enabled = True
         server.settings.autonomous_goal = ""
 
-        with pytest.raises(ValueError, match="autonomous_enabled=True requires autonomous_goal"):
-            async with server._lifespan(server.app):
-                pass
+        async with server._lifespan(server.app):
+            tasks = [t for t in server.task_manager._tasks.values() if t.autonomous]
+            assert len(tasks) == 0
 
     def test_autonomous_settings_from_env(self):
         """Verify env vars map to AgentServerSettings fields."""
         from pais.serverutils import AgentServerSettings
 
         os.environ["AGENT_NAME"] = "test"
-        os.environ["AUTONOMOUS_ENABLED"] = "true"
         os.environ["AUTONOMOUS_GOAL"] = "Scan the network"
         os.environ["AUTONOMOUS_MAX_ITER_RUNTIME_SECONDS"] = "120"
         os.environ["AUTONOMOUS_INTERVAL_SECONDS"] = "5"
@@ -275,7 +257,6 @@ class TestStartupAutonomous:
 
         try:
             settings = AgentServerSettings(agent_name="test")
-            assert settings.autonomous_enabled is True
             assert settings.autonomous_goal == "Scan the network"
             assert settings.autonomous_max_iter_runtime_seconds == 120
             assert settings.autonomous_interval_seconds == 5
@@ -284,7 +265,6 @@ class TestStartupAutonomous:
             assert settings.task_max_tool_calls == 100
         finally:
             for key in [
-                "AUTONOMOUS_ENABLED",
                 "AUTONOMOUS_GOAL",
                 "AUTONOMOUS_MAX_ITER_RUNTIME_SECONDS",
                 "AUTONOMOUS_INTERVAL_SECONDS",

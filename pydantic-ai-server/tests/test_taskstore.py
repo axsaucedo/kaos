@@ -182,7 +182,7 @@ class TestTaskExtendedFields:
             session_id="s1",
             status=TaskStatus(state=TaskState.SUBMITTED),
         )
-        assert task.mode == "interactive"
+        assert task.autonomous is False
         assert task.output == ""
         assert task.events == []
 
@@ -191,23 +191,23 @@ class TestTaskExtendedFields:
             id="t1",
             session_id="s1",
             status=TaskStatus(state=TaskState.SUBMITTED),
-            mode="autonomous",
+            autonomous=True,
         )
-        assert task.mode == "autonomous"
+        assert task.autonomous is True
 
     def test_task_to_dict_includes_new_fields(self):
         task = Task(
             id="t1",
             session_id="s1",
             status=TaskStatus(state=TaskState.COMPLETED),
-            mode="autonomous",
+            autonomous=True,
             output="Final report",
         )
         task.add_event(EVENT_TASK_SUBMITTED)
         task.add_event(EVENT_TASK_COMPLETED, {"output_preview": "Final"})
 
         d = task.to_dict()
-        assert d["mode"] == "autonomous"
+        assert d["autonomous"] is True
         assert d["output"] == "Final report"
         assert len(d["events"]) == 2
         assert d["events"][0]["type"] == EVENT_TASK_SUBMITTED
@@ -222,7 +222,7 @@ class TestTaskExtendedFields:
         )
         d = task.to_dict()
         assert d["events"] == []
-        assert d["mode"] == "interactive"
+        assert d["autonomous"] is False
         assert d["output"] == ""
 
 
@@ -356,8 +356,7 @@ class TestLocalTaskManagerAutonomous:
     async def test_submit_autonomous_creates_task(self):
         manager = LocalTaskManager(_mock_process)
         task = await manager.submit_autonomous("Analyze data")
-        assert task.mode == "autonomous"
-        assert task.status.state in {TaskState.WORKING, TaskState.COMPLETED}
+        assert task.autonomous is True
 
     @pytest.mark.asyncio
     async def test_submit_autonomous_executes_to_completion(self):
@@ -441,7 +440,7 @@ class TestNullTaskManager:
         task = await manager.submit_autonomous("Do something")
         assert task.id.startswith("null_task_")
         assert task.status.state == TaskState.COMPLETED
-        assert task.mode == "autonomous"
+        assert task.autonomous is True
 
     @pytest.mark.asyncio
     async def test_get_task_returns_none(self):

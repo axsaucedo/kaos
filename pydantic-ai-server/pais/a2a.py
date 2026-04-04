@@ -1,7 +1,7 @@
 """A2A protocol module: TaskManager ABC, LocalTaskManager, JSON-RPC dispatcher, and route setup.
 
 Provides:
-- Task data model (TaskState, TaskStatus, TaskMessage, TaskEvent, Task, ContinuousConfig, TaskBudgets)
+- Task data model (TaskState, TaskStatus, TaskMessage, TaskEvent, Task, AutonomousConfig, TaskBudgets)
 - TaskManager ABC: send_message, get_task, cancel_task, shutdown
 - LocalTaskManager: in-process execution with internal dict storage and OTel
 - NullTaskManager: no-op implementation
@@ -128,8 +128,8 @@ EVENT_AUTONOMOUS_BUDGET_EXHAUSTED = "autonomous.budget.exhausted"
 
 
 @dataclass
-class ContinuousConfig:
-    """Per-iteration config for CRD-activated continuous autonomous execution.
+class AutonomousConfig:
+    """Per-iteration config for CRD-activated autonomous execution.
 
     A value of 0 means unlimited (no limit enforced) for that budget.
     """
@@ -163,7 +163,7 @@ class Task:
     artifacts: List[Dict[str, Any]] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
     events: List[TaskEvent] = field(default_factory=list)
-    mode: str = "interactive"  # "interactive" or "autonomous"
+    autonomous: bool = False
     output: str = ""
 
     def add_event(self, event_type: str, data: Optional[Dict[str, Any]] = None) -> TaskEvent:
@@ -186,7 +186,7 @@ class Task:
             "artifacts": self.artifacts,
             "metadata": self.metadata,
             "events": [e.to_dict() for e in self.events],
-            "mode": self.mode,
+            "autonomous": self.autonomous,
             "output": self.output,
         }
 
@@ -244,8 +244,7 @@ class TaskManager(ABC):
         goal: str,
         session_id: Optional[str] = None,
         budgets: Optional[TaskBudgets] = None,
-        continuous: bool = False,
-        continuous_config: Optional["ContinuousConfig"] = None,
+        autonomous_config: Optional["AutonomousConfig"] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Task:
         """Submit an autonomous run. Returns Task immediately (may be in-progress).
@@ -253,9 +252,9 @@ class TaskManager(ABC):
         Args:
             goal: The objective for the autonomous run.
             session_id: Optional session ID (auto-generated if not provided).
-            budgets: Overall budgets for async task mode (ignored when continuous=True).
-            continuous: If True, run in continuous mode (CRD-activated, no overall limits).
-            continuous_config: Per-iteration config for continuous mode.
+            budgets: Overall budgets for async task mode (ignored in CRD mode).
+            autonomous_config: Per-iteration config for CRD-activated mode. If provided, runs
+                in continuous CRD mode (no overall limits). If None, runs as async task.
             metadata: Optional metadata for the task.
         """
         ...
@@ -332,35 +331,33 @@ class LocalTaskManager(TaskManager):
         goal: str,
         session_id: Optional[str] = None,
         budgets: Optional[TaskBudgets] = None,
-        continuous: bool = False,
-        continuous_config: Optional[ContinuousConfig] = None,
+        autonomous_config: Optional[AutonomousConfig] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Task:
         """Submit an autonomous run. Spawns background task, returns immediately."""
         tracer = trace_api.get_tracer(SERVICE_NAME)
         task_counter, _ = get_task_metrics()
-        mode = "continuous" if continuous else "autonomous"
+        is_crd_mode = autonomous_config is not None
 
         with tracer.start_as_current_span(
             "kaos.task.submit_autonomous",
             attributes={
                 "task.session_id": session_id or "",
-                "task.mode": mode,
+                "task.autonomous": True,
             },
         ):
             task = self._create_task(session_id, goal, metadata)
-            task.mode = mode
+            task.autonomous = True
             task.add_event(EVENT_TASK_SUBMITTED, {"goal_preview": goal[:200]})
-            logger.info(f"Submitted {mode} task {task.id}")
+            logger.info(f"Submitted autonomous task {task.id}")
 
             if task_counter:
-                task_counter.add(1, {"state": "submitted", "mode": mode})
+                task_counter.add(1, {"state": "submitted", "autonomous": True})
 
-        self._transition(task.id, TaskState.WORKING, f"{mode.capitalize()} execution started")
+        self._transition(task.id, TaskState.WORKING, "Autonomous execution started")
         task.add_event(EVENT_TASK_WORKING, {})
 
         effective_budgets = budgets or TaskBudgets()
-        effective_continuous_config = continuous_config or ContinuousConfig(goal=goal)
 
         bg_task = asyncio.create_task(
             self._execute_autonomous(
@@ -368,8 +365,7 @@ class LocalTaskManager(TaskManager):
                 goal,
                 task.session_id,
                 budgets=effective_budgets,
-                continuous=continuous,
-                continuous_config=effective_continuous_config,
+                autonomous_config=autonomous_config,
             )
         )
         self._running_tasks[task.id] = bg_task
@@ -528,13 +524,12 @@ class LocalTaskManager(TaskManager):
         goal: str,
         session_id: str,
         budgets: TaskBudgets,
-        continuous: bool = False,
-        continuous_config: Optional[ContinuousConfig] = None,
+        autonomous_config: Optional[AutonomousConfig] = None,
     ) -> None:
-        """Execute autonomous loop: continuous (forever) or async task (budget-limited).
+        """Execute autonomous loop: CRD mode (forever) or async task (budget-limited).
 
-        Continuous mode (CRD-activated): runs forever, per-iteration time limit only.
-        Async task mode (A2A-triggered): overall budgets, "no tool calls = done" completion.
+        CRD mode (autonomous_config provided): runs forever, per-iteration time limit only.
+        Async task mode (autonomous_config=None): overall budgets, "no tool calls = done" completion.
         """
         if self._setup_fn:
             self._setup_fn()
@@ -542,25 +537,23 @@ class LocalTaskManager(TaskManager):
         tracer = trace_api.get_tracer(SERVICE_NAME)
         task_counter, task_duration = get_task_metrics()
         start_time = time.perf_counter()
-        mode = "continuous" if continuous else "autonomous"
+        is_crd_mode = autonomous_config is not None
         interval_seconds = (
-            continuous_config.interval_seconds
-            if continuous and continuous_config
-            else budgets.interval_seconds
+            autonomous_config.interval_seconds if autonomous_config else budgets.interval_seconds
         )
 
         span_attrs: Dict[str, Any] = {
             "autonomous.task_id": task_id,
             "autonomous.session_id": session_id,
-            "autonomous.mode": mode,
+            "autonomous.crd_mode": is_crd_mode,
         }
-        if not continuous:
+        if not is_crd_mode:
             span_attrs["autonomous.max_iterations"] = budgets.max_iterations
             span_attrs["autonomous.max_runtime_seconds"] = budgets.max_runtime_seconds
             span_attrs["autonomous.max_tool_calls"] = budgets.max_tool_calls
-        if continuous and continuous_config:
+        if autonomous_config:
             span_attrs["autonomous.max_iter_runtime_seconds"] = (
-                continuous_config.max_iter_runtime_seconds
+                autonomous_config.max_iter_runtime_seconds
             )
 
         with tracer.start_as_current_span("kaos.autonomous.run", attributes=span_attrs) as span:
@@ -579,11 +572,11 @@ class LocalTaskManager(TaskManager):
                     # Check cancellation
                     current_task = self._tasks.get(task_id)
                     if current_task and current_task.status.state in TERMINAL_STATES:
-                        logger.info(f"{mode} run {task_id} stopped: task in terminal state")
+                        logger.info(f"Autonomous run {task_id} stopped: task in terminal state")
                         break
 
-                    # --- Async task budget checks (continuous mode skips these) ---
-                    if not continuous:
+                    # --- Async task budget checks (CRD mode skips these) ---
+                    if not is_crd_mode:
                         if budgets.max_iterations > 0 and iteration >= budgets.max_iterations:
                             msg = f"Budget exhausted: max_iterations ({budgets.max_iterations}) reached"
                             logger.info(f"Autonomous run {task_id}: {msg}")
@@ -624,7 +617,7 @@ class LocalTaskManager(TaskManager):
                     # Build iteration message
                     if iteration == 0:
                         message = goal
-                    elif continuous:
+                    elif is_crd_mode:
                         message = (
                             f"Continue working toward the goal. This is iteration {iteration + 1}. "
                             "Review your progress and decide next steps."
@@ -661,7 +654,7 @@ class LocalTaskManager(TaskManager):
                     iteration += 1
 
                     # Completion detection for async tasks: no tool calls = done
-                    if not continuous and tool_call_count == 0:
+                    if not is_crd_mode and tool_call_count == 0:
                         logger.info(
                             f"Autonomous run {task_id} completed after {iteration} iterations"
                         )
@@ -680,33 +673,33 @@ class LocalTaskManager(TaskManager):
                         EVENT_TASK_COMPLETED,
                         {"output_preview": last_response[:200]},
                     )
-                    logger.info(f"{mode} task {task_id} completed")
+                    logger.info(f"Autonomous task {task_id} completed")
                     span.set_attribute("task.state", "completed")
                     if task_counter:
-                        task_counter.add(1, {"state": "completed", "mode": mode})
+                        task_counter.add(1, {"state": "completed", "autonomous": True})
 
             except asyncio.CancelledError:
                 self._transition(task_id, TaskState.CANCELED, "Canceled")
                 if task:
                     task.add_event(EVENT_TASK_CANCELED, {})
-                logger.info(f"{mode} task {task_id} canceled")
+                logger.info(f"Autonomous task {task_id} canceled")
                 span.set_attribute("task.state", "canceled")
 
             except Exception as e:
-                logger.error(f"{mode} task {task_id} failed: {e}")
+                logger.error(f"Autonomous task {task_id} failed: {e}")
                 self._transition(task_id, TaskState.FAILED, str(e))
                 if task:
                     task.add_event(EVENT_TASK_FAILED, {"error": str(e)})
                 span.set_attribute("task.state", "failed")
                 span.record_exception(e)
                 if task_counter:
-                    task_counter.add(1, {"state": "failed", "mode": mode})
+                    task_counter.add(1, {"state": "failed", "autonomous": True})
 
             finally:
                 self._running_tasks.pop(task_id, None)
                 duration_ms = (time.perf_counter() - start_time) * 1000
                 if task_duration:
-                    task_duration.record(duration_ms, {"task.id": task_id, "mode": mode})
+                    task_duration.record(duration_ms, {"task.id": task_id, "autonomous": True})
 
     def _cleanup_if_needed(self) -> None:
         if len(self._tasks) >= self.max_tasks:
@@ -747,17 +740,15 @@ class NullTaskManager(TaskManager):
         goal: str,
         session_id: Optional[str] = None,
         budgets: Optional[TaskBudgets] = None,
-        continuous: bool = False,
-        continuous_config: Optional[ContinuousConfig] = None,
+        autonomous_config: Optional[AutonomousConfig] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Task:
         task_id = f"null_task_{uuid.uuid4().hex[:8]}"
-        mode = "continuous" if continuous else "autonomous"
         return Task(
             id=task_id,
             session_id=session_id or "null-session",
             status=TaskStatus(state=TaskState.COMPLETED),
-            mode=mode,
+            autonomous=True,
         )
 
     async def get_task(self, task_id: str) -> Optional[Task]:
