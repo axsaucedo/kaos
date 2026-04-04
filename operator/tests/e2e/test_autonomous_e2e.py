@@ -345,8 +345,7 @@ async def test_autonomous_startup_activated(
         autonomous_config={
             "enabled": True,
             "goal": "Check system health and report status",
-            "maxIterations": 3,
-            "maxRuntimeSeconds": 30,
+            "maxIterRuntimeSeconds": 30,
         },
     )
     create_custom_resource(agent_spec, test_namespace)

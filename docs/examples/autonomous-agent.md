@@ -91,7 +91,6 @@ kaos agent deploy auto-agent \
   --mock-response '{"tool_calls": [{"id": "call_1", "name": "echo", "arguments": {"message": "hello from autonomous"}}]}' \
   --mock-response "The echo tool confirmed: hello from autonomous. Goal achieved." \
   --autonomous "Use the echo tool to say hello and report the result" \
-  --auto-max-iterations 3 \
   --auto-interval 1.0 \
   --wait
 ```
