@@ -347,7 +347,6 @@ async def test_autonomous_startup_activated(
         agent_name,
         mock_responses,
         autonomous_config={
-            "enabled": True,
             "goal": "Check system health and report status",
             "maxIterRuntimeSeconds": 30,
             "intervalSeconds": 30,

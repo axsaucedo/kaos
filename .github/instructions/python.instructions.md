@@ -51,8 +51,7 @@ make format                     # Auto-format code
 | `OTEL_INSTRUMENTATION_VERSION` | Pydantic AI instrumentation version: 1-4 (default: `4`) |
 | `OTEL_EVENT_MODE` | Pydantic AI event mode: `attributes` (default) or `logs` (forces v1) |
 | `TASK_STORE_TYPE` | TaskManager backend: `local` (default) or `null` (disabled) |
-| `AUTONOMOUS_ENABLED` | Enable startup-activated continuous autonomous mode (default: `false`) |
-| `AUTONOMOUS_GOAL` | Goal for continuous autonomous execution |
+| `AUTONOMOUS_GOAL` | Goal for autonomous execution — setting this activates it |
 | `AUTONOMOUS_MAX_ITER_RUNTIME_SECONDS` | Per-iteration wall-clock limit (default: `60`) |
 | `AUTONOMOUS_INTERVAL_SECONDS` | Pause between autonomous iterations (default: `0`) |
 | `TASK_MAX_ITERATIONS` | Max iterations for A2A async tasks (default: `10`) |
@@ -149,9 +148,9 @@ make format                     # Auto-format code
 - Iteratively calls `process_fn(message, session_id) → (response_text, tool_call_count)` with budget enforcement
 - `AgentServer._run_agent(message, session_id) → (str, int)`: Shared helper used as `process_fn` callback
 - Two activation modes:
-  1. **Startup-activated**: `AUTONOMOUS_ENABLED=true` + `AUTONOMOUS_GOAL` → lifespan spawns continuous task
+  1. **Startup-activated**: `AUTONOMOUS_GOAL` set → lifespan spawns autonomous task
   2. **A2A-triggered**: `SendMessage` with `configuration.mode: "autonomous"` + optional `budgets`
-- `ContinuousConfig` dataclass: `goal`, `interval_seconds` (0), `max_iter_runtime_seconds` (60)
+- `AutonomousConfig` dataclass: `goal`, `interval_seconds` (0), `max_iter_runtime_seconds` (60)
 - `TaskBudgets` dataclass: `max_iterations` (10), `max_runtime_seconds` (300), `max_tool_calls` (50), `interval_seconds` (0)
 - `TaskEvent` append-only event log per task: submitted, working, iteration.started/completed, budget.exhausted, completed/failed/canceled
 

@@ -35,7 +35,6 @@ spec:
   config:
     instructions: "You are a system monitoring agent."
     autonomous:
-      enabled: true
       goal: "Check system health and report any issues"
       intervalSeconds: 10
       maxIterRuntimeSeconds: 60
@@ -147,12 +146,11 @@ Events are returned in `GetTask` responses:
 
 ## Environment Variables
 
-### Continuous Mode (CRD Autonomous)
+### Autonomous Mode (CRD)
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AUTONOMOUS_ENABLED` | `false` | Enable continuous autonomous mode on startup |
-| `AUTONOMOUS_GOAL` | `""` | Goal for continuous mode (required when enabled) |
+| `AUTONOMOUS_GOAL` | `""` | Goal for autonomous mode — setting this activates it |
 | `AUTONOMOUS_INTERVAL_SECONDS` | `0` | Pause between iterations (seconds) |
 | `AUTONOMOUS_MAX_ITER_RUNTIME_SECONDS` | `60` | Per-iteration wall-clock limit |
 
@@ -170,16 +168,16 @@ Events are returned in `GetTask` responses:
 spec:
   config:
     autonomous:
-      enabled: true                    # Activate continuous mode on pod startup
-      goal: "Your goal here"           # Required when enabled
+      goal: "Your goal here"           # Setting goal activates autonomous mode
       intervalSeconds: 10              # Pause between iterations
       maxIterRuntimeSeconds: 60        # Per-iteration wall-clock limit (0 = unlimited)
-    taskMaxIterations: 10              # Default for A2A async tasks
-    taskMaxRuntimeSeconds: 300         # Default for A2A async tasks
-    taskMaxToolCalls: 50               # Default for A2A async tasks
+    taskConfig:
+      maxIterations: 10                # Default for A2A async tasks
+      maxRuntimeSeconds: 300           # Default for A2A async tasks
+      maxToolCalls: 50                 # Default for A2A async tasks
 ```
 
-**Validation:** Setting `enabled: true` without a `goal` will cause the operator to set the Agent status to `Failed` and the Python server will raise a `ValueError` on startup, resulting in a CrashLoopBackOff.
+**Note:** Setting `autonomous.goal` activates autonomous mode on pod startup. If no goal is set, autonomous mode is simply inactive.
 
 ## Completion Detection
 
@@ -203,7 +201,7 @@ This leverages the fact that Pydantic AI runs the full agentic loop internally p
 
 ```mermaid
 graph TD
-    A[Trigger] -->|Startup| B1[ContinuousConfig]
+    A[Trigger] -->|Startup| B1[AutonomousConfig]
     A -->|A2A SendMessage| B2[TaskBudgets]
     B1 --> C[TaskManager.submit_autonomous]
     B2 --> C

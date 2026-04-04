@@ -243,12 +243,11 @@ config:
 
 #### config.autonomous (optional)
 
-Autonomous (self-looping) continuous agent execution configuration. When enabled, the agent runs in a **continuous loop** on startup — there are no overall iteration or runtime limits. The loop runs forever until the pod is stopped.
+Autonomous (self-looping) continuous agent execution configuration. When a `goal` is set, the agent runs in a **continuous loop** on startup — there are no overall iteration or runtime limits. The loop runs forever until the pod is stopped.
 
 ```yaml
 config:
   autonomous:
-    enabled: true
     goal: "Monitor system health and report issues"
     intervalSeconds: 5        # Pause between iterations (default: 0)
     maxIterRuntimeSeconds: 60 # Per-iteration wall-clock limit (default: 60, 0 = unlimited)
@@ -256,29 +255,29 @@ config:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `enabled` | bool | `false` | Activate continuous autonomous execution on agent startup |
-| `goal` | string | | Objective the agent works toward (required when enabled) |
+| `goal` | string | | Objective the agent works toward — setting this activates autonomous mode |
 | `intervalSeconds` | int32 | `0` | Seconds to pause between iterations (max: 3600) |
 | `maxIterRuntimeSeconds` | int32 | `60` | Per-iteration wall-clock limit in seconds (0 = unlimited) |
 
-**Validation:** `enabled: true` requires `goal` to be set — the operator will set the Agent status to Failed otherwise.
+**Note:** Setting `autonomous.goal` activates autonomous mode. If no goal is set, autonomous mode is simply inactive.
 
-#### config.taskMax* (optional)
+#### config.taskConfig (optional)
 
 Budget limits for **A2A-triggered async tasks** (via `SendMessage` with `mode: "autonomous"`). These are separate from CRD autonomous config.
 
 ```yaml
 config:
-  taskMaxIterations: 10       # Max iterations for async tasks (default: 10, 0 = unlimited)
-  taskMaxRuntimeSeconds: 300  # Max wall-clock time for async tasks (default: 300, 0 = unlimited)
-  taskMaxToolCalls: 50        # Max cumulative tool calls for async tasks (default: 50, 0 = unlimited)
+  taskConfig:
+    maxIterations: 10       # Max iterations for async tasks (default: 10, 0 = unlimited)
+    maxRuntimeSeconds: 300  # Max wall-clock time for async tasks (default: 300, 0 = unlimited)
+    maxToolCalls: 50        # Max cumulative tool calls for async tasks (default: 50, 0 = unlimited)
 ```
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `taskMaxIterations` | int32 | `10` | Max iterations per A2A async task (0 = unlimited) |
-| `taskMaxRuntimeSeconds` | int32 | `300` | Max wall-clock seconds per A2A async task (0 = unlimited) |
-| `taskMaxToolCalls` | int32 | `50` | Max cumulative tool calls per A2A async task (0 = unlimited) |
+| `maxIterations` | int32 | `10` | Max iterations per A2A async task (0 = unlimited) |
+| `maxRuntimeSeconds` | int32 | `300` | Max wall-clock seconds per A2A async task (0 = unlimited) |
+| `maxToolCalls` | int32 | `50` | Max cumulative tool calls per A2A async task (0 = unlimited) |
 
 **Completion detection for async tasks:** An async task completes when the agent produces a response with no tool calls, or when any budget limit is reached.
 
