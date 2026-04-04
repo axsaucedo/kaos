@@ -144,10 +144,11 @@ The operator translates CRD fields to container environment variables:
 | `config.memory.maxSessionEvents` | `MEMORY_MAX_SESSION_EVENTS` |
 | `config.autonomous.enabled` | `AUTONOMOUS_ENABLED` |
 | `config.autonomous.goal` | `AUTONOMOUS_GOAL` |
-| `config.autonomous.maxIterations` | `AUTONOMOUS_MAX_ITERATIONS` |
-| `config.autonomous.maxRuntimeSeconds` | `AUTONOMOUS_MAX_RUNTIME_SECONDS` |
-| `config.autonomous.maxToolCalls` | `AUTONOMOUS_MAX_TOOL_CALLS` |
 | `config.autonomous.intervalSeconds` | `AUTONOMOUS_INTERVAL_SECONDS` |
+| `config.autonomous.maxIterRuntimeSeconds` | `AUTONOMOUS_MAX_ITER_RUNTIME_SECONDS` |
+| `config.taskMaxIterations` | `TASK_MAX_ITERATIONS` |
+| `config.taskMaxRuntimeSeconds` | `TASK_MAX_RUNTIME_SECONDS` |
+| `config.taskMaxToolCalls` | `TASK_MAX_TOOL_CALLS` |
 | `agentNetwork.access` | `AGENT_SUB_AGENTS` |
 | Each peer agent | `PEER_AGENT_<NAME>_CARD_URL` |
 

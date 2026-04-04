@@ -51,11 +51,13 @@ make format                     # Auto-format code
 | `OTEL_INSTRUMENTATION_VERSION` | Pydantic AI instrumentation version: 1-4 (default: `4`) |
 | `OTEL_EVENT_MODE` | Pydantic AI event mode: `attributes` (default) or `logs` (forces v1) |
 | `TASK_STORE_TYPE` | TaskManager backend: `local` (default) or `null` (disabled) |
-| `AUTONOMOUS_ENABLED` | Enable startup-activated autonomous mode (default: `false`) |
-| `AUTONOMOUS_GOAL` | Goal for startup-activated autonomous execution |
-| `AUTONOMOUS_MAX_ITERATIONS` | Max autonomous loop iterations (default: `10`) |
-| `AUTONOMOUS_MAX_RUNTIME_SECONDS` | Max wall-clock time for autonomous run (default: `300`) |
-| `AUTONOMOUS_MAX_TOOL_CALLS` | Max cumulative tool calls across autonomous iterations (default: `50`) |
+| `AUTONOMOUS_ENABLED` | Enable startup-activated continuous autonomous mode (default: `false`) |
+| `AUTONOMOUS_GOAL` | Goal for continuous autonomous execution |
+| `AUTONOMOUS_MAX_ITER_RUNTIME_SECONDS` | Per-iteration wall-clock limit (default: `60`) |
+| `AUTONOMOUS_INTERVAL_SECONDS` | Pause between autonomous iterations (default: `0`) |
+| `TASK_MAX_ITERATIONS` | Max iterations for A2A async tasks (default: `10`) |
+| `TASK_MAX_RUNTIME_SECONDS` | Max wall-clock time for A2A async tasks (default: `300`) |
+| `TASK_MAX_TOOL_CALLS` | Max cumulative tool calls for A2A async tasks (default: `50`) |
 
 ## Architecture
 
@@ -140,14 +142,17 @@ make format                     # Auto-format code
 - `_running_tasks: Dict[str, asyncio.Task]` tracks running async tasks; `shutdown()` cancels all
 
 ### Autonomous Execution
-- `LocalTaskManager._execute_autonomous(task, budgets)`: Core self-loop engine (owned by TaskManager)
+- `LocalTaskManager._execute_autonomous(task, budgets, continuous, continuous_config)`: Core autonomous loop (owned by TaskManager)
+- Two execution paths:
+  1. **Continuous mode** (CRD): No overall budgets, per-iteration limits only, runs forever
+  2. **Async task mode** (A2A): Overall budgets, "no tool calls = done" completion
 - Iteratively calls `process_fn(message, session_id) → (response_text, tool_call_count)` with budget enforcement
-- Completion detection: if `tool_call_count == 0` in an iteration, agent is done
 - `AgentServer._run_agent(message, session_id) → (str, int)`: Shared helper used as `process_fn` callback
 - Two activation modes:
-  1. **Startup-activated**: `AUTONOMOUS_ENABLED=true` + `AUTONOMOUS_GOAL` → lifespan spawns task
+  1. **Startup-activated**: `AUTONOMOUS_ENABLED=true` + `AUTONOMOUS_GOAL` → lifespan spawns continuous task
   2. **A2A-triggered**: `SendMessage` with `configuration.mode: "autonomous"` + optional `budgets`
-- `AutonomousBudgets` dataclass: `max_iterations` (10), `max_runtime_seconds` (300), `max_tool_calls` (50), `interval_seconds` (0)
+- `ContinuousConfig` dataclass: `goal`, `interval_seconds` (0), `max_iter_runtime_seconds` (60)
+- `TaskBudgets` dataclass: `max_iterations` (10), `max_runtime_seconds` (300), `max_tool_calls` (50), `interval_seconds` (0)
 - `TaskEvent` append-only event log per task: submitted, working, iteration.started/completed, budget.exhausted, completed/failed/canceled
 
 ### A2A JSON-RPC Endpoint (POST /) — a2a.py
