@@ -82,7 +82,7 @@ jobs:
             pytest_filter: "test_multi_agent_telemetry_example"
           - name: examples-code-mode
             files: "e2e/test_examples_e2e.py"
-            pytest_filter: "test_unified_mcp_gateway_example"
+            pytest_filter: "test_fastmcp_codemode_example"
           - name: example-redis-memory
             files: "e2e/test_examples_e2e.py"
             pytest_filter: "test_redis_memory_example"
