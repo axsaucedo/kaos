@@ -51,10 +51,11 @@ def deploy_agent(
     otel_endpoint: str | None,
     env_vars: list[str] | None = None,
     autonomous: str | None = None,
-    auto_max_iterations: int | None = None,
-    auto_max_runtime: int | None = None,
-    auto_max_tool_calls: int | None = None,
+    auto_max_iter_runtime: int | None = None,
     auto_interval: float | None = None,
+    task_max_iterations: int | None = None,
+    task_max_runtime: int | None = None,
+    task_max_tool_calls: int | None = None,
     wait: bool = False,
     wait_timeout: int = DEFAULT_WAIT_TIMEOUT,
     dry_run: bool = False,
@@ -66,8 +67,9 @@ def deploy_agent(
         model=model,
     )
 
-    # Add config section if description, instructions, telemetry, or autonomous provided
-    has_config = description or instructions or otel_endpoint or autonomous
+    # Add config section if description, instructions, telemetry, autonomous, or task budgets provided
+    has_task_budgets = task_max_iterations is not None or task_max_runtime is not None or task_max_tool_calls is not None
+    has_config = description or instructions or otel_endpoint or autonomous or has_task_budgets
     if has_config:
         yaml_content += "  config:\n"
         if description:
@@ -83,14 +85,18 @@ def deploy_agent(
             yaml_content += "    autonomous:\n"
             yaml_content += "      enabled: true\n"
             yaml_content += f'      goal: "{autonomous}"\n'
-            if auto_max_iterations is not None:
-                yaml_content += f"      maxIterations: {auto_max_iterations}\n"
-            if auto_max_runtime is not None:
-                yaml_content += f"      maxRuntimeSeconds: {auto_max_runtime}\n"
-            if auto_max_tool_calls is not None:
-                yaml_content += f"      maxToolCalls: {auto_max_tool_calls}\n"
+            if auto_max_iter_runtime is not None:
+                yaml_content += (
+                    f"      maxIterRuntimeSeconds: {auto_max_iter_runtime}\n"
+                )
             if auto_interval is not None:
                 yaml_content += f"      intervalSeconds: {auto_interval}\n"
+        if task_max_iterations is not None:
+            yaml_content += f"    taskMaxIterations: {task_max_iterations}\n"
+        if task_max_runtime is not None:
+            yaml_content += f"    taskMaxRuntimeSeconds: {task_max_runtime}\n"
+        if task_max_tool_calls is not None:
+            yaml_content += f"    taskMaxToolCalls: {task_max_tool_calls}\n"
 
     # Add MCP servers if provided
     if mcp_servers:

@@ -624,6 +624,11 @@ class LocalTaskManager(TaskManager):
                     # Build iteration message
                     if iteration == 0:
                         message = goal
+                    elif continuous:
+                        message = (
+                            f"Continue working toward the goal. This is iteration {iteration + 1}. "
+                            "Review your progress and decide next steps."
+                        )
                     else:
                         message = (
                             f"Continue working toward the goal. This is iteration {iteration + 1}. "
