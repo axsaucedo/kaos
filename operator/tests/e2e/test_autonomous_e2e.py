@@ -153,7 +153,7 @@ async def test_autonomous_a2a_send_message(
         task = send_data["result"]
         task_id = task["id"]
         assert task_id is not None
-        assert task.get("mode") == "autonomous"
+        assert task.get("autonomous") is True
 
         # Poll GetTask until completed (autonomous runs in background)
         import asyncio
