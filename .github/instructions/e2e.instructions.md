@@ -83,11 +83,13 @@ make e2e-test                     # Run E2E tests
 ### Test Structure
 - `conftest.py`: Fixtures, namespace management, Gateway URL setup
 - `test_a2a_e2e.py`: A2A JSON-RPC endpoint tests (SendMessage, GetTask, CancelTask)
+- `test_autonomous_e2e.py`: Autonomous execution tests (A2A-triggered, budget enforcement, startup-activated)
 - `test_agentic_loop_e2e.py`: Agent with MCP tools tests
 - `test_mcp_tools_e2e.py`: MCPServer runtime tests (python-string)
 - `test_modelapi_e2e.py`: ModelAPI CRD tests
 - `test_multi_agent_e2e.py`: Multi-agent delegation tests
 - `test_base_func_e2e.py`: Basic functionality tests
+- `test_examples_e2e.py`: Example documentation execution tests (jupytext-based)
 
 ### CRD Patterns in Tests
 MCPServer uses runtime-based architecture:
@@ -149,6 +151,27 @@ E2E tests use `DEBUG_MOCK_RESPONSES` env var. The framework uses Pydantic AI wit
 The 2nd entry becomes the output (Pydantic AI stops there), 3rd is ignored.
 
 Note: Absence of `tool_calls` in a response signals loop completion. The old `{"tool": "name", ...}` single-tool format is NOT supported — always use `tool_calls` array.
+
+**Autonomous (multi-iteration):**
+Each autonomous iteration consumes mock responses sequentially. A 2-iteration run with 1 tool call:
+```json
+[
+  "{\"tool_calls\": [{\"id\": \"call_1\", \"name\": \"echo\", \"arguments\": {\"message\": \"iteration 1\"}}]}",
+  "Still working, need more iterations.",
+  "Goal fully achieved. Final report."
+]
+```
+Responses 1-2: iteration 1 (tool call + text with tools → continues). Response 3: iteration 2 (text only, no tools → loop ends).
+
+**Autonomous CRD config:**
+```yaml
+spec:
+  config:
+    autonomous:
+      enabled: true
+      goal: "Check system health"
+      maxIterations: 10
+```
 
 ### Key Patterns
 - Tests create unique namespaces per session

@@ -64,7 +64,7 @@ mcp-servers/               # Standalone MCP server implementations
 kaos-cli/                  # CLI tool
 ├── kaos_cli/system/       # System commands (install, create-rbac)
 ├── kaos_cli/mcp/          # MCP commands (init, build, deploy)
-├── kaos_cli/agent/        # Agent commands
+├── kaos_cli/agent/        # Agent commands (deploy, invoke, a2a, status, memory)
 ├── kaos_cli/modelapi/     # ModelAPI commands
 ├── kaos_cli/samples/      # Samples commands (list, deploy, delete)
 └── tests/                 # CLI integration tests (dry-run YAML validation)
@@ -82,7 +82,7 @@ tmp/                       # Local work files (gitignored)
 ```
 
 ## CRDs Overview
-- **Agent**: AI agent with model API, MCP tools, and sub-agent delegation
+- **Agent**: AI agent with model API, MCP tools, sub-agent delegation, and autonomous (self-looping) execution
 - **MCPServer**: MCP tool server with runtime-based architecture (python-string, fastmcp-codemode, pctx-codemode, kubernetes, slack, custom)
 - **ModelAPI**: LLM proxy (LiteLLM) or hosted (Ollama) mode
 
@@ -90,9 +90,9 @@ tmp/                       # Local work files (gitignored)
 - `operator/api/v1alpha1/*_types.go`: CRD schemas
 - `operator/controllers/*_controller.go`: Reconciliation logic
 - `operator/chart/`: Helm chart (generated from kustomize)
-- `pydantic-ai-server/pais/server.py`: AgentServer, create_agent_server, routes
+- `pydantic-ai-server/pais/server.py`: AgentServer, create_agent_server, routes, _run_agent
 - `pydantic-ai-server/pais/serverutils.py`: AgentDeps, AgentCard (Pydantic BaseModel, A2A-compliant), RemoteAgent (A2A + chat delegation), AgentServerSettings
-- `pydantic-ai-server/pais/a2a.py`: TaskManager ABC, LocalTaskManager, NullTaskManager, Task data model, JSON-RPC, setup_a2a_routes
+- `pydantic-ai-server/pais/a2a.py`: TaskManager ABC, LocalTaskManager, NullTaskManager, Task data model, JSON-RPC, autonomous execution, setup_a2a_routes
 - `pydantic-ai-server/pais/tools.py`: DelegationToolset (AbstractToolset), string-mode handler
 - `pydantic-ai-server/pais/memory.py`: Memory ABC + backends + build_message_history/store_pydantic_message
 

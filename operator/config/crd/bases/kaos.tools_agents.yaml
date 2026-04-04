@@ -73,6 +73,47 @@ spec:
               config:
                 description: Config contains agent-specific configuration
                 properties:
+                  autonomous:
+                    description: Autonomous configures autonomous (self-looping) execution
+                    properties:
+                      enabled:
+                        description: Enabled activates autonomous execution on agent
+                          startup
+                        type: boolean
+                      goal:
+                        description: |-
+                          Goal is the objective the agent works toward autonomously.
+                          Required when enabled is true.
+                        type: string
+                      intervalSeconds:
+                        description: 'IntervalSeconds is the pause between autonomous
+                          loop iterations (default: 0, no pause)'
+                        format: int32
+                        maximum: 3600
+                        minimum: 0
+                        type: integer
+                      maxIterations:
+                        description: 'MaxIterations is the maximum number of autonomous
+                          loop iterations (default: 10, 0 = unlimited)'
+                        format: int32
+                        maximum: 1000
+                        minimum: 0
+                        type: integer
+                      maxRuntimeSeconds:
+                        description: 'MaxRuntimeSeconds is the maximum wall-clock
+                          time for the autonomous run (default: 300, 0 = unlimited)'
+                        format: int32
+                        maximum: 86400
+                        minimum: 0
+                        type: integer
+                      maxToolCalls:
+                        description: 'MaxToolCalls is the maximum cumulative tool
+                          calls across all iterations (default: 50, 0 = unlimited)'
+                        format: int32
+                        maximum: 10000
+                        minimum: 0
+                        type: integer
+                    type: object
                   description:
                     description: Description is a human-readable description of the
                       agent

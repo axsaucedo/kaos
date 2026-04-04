@@ -123,7 +123,8 @@ export default withMermaid(defineConfig({
               { text: 'Agent Server', link: '/python-framework/server' },
               { text: 'Agentic Loop', link: '/python-framework/agentic-loop' },
               { text: 'Memory', link: '/python-framework/memory' },
-              { text: 'A2A Tasks', link: '/python-framework/a2a-tasks' }
+              { text: 'A2A Tasks', link: '/python-framework/a2a-tasks' },
+              { text: 'Autonomous Execution', link: '/python-framework/autonomous' }
             ]
           },
           { text: 'MCP Tools', link: '/python-framework/mcp-tools' }

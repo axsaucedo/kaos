@@ -103,6 +103,20 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		log.Info("WARNING: telemetry.enabled=true but endpoint is empty; telemetry will not function", "agent", agent.Name)
 	}
 
+	// Validate autonomous configuration
+	if agent.Spec.Config != nil && agent.Spec.Config.Autonomous != nil {
+		auto := agent.Spec.Config.Autonomous
+		if auto.Enabled && auto.Goal == "" {
+			agent.Status.Phase = "Failed"
+			agent.Status.Message = "autonomous.enabled=true requires autonomous.goal to be set"
+			agent.Status.Ready = false
+			if err := r.Status().Update(ctx, agent); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{}, nil
+		}
+	}
+
 	// Resolve ModelAPI reference
 	modelapi := &kaosv1alpha1.ModelAPI{}
 	err := r.Get(ctx, types.NamespacedName{Name: agent.Spec.ModelAPI, Namespace: agent.Namespace}, modelapi)
@@ -112,14 +126,18 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			log.Info("ModelAPI not found, waiting", "modelAPI", agent.Spec.ModelAPI)
 			agent.Status.Phase = "Waiting"
 			agent.Status.Message = fmt.Sprintf("ModelAPI %s not found", agent.Spec.ModelAPI)
-			r.Status().Update(ctx, agent)
+			if err := r.Status().Update(ctx, agent); err != nil {
+				log.Error(err, "failed to update status")
+			}
 			return ctrl.Result{RequeueAfter: time.Second * 5}, nil
 		}
 		// Other errors - log and retry
 		log.Error(err, "unable to fetch ModelAPI", "modelAPI", agent.Spec.ModelAPI)
 		agent.Status.Phase = "Failed"
 		agent.Status.Message = fmt.Sprintf("Failed to resolve ModelAPI: %v", err)
-		r.Status().Update(ctx, agent)
+		if err := r.Status().Update(ctx, agent); err != nil {
+			return ctrl.Result{}, err
+		}
 		return ctrl.Result{}, err
 	}
 
@@ -130,7 +148,9 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		log.Info("ModelAPI not ready, waiting", "modelAPI", agent.Spec.ModelAPI)
 		agent.Status.Phase = "Waiting"
 		agent.Status.Message = "ModelAPI is not ready"
-		r.Status().Update(ctx, agent)
+		if err := r.Status().Update(ctx, agent); err != nil {
+			log.Error(err, "failed to update status")
+		}
 		return ctrl.Result{}, nil
 	}
 
@@ -139,7 +159,9 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		log.Error(err, "model validation failed")
 		agent.Status.Phase = "Failed"
 		agent.Status.Message = err.Error()
-		r.Status().Update(ctx, agent)
+		if statusErr := r.Status().Update(ctx, agent); statusErr != nil {
+			log.Error(statusErr, "failed to update status")
+		}
 		return ctrl.Result{}, nil
 	}
 
@@ -154,14 +176,18 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 				log.Info("MCPServer not found, waiting", "mcpserver", mcpName)
 				agent.Status.Phase = "Waiting"
 				agent.Status.Message = fmt.Sprintf("MCPServer %s not found", mcpName)
-				r.Status().Update(ctx, agent)
+				if err := r.Status().Update(ctx, agent); err != nil {
+					log.Error(err, "failed to update status")
+				}
 				return ctrl.Result{RequeueAfter: time.Second * 5}, nil
 			}
 			// Other errors - log and retry
 			log.Error(err, "unable to fetch MCPServer", "mcpserver", mcpName)
 			agent.Status.Phase = "Failed"
 			agent.Status.Message = fmt.Sprintf("Failed to resolve MCPServer %s: %v", mcpName, err)
-			r.Status().Update(ctx, agent)
+			if err := r.Status().Update(ctx, agent); err != nil {
+				return ctrl.Result{}, err
+			}
 			return ctrl.Result{}, err
 		}
 
@@ -169,7 +195,9 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			log.Info("MCPServer not ready, waiting", "mcpserver", mcpName)
 			agent.Status.Phase = "Waiting"
 			agent.Status.Message = fmt.Sprintf("MCPServer %s is not ready", mcpName)
-			r.Status().Update(ctx, agent)
+			if err := r.Status().Update(ctx, agent); err != nil {
+				log.Error(err, "failed to update status")
+			}
 			return ctrl.Result{}, nil
 		}
 
@@ -206,7 +234,9 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			log.Error(err, "failed to construct Deployment")
 			agent.Status.Phase = "Failed"
 			agent.Status.Message = fmt.Sprintf("Failed to construct Deployment: %v", err)
-			r.Status().Update(ctx, agent)
+			if statusErr := r.Status().Update(ctx, agent); statusErr != nil {
+				return ctrl.Result{}, statusErr
+			}
 			return ctrl.Result{}, err
 		}
 		if err := controllerutil.SetControllerReference(agent, deployment, r.Scheme); err != nil {
@@ -219,7 +249,9 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			log.Error(err, "failed to create Deployment")
 			agent.Status.Phase = "Failed"
 			agent.Status.Message = fmt.Sprintf("Failed to create Deployment: %v", err)
-			r.Status().Update(ctx, agent)
+			if statusErr := r.Status().Update(ctx, agent); statusErr != nil {
+				return ctrl.Result{}, statusErr
+			}
 			return ctrl.Result{}, err
 		}
 	} else if err != nil {
@@ -272,7 +304,9 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 				log.Error(err, "failed to create Service")
 				agent.Status.Phase = "Failed"
 				agent.Status.Message = fmt.Sprintf("Failed to create Service: %v", err)
-				r.Status().Update(ctx, agent)
+				if statusErr := r.Status().Update(ctx, agent); statusErr != nil {
+					return ctrl.Result{}, statusErr
+				}
 				return ctrl.Result{}, err
 			}
 		} else if err != nil {
@@ -320,6 +354,10 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	agent.Status.Message = fmt.Sprintf("Deployment ready replicas: %d/%d", deployment.Status.ReadyReplicas, *deployment.Spec.Replicas)
 
 	if err := r.Status().Update(ctx, agent); err != nil {
+		if apierrors.IsConflict(err) {
+			log.Info("conflict updating status, will retry on next reconcile")
+			return ctrl.Result{}, nil
+		}
 		log.Error(err, "failed to update status")
 		return ctrl.Result{}, err
 	}
@@ -540,6 +578,47 @@ func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *
 			env = append(env, corev1.EnvVar{
 				Name:  "MEMORY_MAX_SESSION_EVENTS",
 				Value: fmt.Sprintf("%d", *mem.MaxSessionEvents),
+			})
+		}
+	}
+
+	// Autonomous configuration
+	if agent.Spec.Config != nil && agent.Spec.Config.Autonomous != nil {
+		auto := agent.Spec.Config.Autonomous
+		if auto.Enabled {
+			env = append(env, corev1.EnvVar{
+				Name:  "AUTONOMOUS_ENABLED",
+				Value: "true",
+			})
+		}
+		if auto.Goal != "" {
+			env = append(env, corev1.EnvVar{
+				Name:  "AUTONOMOUS_GOAL",
+				Value: auto.Goal,
+			})
+		}
+		if auto.MaxIterations != nil {
+			env = append(env, corev1.EnvVar{
+				Name:  "AUTONOMOUS_MAX_ITERATIONS",
+				Value: fmt.Sprintf("%d", *auto.MaxIterations),
+			})
+		}
+		if auto.MaxRuntimeSeconds != nil {
+			env = append(env, corev1.EnvVar{
+				Name:  "AUTONOMOUS_MAX_RUNTIME_SECONDS",
+				Value: fmt.Sprintf("%d", *auto.MaxRuntimeSeconds),
+			})
+		}
+		if auto.MaxToolCalls != nil {
+			env = append(env, corev1.EnvVar{
+				Name:  "AUTONOMOUS_MAX_TOOL_CALLS",
+				Value: fmt.Sprintf("%d", *auto.MaxToolCalls),
+			})
+		}
+		if auto.IntervalSeconds != nil {
+			env = append(env, corev1.EnvVar{
+				Name:  "AUTONOMOUS_INTERVAL_SECONDS",
+				Value: fmt.Sprintf("%d", *auto.IntervalSeconds),
 			})
 		}
 	}

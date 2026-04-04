@@ -139,13 +139,30 @@ async def test_a2a_task_lifecycle(test_namespace: str, shared_modelapi: str):
         assert "result" in get_data
         assert get_data["result"]["status"]["state"] == "completed"
 
-        # 3. Verify history has user + agent messages
+        # 3. Verify history has user + agent messages with expected content
         history = get_data["result"]["history"]
         assert len(history) >= 2
         user_msgs = [m for m in history if m["role"] == "user"]
         agent_msgs = [m for m in history if m["role"] == "agent"]
         assert len(user_msgs) >= 1
         assert len(agent_msgs) >= 1
+
+        # Verify user message content
+        user_text = user_msgs[0]["parts"][0]["text"]
+        assert "Process this task" in user_text
+
+        # Verify agent response matches mock
+        agent_text = agent_msgs[-1]["parts"][0]["text"]
+        assert "Task processed successfully" in agent_text
+
+        # 4. Verify memory endpoint shows this session
+        memory_resp = await client.get(
+            f"{agent_url}/memory/events",
+            params={"session_id": session_id},
+        )
+        assert memory_resp.status_code == 200
+        events = memory_resp.json()
+        assert len(events) >= 1, "Expected memory events for the session"
 
 
 @pytest.mark.asyncio
@@ -187,7 +204,22 @@ async def test_a2a_send_message_with_session(test_namespace: str, shared_modelap
         assert "result" in data, f"Expected result, got: {data}"
         assert data["result"]["status"]["state"] == "completed"
         assert data["result"]["sessionId"] == session_id
-        assert len(data["result"].get("history", [])) >= 2
+        history = data["result"].get("history", [])
+        assert len(history) >= 2
+
+        # Verify agent response matches mock
+        agent_msgs = [m for m in history if m["role"] == "agent"]
+        assert len(agent_msgs) >= 1
+        assert "Session response complete" in agent_msgs[-1]["parts"][0]["text"]
+
+        # Verify memory persisted with this specific session
+        memory_resp = await client.get(
+            f"{agent_url}/memory/events",
+            params={"session_id": session_id},
+        )
+        assert memory_resp.status_code == 200
+        events = memory_resp.json()
+        assert len(events) >= 1, "Expected memory events for session"
 
 
 @pytest.mark.asyncio

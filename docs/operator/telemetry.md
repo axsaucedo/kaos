@@ -57,22 +57,20 @@ kind: MCPServer
 metadata:
   name: my-tools
 spec:
-  type: python-runtime
-  config:
-    telemetry:
-      enabled: true
-      endpoint: "http://otel-collector.monitoring.svc.cluster.local:4317"
-    tools:
-      fromString: |
-        def echo(msg: str) -> str:
-            return msg
+  runtime: python-string
+  telemetry:
+    enabled: true
+    endpoint: "http://otel-collector.monitoring.svc.cluster.local:4317"
+  params: |
+    def echo(msg: str) -> str:
+        return msg
 ```
 
 ### Configuration Precedence
 
 Component-level configuration always overrides global defaults:
 
-1. **Component-level telemetry** (highest priority): If `spec.config.telemetry` is set on the Agent or MCPServer, or `spec.telemetry` on ModelAPI, it is used
+1. **Component-level telemetry** (highest priority): If `spec.telemetry` is set on the Agent, MCPServer, or ModelAPI, it is used
 2. **Global Helm values** (default): If component-level telemetry is not set, the global `telemetry.enabled` and `telemetry.endpoint` values are used
 
 ## Configuration Fields

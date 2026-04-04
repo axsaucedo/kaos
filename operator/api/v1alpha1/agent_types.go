@@ -130,6 +130,48 @@ type AgentConfig struct {
 	// Telemetry configures OpenTelemetry instrumentation
 	// +kubebuilder:validation:Optional
 	Telemetry *TelemetryConfig `json:"telemetry,omitempty"`
+
+	// Autonomous configures autonomous (self-looping) execution
+	// +kubebuilder:validation:Optional
+	Autonomous *AutonomousConfig `json:"autonomous,omitempty"`
+}
+
+// +kubebuilder:object:generate=true
+
+// AutonomousConfig configures autonomous (self-looping) agent execution.
+type AutonomousConfig struct {
+	// Enabled activates autonomous execution on agent startup
+	// +optional
+	Enabled bool `json:"enabled,omitempty"`
+
+	// Goal is the objective the agent works toward autonomously.
+	// Required when enabled is true.
+	// +optional
+	Goal string `json:"goal,omitempty"`
+
+	// MaxIterations is the maximum number of autonomous loop iterations (default: 10, 0 = unlimited)
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=1000
+	MaxIterations *int32 `json:"maxIterations,omitempty"`
+
+	// MaxRuntimeSeconds is the maximum wall-clock time for the autonomous run (default: 300, 0 = unlimited)
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=86400
+	MaxRuntimeSeconds *int32 `json:"maxRuntimeSeconds,omitempty"`
+
+	// MaxToolCalls is the maximum cumulative tool calls across all iterations (default: 50, 0 = unlimited)
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=10000
+	MaxToolCalls *int32 `json:"maxToolCalls,omitempty"`
+
+	// IntervalSeconds is the pause between autonomous loop iterations (default: 0, no pause)
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=3600
+	IntervalSeconds *int32 `json:"intervalSeconds,omitempty"`
 }
 
 // +kubebuilder:object:generate=true

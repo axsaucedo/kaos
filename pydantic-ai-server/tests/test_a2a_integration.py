@@ -181,11 +181,11 @@ class TestA2AIntegrationLifecycle:
         assert any("Input query" in str(m) for m in user_msgs)
 
     @pytest.mark.asyncio
-    async def test_task_with_model_error_completes_with_error_output(self):
-        """Test task completes with error message when model raises exception.
+    async def test_task_with_model_error_results_in_failed_task(self):
+        """Test task transitions to failed when model raises exception.
 
-        _process_message catches errors and yields an error string,
-        so the task still transitions to completed (not failed).
+        _run_agent propagates the error to _execute_task, which catches it
+        and transitions the task to FAILED state.
         """
         from pydantic_ai.models.function import FunctionModel
 
@@ -200,10 +200,8 @@ class TestA2AIntegrationLifecycle:
             resp = await client.post("/", json=_send_message("Trigger error"))
             result = _get_result(resp)
 
-        # _process_message catches the error and yields it as text
-        assert result["status"]["state"] == "completed"
-        agent_msgs = [m for m in result["history"] if m["role"] == "agent"]
-        assert any("error" in str(m).lower() for m in agent_msgs)
+        assert result["status"]["state"] == "failed"
+        assert "error" in result["status"]["message"].lower()
 
     @pytest.mark.asyncio
     async def test_jsonrpc_without_task_manager_returns_result(self):
@@ -218,3 +216,159 @@ class TestA2AIntegrationLifecycle:
 
         # NullTaskManager.send_message returns a stub task
         assert "result" in data
+
+
+class TestA2AAutonomousMode:
+    """Tests for autonomous mode via A2A SendMessage."""
+
+    @pytest.mark.asyncio
+    async def test_send_message_autonomous_mode(self):
+        """Send with mode=autonomous: validates task lifecycle, events, and output."""
+        import json
+        import os
+        import asyncio
+
+        os.environ["DEBUG_MOCK_RESPONSES"] = json.dumps(
+            [
+                '{"tool_calls": [{"id": "c1", "name": "echo", "arguments": {"message": "checking"}}]}',
+                "Still working.",
+                "Analysis complete. All systems healthy.",
+            ]
+        )
+        try:
+            server = make_test_server(task_manager_type="local")
+
+            @server._agent.tool_plain
+            def echo(message: str) -> str:
+                """Echo the message back."""
+                return f"Echo: {message}"
+
+            if server._mock_state:
+                server._mock_state.reset()
+                server._mock_state = None
+            transport = ASGITransport(app=server.app)
+
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post(
+                    "/",
+                    json=_jsonrpc(
+                        "SendMessage",
+                        {
+                            "message": {
+                                "role": "user",
+                                "parts": [{"type": "text", "text": "Analyze data"}],
+                            },
+                            "configuration": {"mode": "autonomous"},
+                        },
+                    ),
+                )
+                data = resp.json()
+                assert "result" in data
+                task = data["result"]
+                assert task["mode"] == "autonomous"
+                task_id = task["id"]
+
+                await asyncio.sleep(1.0)
+                resp2 = await client.post("/", json=_jsonrpc("GetTask", {"id": task_id}))
+                task2 = resp2.json()["result"]
+                assert task2["status"]["state"] == "completed"
+
+                # Validate events show iteration lifecycle
+                event_types = [e["type"] for e in task2.get("events", [])]
+                assert "task.submitted" in event_types
+                assert "autonomous.iteration.started" in event_types
+                assert "autonomous.iteration.completed" in event_types
+                assert "task.completed" in event_types
+
+                # Validate output content
+                assert task2.get("output") is not None
+                assert "analysis complete" in task2["output"].lower() or len(task2["output"]) > 0
+
+                # Validate history has agent response
+                agent_msgs = [m for m in task2["history"] if m["role"] == "agent"]
+                assert len(agent_msgs) > 0
+        finally:
+            os.environ.pop("DEBUG_MOCK_RESPONSES", None)
+
+    @pytest.mark.asyncio
+    async def test_send_message_autonomous_with_budgets(self):
+        """Custom budgets enforce limits and produce budget exhaustion events."""
+        import json
+        import os
+        import asyncio
+
+        os.environ["DEBUG_MOCK_RESPONSES"] = json.dumps(
+            [
+                '{"tool_calls": [{"id": "c1", "name": "echo", "arguments": {"message": "iter1"}}]}',
+                "Still going.",
+                '{"tool_calls": [{"id": "c2", "name": "echo", "arguments": {"message": "iter2"}}]}',
+                "More work.",
+            ]
+        )
+        try:
+            server = make_test_server(task_manager_type="local")
+
+            @server._agent.tool_plain
+            def echo(message: str) -> str:
+                """Echo the message back."""
+                return f"Echo: {message}"
+
+            if server._mock_state:
+                server._mock_state.reset()
+                server._mock_state = None
+            transport = ASGITransport(app=server.app)
+
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                resp = await client.post(
+                    "/",
+                    json=_jsonrpc(
+                        "SendMessage",
+                        {
+                            "message": {
+                                "role": "user",
+                                "parts": [{"type": "text", "text": "Keep working"}],
+                            },
+                            "configuration": {
+                                "mode": "autonomous",
+                                "budgets": {
+                                    "maxIterations": 1,
+                                    "maxRuntimeSeconds": 60,
+                                    "maxToolCalls": 100,
+                                },
+                            },
+                        },
+                    ),
+                )
+                data = resp.json()
+                assert "result" in data
+                task_id = data["result"]["id"]
+
+                await asyncio.sleep(1.0)
+                resp2 = await client.post("/", json=_jsonrpc("GetTask", {"id": task_id}))
+                task2 = resp2.json()["result"]
+                assert task2["status"]["state"] == "completed"
+
+                event_types = [e["type"] for e in task2.get("events", [])]
+                assert "autonomous.budget.exhausted" in event_types
+                budget_events = [
+                    e for e in task2["events"] if e["type"] == "autonomous.budget.exhausted"
+                ]
+                assert budget_events[0]["data"]["reason"] == "max_iterations"
+        finally:
+            os.environ.pop("DEBUG_MOCK_RESPONSES", None)
+
+    @pytest.mark.asyncio
+    async def test_send_message_default_mode_interactive(self):
+        """Verify existing behavior unchanged (synchronous completion)."""
+        from pydantic_ai.models.test import TestModel
+
+        model = TestModel(custom_output_text="Sync result")
+        server = make_test_server(model=model, task_manager_type="local")
+        transport = ASGITransport(app=server.app)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post("/", json=_send_message("Hello"))
+            data = resp.json()
+            task = data["result"]
+            assert task["mode"] == "interactive"
+            assert task["status"]["state"] == "completed"

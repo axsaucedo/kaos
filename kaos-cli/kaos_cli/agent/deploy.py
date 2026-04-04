@@ -50,6 +50,11 @@ def deploy_agent(
     expose: bool,
     otel_endpoint: str | None,
     env_vars: list[str] | None = None,
+    autonomous: str | None = None,
+    auto_max_iterations: int | None = None,
+    auto_max_runtime: int | None = None,
+    auto_max_tool_calls: int | None = None,
+    auto_interval: float | None = None,
     wait: bool = False,
     wait_timeout: int = DEFAULT_WAIT_TIMEOUT,
     dry_run: bool = False,
@@ -61,8 +66,9 @@ def deploy_agent(
         model=model,
     )
 
-    # Add config section if description, instructions or telemetry provided
-    if description or instructions or otel_endpoint:
+    # Add config section if description, instructions, telemetry, or autonomous provided
+    has_config = description or instructions or otel_endpoint or autonomous
+    if has_config:
         yaml_content += "  config:\n"
         if description:
             yaml_content += f'    description: "{description}"\n'
@@ -73,6 +79,18 @@ def deploy_agent(
       enabled: true
       endpoint: "{otel_endpoint}"
 """
+        if autonomous:
+            yaml_content += "    autonomous:\n"
+            yaml_content += "      enabled: true\n"
+            yaml_content += f'      goal: "{autonomous}"\n'
+            if auto_max_iterations is not None:
+                yaml_content += f"      maxIterations: {auto_max_iterations}\n"
+            if auto_max_runtime is not None:
+                yaml_content += f"      maxRuntimeSeconds: {auto_max_runtime}\n"
+            if auto_max_tool_calls is not None:
+                yaml_content += f"      maxToolCalls: {auto_max_tool_calls}\n"
+            if auto_interval is not None:
+                yaml_content += f"      intervalSeconds: {auto_interval}\n"
 
     # Add MCP servers if provided
     if mcp_servers:

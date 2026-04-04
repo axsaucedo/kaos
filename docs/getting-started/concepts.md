@@ -81,13 +81,11 @@ The MCPServer CRD deploys tool servers using the Model Context Protocol:
 
 ```yaml
 spec:
-  type: python-runtime
-  config:
-    mcp: "package-name"    # PyPI package
-    # OR
-    toolsString: |         # Dynamic Python tools
-      def my_tool(x: str) -> str:
-          return x.upper()
+  runtime: python-string
+  params: |
+    def my_tool(x: str) -> str:
+        """My custom tool."""
+        return x.upper()
 ```
 
 ## Agentic Loop
@@ -105,26 +103,24 @@ The agent implements a reasoning loop that enables tool use and delegation:
 5. Store events in memory
 ```
 
-Maximum iterations are controlled by `agenticLoop.maxSteps` (default: 5).
+Maximum iterations are controlled by `config.reasoningLoopMaxSteps` (default: 5).
 
 ## Agent-to-Agent (A2A) Protocol
 
 Agents can discover and invoke each other using the A2A protocol:
 
 1. **Discovery**: Agents expose `/.well-known/agent.json` endpoint with capabilities
-2. **Invocation**: Agents call `/v1/chat/completions` on peer agents
-3. **Delegation**: Via agentic loop when model response contains a `delegate` block
+2. **Invocation**: Agents use A2A JSON-RPC `SendMessage` on peer agents, falling back to `/v1/chat/completions`
+3. **Delegation**: Via `DelegationToolset` — sub-agents exposed as `delegate_to_{name}` tools
 
 The operator automatically configures peer agent URLs based on `agentNetwork.access`.
 
 ## Memory and Sessions
 
-Each agent maintains in-memory session storage:
+Each agent maintains session storage (local in-memory or Redis):
 - Sessions track conversation context
 - Events logged: user_message, agent_response, tool_call, delegation
 - Debug endpoints available for testing: `/memory/events`, `/memory/sessions`
-
-Memory is per-pod and not persisted across restarts.
 
 ## Environment Variable Configuration
 
@@ -134,7 +130,7 @@ The operator configures agent pods via environment variables:
 |----------|--------|
 | `AGENT_NAME` | Agent metadata.name |
 | `MODEL_API_URL` | ModelAPI status.endpoint |
-| `PEER_AGENTS` | agentNetwork.access list |
-| `AGENTIC_LOOP_MAX_STEPS` | config.agenticLoop.maxSteps |
+| `AGENT_SUB_AGENTS` | agentNetwork.access list |
+| `REASONING_LOOP_MAX_STEPS` | config.reasoningLoopMaxSteps |
 
 See [Environment Variables](../reference/environment-variables.md) for complete list.

@@ -155,3 +155,20 @@ class TestExamplesViaJupytext:
             print(f"STDERR:\n{result.stderr}")
         
         assert result.returncode == 0, f"Example execution failed: {result.stderr}"
+
+    def test_autonomous_agent_example(self):
+        """Execute the autonomous agent example.
+        
+        Tests: Startup-activated autonomous execution, A2A sync/autonomous modes,
+        kaos agent memory, kaos agent status, kaos agent a2a send/get
+        """
+        example_file = DOCS_EXAMPLES_PATH / "autonomous-agent.md"
+        assert example_file.exists(), f"Example file not found: {example_file}"
+        
+        result = run_jupytext(example_file, timeout=300)
+        
+        if result.returncode != 0:
+            print(f"STDOUT:\n{result.stdout}")
+            print(f"STDERR:\n{result.stderr}")
+        
+        assert result.returncode == 0, f"Example execution failed: {result.stderr}"

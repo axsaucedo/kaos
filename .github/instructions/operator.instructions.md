@@ -63,3 +63,4 @@ RBAC is auto-generated from `// +kubebuilder:rbac:` annotations.
 - Use `+optional` for optional fields
 - Status should include `Conditions` for Ready/Failed states
 - Use `ObservedGeneration` to track spec changes
+- Agent CRD includes `AutonomousConfig` for self-looping execution (maps to `AUTONOMOUS_*` env vars)

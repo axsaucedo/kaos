@@ -45,6 +45,7 @@ from pais.a2a import (
     TaskManager,
     LocalTaskManager,
     NullTaskManager,
+    AutonomousBudgets,
     setup_a2a_routes,
 )
 
@@ -120,9 +121,9 @@ class AgentServer:
         self._mcp_servers = mcp_servers or []
         self._model = model
         self._custom_tools = custom_tools or []
-
         if task_manager_type == "local":
-            self.task_manager: TaskManager = LocalTaskManager(self._process_message)
+            setup_fn = self._mock_state.reset if self._mock_state else None
+            self.task_manager: TaskManager = LocalTaskManager(self._run_agent, setup_fn=setup_fn)
         else:
             self.task_manager = NullTaskManager()
 
@@ -162,6 +163,28 @@ class AgentServer:
     @asynccontextmanager
     async def _lifespan(self, app: FastAPI):
         self._log_startup_config()
+
+        # Start autonomous execution if configured
+        if self.settings.autonomous_enabled and self.settings.autonomous_goal:
+            logger.info(
+                f"Starting autonomous execution: "
+                f"goal_preview={self.settings.autonomous_goal[:100]} "
+                f"max_iterations={self.settings.autonomous_max_iterations}"
+            )
+            budgets = AutonomousBudgets(
+                max_iterations=self.settings.autonomous_max_iterations,
+                max_runtime_seconds=self.settings.autonomous_max_runtime_seconds,
+                max_tool_calls=self.settings.autonomous_max_tool_calls,
+                interval_seconds=self.settings.autonomous_interval_seconds,
+            )
+            await self.task_manager.submit_autonomous(
+                goal=self.settings.autonomous_goal,
+                budgets=budgets,
+                metadata={"trigger": "startup"},
+            )
+        elif self.settings.autonomous_enabled and not self.settings.autonomous_goal:
+            raise ValueError("autonomous_enabled=True requires autonomous_goal to be set")
+
         yield
         logger.info("AgentServer shutdown")
         await self.task_manager.shutdown()
@@ -180,7 +203,8 @@ class AgentServer:
             f"model={self._model} memory={type(self.memory).__name__} "
             f"max_steps={self.settings.agentic_loop_max_steps} mcp_servers={mcp_count} "
             f"sub_agents={sub_agents} otel={otel} "
-            f"custom_tools={len(self._custom_tools)}"
+            f"custom_tools={len(self._custom_tools)} "
+            f"autonomous={'enabled' if self.settings.autonomous_enabled else 'disabled'}"
         )
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(f"AgentServerSettings: {self.settings.model_dump()}")
@@ -349,8 +373,6 @@ class AgentServer:
         session_id: str,
     ) -> tuple:
         """Setup for agent run: memory event, history, deps. Returns (user_prompt, message_history, deps, usage_limits)."""
-        if self._mock_state:
-            self._mock_state.reset()
 
         # Ensure session exists in memory (idempotent)
         session_id = await self.memory.get_or_create_session(session_id, "agent", "user")
@@ -365,6 +387,33 @@ class AgentServer:
         usage_limits = UsageLimits(request_limit=self.settings.agentic_loop_max_steps)
         return user_prompt, message_history, deps, usage_limits
 
+    async def _run_agent(
+        self,
+        message: Union[str, List[Dict[str, str]]],
+        session_id: str,
+    ) -> tuple[str, int]:
+        """Core non-streaming agent execution. Returns (response_text, tool_call_count)."""
+        user_prompt, message_history, deps, usage_limits = await self._prepare_run(
+            message, session_id
+        )
+        result = await self._agent.run(
+            user_prompt,
+            message_history=message_history,
+            usage_limits=usage_limits,
+            deps=deps,
+        )
+        content = str(result.output) if result.output else ""
+        tool_call_count = sum(
+            1
+            for msg in result.new_messages()
+            for p in getattr(msg, "parts", [])
+            if isinstance(p, ToolCallPart)
+        )
+        await self.memory.add_event(session_id, "agent_response", content)
+        for msg in result.new_messages():
+            await self.memory.store_pydantic_message(session_id, msg)
+        return content, tool_call_count
+
     async def _process_message(
         self,
         message: Union[str, List[Dict[str, str]]],
@@ -372,13 +421,17 @@ class AgentServer:
         stream: bool = False,
     ) -> AsyncIterator[str]:
         """Yields content chunks (streaming) or single complete response."""
-        user_prompt, message_history, deps, usage_limits = await self._prepare_run(
-            message, session_id
-        )
         logger.debug(f"Processing message for session {session_id}, streaming={stream}")
+
+        # Reset mock state for each external request (not autonomous iterations)
+        if self._mock_state:
+            self._mock_state.reset()
 
         try:
             if stream:
+                user_prompt, message_history, deps, usage_limits = await self._prepare_run(
+                    message, session_id
+                )
                 full_response = ""
                 step = 0
                 async with self._agent.iter(
@@ -398,7 +451,9 @@ class AgentServer:
                             for part in node.model_response.parts:
                                 if isinstance(part, ToolCallPart):
                                     yield format_progress_event(
-                                        part, step, self.settings.agentic_loop_max_steps
+                                        part,
+                                        step,
+                                        self.settings.agentic_loop_max_steps,
                                     )
                         node = await run.next(node)
 
@@ -411,16 +466,7 @@ class AgentServer:
                 for msg in new_msgs:
                     await self.memory.store_pydantic_message(session_id, msg)
             else:
-                result = await self._agent.run(
-                    user_prompt,
-                    message_history=message_history,
-                    usage_limits=usage_limits,
-                    deps=deps,
-                )
-                content = str(result.output) if result.output else ""
-                await self.memory.add_event(session_id, "agent_response", content)
-                for msg in result.new_messages():
-                    await self.memory.store_pydantic_message(session_id, msg)
+                content, _ = await self._run_agent(message, session_id)
                 yield content
 
         except Exception as e:
@@ -611,7 +657,7 @@ def _setup_otel_instrumentation(settings: AgentServerSettings) -> None:
             tracer_provider=get_tracer_provider(),
             meter_provider=get_meter_provider(),
             logger_provider=get_logger_provider(),
-            version=settings.otel_instrumentation_version,  # type: ignore[arg-type]
+            version=settings.otel_instrumentation_version,  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
             event_mode=settings.otel_event_mode,
         )
         PydanticAgent.instrument_all(instrumentation)
@@ -624,7 +670,7 @@ def create_agent_server(
 ) -> AgentServer:
     """Create an AgentServer with optional sub-agents and MCP clients."""
     if not settings:
-        settings = AgentServerSettings()  # type: ignore[call-arg]
+        settings = AgentServerSettings()  # type: ignore[call-arg]  # ty: ignore[missing-argument]
 
     # Logging + OTel
     configure_logging(get_log_level(), otel_correlation=should_enable_otel())

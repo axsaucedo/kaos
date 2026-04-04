@@ -6,11 +6,17 @@ from pais.a2a import (
     TaskState,
     TaskStatus,
     TaskMessage,
+    TaskEvent,
     Task,
+    AutonomousBudgets,
     LocalTaskManager,
     NullTaskManager,
     VALID_TRANSITIONS,
     TERMINAL_STATES,
+    EVENT_TASK_SUBMITTED,
+    EVENT_TASK_COMPLETED,
+    EVENT_AUTONOMOUS_ITERATION_STARTED,
+    EVENT_AUTONOMOUS_BUDGET_EXHAUSTED,
 )
 
 
@@ -77,9 +83,152 @@ class TestTaskModel:
         assert len(VALID_TRANSITIONS[TaskState.CANCELED]) == 0
 
 
-async def _mock_process(msg, session_id="", stream=False):
-    """Simple mock process function that yields a result."""
-    yield "Task result"
+class TestTaskEvent:
+    """Tests for TaskEvent dataclass and Task.add_event()."""
+
+    def test_task_event_creation(self):
+        event = TaskEvent(
+            id="evt_001", type="task.submitted", timestamp="2024-01-01T00:00:00+00:00"
+        )
+        assert event.id == "evt_001"
+        assert event.type == "task.submitted"
+        assert event.data == {}
+
+    def test_task_event_with_data(self):
+        event = TaskEvent(
+            id="evt_002",
+            type="autonomous.iteration.started",
+            timestamp="2024-01-01T00:00:00+00:00",
+            data={"iteration": 1},
+        )
+        assert event.data == {"iteration": 1}
+
+    def test_task_event_to_dict(self):
+        event = TaskEvent(
+            id="evt_003",
+            type="task.completed",
+            timestamp="2024-01-01T00:00:00+00:00",
+            data={"output_preview": "Done"},
+        )
+        d = event.to_dict()
+        assert d["id"] == "evt_003"
+        assert d["type"] == "task.completed"
+        assert d["timestamp"] == "2024-01-01T00:00:00+00:00"
+        assert d["data"] == {"output_preview": "Done"}
+
+    def test_task_add_event(self):
+        task = Task(
+            id="task_123",
+            session_id="s1",
+            status=TaskStatus(state=TaskState.SUBMITTED),
+        )
+        event = task.add_event(EVENT_TASK_SUBMITTED, {"trigger": "api"})
+        assert len(task.events) == 1
+        assert event.type == EVENT_TASK_SUBMITTED
+        assert event.data == {"trigger": "api"}
+        assert len(event.id) == 12  # uuid hex[:12]
+        assert "T" in event.timestamp  # ISO format
+
+    def test_task_add_event_ordering(self):
+        task = Task(
+            id="task_123",
+            session_id="s1",
+            status=TaskStatus(state=TaskState.SUBMITTED),
+        )
+        task.add_event(EVENT_TASK_SUBMITTED)
+        task.add_event(EVENT_AUTONOMOUS_ITERATION_STARTED, {"iteration": 0})
+        task.add_event(EVENT_TASK_COMPLETED)
+        assert len(task.events) == 3
+        assert task.events[0].type == EVENT_TASK_SUBMITTED
+        assert task.events[1].type == EVENT_AUTONOMOUS_ITERATION_STARTED
+        assert task.events[2].type == EVENT_TASK_COMPLETED
+
+    def test_task_add_event_no_data(self):
+        task = Task(
+            id="task_123",
+            session_id="s1",
+            status=TaskStatus(state=TaskState.SUBMITTED),
+        )
+        event = task.add_event(EVENT_TASK_SUBMITTED)
+        assert event.data == {}
+
+
+class TestAutonomousBudgets:
+    """Tests for AutonomousBudgets dataclass."""
+
+    def test_defaults(self):
+        budgets = AutonomousBudgets()
+        assert budgets.max_iterations == 10
+        assert budgets.max_runtime_seconds == 300
+        assert budgets.max_tool_calls == 50
+        assert budgets.interval_seconds == 0
+
+    def test_custom_values(self):
+        budgets = AutonomousBudgets(
+            max_iterations=5, max_runtime_seconds=60, max_tool_calls=20, interval_seconds=10
+        )
+        assert budgets.max_iterations == 5
+        assert budgets.max_runtime_seconds == 60
+        assert budgets.max_tool_calls == 20
+        assert budgets.interval_seconds == 10
+
+
+class TestTaskExtendedFields:
+    """Tests for Task mode, output, and events fields."""
+
+    def test_task_default_mode(self):
+        task = Task(
+            id="t1",
+            session_id="s1",
+            status=TaskStatus(state=TaskState.SUBMITTED),
+        )
+        assert task.mode == "interactive"
+        assert task.output == ""
+        assert task.events == []
+
+    def test_task_autonomous_mode(self):
+        task = Task(
+            id="t1",
+            session_id="s1",
+            status=TaskStatus(state=TaskState.SUBMITTED),
+            mode="autonomous",
+        )
+        assert task.mode == "autonomous"
+
+    def test_task_to_dict_includes_new_fields(self):
+        task = Task(
+            id="t1",
+            session_id="s1",
+            status=TaskStatus(state=TaskState.COMPLETED),
+            mode="autonomous",
+            output="Final report",
+        )
+        task.add_event(EVENT_TASK_SUBMITTED)
+        task.add_event(EVENT_TASK_COMPLETED, {"output_preview": "Final"})
+
+        d = task.to_dict()
+        assert d["mode"] == "autonomous"
+        assert d["output"] == "Final report"
+        assert len(d["events"]) == 2
+        assert d["events"][0]["type"] == EVENT_TASK_SUBMITTED
+        assert d["events"][1]["type"] == EVENT_TASK_COMPLETED
+        assert d["events"][1]["data"]["output_preview"] == "Final"
+
+    def test_task_to_dict_empty_events(self):
+        task = Task(
+            id="t1",
+            session_id="s1",
+            status=TaskStatus(state=TaskState.SUBMITTED),
+        )
+        d = task.to_dict()
+        assert d["events"] == []
+        assert d["mode"] == "interactive"
+        assert d["output"] == ""
+
+
+async def _mock_process(msg, session_id=""):
+    """Simple mock process function that returns (response, tool_call_count)."""
+    return ("Task result", 0)
 
 
 class TestLocalTaskManager:
@@ -165,13 +314,11 @@ class TestLocalTaskManager:
 
     @pytest.mark.asyncio
     async def test_failed_task_lifecycle(self):
-        async def failing_process(msg, session_id="", stream=False):
+        async def failing_process(msg, session_id=""):
             raise RuntimeError("Error occurred")
-            yield
 
         manager = LocalTaskManager(failing_process)
         task = await manager.send_message("Fail me")
-        # Synchronous execution: task is failed immediately
         assert task.status.state == TaskState.FAILED
         assert task.status.message == "Error occurred"
 
@@ -202,6 +349,84 @@ class TestLocalTaskManager:
             assert task.status.state == TaskState.COMPLETED
 
 
+class TestLocalTaskManagerAutonomous:
+    """Tests for LocalTaskManager.submit_autonomous with integrated loop."""
+
+    @pytest.mark.asyncio
+    async def test_submit_autonomous_creates_task(self):
+        manager = LocalTaskManager(_mock_process)
+        task = await manager.submit_autonomous("Analyze data")
+        assert task.mode == "autonomous"
+        assert task.status.state in {TaskState.WORKING, TaskState.COMPLETED}
+
+    @pytest.mark.asyncio
+    async def test_submit_autonomous_executes_to_completion(self):
+        manager = LocalTaskManager(_mock_process)
+        task = await manager.submit_autonomous("Run analysis")
+        completed = await manager.wait_for_completion(task.id, timeout=5.0)
+        assert completed is not None
+        assert completed.status.state == TaskState.COMPLETED
+        assert completed.output is not None
+        assert "Task result" in completed.output
+
+    @pytest.mark.asyncio
+    async def test_submit_autonomous_failure_handling(self):
+        async def failing_process(msg, session_id):
+            raise RuntimeError("Analysis failed")
+
+        manager = LocalTaskManager(failing_process)
+        task = await manager.submit_autonomous("Fail task")
+        completed = await manager.wait_for_completion(task.id, timeout=5.0)
+        assert completed is not None
+        assert completed.status.state == TaskState.FAILED
+        assert completed.status.message is not None
+        assert "Analysis failed" in completed.status.message
+
+    @pytest.mark.asyncio
+    async def test_submit_autonomous_events(self):
+        manager = LocalTaskManager(_mock_process)
+        task = await manager.submit_autonomous("Test events")
+        completed = await manager.wait_for_completion(task.id, timeout=5.0)
+        assert completed is not None
+        event_types = [e.type for e in completed.events]
+        assert EVENT_TASK_SUBMITTED in event_types
+        assert EVENT_AUTONOMOUS_ITERATION_STARTED in event_types
+        assert EVENT_TASK_COMPLETED in event_types
+
+    @pytest.mark.asyncio
+    async def test_submit_autonomous_budget_exhaustion(self):
+        call_count = 0
+
+        async def tool_calling_process(msg, session_id):
+            nonlocal call_count
+            call_count += 1
+            return (f"Iteration {call_count}", 1)
+
+        manager = LocalTaskManager(tool_calling_process)
+        task = await manager.submit_autonomous(
+            "Keep going", budgets=AutonomousBudgets(max_iterations=2)
+        )
+        completed = await manager.wait_for_completion(task.id, timeout=5.0)
+        assert completed is not None
+        assert completed.status.state == TaskState.COMPLETED
+        event_types = [e.type for e in completed.events]
+        assert EVENT_AUTONOMOUS_BUDGET_EXHAUSTED in event_types
+
+    @pytest.mark.asyncio
+    async def test_shutdown_cancels_running_autonomous(self):
+        import asyncio
+
+        async def slow_process(msg, session_id):
+            await asyncio.sleep(10)
+            return ("Should not reach", 0)
+
+        manager = LocalTaskManager(slow_process)
+        task = await manager.submit_autonomous("Long task")
+        assert task.id in manager._running_tasks
+        await manager.shutdown()
+        assert len(manager._running_tasks) == 0
+
+
 class TestNullTaskManager:
     """Tests for NullTaskManager no-op implementation."""
 
@@ -211,6 +436,14 @@ class TestNullTaskManager:
         task = await manager.send_message("Hello")
         assert task.id.startswith("null_task_")
         assert task.status.state == TaskState.COMPLETED
+
+    @pytest.mark.asyncio
+    async def test_submit_autonomous(self):
+        manager = NullTaskManager()
+        task = await manager.submit_autonomous("Do something")
+        assert task.id.startswith("null_task_")
+        assert task.status.state == TaskState.COMPLETED
+        assert task.mode == "autonomous"
 
     @pytest.mark.asyncio
     async def test_get_task_returns_none(self):

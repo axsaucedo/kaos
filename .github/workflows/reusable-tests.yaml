@@ -69,7 +69,7 @@ jobs:
       matrix:
         shard:
           - name: core
-            files: "e2e/test_base_func_e2e.py e2e/test_modelapi_e2e.py e2e/test_a2a_e2e.py"
+            files: "e2e/test_base_func_e2e.py e2e/test_modelapi_e2e.py e2e/test_a2a_e2e.py e2e/test_autonomous_e2e.py"
           - name: mcp
             files: "e2e/test_mcp_tools_e2e.py"
           - name: multi-agent
@@ -82,13 +82,16 @@ jobs:
             pytest_filter: "test_multi_agent_telemetry_example"
           - name: examples-code-mode
             files: "e2e/test_examples_e2e.py"
-            pytest_filter: "test_unified_mcp_gateway_example"
+            pytest_filter: "test_fastmcp_codemode_example"
           - name: example-redis-memory
             files: "e2e/test_examples_e2e.py"
             pytest_filter: "test_redis_memory_example"
           - name: example-custom-agent
             files: "e2e/test_examples_e2e.py"
             pytest_filter: "test_custom_agent_example"
+          - name: example-autonomous
+            files: "e2e/test_examples_e2e.py"
+            pytest_filter: "test_autonomous_agent_example"
     name: E2E (${{ matrix.shard.name }})
     steps:
       - name: Checkout
