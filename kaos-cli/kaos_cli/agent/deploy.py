@@ -83,7 +83,6 @@ def deploy_agent(
 """
         if autonomous:
             yaml_content += "    autonomous:\n"
-            yaml_content += "      enabled: true\n"
             yaml_content += f'      goal: "{autonomous}"\n'
             if auto_max_iter_runtime is not None:
                 yaml_content += (
@@ -91,12 +90,14 @@ def deploy_agent(
                 )
             if auto_interval is not None:
                 yaml_content += f"      intervalSeconds: {auto_interval}\n"
-        if task_max_iterations is not None:
-            yaml_content += f"    taskMaxIterations: {task_max_iterations}\n"
-        if task_max_runtime is not None:
-            yaml_content += f"    taskMaxRuntimeSeconds: {task_max_runtime}\n"
-        if task_max_tool_calls is not None:
-            yaml_content += f"    taskMaxToolCalls: {task_max_tool_calls}\n"
+        if has_task_budgets:
+            yaml_content += "    taskConfig:\n"
+            if task_max_iterations is not None:
+                yaml_content += f"      maxIterations: {task_max_iterations}\n"
+            if task_max_runtime is not None:
+                yaml_content += f"      maxRuntimeSeconds: {task_max_runtime}\n"
+            if task_max_tool_calls is not None:
+                yaml_content += f"      maxToolCalls: {task_max_tool_calls}\n"
 
     # Add MCP servers if provided
     if mcp_servers:
