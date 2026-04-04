@@ -64,7 +64,7 @@ mcp-servers/               # Standalone MCP server implementations
 kaos-cli/                  # CLI tool
 ├── kaos_cli/system/       # System commands (install, create-rbac)
 ├── kaos_cli/mcp/          # MCP commands (init, build, deploy)
-├── kaos_cli/agent/        # Agent commands
+├── kaos_cli/agent/        # Agent commands (deploy, invoke, a2a, status, memory)
 ├── kaos_cli/modelapi/     # ModelAPI commands
 ├── kaos_cli/samples/      # Samples commands (list, deploy, delete)
 └── tests/                 # CLI integration tests (dry-run YAML validation)

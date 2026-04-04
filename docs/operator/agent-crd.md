@@ -75,7 +75,6 @@ status:
   phase: Ready             # Pending, Ready, Failed, Waiting
   ready: true
   endpoint: "http://agent-my-agent.my-namespace.svc.cluster.local:8000"
-  model: "openai/gpt-4o"   # Model being used
   linkedResources:
     modelAPI: my-modelapi
   message: "Deployment ready replicas: 1/1"
@@ -242,6 +241,34 @@ config:
 - Resource-constrained environments
 - High-throughput agents where memory overhead matters
 
+#### config.autonomous (optional)
+
+Autonomous (self-looping) agent execution configuration:
+
+```yaml
+config:
+  autonomous:
+    enabled: true
+    goal: "Monitor system health and report issues"
+    maxIterations: 10       # Max iterations (default: 10, 0 = unlimited)
+    maxRuntimeSeconds: 300  # Max wall-clock time (default: 300, 0 = unlimited)
+    maxToolCalls: 50        # Max cumulative tool calls (default: 50, 0 = unlimited)
+    intervalSeconds: 0      # Pause between iterations (default: 0)
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | bool | `false` | Activate autonomous execution on agent startup |
+| `goal` | string | | Objective the agent works toward (required when enabled) |
+| `maxIterations` | int32 | `10` | Max loop iterations (0 = unlimited, max: 1000) |
+| `maxRuntimeSeconds` | int32 | `300` | Max wall-clock seconds (0 = unlimited, max: 86400) |
+| `maxToolCalls` | int32 | `50` | Max cumulative tool calls (0 = unlimited, max: 10000) |
+| `intervalSeconds` | int32 | `0` | Seconds to pause between iterations (max: 3600) |
+
+**Validation:** `enabled: true` requires `goal` to be set — the operator will set the Agent status to Failed otherwise.
+
+**Completion detection:** The agent stops when it produces a response with no tool calls, indicating the goal is achieved or no further actions are needed.
+
 ### container (optional)
 
 Container overrides for the agent pod.
@@ -361,7 +388,6 @@ spec:
 | `phase` | string | Current phase: Pending, Ready, Failed, Waiting |
 | `ready` | bool | Whether agent is ready to serve |
 | `endpoint` | string | Service URL for A2A communication |
-| `model` | string | Model being used by this agent |
 | `linkedResources` | map | References to dependencies |
 | `message` | string | Additional status information |
 | `deployment` | object | Deployment status for rolling update visibility |

@@ -89,6 +89,7 @@ make e2e-test                     # Run E2E tests
 - `test_modelapi_e2e.py`: ModelAPI CRD tests
 - `test_multi_agent_e2e.py`: Multi-agent delegation tests
 - `test_base_func_e2e.py`: Basic functionality tests
+- `test_examples_e2e.py`: Example documentation execution tests (jupytext-based)
 
 ### CRD Patterns in Tests
 MCPServer uses runtime-based architecture:

@@ -131,17 +131,24 @@ The operator translates CRD fields to container environment variables:
 | CRD Field | Environment Variable |
 |-----------|---------------------|
 | `metadata.name` | `AGENT_NAME` |
+| `spec.model` | `MODEL_NAME` |
 | `config.description` | `AGENT_DESCRIPTION` |
 | `config.instructions` | `AGENT_INSTRUCTIONS` |
 | ModelAPI.status.endpoint | `MODEL_API_URL` |
-| `config.env[MODEL_NAME]` | `MODEL_NAME` |
 | `config.reasoningLoopMaxSteps` | `AGENTIC_LOOP_MAX_STEPS` |
+| `config.toolCallMode` | `TOOL_CALL_MODE` |
 | `config.memory.enabled` | `MEMORY_ENABLED` |
 | `config.memory.type` | `MEMORY_TYPE` |
 | `config.memory.contextLimit` | `MEMORY_CONTEXT_LIMIT` |
 | `config.memory.maxSessions` | `MEMORY_MAX_SESSIONS` |
 | `config.memory.maxSessionEvents` | `MEMORY_MAX_SESSION_EVENTS` |
-| `agentNetwork.access` | `PEER_AGENTS` |
+| `config.autonomous.enabled` | `AUTONOMOUS_ENABLED` |
+| `config.autonomous.goal` | `AUTONOMOUS_GOAL` |
+| `config.autonomous.maxIterations` | `AUTONOMOUS_MAX_ITERATIONS` |
+| `config.autonomous.maxRuntimeSeconds` | `AUTONOMOUS_MAX_RUNTIME_SECONDS` |
+| `config.autonomous.maxToolCalls` | `AUTONOMOUS_MAX_TOOL_CALLS` |
+| `config.autonomous.intervalSeconds` | `AUTONOMOUS_INTERVAL_SECONDS` |
+| `agentNetwork.access` | `AGENT_SUB_AGENTS` |
 | Each peer agent | `PEER_AGENT_<NAME>_CARD_URL` |
 
 ### ModelAPI Pod Environment

@@ -147,7 +147,7 @@ make format                     # Auto-format code
 - Two activation modes:
   1. **Startup-activated**: `AUTONOMOUS_ENABLED=true` + `AUTONOMOUS_GOAL` → lifespan spawns task
   2. **A2A-triggered**: `SendMessage` with `configuration.mode: "autonomous"` + optional `budgets`
-- `AutonomousBudgets` dataclass: `max_iterations` (10), `max_runtime_seconds` (300), `max_tool_calls` (50)
+- `AutonomousBudgets` dataclass: `max_iterations` (10), `max_runtime_seconds` (300), `max_tool_calls` (50), `interval_seconds` (0)
 - `TaskEvent` append-only event log per task: submitted, working, iteration.started/completed, budget.exhausted, completed/failed/canceled
 
 ### A2A JSON-RPC Endpoint (POST /) — a2a.py
