@@ -178,13 +178,11 @@ metadata:
   name: echo-tools
   namespace: my-agents
 spec:
-  type: python-runtime
-  config:
-    tools:
-      fromString: |
-        def echo(message: str) -> str:
-            """Echo back the message."""
-            return f"Echo: {message}"
+  runtime: python-string
+  params: |
+    def echo(message: str) -> str:
+        """Echo back the message."""
+        return f"Echo: {message}"
 ```
 
 Then update your Agent to reference it:
