@@ -77,8 +77,8 @@ spec:
                     description: Autonomous configures autonomous (self-looping) execution
                     properties:
                       enabled:
-                        description: Enabled activates autonomous execution on agent
-                          startup
+                        description: Enabled activates continuous autonomous execution
+                          on agent startup
                         type: boolean
                       goal:
                         description: |-
@@ -92,25 +92,11 @@ spec:
                         maximum: 3600
                         minimum: 0
                         type: integer
-                      maxIterations:
-                        description: 'MaxIterations is the maximum number of autonomous
-                          loop iterations (default: 10, 0 = unlimited)'
-                        format: int32
-                        maximum: 1000
-                        minimum: 0
-                        type: integer
-                      maxRuntimeSeconds:
-                        description: 'MaxRuntimeSeconds is the maximum wall-clock
-                          time for the autonomous run (default: 300, 0 = unlimited)'
+                      maxIterRuntimeSeconds:
+                        description: 'MaxIterRuntimeSeconds is the maximum wall-clock
+                          time per iteration (default: 60, 0 = unlimited)'
                         format: int32
                         maximum: 86400
-                        minimum: 0
-                        type: integer
-                      maxToolCalls:
-                        description: 'MaxToolCalls is the maximum cumulative tool
-                          calls across all iterations (default: 50, 0 = unlimited)'
-                        format: int32
-                        maximum: 10000
                         minimum: 0
                         type: integer
                     type: object
@@ -171,6 +157,27 @@ spec:
                     format: int32
                     maximum: 20
                     minimum: 1
+                    type: integer
+                  taskMaxIterations:
+                    description: 'TaskMaxIterations is the max iterations for A2A
+                      async tasks (default: 10, 0 = unlimited)'
+                    format: int32
+                    maximum: 1000
+                    minimum: 0
+                    type: integer
+                  taskMaxRuntimeSeconds:
+                    description: 'TaskMaxRuntimeSeconds is the max wall-clock time
+                      for A2A async tasks (default: 300, 0 = unlimited)'
+                    format: int32
+                    maximum: 86400
+                    minimum: 0
+                    type: integer
+                  taskMaxToolCalls:
+                    description: 'TaskMaxToolCalls is the max cumulative tool calls
+                      for A2A async tasks (default: 50, 0 = unlimited)'
+                    format: int32
+                    maximum: 10000
+                    minimum: 0
                     type: integer
                   telemetry:
                     description: Telemetry configures OpenTelemetry instrumentation

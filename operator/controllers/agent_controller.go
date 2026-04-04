@@ -597,28 +597,39 @@ func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *
 				Value: auto.Goal,
 			})
 		}
-		if auto.MaxIterations != nil {
-			env = append(env, corev1.EnvVar{
-				Name:  "AUTONOMOUS_MAX_ITERATIONS",
-				Value: fmt.Sprintf("%d", *auto.MaxIterations),
-			})
-		}
-		if auto.MaxRuntimeSeconds != nil {
-			env = append(env, corev1.EnvVar{
-				Name:  "AUTONOMOUS_MAX_RUNTIME_SECONDS",
-				Value: fmt.Sprintf("%d", *auto.MaxRuntimeSeconds),
-			})
-		}
-		if auto.MaxToolCalls != nil {
-			env = append(env, corev1.EnvVar{
-				Name:  "AUTONOMOUS_MAX_TOOL_CALLS",
-				Value: fmt.Sprintf("%d", *auto.MaxToolCalls),
-			})
-		}
 		if auto.IntervalSeconds != nil {
 			env = append(env, corev1.EnvVar{
 				Name:  "AUTONOMOUS_INTERVAL_SECONDS",
 				Value: fmt.Sprintf("%d", *auto.IntervalSeconds),
+			})
+		}
+		if auto.MaxIterRuntimeSeconds != nil {
+			env = append(env, corev1.EnvVar{
+				Name:  "AUTONOMOUS_MAX_ITER_RUNTIME_SECONDS",
+				Value: fmt.Sprintf("%d", *auto.MaxIterRuntimeSeconds),
+			})
+		}
+	}
+
+	// Task budget configuration (A2A async task defaults)
+	if agent.Spec.Config != nil {
+		cfg := agent.Spec.Config
+		if cfg.TaskMaxIterations != nil {
+			env = append(env, corev1.EnvVar{
+				Name:  "TASK_MAX_ITERATIONS",
+				Value: fmt.Sprintf("%d", *cfg.TaskMaxIterations),
+			})
+		}
+		if cfg.TaskMaxRuntimeSeconds != nil {
+			env = append(env, corev1.EnvVar{
+				Name:  "TASK_MAX_RUNTIME_SECONDS",
+				Value: fmt.Sprintf("%d", *cfg.TaskMaxRuntimeSeconds),
+			})
+		}
+		if cfg.TaskMaxToolCalls != nil {
+			env = append(env, corev1.EnvVar{
+				Name:  "TASK_MAX_TOOL_CALLS",
+				Value: fmt.Sprintf("%d", *cfg.TaskMaxToolCalls),
 			})
 		}
 	}

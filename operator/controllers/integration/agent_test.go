@@ -720,9 +720,10 @@ var _ = Describe("Agent Controller", func() {
 			k8sClient.Delete(ctx, modelAPI)
 		}()
 
-		maxIter := int32(20)
-		maxRuntime := int32(600)
-		maxTools := int32(100)
+		maxIterRuntime := int32(60)
+		taskMaxIter := int32(20)
+		taskMaxRuntime := int32(600)
+		taskMaxTools := int32(100)
 		agent := &kaosv1alpha1.Agent{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      agentName,
@@ -734,12 +735,13 @@ var _ = Describe("Agent Controller", func() {
 				WaitForDependencies: boolPtr(false),
 				Config: &kaosv1alpha1.AgentConfig{
 					Autonomous: &kaosv1alpha1.AutonomousConfig{
-						Enabled:           true,
-						Goal:              "Monitor system health",
-						MaxIterations:     &maxIter,
-						MaxRuntimeSeconds: &maxRuntime,
-						MaxToolCalls:      &maxTools,
+						Enabled:               true,
+						Goal:                  "Monitor system health",
+						MaxIterRuntimeSeconds: &maxIterRuntime,
 					},
+					TaskMaxIterations:     &taskMaxIter,
+					TaskMaxRuntimeSeconds: &taskMaxRuntime,
+					TaskMaxToolCalls:      &taskMaxTools,
 				},
 			},
 		}
@@ -763,9 +765,10 @@ var _ = Describe("Agent Controller", func() {
 		}
 		Expect(envMap["AUTONOMOUS_ENABLED"]).To(Equal("true"))
 		Expect(envMap["AUTONOMOUS_GOAL"]).To(Equal("Monitor system health"))
-		Expect(envMap["AUTONOMOUS_MAX_ITERATIONS"]).To(Equal("20"))
-		Expect(envMap["AUTONOMOUS_MAX_RUNTIME_SECONDS"]).To(Equal("600"))
-		Expect(envMap["AUTONOMOUS_MAX_TOOL_CALLS"]).To(Equal("100"))
+		Expect(envMap["AUTONOMOUS_MAX_ITER_RUNTIME_SECONDS"]).To(Equal("60"))
+		Expect(envMap["TASK_MAX_ITERATIONS"]).To(Equal("20"))
+		Expect(envMap["TASK_MAX_RUNTIME_SECONDS"]).To(Equal("600"))
+		Expect(envMap["TASK_MAX_TOOL_CALLS"]).To(Equal("100"))
 	})
 
 	It("should not set autonomous env vars when config is nil", func() {

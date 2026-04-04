@@ -134,13 +134,33 @@ type AgentConfig struct {
 	// Autonomous configures autonomous (self-looping) execution
 	// +kubebuilder:validation:Optional
 	Autonomous *AutonomousConfig `json:"autonomous,omitempty"`
+
+	// TaskMaxIterations is the max iterations for A2A async tasks (default: 10, 0 = unlimited)
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=1000
+	TaskMaxIterations *int32 `json:"taskMaxIterations,omitempty"`
+
+	// TaskMaxRuntimeSeconds is the max wall-clock time for A2A async tasks (default: 300, 0 = unlimited)
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=86400
+	TaskMaxRuntimeSeconds *int32 `json:"taskMaxRuntimeSeconds,omitempty"`
+
+	// TaskMaxToolCalls is the max cumulative tool calls for A2A async tasks (default: 50, 0 = unlimited)
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=10000
+	TaskMaxToolCalls *int32 `json:"taskMaxToolCalls,omitempty"`
 }
 
 // +kubebuilder:object:generate=true
 
-// AutonomousConfig configures autonomous (self-looping) agent execution.
+// AutonomousConfig configures continuous autonomous (self-looping) agent execution.
+// When enabled, the agent runs forever with per-iteration budgets.
+// For bounded async tasks triggered via A2A, use AgentConfig-level task budget fields.
 type AutonomousConfig struct {
-	// Enabled activates autonomous execution on agent startup
+	// Enabled activates continuous autonomous execution on agent startup
 	// +optional
 	Enabled bool `json:"enabled,omitempty"`
 
@@ -149,29 +169,17 @@ type AutonomousConfig struct {
 	// +optional
 	Goal string `json:"goal,omitempty"`
 
-	// MaxIterations is the maximum number of autonomous loop iterations (default: 10, 0 = unlimited)
-	// +optional
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=1000
-	MaxIterations *int32 `json:"maxIterations,omitempty"`
-
-	// MaxRuntimeSeconds is the maximum wall-clock time for the autonomous run (default: 300, 0 = unlimited)
-	// +optional
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=86400
-	MaxRuntimeSeconds *int32 `json:"maxRuntimeSeconds,omitempty"`
-
-	// MaxToolCalls is the maximum cumulative tool calls across all iterations (default: 50, 0 = unlimited)
-	// +optional
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=10000
-	MaxToolCalls *int32 `json:"maxToolCalls,omitempty"`
-
 	// IntervalSeconds is the pause between autonomous loop iterations (default: 0, no pause)
 	// +optional
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=3600
 	IntervalSeconds *int32 `json:"intervalSeconds,omitempty"`
+
+	// MaxIterRuntimeSeconds is the maximum wall-clock time per iteration (default: 60, 0 = unlimited)
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=86400
+	MaxIterRuntimeSeconds *int32 `json:"maxIterRuntimeSeconds,omitempty"`
 }
 
 // +kubebuilder:object:generate=true
