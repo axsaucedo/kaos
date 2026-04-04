@@ -145,7 +145,7 @@ def send_message(
         "params": params,
     }
 
-    typer.echo(f"Sending A2A message to {name}...")
+    typer.echo(f"Sending A2A message to {name}...", err=output_json)
     response = _port_forward_and_call(name, namespace, port, payload)
 
     if output_json:
@@ -185,7 +185,7 @@ def get_task(
         "params": {"id": task_id},
     }
 
-    typer.echo(f"Getting task {task_id} from {name}...")
+    typer.echo(f"Getting task {task_id} from {name}...", err=output_json)
     response = _port_forward_and_call(name, namespace, port, payload)
 
     if output_json:
@@ -225,7 +225,7 @@ def cancel_task(
         "params": {"id": task_id},
     }
 
-    typer.echo(f"Canceling task {task_id} on {name}...")
+    typer.echo(f"Canceling task {task_id} on {name}...", err=output_json)
     response = _port_forward_and_call(name, namespace, port, payload)
 
     if output_json:
