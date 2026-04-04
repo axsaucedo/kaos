@@ -249,6 +249,103 @@ class TestAgentDeployDryRun:
         assert result.exit_code != 0
 
 
+# ─── Agent deploy autonomous flags ─────────────────────────────────────
+
+
+class TestAgentDeployAutonomous:
+    def test_autonomous_basic(self):
+        result = runner.invoke(
+            app,
+            [
+                "agent", "deploy", "auto-agent",
+                "--modelapi", "api", "--model", "m1",
+                "--autonomous", "Monitor system health",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0
+        docs = list(yaml.safe_load_all(result.output))
+        agent = docs[0]
+        auto = agent["spec"]["config"]["autonomous"]
+        assert auto["enabled"] is True
+        assert auto["goal"] == "Monitor system health"
+
+    def test_autonomous_with_budgets(self):
+        result = runner.invoke(
+            app,
+            [
+                "agent", "deploy", "auto-agent",
+                "--modelapi", "api", "--model", "m1",
+                "--autonomous", "Check health",
+                "--auto-max-iterations", "20",
+                "--auto-max-runtime", "600",
+                "--auto-max-tool-calls", "100",
+                "--auto-interval", "5.0",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0
+        docs = list(yaml.safe_load_all(result.output))
+        agent = docs[0]
+        auto = agent["spec"]["config"]["autonomous"]
+        assert auto["enabled"] is True
+        assert auto["goal"] == "Check health"
+        assert auto["maxIterations"] == 20
+        assert auto["maxRuntimeSeconds"] == 600
+        assert auto["maxToolCalls"] == 100
+        assert auto["intervalSeconds"] == 5.0
+
+    def test_autonomous_unlimited_iterations(self):
+        result = runner.invoke(
+            app,
+            [
+                "agent", "deploy", "auto-agent",
+                "--modelapi", "api", "--model", "m1",
+                "--autonomous", "Run forever",
+                "--auto-max-iterations", "0",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0
+        docs = list(yaml.safe_load_all(result.output))
+        agent = docs[0]
+        auto = agent["spec"]["config"]["autonomous"]
+        assert auto["maxIterations"] == 0
+
+    def test_autonomous_with_other_config(self):
+        result = runner.invoke(
+            app,
+            [
+                "agent", "deploy", "auto-agent",
+                "--modelapi", "api", "--model", "m1",
+                "--description", "Auto agent",
+                "--autonomous", "Do work",
+                "--mcp", "echo-mcp",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0
+        docs = list(yaml.safe_load_all(result.output))
+        agent = docs[0]
+        assert agent["spec"]["config"]["description"] == "Auto agent"
+        assert agent["spec"]["config"]["autonomous"]["enabled"] is True
+        assert "echo-mcp" in agent["spec"]["mcpServers"]
+
+    def test_no_autonomous_no_config_section(self):
+        result = runner.invoke(
+            app,
+            [
+                "agent", "deploy", "basic-agent",
+                "--modelapi", "api", "--model", "m1",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0
+        docs = list(yaml.safe_load_all(result.output))
+        agent = docs[0]
+        assert "config" not in agent["spec"]
+
+
 # ─── ModelAPI deploy dry-run ────────────────────────────────────────────
 
 

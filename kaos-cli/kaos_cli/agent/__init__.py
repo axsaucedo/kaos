@@ -230,6 +230,21 @@ def deploy_agent_cmd(
     wait_timeout: int = typer.Option(
         120, "--wait-timeout", help="Timeout in seconds for --wait."
     ),
+    autonomous: str = typer.Option(
+        None, "--autonomous", help="Enable autonomous mode with the given goal."
+    ),
+    auto_max_iterations: int = typer.Option(
+        None, "--auto-max-iterations", help="Max autonomous iterations (0=unlimited)."
+    ),
+    auto_max_runtime: int = typer.Option(
+        None, "--auto-max-runtime", help="Max autonomous runtime in seconds (0=unlimited)."
+    ),
+    auto_max_tool_calls: int = typer.Option(
+        None, "--auto-max-tool-calls", help="Max cumulative tool calls (0=unlimited)."
+    ),
+    auto_interval: float = typer.Option(
+        None, "--auto-interval", help="Seconds between autonomous iterations."
+    ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Print YAML instead of deploying."
     ),
@@ -242,6 +257,7 @@ def deploy_agent_cmd(
       kaos agent deploy my-agent --image my-agent:latest --build --kind-load --modelapi my-api --model gpt-4o
       kaos agent deploy my-agent --image my-agent:latest --build agent:bot --modelapi my-api --model gpt-4o
       kaos agent deploy my-agent -a my-api -m gpt-4o --sub-agent helper --expose
+      kaos agent deploy my-agent -a my-api -m gpt-4o --autonomous "Monitor system health"
     """
     import sys
 
@@ -279,6 +295,11 @@ def deploy_agent_cmd(
         expose=expose,
         otel_endpoint=otel_endpoint,
         env_vars=env_vars,
+        autonomous=autonomous,
+        auto_max_iterations=auto_max_iterations,
+        auto_max_runtime=auto_max_runtime,
+        auto_max_tool_calls=auto_max_tool_calls,
+        auto_interval=auto_interval,
         wait=wait,
         wait_timeout=wait_timeout,
         dry_run=dry_run,
