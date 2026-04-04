@@ -131,41 +131,24 @@ type AgentConfig struct {
 	// +kubebuilder:validation:Optional
 	Telemetry *TelemetryConfig `json:"telemetry,omitempty"`
 
-	// Autonomous configures autonomous (self-looping) execution
+	// Autonomous configures autonomous (self-looping) execution.
+	// Setting a goal activates autonomous mode on agent startup.
 	// +kubebuilder:validation:Optional
 	Autonomous *AutonomousConfig `json:"autonomous,omitempty"`
 
-	// TaskMaxIterations is the max iterations for A2A async tasks (default: 10, 0 = unlimited)
-	// +optional
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=1000
-	TaskMaxIterations *int32 `json:"taskMaxIterations,omitempty"`
-
-	// TaskMaxRuntimeSeconds is the max wall-clock time for A2A async tasks (default: 300, 0 = unlimited)
-	// +optional
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=86400
-	TaskMaxRuntimeSeconds *int32 `json:"taskMaxRuntimeSeconds,omitempty"`
-
-	// TaskMaxToolCalls is the max cumulative tool calls for A2A async tasks (default: 50, 0 = unlimited)
-	// +optional
-	// +kubebuilder:validation:Minimum=0
-	// +kubebuilder:validation:Maximum=10000
-	TaskMaxToolCalls *int32 `json:"taskMaxToolCalls,omitempty"`
+	// TaskConfig configures budget limits for A2A async tasks
+	// +kubebuilder:validation:Optional
+	TaskConfig *TaskConfig `json:"taskConfig,omitempty"`
 }
 
 // +kubebuilder:object:generate=true
 
-// AutonomousConfig configures continuous autonomous (self-looping) agent execution.
-// When enabled, the agent runs forever with per-iteration budgets.
-// For bounded async tasks triggered via A2A, use AgentConfig-level task budget fields.
+// AutonomousConfig configures autonomous (self-looping) agent execution.
+// When a goal is set, the agent self-loops on startup with per-iteration budgets.
+// For bounded async tasks triggered via A2A, use taskConfig.
 type AutonomousConfig struct {
-	// Enabled activates continuous autonomous execution on agent startup
-	// +optional
-	Enabled bool `json:"enabled,omitempty"`
-
 	// Goal is the objective the agent works toward autonomously.
-	// Required when enabled is true.
+	// Setting this activates autonomous execution on agent startup.
 	// +optional
 	Goal string `json:"goal,omitempty"`
 
@@ -180,6 +163,29 @@ type AutonomousConfig struct {
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=86400
 	MaxIterRuntimeSeconds *int32 `json:"maxIterRuntimeSeconds,omitempty"`
+}
+
+// +kubebuilder:object:generate=true
+
+// TaskConfig configures budget limits for A2A async task execution.
+type TaskConfig struct {
+	// MaxIterations is the max iterations for A2A async tasks (default: 10, 0 = unlimited)
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=1000
+	MaxIterations *int32 `json:"maxIterations,omitempty"`
+
+	// MaxRuntimeSeconds is the max wall-clock time for A2A async tasks (default: 300, 0 = unlimited)
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=86400
+	MaxRuntimeSeconds *int32 `json:"maxRuntimeSeconds,omitempty"`
+
+	// MaxToolCalls is the max cumulative tool calls for A2A async tasks (default: 50, 0 = unlimited)
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=10000
+	MaxToolCalls *int32 `json:"maxToolCalls,omitempty"`
 }
 
 // +kubebuilder:object:generate=true

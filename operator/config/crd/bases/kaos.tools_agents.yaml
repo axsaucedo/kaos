@@ -74,16 +74,14 @@ spec:
                 description: Config contains agent-specific configuration
                 properties:
                   autonomous:
-                    description: Autonomous configures autonomous (self-looping) execution
+                    description: |-
+                      Autonomous configures autonomous (self-looping) execution.
+                      Setting a goal activates autonomous mode on agent startup.
                     properties:
-                      enabled:
-                        description: Enabled activates continuous autonomous execution
-                          on agent startup
-                        type: boolean
                       goal:
                         description: |-
                           Goal is the objective the agent works toward autonomously.
-                          Required when enabled is true.
+                          Setting this activates autonomous execution on agent startup.
                         type: string
                       intervalSeconds:
                         description: 'IntervalSeconds is the pause between autonomous
@@ -158,27 +156,32 @@ spec:
                     maximum: 20
                     minimum: 1
                     type: integer
-                  taskMaxIterations:
-                    description: 'TaskMaxIterations is the max iterations for A2A
-                      async tasks (default: 10, 0 = unlimited)'
-                    format: int32
-                    maximum: 1000
-                    minimum: 0
-                    type: integer
-                  taskMaxRuntimeSeconds:
-                    description: 'TaskMaxRuntimeSeconds is the max wall-clock time
-                      for A2A async tasks (default: 300, 0 = unlimited)'
-                    format: int32
-                    maximum: 86400
-                    minimum: 0
-                    type: integer
-                  taskMaxToolCalls:
-                    description: 'TaskMaxToolCalls is the max cumulative tool calls
-                      for A2A async tasks (default: 50, 0 = unlimited)'
-                    format: int32
-                    maximum: 10000
-                    minimum: 0
-                    type: integer
+                  taskConfig:
+                    description: TaskConfig configures budget limits for A2A async
+                      tasks
+                    properties:
+                      maxIterations:
+                        description: 'MaxIterations is the max iterations for A2A
+                          async tasks (default: 10, 0 = unlimited)'
+                        format: int32
+                        maximum: 1000
+                        minimum: 0
+                        type: integer
+                      maxRuntimeSeconds:
+                        description: 'MaxRuntimeSeconds is the max wall-clock time
+                          for A2A async tasks (default: 300, 0 = unlimited)'
+                        format: int32
+                        maximum: 86400
+                        minimum: 0
+                        type: integer
+                      maxToolCalls:
+                        description: 'MaxToolCalls is the max cumulative tool calls
+                          for A2A async tasks (default: 50, 0 = unlimited)'
+                        format: int32
+                        maximum: 10000
+                        minimum: 0
+                        type: integer
+                    type: object
                   telemetry:
                     description: Telemetry configures OpenTelemetry instrumentation
                     properties:
