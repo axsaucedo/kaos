@@ -390,6 +390,7 @@ export function AgentMemory({ agent }: AgentMemoryProps) {
               size="sm"
               className="h-7 px-2 rounded-r-none"
               onClick={() => setViewMode('raw')}
+              data-testid="memory-view-raw"
             >
               <List className="h-3.5 w-3.5 mr-1" />
               <span className="text-xs">Raw</span>
@@ -399,6 +400,7 @@ export function AgentMemory({ agent }: AgentMemoryProps) {
               size="sm"
               className="h-7 px-2 rounded-l-none"
               onClick={() => setViewMode('conversation')}
+              data-testid="memory-view-chat"
             >
               <Eye className="h-3.5 w-3.5 mr-1" />
               <span className="text-xs">Chat</span>
