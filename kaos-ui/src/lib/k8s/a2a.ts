@@ -3,7 +3,7 @@
  * Uses K8s service proxy to communicate with agent pods.
  */
 
-import type { AgentCard, JsonRpcResponse } from '@/types/a2a';
+import type { AgentCard, A2ATask, JsonRpcResponse } from '@/types/a2a';
 import { k8sClient } from './index';
 
 /**
@@ -68,47 +68,27 @@ export async function sendA2AJsonRpc(
 
 /**
  * Send an A2A SendMessage request.
+ * Accepts structured SendMessageParams directly.
  */
 export async function sendA2AMessage(
   serviceName: string,
-  message: string,
-  options: {
-    sessionId?: string;
-    mode?: 'interactive' | 'autonomous';
-    budgets?: {
-      maxIterations?: number;
-      maxRuntimeSeconds?: number;
-      maxToolCalls?: number;
-    };
-    namespace?: string;
-    port?: number;
-  } = {}
-): Promise<JsonRpcResponse> {
-  const params: Record<string, unknown> = {
-    message: {
-      role: 'user',
-      parts: [{ type: 'text', text: message }],
-    },
-  };
-
-  if (options.sessionId) {
-    params.contextId = options.sessionId;
-  }
-
-  if (options.mode || options.budgets) {
-    const config: Record<string, unknown> = {};
-    if (options.mode) config.mode = options.mode;
-    if (options.budgets) config.budgets = options.budgets;
-    params.configuration = config;
-  }
-
-  return sendA2AJsonRpc(
+  params: Record<string, unknown>,
+  namespace?: string,
+  port: number = 8000
+): Promise<A2ATask> {
+  const rpcResponse = await sendA2AJsonRpc(
     serviceName,
     'SendMessage',
     params,
-    options.namespace,
-    options.port
+    namespace,
+    port
   );
+
+  if (rpcResponse.error) {
+    throw new Error(rpcResponse.error.message || 'A2A SendMessage failed');
+  }
+
+  return rpcResponse.result as A2ATask;
 }
 
 /**
@@ -119,14 +99,20 @@ export async function getA2ATask(
   taskId: string,
   namespace?: string,
   port: number = 8000
-): Promise<JsonRpcResponse> {
-  return sendA2AJsonRpc(
+): Promise<A2ATask> {
+  const rpcResponse = await sendA2AJsonRpc(
     serviceName,
     'GetTask',
     { id: taskId },
     namespace,
     port
   );
+
+  if (rpcResponse.error) {
+    throw new Error(rpcResponse.error.message || 'A2A GetTask failed');
+  }
+
+  return rpcResponse.result as A2ATask;
 }
 
 /**
@@ -137,12 +123,18 @@ export async function cancelA2ATask(
   taskId: string,
   namespace?: string,
   port: number = 8000
-): Promise<JsonRpcResponse> {
-  return sendA2AJsonRpc(
+): Promise<A2ATask> {
+  const rpcResponse = await sendA2AJsonRpc(
     serviceName,
     'CancelTask',
     { id: taskId },
     namespace,
     port
   );
+
+  if (rpcResponse.error) {
+    throw new Error(rpcResponse.error.message || 'A2A CancelTask failed');
+  }
+
+  return rpcResponse.result as A2ATask;
 }
