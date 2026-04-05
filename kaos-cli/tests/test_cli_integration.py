@@ -267,7 +267,7 @@ class TestAgentDeployAutonomous:
         docs = list(yaml.safe_load_all(result.output))
         agent = docs[0]
         auto = agent["spec"]["config"]["autonomous"]
-        assert auto["enabled"] is True
+        assert "enabled" not in auto
         assert auto["goal"] == "Monitor system health"
 
     def test_autonomous_with_budgets(self):
@@ -277,10 +277,11 @@ class TestAgentDeployAutonomous:
                 "agent", "deploy", "auto-agent",
                 "--modelapi", "api", "--model", "m1",
                 "--autonomous", "Check health",
-                "--auto-max-iterations", "20",
-                "--auto-max-runtime", "600",
-                "--auto-max-tool-calls", "100",
+                "--auto-max-iter-runtime", "120",
                 "--auto-interval", "5.0",
+                "--task-max-iterations", "20",
+                "--task-max-runtime", "600",
+                "--task-max-tool-calls", "100",
                 "--dry-run",
             ],
         )
@@ -288,29 +289,30 @@ class TestAgentDeployAutonomous:
         docs = list(yaml.safe_load_all(result.output))
         agent = docs[0]
         auto = agent["spec"]["config"]["autonomous"]
-        assert auto["enabled"] is True
+        assert "enabled" not in auto
         assert auto["goal"] == "Check health"
-        assert auto["maxIterations"] == 20
-        assert auto["maxRuntimeSeconds"] == 600
-        assert auto["maxToolCalls"] == 100
+        assert auto["maxIterRuntimeSeconds"] == 120
         assert auto["intervalSeconds"] == 5.0
+        tc = agent["spec"]["config"]["taskConfig"]
+        assert tc["maxIterations"] == 20
+        assert tc["maxRuntimeSeconds"] == 600
+        assert tc["maxToolCalls"] == 100
 
-    def test_autonomous_unlimited_iterations(self):
+    def test_autonomous_with_task_budgets_only(self):
         result = runner.invoke(
             app,
             [
                 "agent", "deploy", "auto-agent",
                 "--modelapi", "api", "--model", "m1",
-                "--autonomous", "Run forever",
-                "--auto-max-iterations", "0",
+                "--task-max-iterations", "0",
                 "--dry-run",
             ],
         )
         assert result.exit_code == 0
         docs = list(yaml.safe_load_all(result.output))
         agent = docs[0]
-        auto = agent["spec"]["config"]["autonomous"]
-        assert auto["maxIterations"] == 0
+        tc = agent["spec"]["config"]["taskConfig"]
+        assert tc["maxIterations"] == 0
 
     def test_autonomous_with_other_config(self):
         result = runner.invoke(
@@ -328,7 +330,7 @@ class TestAgentDeployAutonomous:
         docs = list(yaml.safe_load_all(result.output))
         agent = docs[0]
         assert agent["spec"]["config"]["description"] == "Auto agent"
-        assert agent["spec"]["config"]["autonomous"]["enabled"] is True
+        assert agent["spec"]["config"]["autonomous"]["goal"] == "Do work"
         assert "echo-mcp" in agent["spec"]["mcpServers"]
 
     def test_no_autonomous_no_config_section(self):

@@ -163,14 +163,15 @@ Each autonomous iteration consumes mock responses sequentially. A 2-iteration ru
 ```
 Responses 1-2: iteration 1 (tool call + text with tools → continues). Response 3: iteration 2 (text only, no tools → loop ends).
 
-**Autonomous CRD config:**
+**Autonomous CRD config (autonomous mode):**
 ```yaml
 spec:
   config:
     autonomous:
       enabled: true
       goal: "Check system health"
-      maxIterations: 10
+      intervalSeconds: 10
+      maxIterRuntimeSeconds: 60
 ```
 
 ### Key Patterns

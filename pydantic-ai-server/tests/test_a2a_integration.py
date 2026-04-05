@@ -265,7 +265,7 @@ class TestA2AAutonomousMode:
                 data = resp.json()
                 assert "result" in data
                 task = data["result"]
-                assert task["mode"] == "autonomous"
+                assert task["autonomous"] is True
                 task_id = task["id"]
 
                 await asyncio.sleep(1.0)
@@ -370,5 +370,5 @@ class TestA2AAutonomousMode:
             resp = await client.post("/", json=_send_message("Hello"))
             data = resp.json()
             task = data["result"]
-            assert task["mode"] == "interactive"
+            assert task["autonomous"] is False
             assert task["status"]["state"] == "completed"

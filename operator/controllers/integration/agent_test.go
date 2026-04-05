@@ -720,9 +720,10 @@ var _ = Describe("Agent Controller", func() {
 			k8sClient.Delete(ctx, modelAPI)
 		}()
 
-		maxIter := int32(20)
-		maxRuntime := int32(600)
-		maxTools := int32(100)
+		maxIterRuntime := int32(60)
+		taskMaxIter := int32(20)
+		taskMaxRuntime := int32(600)
+		taskMaxTools := int32(100)
 		agent := &kaosv1alpha1.Agent{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      agentName,
@@ -734,11 +735,13 @@ var _ = Describe("Agent Controller", func() {
 				WaitForDependencies: boolPtr(false),
 				Config: &kaosv1alpha1.AgentConfig{
 					Autonomous: &kaosv1alpha1.AutonomousConfig{
-						Enabled:           true,
-						Goal:              "Monitor system health",
-						MaxIterations:     &maxIter,
-						MaxRuntimeSeconds: &maxRuntime,
-						MaxToolCalls:      &maxTools,
+						Goal:                  "Monitor system health",
+						MaxIterRuntimeSeconds: &maxIterRuntime,
+					},
+					TaskConfig: &kaosv1alpha1.TaskConfig{
+						MaxIterations:     &taskMaxIter,
+						MaxRuntimeSeconds: &taskMaxRuntime,
+						MaxToolCalls:      &taskMaxTools,
 					},
 				},
 			},
@@ -761,11 +764,11 @@ var _ = Describe("Agent Controller", func() {
 		for _, env := range container.Env {
 			envMap[env.Name] = env.Value
 		}
-		Expect(envMap["AUTONOMOUS_ENABLED"]).To(Equal("true"))
 		Expect(envMap["AUTONOMOUS_GOAL"]).To(Equal("Monitor system health"))
-		Expect(envMap["AUTONOMOUS_MAX_ITERATIONS"]).To(Equal("20"))
-		Expect(envMap["AUTONOMOUS_MAX_RUNTIME_SECONDS"]).To(Equal("600"))
-		Expect(envMap["AUTONOMOUS_MAX_TOOL_CALLS"]).To(Equal("100"))
+		Expect(envMap["AUTONOMOUS_MAX_ITER_RUNTIME_SECONDS"]).To(Equal("60"))
+		Expect(envMap["TASK_MAX_ITERATIONS"]).To(Equal("20"))
+		Expect(envMap["TASK_MAX_RUNTIME_SECONDS"]).To(Equal("600"))
+		Expect(envMap["TASK_MAX_TOOL_CALLS"]).To(Equal("100"))
 	})
 
 	It("should not set autonomous env vars when config is nil", func() {
@@ -818,13 +821,11 @@ var _ = Describe("Agent Controller", func() {
 		for _, env := range container.Env {
 			envMap[env.Name] = env.Value
 		}
-		_, hasEnabled := envMap["AUTONOMOUS_ENABLED"]
 		_, hasGoal := envMap["AUTONOMOUS_GOAL"]
-		Expect(hasEnabled).To(BeFalse())
 		Expect(hasGoal).To(BeFalse())
 	})
 
-	It("should set Failed status when autonomous enabled without goal", func() {
+	It("should not set autonomous env vars when goal is empty", func() {
 		modelAPIName := uniqueAgentName("autonogoal-modelapi")
 		agentName := uniqueAgentName("autonogoal-agent")
 
@@ -856,8 +857,7 @@ var _ = Describe("Agent Controller", func() {
 				WaitForDependencies: boolPtr(false),
 				Config: &kaosv1alpha1.AgentConfig{
 					Autonomous: &kaosv1alpha1.AutonomousConfig{
-						Enabled: true,
-						Goal:    "",
+						Goal: "",
 					},
 				},
 			},
@@ -867,24 +867,20 @@ var _ = Describe("Agent Controller", func() {
 			k8sClient.Delete(ctx, agent)
 		}()
 
-		// Should eventually have Failed phase
-		Eventually(func() string {
-			updated := &kaosv1alpha1.Agent{}
-			err := k8sClient.Get(ctx, types.NamespacedName{
-				Name:      agentName,
+		deployment := &appsv1.Deployment{}
+		Eventually(func() error {
+			return k8sClient.Get(ctx, types.NamespacedName{
+				Name:      fmt.Sprintf("agent-%s", agentName),
 				Namespace: namespace,
-			}, updated)
-			if err != nil {
-				return ""
-			}
-			return updated.Status.Phase
-		}, timeout, interval).Should(Equal("Failed"))
+			}, deployment)
+		}, timeout, interval).Should(Succeed())
 
-		updated := &kaosv1alpha1.Agent{}
-		Expect(k8sClient.Get(ctx, types.NamespacedName{
-			Name:      agentName,
-			Namespace: namespace,
-		}, updated)).To(Succeed())
-		Expect(updated.Status.Message).To(ContainSubstring("autonomous.goal"))
+		container := deployment.Spec.Template.Spec.Containers[0]
+		envMap := make(map[string]string)
+		for _, env := range container.Env {
+			envMap[env.Name] = env.Value
+		}
+		_, hasGoal := envMap["AUTONOMOUS_GOAL"]
+		Expect(hasGoal).To(BeFalse())
 	})
 })

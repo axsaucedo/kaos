@@ -1,7 +1,7 @@
 """A2A protocol module: TaskManager ABC, LocalTaskManager, JSON-RPC dispatcher, and route setup.
 
 Provides:
-- Task data model (TaskState, TaskStatus, TaskMessage, TaskEvent, Task, AutonomousBudgets)
+- Task data model (TaskState, TaskStatus, TaskMessage, TaskEvent, Task, AutonomousConfig, TaskBudgets)
 - TaskManager ABC: send_message, get_task, cancel_task, shutdown
 - LocalTaskManager: in-process execution with internal dict storage and OTel
 - NullTaskManager: no-op implementation
@@ -128,8 +128,20 @@ EVENT_AUTONOMOUS_BUDGET_EXHAUSTED = "autonomous.budget.exhausted"
 
 
 @dataclass
-class AutonomousBudgets:
-    """Budget limits for autonomous execution runs.
+class AutonomousConfig:
+    """Per-iteration config for CRD-activated autonomous execution.
+
+    A value of 0 means unlimited (no limit enforced) for that budget.
+    """
+
+    goal: str = ""
+    interval_seconds: int = 0
+    max_iter_runtime_seconds: int = 60
+
+
+@dataclass
+class TaskBudgets:
+    """Overall budget limits for A2A async task execution.
 
     A value of 0 means unlimited (no limit enforced) for that budget.
     """
@@ -151,7 +163,7 @@ class Task:
     artifacts: List[Dict[str, Any]] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
     events: List[TaskEvent] = field(default_factory=list)
-    mode: str = "interactive"  # "interactive" or "autonomous"
+    autonomous: bool = False
     output: str = ""
 
     def add_event(self, event_type: str, data: Optional[Dict[str, Any]] = None) -> TaskEvent:
@@ -174,7 +186,7 @@ class Task:
             "artifacts": self.artifacts,
             "metadata": self.metadata,
             "events": [e.to_dict() for e in self.events],
-            "mode": self.mode,
+            "autonomous": self.autonomous,
             "output": self.output,
         }
 
@@ -231,10 +243,20 @@ class TaskManager(ABC):
         self,
         goal: str,
         session_id: Optional[str] = None,
-        budgets: Optional[AutonomousBudgets] = None,
+        budgets: Optional[TaskBudgets] = None,
+        autonomous_config: Optional["AutonomousConfig"] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Task:
-        """Submit an autonomous run. Returns Task immediately (may be in-progress)."""
+        """Submit an autonomous run. Returns Task immediately (may be in-progress).
+
+        Args:
+            goal: The objective for the autonomous run.
+            session_id: Optional session ID (auto-generated if not provided).
+            budgets: Overall budgets for async task mode (ignored in autonomous mode).
+            autonomous_config: Per-iteration config for autonomous mode. If provided, runs
+                in autonomous mode (no overall limits). If None, runs as async task.
+            metadata: Optional metadata for the task.
+        """
         ...
 
     @abstractmethod
@@ -308,34 +330,43 @@ class LocalTaskManager(TaskManager):
         self,
         goal: str,
         session_id: Optional[str] = None,
-        budgets: Optional[AutonomousBudgets] = None,
+        budgets: Optional[TaskBudgets] = None,
+        autonomous_config: Optional[AutonomousConfig] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Task:
         """Submit an autonomous run. Spawns background task, returns immediately."""
         tracer = trace_api.get_tracer(SERVICE_NAME)
         task_counter, _ = get_task_metrics()
-        effective_budgets = budgets or AutonomousBudgets()
+        is_autonomous = autonomous_config is not None
 
         with tracer.start_as_current_span(
             "kaos.task.submit_autonomous",
             attributes={
                 "task.session_id": session_id or "",
-                "task.mode": "autonomous",
+                "task.autonomous": True,
             },
         ):
             task = self._create_task(session_id, goal, metadata)
-            task.mode = "autonomous"
+            task.autonomous = True
             task.add_event(EVENT_TASK_SUBMITTED, {"goal_preview": goal[:200]})
             logger.info(f"Submitted autonomous task {task.id}")
 
             if task_counter:
-                task_counter.add(1, {"state": "submitted", "mode": "autonomous"})
+                task_counter.add(1, {"state": "submitted", "autonomous": True})
 
         self._transition(task.id, TaskState.WORKING, "Autonomous execution started")
         task.add_event(EVENT_TASK_WORKING, {})
 
+        effective_budgets = budgets or TaskBudgets()
+
         bg_task = asyncio.create_task(
-            self._execute_autonomous(task.id, goal, task.session_id, effective_budgets)
+            self._execute_autonomous(
+                task.id,
+                goal,
+                task.session_id,
+                budgets=effective_budgets,
+                autonomous_config=autonomous_config,
+            )
         )
         self._running_tasks[task.id] = bg_task
         return task
@@ -492,27 +523,40 @@ class LocalTaskManager(TaskManager):
         task_id: str,
         goal: str,
         session_id: str,
-        budgets: AutonomousBudgets,
+        budgets: TaskBudgets,
+        autonomous_config: Optional[AutonomousConfig] = None,
     ) -> None:
-        """Execute autonomous self-loop: iterate process_fn until done or budget exhausted."""
+        """Execute autonomous loop: autonomous mode (forever) or async task (budget-limited).
+
+        Autonomous mode (autonomous_config provided): runs forever, per-iteration time limit only.
+        Async task mode (autonomous_config=None): overall budgets, "no tool calls = done" completion.
+        """
         if self._setup_fn:
             self._setup_fn()
 
         tracer = trace_api.get_tracer(SERVICE_NAME)
         task_counter, task_duration = get_task_metrics()
         start_time = time.perf_counter()
+        is_autonomous = autonomous_config is not None
+        interval_seconds = (
+            autonomous_config.interval_seconds if autonomous_config else budgets.interval_seconds
+        )
 
-        with tracer.start_as_current_span(
-            "kaos.autonomous.run",
-            attributes={
-                "autonomous.task_id": task_id,
-                "autonomous.session_id": session_id,
-                "autonomous.max_iterations": budgets.max_iterations,
-                "autonomous.max_runtime_seconds": budgets.max_runtime_seconds,
-                "autonomous.max_tool_calls": budgets.max_tool_calls,
-                "autonomous.interval_seconds": budgets.interval_seconds,
-            },
-        ) as span:
+        span_attrs: Dict[str, Any] = {
+            "autonomous.task_id": task_id,
+            "autonomous.session_id": session_id,
+            "autonomous.is_autonomous": is_autonomous,
+        }
+        if not is_autonomous:
+            span_attrs["autonomous.max_iterations"] = budgets.max_iterations
+            span_attrs["autonomous.max_runtime_seconds"] = budgets.max_runtime_seconds
+            span_attrs["autonomous.max_tool_calls"] = budgets.max_tool_calls
+        if autonomous_config:
+            span_attrs["autonomous.max_iter_runtime_seconds"] = (
+                autonomous_config.max_iter_runtime_seconds
+            )
+
+        with tracer.start_as_current_span("kaos.autonomous.run", attributes=span_attrs) as span:
             task = self._tasks.get(task_id)
             if not task:
                 logger.error(f"Autonomous task {task_id} not found")
@@ -531,49 +575,53 @@ class LocalTaskManager(TaskManager):
                         logger.info(f"Autonomous run {task_id} stopped: task in terminal state")
                         break
 
-                    # Check iteration budget (0 = unlimited)
-                    if budgets.max_iterations > 0 and iteration >= budgets.max_iterations:
-                        msg = f"Budget exhausted: max_iterations ({budgets.max_iterations}) reached"
-                        logger.info(f"Autonomous run {task_id}: {msg}")
-                        task.add_event(
-                            EVENT_AUTONOMOUS_BUDGET_EXHAUSTED,
-                            {"reason": "max_iterations", "iterations": iteration},
-                        )
-                        last_response = msg
-                        break
+                    # --- Async task budget checks (autonomous mode skips these) ---
+                    if not is_autonomous:
+                        if budgets.max_iterations > 0 and iteration >= budgets.max_iterations:
+                            msg = f"Budget exhausted: max_iterations ({budgets.max_iterations}) reached"
+                            logger.info(f"Autonomous run {task_id}: {msg}")
+                            task.add_event(
+                                EVENT_AUTONOMOUS_BUDGET_EXHAUSTED,
+                                {"reason": "max_iterations", "iterations": iteration},
+                            )
+                            last_response = msg
+                            break
 
-                    # Check runtime budget (0 = unlimited)
-                    elapsed = time.monotonic() - loop_start
-                    if budgets.max_runtime_seconds > 0 and elapsed >= budgets.max_runtime_seconds:
-                        msg = f"Budget exhausted: max_runtime_seconds ({budgets.max_runtime_seconds}s) reached"
-                        logger.info(f"Autonomous run {task_id}: {msg}")
-                        task.add_event(
-                            EVENT_AUTONOMOUS_BUDGET_EXHAUSTED,
-                            {
-                                "reason": "max_runtime_seconds",
-                                "elapsed": round(elapsed, 1),
-                            },
-                        )
-                        last_response = msg
-                        break
+                        elapsed = time.monotonic() - loop_start
+                        if (
+                            budgets.max_runtime_seconds > 0
+                            and elapsed >= budgets.max_runtime_seconds
+                        ):
+                            msg = f"Budget exhausted: max_runtime_seconds ({budgets.max_runtime_seconds}s) reached"
+                            logger.info(f"Autonomous run {task_id}: {msg}")
+                            task.add_event(
+                                EVENT_AUTONOMOUS_BUDGET_EXHAUSTED,
+                                {"reason": "max_runtime_seconds", "elapsed": round(elapsed, 1)},
+                            )
+                            last_response = msg
+                            break
 
-                    # Check tool call budget (0 = unlimited)
-                    if budgets.max_tool_calls > 0 and total_tool_calls >= budgets.max_tool_calls:
-                        msg = f"Budget exhausted: max_tool_calls ({budgets.max_tool_calls}) reached"
-                        logger.info(f"Autonomous run {task_id}: {msg}")
-                        task.add_event(
-                            EVENT_AUTONOMOUS_BUDGET_EXHAUSTED,
-                            {
-                                "reason": "max_tool_calls",
-                                "total_tool_calls": total_tool_calls,
-                            },
-                        )
-                        last_response = msg
-                        break
+                        if (
+                            budgets.max_tool_calls > 0
+                            and total_tool_calls >= budgets.max_tool_calls
+                        ):
+                            msg = f"Budget exhausted: max_tool_calls ({budgets.max_tool_calls}) reached"
+                            logger.info(f"Autonomous run {task_id}: {msg}")
+                            task.add_event(
+                                EVENT_AUTONOMOUS_BUDGET_EXHAUSTED,
+                                {"reason": "max_tool_calls", "total_tool_calls": total_tool_calls},
+                            )
+                            last_response = msg
+                            break
 
                     # Build iteration message
                     if iteration == 0:
                         message = goal
+                    elif is_autonomous:
+                        message = (
+                            f"Continue working toward the goal. This is iteration {iteration + 1}. "
+                            "Review your progress and decide next steps."
+                        )
                     else:
                         message = (
                             f"Continue working toward the goal. This is iteration {iteration + 1}. "
@@ -605,16 +653,16 @@ class LocalTaskManager(TaskManager):
 
                     iteration += 1
 
-                    # Completion detection: if no tool calls, agent gave a final answer
-                    if tool_call_count == 0:
+                    # Completion detection for async tasks: no tool calls = done
+                    if not is_autonomous and tool_call_count == 0:
                         logger.info(
                             f"Autonomous run {task_id} completed after {iteration} iterations"
                         )
                         break
 
                     # Inter-iteration interval
-                    if budgets.interval_seconds > 0:
-                        await asyncio.sleep(budgets.interval_seconds)
+                    if interval_seconds > 0:
+                        await asyncio.sleep(interval_seconds)
 
                 task.output = last_response
                 task.history.append(TaskMessage(role="agent", text=last_response))
@@ -628,7 +676,7 @@ class LocalTaskManager(TaskManager):
                     logger.info(f"Autonomous task {task_id} completed")
                     span.set_attribute("task.state", "completed")
                     if task_counter:
-                        task_counter.add(1, {"state": "completed", "mode": "autonomous"})
+                        task_counter.add(1, {"state": "completed", "autonomous": True})
 
             except asyncio.CancelledError:
                 self._transition(task_id, TaskState.CANCELED, "Canceled")
@@ -645,13 +693,13 @@ class LocalTaskManager(TaskManager):
                 span.set_attribute("task.state", "failed")
                 span.record_exception(e)
                 if task_counter:
-                    task_counter.add(1, {"state": "failed", "mode": "autonomous"})
+                    task_counter.add(1, {"state": "failed", "autonomous": True})
 
             finally:
                 self._running_tasks.pop(task_id, None)
                 duration_ms = (time.perf_counter() - start_time) * 1000
                 if task_duration:
-                    task_duration.record(duration_ms, {"task.id": task_id, "mode": "autonomous"})
+                    task_duration.record(duration_ms, {"task.id": task_id, "autonomous": True})
 
     def _cleanup_if_needed(self) -> None:
         if len(self._tasks) >= self.max_tasks:
@@ -691,7 +739,8 @@ class NullTaskManager(TaskManager):
         self,
         goal: str,
         session_id: Optional[str] = None,
-        budgets: Optional[AutonomousBudgets] = None,
+        budgets: Optional[TaskBudgets] = None,
+        autonomous_config: Optional[AutonomousConfig] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> Task:
         task_id = f"null_task_{uuid.uuid4().hex[:8]}"
@@ -699,7 +748,7 @@ class NullTaskManager(TaskManager):
             id=task_id,
             session_id=session_id or "null-session",
             status=TaskStatus(state=TaskState.COMPLETED),
-            mode="autonomous",
+            autonomous=True,
         )
 
     async def get_task(self, task_id: str) -> Optional[Task]:
@@ -856,7 +905,7 @@ async def _jsonrpc_send_message(
 
     if mode == "autonomous":
         budgets_raw = config.get("budgets", {})
-        budgets = AutonomousBudgets(
+        budgets = TaskBudgets(
             max_iterations=budgets_raw.get("maxIterations", 10),
             max_runtime_seconds=budgets_raw.get("maxRuntimeSeconds", 300),
             max_tool_calls=budgets_raw.get("maxToolCalls", 50),

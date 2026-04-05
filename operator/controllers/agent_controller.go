@@ -103,19 +103,8 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		log.Info("WARNING: telemetry.enabled=true but endpoint is empty; telemetry will not function", "agent", agent.Name)
 	}
 
-	// Validate autonomous configuration
-	if agent.Spec.Config != nil && agent.Spec.Config.Autonomous != nil {
-		auto := agent.Spec.Config.Autonomous
-		if auto.Enabled && auto.Goal == "" {
-			agent.Status.Phase = "Failed"
-			agent.Status.Message = "autonomous.enabled=true requires autonomous.goal to be set"
-			agent.Status.Ready = false
-			if err := r.Status().Update(ctx, agent); err != nil {
-				return ctrl.Result{}, err
-			}
-			return ctrl.Result{}, nil
-		}
-	}
+	// Validate autonomous configuration (goal is required to activate)
+	// No validation needed — autonomous section without a goal is simply a no-op
 
 	// Resolve ModelAPI reference
 	modelapi := &kaosv1alpha1.ModelAPI{}
@@ -582,43 +571,48 @@ func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *
 		}
 	}
 
-	// Autonomous configuration
+	// Autonomous configuration — goal presence activates autonomous mode
 	if agent.Spec.Config != nil && agent.Spec.Config.Autonomous != nil {
 		auto := agent.Spec.Config.Autonomous
-		if auto.Enabled {
-			env = append(env, corev1.EnvVar{
-				Name:  "AUTONOMOUS_ENABLED",
-				Value: "true",
-			})
-		}
 		if auto.Goal != "" {
 			env = append(env, corev1.EnvVar{
 				Name:  "AUTONOMOUS_GOAL",
 				Value: auto.Goal,
 			})
 		}
-		if auto.MaxIterations != nil {
-			env = append(env, corev1.EnvVar{
-				Name:  "AUTONOMOUS_MAX_ITERATIONS",
-				Value: fmt.Sprintf("%d", *auto.MaxIterations),
-			})
-		}
-		if auto.MaxRuntimeSeconds != nil {
-			env = append(env, corev1.EnvVar{
-				Name:  "AUTONOMOUS_MAX_RUNTIME_SECONDS",
-				Value: fmt.Sprintf("%d", *auto.MaxRuntimeSeconds),
-			})
-		}
-		if auto.MaxToolCalls != nil {
-			env = append(env, corev1.EnvVar{
-				Name:  "AUTONOMOUS_MAX_TOOL_CALLS",
-				Value: fmt.Sprintf("%d", *auto.MaxToolCalls),
-			})
-		}
 		if auto.IntervalSeconds != nil {
 			env = append(env, corev1.EnvVar{
 				Name:  "AUTONOMOUS_INTERVAL_SECONDS",
 				Value: fmt.Sprintf("%d", *auto.IntervalSeconds),
+			})
+		}
+		if auto.MaxIterRuntimeSeconds != nil {
+			env = append(env, corev1.EnvVar{
+				Name:  "AUTONOMOUS_MAX_ITER_RUNTIME_SECONDS",
+				Value: fmt.Sprintf("%d", *auto.MaxIterRuntimeSeconds),
+			})
+		}
+	}
+
+	// Task budget configuration (A2A async task defaults)
+	if agent.Spec.Config != nil && agent.Spec.Config.TaskConfig != nil {
+		tc := agent.Spec.Config.TaskConfig
+		if tc.MaxIterations != nil {
+			env = append(env, corev1.EnvVar{
+				Name:  "TASK_MAX_ITERATIONS",
+				Value: fmt.Sprintf("%d", *tc.MaxIterations),
+			})
+		}
+		if tc.MaxRuntimeSeconds != nil {
+			env = append(env, corev1.EnvVar{
+				Name:  "TASK_MAX_RUNTIME_SECONDS",
+				Value: fmt.Sprintf("%d", *tc.MaxRuntimeSeconds),
+			})
+		}
+		if tc.MaxToolCalls != nil {
+			env = append(env, corev1.EnvVar{
+				Name:  "TASK_MAX_TOOL_CALLS",
+				Value: fmt.Sprintf("%d", *tc.MaxToolCalls),
 			})
 		}
 	}

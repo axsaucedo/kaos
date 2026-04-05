@@ -235,17 +235,22 @@ def deploy_agent_cmd(
     autonomous: str = typer.Option(
         None, "--autonomous", help="Enable autonomous mode with the given goal."
     ),
-    auto_max_iterations: int = typer.Option(
-        None, "--auto-max-iterations", help="Max autonomous iterations (0=unlimited)."
-    ),
-    auto_max_runtime: int = typer.Option(
-        None, "--auto-max-runtime", help="Max autonomous runtime in seconds (0=unlimited)."
-    ),
-    auto_max_tool_calls: int = typer.Option(
-        None, "--auto-max-tool-calls", help="Max cumulative tool calls (0=unlimited)."
+    auto_max_iter_runtime: int = typer.Option(
+        None,
+        "--auto-max-iter-runtime",
+        help="Max per-iteration runtime in seconds for continuous mode (0=unlimited).",
     ),
     auto_interval: float = typer.Option(
         None, "--auto-interval", help="Seconds between autonomous iterations."
+    ),
+    task_max_iterations: int = typer.Option(
+        None, "--task-max-iterations", help="Max iterations for A2A async tasks (0=unlimited)."
+    ),
+    task_max_runtime: int = typer.Option(
+        None, "--task-max-runtime", help="Max runtime in seconds for A2A async tasks (0=unlimited)."
+    ),
+    task_max_tool_calls: int = typer.Option(
+        None, "--task-max-tool-calls", help="Max cumulative tool calls for A2A async tasks (0=unlimited)."
     ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Print YAML instead of deploying."
@@ -298,10 +303,11 @@ def deploy_agent_cmd(
         otel_endpoint=otel_endpoint,
         env_vars=env_vars,
         autonomous=autonomous,
-        auto_max_iterations=auto_max_iterations,
-        auto_max_runtime=auto_max_runtime,
-        auto_max_tool_calls=auto_max_tool_calls,
+        auto_max_iter_runtime=auto_max_iter_runtime,
         auto_interval=auto_interval,
+        task_max_iterations=task_max_iterations,
+        task_max_runtime=task_max_runtime,
+        task_max_tool_calls=task_max_tool_calls,
         wait=wait,
         wait_timeout=wait_timeout,
         dry_run=dry_run,
