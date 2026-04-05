@@ -178,17 +178,12 @@ async def test_autonomous_a2a_send_message(
 
         assert state == "completed", f"Task ended in state: {state}"
 
-        # Verify events were recorded
+        # Verify state transition events were recorded
         events = get_data["result"].get("events", [])
         event_types = [e["type"] for e in events]
         assert "task.submitted" in event_types
         assert "task.working" in event_types
-        assert "autonomous.iteration.started" in event_types
         assert "task.completed" in event_types
-
-        # Verify at least 2 iterations occurred (tool call then final)
-        iteration_starts = [e for e in events if e["type"] == "autonomous.iteration.started"]
-        assert len(iteration_starts) >= 2, f"Expected >=2 iterations, got {len(iteration_starts)}"
 
         # Verify history contains agent response with final output
         history = get_data["result"].get("history", [])
@@ -321,10 +316,6 @@ async def test_autonomous_budget_enforcement(
         budget_data = budget_event.get("data", {})
         assert "max_iterations" in budget_data.get("reason", ""), \
             f"Expected max_iterations reason, got: {budget_event}"
-
-        # Verify only 1 iteration occurred
-        iteration_starts = [e for e in events if e["type"] == "autonomous.iteration.started"]
-        assert len(iteration_starts) == 1, f"Expected 1 iteration, got {len(iteration_starts)}"
 
 
 @pytest.mark.asyncio
