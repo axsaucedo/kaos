@@ -260,6 +260,35 @@ export interface AgentMemoryConfig {
   maxSessionEvents?: number;
 }
 
+// AutonomousConfig configures autonomous (self-looping) agent execution.
+// Setting a goal activates autonomous mode on agent startup.
+export interface AutonomousConfig {
+  // Goal is the objective the agent works toward autonomously
+  goal?: string;
+  // IntervalSeconds is the pause between autonomous loop iterations (default: 0)
+  intervalSeconds?: number;
+  // MaxIterRuntimeSeconds is the maximum wall-clock time per iteration (default: 60, 0 = unlimited)
+  maxIterRuntimeSeconds?: number;
+}
+
+// TaskConfig configures budget limits for A2A async task execution
+export interface TaskConfig {
+  // MaxIterations is the max iterations for A2A async tasks (default: 10, 0 = unlimited)
+  maxIterations?: number;
+  // MaxRuntimeSeconds is the max wall-clock time for A2A async tasks (default: 300, 0 = unlimited)
+  maxRuntimeSeconds?: number;
+  // MaxToolCalls is the max cumulative tool calls for A2A async tasks (default: 50, 0 = unlimited)
+  maxToolCalls?: number;
+}
+
+// TelemetryConfig defines OpenTelemetry instrumentation settings
+export interface TelemetryConfig {
+  // Enabled controls whether OpenTelemetry is enabled (default: false)
+  enabled?: boolean;
+  // Endpoint is the OTLP gRPC endpoint URL
+  endpoint?: string;
+}
+
 // AgentConfig defines agent-specific configuration
 export interface AgentConfig {
   // Description is a human-readable description of the agent
@@ -272,6 +301,12 @@ export interface AgentConfig {
   toolCallMode?: 'auto' | 'native' | 'string';
   // Memory system configuration
   memory?: AgentMemoryConfig;
+  // Telemetry configures OpenTelemetry instrumentation
+  telemetry?: TelemetryConfig;
+  // Autonomous configures autonomous (self-looping) execution
+  autonomous?: AutonomousConfig;
+  // TaskConfig configures budget limits for A2A async tasks
+  taskConfig?: TaskConfig;
   // Env variables to pass to the agent runtime
   env?: EnvVar[];
 }
