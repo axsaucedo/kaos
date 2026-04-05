@@ -141,7 +141,7 @@ make format                     # Auto-format code
 - `_running_tasks: Dict[str, asyncio.Task]` tracks running async tasks; `shutdown()` cancels all
 
 ### Autonomous Execution
-- `LocalTaskManager._execute_autonomous(task, budgets, continuous, continuous_config)`: Core autonomous loop (owned by TaskManager)
+- `LocalTaskManager._execute_autonomous(task, budgets, autonomous_config)`: Core autonomous loop (owned by TaskManager)
 - Two execution paths:
   1. **Continuous mode** (CRD): No overall budgets, per-iteration limits only, runs forever
   2. **Async task mode** (A2A): Overall budgets, "no tool calls = done" completion

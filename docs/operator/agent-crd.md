@@ -243,7 +243,7 @@ config:
 
 #### config.autonomous (optional)
 
-Autonomous (self-looping) continuous agent execution configuration. When a `goal` is set, the agent runs in a **continuous loop** on startup — there are no overall iteration or runtime limits. The loop runs forever until the pod is stopped.
+Autonomous (self-looping) agent execution configuration. When a `goal` is set, the agent runs in an **autonomous loop** on startup — there are no overall iteration or runtime limits. The loop runs forever until the pod is stopped.
 
 ```yaml
 config:

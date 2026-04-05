@@ -252,9 +252,9 @@ class TaskManager(ABC):
         Args:
             goal: The objective for the autonomous run.
             session_id: Optional session ID (auto-generated if not provided).
-            budgets: Overall budgets for async task mode (ignored in CRD mode).
-            autonomous_config: Per-iteration config for CRD-activated mode. If provided, runs
-                in continuous CRD mode (no overall limits). If None, runs as async task.
+            budgets: Overall budgets for async task mode (ignored in autonomous mode).
+            autonomous_config: Per-iteration config for autonomous mode. If provided, runs
+                in autonomous mode (no overall limits). If None, runs as async task.
             metadata: Optional metadata for the task.
         """
         ...
@@ -337,7 +337,7 @@ class LocalTaskManager(TaskManager):
         """Submit an autonomous run. Spawns background task, returns immediately."""
         tracer = trace_api.get_tracer(SERVICE_NAME)
         task_counter, _ = get_task_metrics()
-        is_crd_mode = autonomous_config is not None
+        is_autonomous = autonomous_config is not None
 
         with tracer.start_as_current_span(
             "kaos.task.submit_autonomous",
@@ -526,9 +526,9 @@ class LocalTaskManager(TaskManager):
         budgets: TaskBudgets,
         autonomous_config: Optional[AutonomousConfig] = None,
     ) -> None:
-        """Execute autonomous loop: CRD mode (forever) or async task (budget-limited).
+        """Execute autonomous loop: autonomous mode (forever) or async task (budget-limited).
 
-        CRD mode (autonomous_config provided): runs forever, per-iteration time limit only.
+        Autonomous mode (autonomous_config provided): runs forever, per-iteration time limit only.
         Async task mode (autonomous_config=None): overall budgets, "no tool calls = done" completion.
         """
         if self._setup_fn:
@@ -537,7 +537,7 @@ class LocalTaskManager(TaskManager):
         tracer = trace_api.get_tracer(SERVICE_NAME)
         task_counter, task_duration = get_task_metrics()
         start_time = time.perf_counter()
-        is_crd_mode = autonomous_config is not None
+        is_autonomous = autonomous_config is not None
         interval_seconds = (
             autonomous_config.interval_seconds if autonomous_config else budgets.interval_seconds
         )
@@ -545,9 +545,9 @@ class LocalTaskManager(TaskManager):
         span_attrs: Dict[str, Any] = {
             "autonomous.task_id": task_id,
             "autonomous.session_id": session_id,
-            "autonomous.crd_mode": is_crd_mode,
+            "autonomous.is_autonomous": is_autonomous,
         }
-        if not is_crd_mode:
+        if not is_autonomous:
             span_attrs["autonomous.max_iterations"] = budgets.max_iterations
             span_attrs["autonomous.max_runtime_seconds"] = budgets.max_runtime_seconds
             span_attrs["autonomous.max_tool_calls"] = budgets.max_tool_calls
@@ -575,8 +575,8 @@ class LocalTaskManager(TaskManager):
                         logger.info(f"Autonomous run {task_id} stopped: task in terminal state")
                         break
 
-                    # --- Async task budget checks (CRD mode skips these) ---
-                    if not is_crd_mode:
+                    # --- Async task budget checks (autonomous mode skips these) ---
+                    if not is_autonomous:
                         if budgets.max_iterations > 0 and iteration >= budgets.max_iterations:
                             msg = f"Budget exhausted: max_iterations ({budgets.max_iterations}) reached"
                             logger.info(f"Autonomous run {task_id}: {msg}")
@@ -617,7 +617,7 @@ class LocalTaskManager(TaskManager):
                     # Build iteration message
                     if iteration == 0:
                         message = goal
-                    elif is_crd_mode:
+                    elif is_autonomous:
                         message = (
                             f"Continue working toward the goal. This is iteration {iteration + 1}. "
                             "Review your progress and decide next steps."
@@ -654,7 +654,7 @@ class LocalTaskManager(TaskManager):
                     iteration += 1
 
                     # Completion detection for async tasks: no tool calls = done
-                    if not is_crd_mode and tool_call_count == 0:
+                    if not is_autonomous and tool_call_count == 0:
                         logger.info(
                             f"Autonomous run {task_id} completed after {iteration} iterations"
                         )

@@ -22,7 +22,7 @@ External callers submit goals via A2A `SendMessage`. The agent runs in backgroun
 
 ### Startup-Activated Continuous (Use-Case A)
 
-Agent self-loops on pod boot. Runs continuously until the pod is stopped.
+Agent self-loops on pod boot. Runs autonomously until the pod is stopped.
 
 ```yaml
 apiVersion: kaos.tools/v1alpha1
