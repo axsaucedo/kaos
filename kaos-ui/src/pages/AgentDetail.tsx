@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Bot, Edit, Trash2, RefreshCw, Box, FileCode } from 'lucide-react';
+import { ArrowLeft, Bot, Edit, Trash2, RefreshCw, Box, FileCode, Radio } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -21,6 +21,7 @@ import { useKubernetesConnection } from '@/contexts/KubernetesConnectionContext'
 import { AgentChat } from '@/components/agent/AgentChat';
 import { AgentOverview } from '@/components/agent/AgentOverview';
 import { AgentMemory } from '@/components/agent/AgentMemory';
+import { AgentA2ADebug } from '@/components/agent/AgentA2ADebug';
 import { ResourcePods } from '@/components/shared/ResourcePods';
 import { AgentEditDialog } from '@/components/resources/AgentEditDialog';
 import { YamlViewer } from '@/components/shared/YamlViewer';
@@ -253,9 +254,13 @@ export default function AgentDetail() {
 
       {/* Tabs Content */}
       <Tabs value={currentTab} onValueChange={setCurrentTab} className="space-y-6">
-        <TabsList className="grid w-full max-w-2xl grid-cols-5">
+        <TabsList className="grid w-full max-w-2xl grid-cols-6">
           <TabsTrigger value="overview" data-testid="tab-overview">Overview</TabsTrigger>
           <TabsTrigger value="chat" data-testid="tab-chat">Chat</TabsTrigger>
+          <TabsTrigger value="a2a" data-testid="tab-a2a" className="flex items-center gap-1">
+            <Radio className="h-3 w-3" />
+            A2A
+          </TabsTrigger>
           <TabsTrigger value="memory" data-testid="tab-memory">Memory</TabsTrigger>
           <TabsTrigger value="pods" data-testid="tab-pods" className="flex items-center gap-1">
             <Box className="h-3 w-3" />
@@ -282,6 +287,10 @@ export default function AgentDetail() {
             onNewSession={handleNewSession}
           />
         </div>
+
+        <TabsContent value="a2a" className="space-y-6">
+          <AgentA2ADebug agent={agent} />
+        </TabsContent>
 
         <TabsContent value="memory" className="space-y-6">
           <AgentMemory agent={agent} />
