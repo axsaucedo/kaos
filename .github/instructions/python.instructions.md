@@ -152,7 +152,7 @@ make format                     # Auto-format code
   2. **A2A-triggered**: `SendMessage` with `configuration.mode: "autonomous"` + optional `budgets`
 - `AutonomousConfig` dataclass: `goal`, `interval_seconds` (0), `max_iter_runtime_seconds` (60)
 - `TaskBudgets` dataclass: `max_iterations` (10), `max_runtime_seconds` (300), `max_tool_calls` (50), `interval_seconds` (0)
-- `TaskEvent` append-only event log per task: submitted, working, iteration.started/completed, budget.exhausted, completed/failed/canceled
+- `TaskEvent` append-only event log per task: submitted, working, budget.exhausted, completed/failed/canceled (state transitions only — iteration detail captured by Memory)
 
 ### A2A JSON-RPC Endpoint (POST /) — a2a.py
 - JSON-RPC 2.0 dispatcher at root path, separate from `/v1/chat/completions`
