@@ -1,5 +1,5 @@
 import React from 'react';
-import { Bot, Box, Server, Link2, Cpu, Package, Code } from 'lucide-react';
+import { Bot, Box, Server, Link2, Cpu, Package, Code, Zap } from 'lucide-react';
 import {
   Sheet,
   SheetContent,
@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import type { Agent, MCPServer, ModelAPI } from '@/types/kubernetes';
-import { getStatusVariant } from '@/lib/status-utils';
+import { getStatusVariant, isAutonomousAgent } from '@/lib/status-utils';
 
 type ResourceType = 'Agent' | 'MCPServer' | 'ModelAPI';
 
@@ -188,6 +188,69 @@ function AgentSections({ agent }: { agent: Agent }) {
       </section>
 
       <Separator />
+
+      {/* Autonomous Execution */}
+      {isAutonomousAgent(agent) && (
+        <>
+          <section>
+            <h3 className="text-sm font-semibold text-foreground mb-2 flex items-center gap-2">
+              <Zap className="h-4 w-4 text-yellow-500" />
+              Autonomous Execution
+            </h3>
+            <div className="space-y-2 text-sm">
+              <div>
+                <span className="text-muted-foreground block mb-1">Goal</span>
+                <p className="text-foreground bg-muted/50 rounded-lg p-2 text-xs">
+                  {agent.spec.config?.autonomous?.goal}
+                </p>
+              </div>
+              {agent.spec.config?.autonomous?.intervalSeconds !== undefined && (
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Interval</span>
+                  <span className="font-mono">{agent.spec.config.autonomous.intervalSeconds}s</span>
+                </div>
+              )}
+              {agent.spec.config?.autonomous?.maxIterRuntimeSeconds !== undefined && (
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Max Iter Runtime</span>
+                  <span className="font-mono">{agent.spec.config.autonomous.maxIterRuntimeSeconds}s</span>
+                </div>
+              )}
+            </div>
+          </section>
+          <Separator />
+        </>
+      )}
+
+      {/* Task Budgets */}
+      {agent.spec.config?.taskConfig && (
+        <>
+          <section>
+            <h3 className="text-sm font-semibold text-foreground mb-2">Task Budgets</h3>
+            <div className="space-y-2 text-sm">
+              {agent.spec.config.taskConfig.maxIterations !== undefined && (
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Max Iterations</span>
+                  <span className="font-mono">{agent.spec.config.taskConfig.maxIterations}</span>
+                </div>
+              )}
+              {agent.spec.config.taskConfig.maxRuntimeSeconds !== undefined && (
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Max Runtime</span>
+                  <span className="font-mono">{agent.spec.config.taskConfig.maxRuntimeSeconds}s</span>
+                </div>
+              )}
+              {agent.spec.config.taskConfig.maxToolCalls !== undefined && (
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Max Tool Calls</span>
+                  <span className="font-mono">{agent.spec.config.taskConfig.maxToolCalls}</span>
+                </div>
+              )}
+            </div>
+          </section>
+          <Separator />
+        </>
+      )}
 
       <EnvVarsSection envVars={envVars} />
 

@@ -1,12 +1,12 @@
 import React, { createContext, useContext } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Handle, Position } from '@xyflow/react';
-import { Box, Server, Bot, Info, MessageSquare, Brain, Wrench, Stethoscope, AlertTriangle, Pencil } from 'lucide-react';
+import { Box, Server, Bot, Info, MessageSquare, Brain, Wrench, Stethoscope, AlertTriangle, Pencil, Zap } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import type { ResourceNodeData, ResourceKind } from './types';
 import { RESOURCE_ROUTES } from './types';
-import { getStatusVariant } from '@/lib/status-utils';
+import { getStatusVariant, isAutonomousAgent } from '@/lib/status-utils';
 
 // Context for zoom level and compact mode toggle (zoom no longer triggers compact)
 // eslint-disable-next-line react-refresh/only-export-components
@@ -81,6 +81,7 @@ export function ResourceNode({ data, onEdit }: { data: ResourceNodeData; onEdit?
   const route = RESOURCE_ROUTES[data.resourceType];
   const { namespace, name } = data.resource.metadata;
   const basePath = `/${route}/${namespace}/${name}`;
+  const isAutonomous = data.resourceType === 'Agent' && isAutonomousAgent(data.resource as import('@/types/kubernetes').Agent);
 
   const handleQuickAction = (tab: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -119,6 +120,7 @@ export function ResourceNode({ data, onEdit }: { data: ResourceNodeData; onEdit?
         >
           <Icon className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
           <span className="text-[10px] font-medium text-foreground truncate max-w-[120px]">{data.label}</span>
+          {isAutonomous && <Zap className="h-3 w-3 text-yellow-500 shrink-0" />}
           <div className={`w-2 h-2 rounded-full ${statusDot} shrink-0`} />
         </div>
       </>
@@ -147,6 +149,14 @@ export function ResourceNode({ data, onEdit }: { data: ResourceNodeData; onEdit?
         <div className="flex items-center gap-2.5 mb-1.5">
           <Icon className="h-4 w-4 text-muted-foreground group-hover:text-foreground transition-colors" />
           <span className="text-sm font-semibold text-foreground truncate flex-1">{data.label}</span>
+          {isAutonomous && (
+            <Tooltip delayDuration={400}>
+              <TooltipTrigger>
+                <Zap className="h-3.5 w-3.5 text-yellow-500 shrink-0" />
+              </TooltipTrigger>
+              <TooltipContent side="top" className="text-xs">Autonomous</TooltipContent>
+            </Tooltip>
+          )}
         </div>
 
         <div className="flex items-center justify-between gap-2 mb-2">
