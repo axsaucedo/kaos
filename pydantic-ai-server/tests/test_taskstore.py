@@ -15,7 +15,6 @@ from pais.a2a import (
     TERMINAL_STATES,
     EVENT_TASK_SUBMITTED,
     EVENT_TASK_COMPLETED,
-    EVENT_AUTONOMOUS_ITERATION_STARTED,
     EVENT_AUTONOMOUS_BUDGET_EXHAUSTED,
 )
 
@@ -97,11 +96,11 @@ class TestTaskEvent:
     def test_task_event_with_data(self):
         event = TaskEvent(
             id="evt_002",
-            type="autonomous.iteration.started",
+            type="autonomous.budget.exhausted",
             timestamp="2024-01-01T00:00:00+00:00",
-            data={"iteration": 1},
+            data={"reason": "max_iterations"},
         )
-        assert event.data == {"iteration": 1}
+        assert event.data == {"reason": "max_iterations"}
 
     def test_task_event_to_dict(self):
         event = TaskEvent(
@@ -136,11 +135,11 @@ class TestTaskEvent:
             status=TaskStatus(state=TaskState.SUBMITTED),
         )
         task.add_event(EVENT_TASK_SUBMITTED)
-        task.add_event(EVENT_AUTONOMOUS_ITERATION_STARTED, {"iteration": 0})
+        task.add_event(EVENT_AUTONOMOUS_BUDGET_EXHAUSTED, {"reason": "max_iterations"})
         task.add_event(EVENT_TASK_COMPLETED)
         assert len(task.events) == 3
         assert task.events[0].type == EVENT_TASK_SUBMITTED
-        assert task.events[1].type == EVENT_AUTONOMOUS_ITERATION_STARTED
+        assert task.events[1].type == EVENT_AUTONOMOUS_BUDGET_EXHAUSTED
         assert task.events[2].type == EVENT_TASK_COMPLETED
 
     def test_task_add_event_no_data(self):
@@ -389,7 +388,6 @@ class TestLocalTaskManagerAutonomous:
         assert completed is not None
         event_types = [e.type for e in completed.events]
         assert EVENT_TASK_SUBMITTED in event_types
-        assert EVENT_AUTONOMOUS_ITERATION_STARTED in event_types
         assert EVENT_TASK_COMPLETED in event_types
 
     @pytest.mark.asyncio

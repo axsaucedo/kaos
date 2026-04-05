@@ -119,18 +119,18 @@ Budgets are checked at the **start** of each iteration (before execution). When 
 
 ## Event Log
 
-Each task maintains an append-only event log tracking execution progress:
+Each task maintains an append-only event log tracking state transitions:
 
 | Event Type | Description |
 |-----------|-------------|
 | `task.submitted` | Task created |
 | `task.working` | Execution started |
-| `autonomous.iteration.started` | Begin iteration N |
-| `autonomous.iteration.completed` | Iteration N finished |
 | `autonomous.budget.exhausted` | Budget limit reached |
 | `task.completed` | Execution finished successfully |
 | `task.failed` | Execution failed with error |
 | `task.canceled` | Task was canceled |
+
+Iteration-level detail (tool calls, responses) is captured by the Memory system via `/memory/events`.
 
 Events are returned in `GetTask` responses:
 ```json
@@ -138,8 +138,7 @@ Events are returned in `GetTask` responses:
   "events": [
     {"id": "evt-1", "type": "task.submitted", "timestamp": "2024-01-01T00:00:00Z", "data": {}},
     {"id": "evt-2", "type": "task.working", "timestamp": "2024-01-01T00:00:01Z", "data": {}},
-    {"id": "evt-3", "type": "autonomous.iteration.started", "timestamp": "2024-01-01T00:00:01Z", "data": {"iteration": 0}},
-    {"id": "evt-4", "type": "autonomous.iteration.completed", "timestamp": "2024-01-01T00:00:05Z", "data": {"iteration": 0, "response_preview": "..."}}
+    {"id": "evt-3", "type": "task.completed", "timestamp": "2024-01-01T00:00:05Z", "data": {"output_preview": "..."}}
   ]
 }
 ```
