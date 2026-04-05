@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { Brain, Clock, RefreshCw, MessageSquare, User, Bot, Wrench, AlertCircle, Users, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { Brain, Clock, RefreshCw, MessageSquare, User, Bot, Wrench, AlertCircle, Users, AlertTriangle, CheckCircle2, Radio, Eye, List, Filter } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -7,7 +7,15 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { k8sClient } from '@/lib/kubernetes-client';
+import { MemoryConversationView } from './MemoryConversationView';
 import type { Agent } from '@/types/kubernetes';
 
 interface MemoryEvent {
@@ -45,6 +53,10 @@ export function AgentMemory({ agent }: AgentMemoryProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+  const [isLive, setIsLive] = useState(false);
+  const [viewMode, setViewMode] = useState<'raw' | 'conversation'>('raw');
+  const [sessionFilter, setSessionFilter] = useState<string>('all');
+  const liveRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Check if memory is enabled for this agent
   const isMemoryEnabled = agent.spec.config?.memory?.enabled !== false;
@@ -111,6 +123,26 @@ export function AgentMemory({ agent }: AgentMemoryProps) {
       fetchMemory();
     }
   }, [fetchMemory, isMemoryEnabled]);
+
+  // Live mode polling
+  useEffect(() => {
+    if (isLive && isMemoryEnabled) {
+      liveRef.current = setInterval(() => {
+        fetchMemory();
+      }, 2000);
+    }
+    return () => {
+      if (liveRef.current) {
+        clearInterval(liveRef.current);
+        liveRef.current = null;
+      }
+    };
+  }, [isLive, isMemoryEnabled, fetchMemory]);
+
+  // Filter events by session
+  const filteredEvents = sessionFilter === 'all'
+    ? events
+    : events.filter(e => e.session_id === sessionFilter);
 
   const getEventIcon = (event: MemoryEvent) => {
     switch (event.type) {
@@ -338,21 +370,62 @@ export function AgentMemory({ agent }: AgentMemoryProps) {
         <div className="flex items-center gap-2">
           <Brain className="h-5 w-5 text-agent" />
           <h2 className="text-lg font-semibold">Agent Memory</h2>
-          {lastRefresh && (
+          {isLive && (
+            <div className="flex items-center gap-1">
+              <div className="h-2 w-2 rounded-full bg-green-500 animate-pulse" />
+              <span className="text-xs text-green-500 font-medium">Live</span>
+            </div>
+          )}
+          {lastRefresh && !isLive && (
             <span className="text-xs text-muted-foreground">
               Last updated: {lastRefresh.toLocaleTimeString()}
             </span>
           )}
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={fetchMemory}
-          disabled={isLoading}
-        >
-          <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          {/* View mode toggle */}
+          <div className="flex items-center border rounded-md">
+            <Button
+              variant={viewMode === 'raw' ? 'secondary' : 'ghost'}
+              size="sm"
+              className="h-7 px-2 rounded-r-none"
+              onClick={() => setViewMode('raw')}
+            >
+              <List className="h-3.5 w-3.5 mr-1" />
+              <span className="text-xs">Raw</span>
+            </Button>
+            <Button
+              variant={viewMode === 'conversation' ? 'secondary' : 'ghost'}
+              size="sm"
+              className="h-7 px-2 rounded-l-none"
+              onClick={() => setViewMode('conversation')}
+            >
+              <Eye className="h-3.5 w-3.5 mr-1" />
+              <span className="text-xs">Chat</span>
+            </Button>
+          </div>
+
+          {/* Live mode toggle */}
+          <Button
+            variant={isLive ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setIsLive(!isLive)}
+            className={isLive ? 'bg-green-600 hover:bg-green-700' : ''}
+          >
+            <Radio className={`h-4 w-4 mr-1 ${isLive ? 'animate-pulse' : ''}`} />
+            {isLive ? 'Live' : 'Live'}
+          </Button>
+
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={fetchMemory}
+            disabled={isLoading}
+          >
+            <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Error State */}
@@ -368,7 +441,7 @@ export function AgentMemory({ agent }: AgentMemoryProps) {
         <TabsList>
           <TabsTrigger value="events" className="gap-2">
             <MessageSquare className="h-4 w-4" />
-            Events ({events.length})
+            Events ({filteredEvents.length})
           </TabsTrigger>
           <TabsTrigger value="sessions" className="gap-2">
             <Clock className="h-4 w-4" />
@@ -380,10 +453,31 @@ export function AgentMemory({ agent }: AgentMemoryProps) {
         <TabsContent value="events">
           <Card>
             <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
-                <MessageSquare className="h-4 w-4" />
-                Memory Events
-              </CardTitle>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <MessageSquare className="h-4 w-4" />
+                  Memory Events
+                </CardTitle>
+                {/* Session filter */}
+                {sessions.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <Filter className="h-3.5 w-3.5 text-muted-foreground" />
+                    <Select value={sessionFilter} onValueChange={setSessionFilter}>
+                      <SelectTrigger className="w-44 h-7 text-xs">
+                        <SelectValue placeholder="All sessions" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All sessions</SelectItem>
+                        {sessions.map((sid) => (
+                          <SelectItem key={sid} value={sid}>
+                            <span className="font-mono text-xs">{sid.slice(0, 16)}...</span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </div>
             </CardHeader>
             <CardContent>
               {isLoading ? (
@@ -398,16 +492,20 @@ export function AgentMemory({ agent }: AgentMemoryProps) {
                     </div>
                   ))}
                 </div>
-              ) : events.length === 0 ? (
+              ) : filteredEvents.length === 0 ? (
                 <div className="text-center py-8 text-muted-foreground">
                   <Brain className="h-12 w-12 mx-auto mb-4 opacity-50" />
                   <p>No memory events recorded</p>
                   <p className="text-xs mt-1">Events will appear here after agent interactions</p>
                 </div>
+              ) : viewMode === 'conversation' ? (
+                <ScrollArea className="h-[400px] pr-4">
+                  <MemoryConversationView events={filteredEvents} />
+                </ScrollArea>
               ) : (
                 <ScrollArea className="h-[400px] pr-4">
                   <div className="space-y-3">
-                    {[...events].reverse().map((event, index) => (
+                    {[...filteredEvents].reverse().map((event, index) => (
                       <div
                         key={event.id || index}
                         className="flex gap-3 p-3 rounded-lg bg-muted/30 border border-border/50"

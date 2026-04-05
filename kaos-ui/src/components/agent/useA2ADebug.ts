@@ -61,6 +61,26 @@ export function useA2ADebug(agent: Agent) {
     }
   }, [serviceName, namespace]);
 
+  const startPolling = useCallback((taskId: string) => {
+    stopPolling();
+    setIsPolling(true);
+    pollRef.current = setInterval(async () => {
+      try {
+        const task = await getA2ATask(serviceName, taskId, namespace);
+        setCurrentTask(task);
+        setTaskHistory(prev => prev.map(entry =>
+          entry.taskId === taskId ? { ...entry, state: task.status?.state || entry.state } : entry
+        ));
+        const terminalStates = ['completed', 'failed', 'canceled'];
+        if (task.status && terminalStates.includes(task.status.state)) {
+          stopPolling();
+        }
+      } catch {
+        // Silently continue polling on transient errors
+      }
+    }, 3000);
+  }, [serviceName, namespace, stopPolling]);
+
   const sendMessage = useCallback(async (params: SendMessageParams) => {
     setIsSending(true);
     setSendError(null);
@@ -90,7 +110,7 @@ export function useA2ADebug(agent: Agent) {
     } finally {
       setIsSending(false);
     }
-  }, [serviceName, namespace]);
+  }, [serviceName, namespace, startPolling]);
 
   const fetchTask = useCallback(async (taskId: string) => {
     setIsLoadingTask(true);
@@ -129,26 +149,6 @@ export function useA2ADebug(agent: Agent) {
     } finally {
       setIsLoadingTask(false);
     }
-  }, [serviceName, namespace, stopPolling]);
-
-  const startPolling = useCallback((taskId: string) => {
-    stopPolling();
-    setIsPolling(true);
-    pollRef.current = setInterval(async () => {
-      try {
-        const task = await getA2ATask(serviceName, taskId, namespace);
-        setCurrentTask(task);
-        setTaskHistory(prev => prev.map(entry =>
-          entry.taskId === taskId ? { ...entry, state: task.status?.state || entry.state } : entry
-        ));
-        const terminalStates = ['completed', 'failed', 'canceled'];
-        if (task.status && terminalStates.includes(task.status.state)) {
-          stopPolling();
-        }
-      } catch {
-        // Silently continue polling on transient errors
-      }
-    }, 3000);
   }, [serviceName, namespace, stopPolling]);
 
   const loadTaskFromHistory = useCallback((entry: TaskHistoryEntry) => {
