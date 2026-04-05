@@ -273,11 +273,9 @@ class TestA2AAutonomousMode:
                 task2 = resp2.json()["result"]
                 assert task2["status"]["state"] == "completed"
 
-                # Validate events show iteration lifecycle
+                # Validate events show state transitions
                 event_types = [e["type"] for e in task2.get("events", [])]
                 assert "task.submitted" in event_types
-                assert "autonomous.iteration.started" in event_types
-                assert "autonomous.iteration.completed" in event_types
                 assert "task.completed" in event_types
 
                 # Validate output content

@@ -122,8 +122,6 @@ EVENT_TASK_WORKING = "task.working"
 EVENT_TASK_COMPLETED = "task.completed"
 EVENT_TASK_FAILED = "task.failed"
 EVENT_TASK_CANCELED = "task.canceled"
-EVENT_AUTONOMOUS_ITERATION_STARTED = "autonomous.iteration.started"
-EVENT_AUTONOMOUS_ITERATION_COMPLETED = "autonomous.iteration.completed"
 EVENT_AUTONOMOUS_BUDGET_EXHAUSTED = "autonomous.budget.exhausted"
 
 
@@ -629,8 +627,6 @@ class LocalTaskManager(TaskManager):
                             "respond with your final answer without making any tool calls."
                         )
 
-                    task.add_event(EVENT_AUTONOMOUS_ITERATION_STARTED, {"iteration": iteration})
-
                     # Run one iteration
                     with tracer.start_as_current_span(
                         "kaos.autonomous.iteration",
@@ -640,16 +636,6 @@ class LocalTaskManager(TaskManager):
 
                     if tool_call_count > 0:
                         total_tool_calls += tool_call_count
-
-                    task.add_event(
-                        EVENT_AUTONOMOUS_ITERATION_COMPLETED,
-                        {
-                            "iteration": iteration,
-                            "had_tool_calls": tool_call_count > 0,
-                            "tool_call_count": tool_call_count,
-                            "response_preview": last_response[:200],
-                        },
-                    )
 
                     iteration += 1
 

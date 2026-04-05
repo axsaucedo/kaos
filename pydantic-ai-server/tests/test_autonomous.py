@@ -7,9 +7,9 @@ import pytest
 
 from pais.a2a import (
     TaskBudgets,
-    EVENT_AUTONOMOUS_ITERATION_STARTED,
-    EVENT_AUTONOMOUS_ITERATION_COMPLETED,
     EVENT_AUTONOMOUS_BUDGET_EXHAUSTED,
+    EVENT_TASK_SUBMITTED,
+    EVENT_TASK_COMPLETED,
 )
 from tests.helpers import make_test_server
 
@@ -61,9 +61,7 @@ class TestAutonomousLoop:
         assert completed is not None
         assert completed.output is not None
         assert len(completed.output) > 0
-
-        started = [e for e in completed.events if e.type == EVENT_AUTONOMOUS_ITERATION_STARTED]
-        assert len(started) == 1
+        assert completed.status.state.value == "completed"
 
     @pytest.mark.asyncio
     async def test_budget_max_iterations(self):
@@ -134,13 +132,13 @@ class TestAutonomousLoop:
         completed = await server.task_manager.wait_for_completion(task.id, timeout=5.0)
         assert completed is not None
         assert "final report" in completed.output.lower() or "complete" in completed.output.lower()
-
-        started = [e for e in completed.events if e.type == EVENT_AUTONOMOUS_ITERATION_STARTED]
-        assert len(started) == 3
+        event_types = [e.type for e in completed.events]
+        assert EVENT_TASK_SUBMITTED in event_types
+        assert EVENT_TASK_COMPLETED in event_types
 
     @pytest.mark.asyncio
-    async def test_events_emitted(self):
-        """Verify task events during autonomous execution."""
+    async def test_state_transition_events_emitted(self):
+        """Verify task state transition events during autonomous execution."""
         _set_mock_responses(
             [
                 '{"tool_calls": [{"id": "c1", "name": "echo", "arguments": {"message": "work"}}]}',
@@ -158,13 +156,10 @@ class TestAutonomousLoop:
         assert completed is not None
 
         event_types = [e.type for e in completed.events]
-        assert EVENT_AUTONOMOUS_ITERATION_STARTED in event_types
-        assert EVENT_AUTONOMOUS_ITERATION_COMPLETED in event_types
-
-        completed_events = [
-            e for e in completed.events if e.type == EVENT_AUTONOMOUS_ITERATION_COMPLETED
-        ]
-        assert any(e.data.get("tool_call_count", 0) > 0 for e in completed_events)
+        assert EVENT_TASK_SUBMITTED in event_types
+        assert EVENT_TASK_COMPLETED in event_types
+        assert completed.output is not None
+        assert len(completed.output) > 0
 
     @pytest.mark.asyncio
     async def test_unlimited_iterations_completes_naturally(self):
