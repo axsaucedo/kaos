@@ -1,10 +1,10 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Radio, Clock, Loader2 } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
-import { useA2ADebug } from './useA2ADebug';
+import { useA2ADebug, type TaskHistoryEntry } from './useA2ADebug';
 import { A2AAgentCard } from './A2AAgentCard';
 import { A2ASendMessage } from './A2ASendMessage';
 import { A2ATaskViewer } from './A2ATaskViewer';
@@ -24,6 +24,7 @@ function getStateBadgeVariant(state: string): 'default' | 'secondary' | 'destruc
 }
 
 export function AgentA2ADebug({ agent }: AgentA2ADebugProps) {
+  const [activeTab, setActiveTab] = useState('send');
   const {
     agentCard, isLoadingCard, cardError, fetchAgentCard,
     isSending, sendError, sendMessage,
@@ -36,6 +37,11 @@ export function AgentA2ADebug({ agent }: AgentA2ADebugProps) {
   useEffect(() => {
     fetchAgentCard();
   }, [fetchAgentCard]);
+
+  const handleLoadTaskFromHistory = (entry: TaskHistoryEntry) => {
+    loadTaskFromHistory(entry);
+    setActiveTab('tasks');
+  };
 
   return (
     <div className="flex gap-4 h-[calc(100vh-380px)]" data-testid="a2a-debug-container">
@@ -54,7 +60,7 @@ export function AgentA2ADebug({ agent }: AgentA2ADebugProps) {
             <Separator />
 
             {/* Method tabs */}
-            <Tabs defaultValue="send" className="w-full">
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
               <TabsList className="grid w-full grid-cols-2">
                 <TabsTrigger value="send" data-testid="a2a-tab-send">
                   <Radio className="h-3 w-3 mr-1.5" />
@@ -108,7 +114,7 @@ export function AgentA2ADebug({ agent }: AgentA2ADebugProps) {
               {taskHistory.map((entry, i) => (
                 <button
                   key={i}
-                  onClick={() => loadTaskFromHistory(entry)}
+                  onClick={() => handleLoadTaskFromHistory(entry)}
                   className={`w-full text-left p-2 rounded-md border text-xs transition-colors hover:bg-muted/50 ${
                     currentTask?.id === entry.taskId ? 'bg-muted border-primary/30' : ''
                   }`}
