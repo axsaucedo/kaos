@@ -92,11 +92,9 @@ function buildGraph(
       edges.push({
         id: `edge-modelapi-${agent.metadata.name}`,
         source: sourceId, target: agentId, type: 'dynamic',
-        animated: true, label: 'model',
+        animated: true,
         style: { stroke: 'hsl(var(--modelapi-color))', strokeWidth: 2 },
         markerEnd: { type: MarkerType.ArrowClosed, color: 'hsl(var(--modelapi-color))' },
-        labelStyle: { fill: 'hsl(var(--muted-foreground))', fontSize: 10 },
-        labelBgStyle: { fill: 'hsl(var(--card))', fillOpacity: 0.9 },
       });
     }
 
@@ -106,11 +104,9 @@ function buildGraph(
       edges.push({
         id: `edge-mcp-${mcpName}-${agent.metadata.name}`,
         source: sourceId, target: agentId, type: 'dynamic',
-        animated: true, label: 'tools',
+        animated: true,
         style: { stroke: 'hsl(var(--mcpserver-color))', strokeWidth: 2 },
         markerEnd: { type: MarkerType.ArrowClosed, color: 'hsl(var(--mcpserver-color))' },
-        labelStyle: { fill: 'hsl(var(--muted-foreground))', fontSize: 10 },
-        labelBgStyle: { fill: 'hsl(var(--card))', fillOpacity: 0.9 },
       });
     });
 
@@ -120,11 +116,9 @@ function buildGraph(
       edges.push({
         id: `edge-a2a-${agent.metadata.name}-${targetAgentName}`,
         source: agentId, target: targetId, type: 'dynamic',
-        animated: true, label: 'a2a',
+        animated: true,
         style: { stroke: 'hsl(var(--agent-color))', strokeWidth: 2 },
         markerEnd: { type: MarkerType.ArrowClosed, color: 'hsl(var(--agent-color))' },
-        labelStyle: { fill: 'hsl(var(--muted-foreground))', fontSize: 10 },
-        labelBgStyle: { fill: 'hsl(var(--card))', fillOpacity: 0.9 },
       });
     });
   });
