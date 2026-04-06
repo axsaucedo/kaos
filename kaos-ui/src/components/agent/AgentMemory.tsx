@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Brain, Clock, RefreshCw, MessageSquare, User, Bot, Wrench, AlertCircle, Users, AlertTriangle, CheckCircle2, Radio, Eye, List, Filter } from 'lucide-react';
+import { Brain, Clock, RefreshCw, MessageSquare, User, Bot, Wrench, AlertCircle, Users, AlertTriangle, CheckCircle2, Radio, Eye, List, Filter, ArrowDown } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -54,9 +54,12 @@ export function AgentMemory({ agent }: AgentMemoryProps) {
   const [error, setError] = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [isLive, setIsLive] = useState(false);
-  const [viewMode, setViewMode] = useState<'raw' | 'conversation'>('raw');
+  const [viewMode, setViewMode] = useState<'raw' | 'conversation'>('conversation');
   const [sessionFilter, setSessionFilter] = useState<string>('all');
   const liveRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const scrollAreaRef = useRef<HTMLDivElement | null>(null);
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const prevEventCountRef = useRef(0);
 
   // Check if memory is enabled for this agent
   const isMemoryEnabled = agent.spec.config?.memory?.enabled !== false;
@@ -64,17 +67,18 @@ export function AgentMemory({ agent }: AgentMemoryProps) {
   const serviceName = `agent-${agent.metadata.name}`;
   const namespace = agent.metadata.namespace || 'default';
 
-  const fetchMemory = useCallback(async () => {
+  const fetchMemory = useCallback(async (isLivePoll = false) => {
     if (!k8sClient.isConfigured()) {
       setError('Kubernetes client not configured');
       return;
     }
 
-    setIsLoading(true);
+    if (!isLivePoll) {
+      setIsLoading(true);
+    }
     setError(null);
 
     try {
-      // Fetch both events and sessions in parallel
       const [eventsResponse, sessionsResponse] = await Promise.all([
         k8sClient.proxyServiceRequest(serviceName, '/memory/events', {
           method: 'GET',
@@ -97,14 +101,32 @@ export function AgentMemory({ agent }: AgentMemoryProps) {
       const eventsData = await eventsResponse.json();
       const sessionsData = await sessionsResponse.json();
 
-      setEvents((eventsData.events || []).map(normalizeEvent));
+      const newEvents = (eventsData.events || []).map(normalizeEvent);
+
+      if (isLivePoll) {
+        // Diff-based: only update if there are new events
+        setEvents(prev => {
+          if (newEvents.length !== prev.length) {
+            return newEvents;
+          }
+          // Check last event id to detect changes
+          const lastNew = newEvents[newEvents.length - 1];
+          const lastPrev = prev[prev.length - 1];
+          if (lastNew?.id !== lastPrev?.id) {
+            return newEvents;
+          }
+          return prev; // No change — skip re-render
+        });
+      } else {
+        setEvents(newEvents);
+      }
+
       setSessions(sessionsData.sessions || []);
       setLastRefresh(new Date());
     } catch (err) {
       console.error('[AgentMemory] Fetch error:', err);
       const errorMessage = err instanceof Error ? err.message : 'Failed to fetch memory';
       
-      // Check for common issues
       if (errorMessage.includes('404') || errorMessage.includes('not found')) {
         setError('Memory endpoints not available. Ensure AGENT_DEBUG_MEMORY_ENDPOINTS=true is set.');
       } else if (errorMessage.includes('503') || errorMessage.includes('no endpoints')) {
@@ -113,7 +135,9 @@ export function AgentMemory({ agent }: AgentMemoryProps) {
         setError(errorMessage);
       }
     } finally {
-      setIsLoading(false);
+      if (!isLivePoll) {
+        setIsLoading(false);
+      }
     }
   }, [serviceName, namespace]);
 
@@ -124,11 +148,11 @@ export function AgentMemory({ agent }: AgentMemoryProps) {
     }
   }, [fetchMemory, isMemoryEnabled]);
 
-  // Live mode polling
+  // Live mode polling — uses diff-based update to avoid jitter
   useEffect(() => {
     if (isLive && isMemoryEnabled) {
       liveRef.current = setInterval(() => {
-        fetchMemory();
+        fetchMemory(true);
       }, 2000);
     }
     return () => {
@@ -143,6 +167,45 @@ export function AgentMemory({ agent }: AgentMemoryProps) {
   const filteredEvents = sessionFilter === 'all'
     ? events
     : events.filter(e => e.session_id === sessionFilter);
+
+  // Scroll tracking for sticky scroll
+  const handleScroll = useCallback(() => {
+    const el = scrollAreaRef.current;
+    if (!el) return;
+    const threshold = 40;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+    setIsAtBottom(atBottom);
+  }, []);
+
+  // Auto-scroll to bottom on initial load or when new events arrive (if at bottom)
+  useEffect(() => {
+    const el = scrollAreaRef.current;
+    if (!el) return;
+    const currentCount = filteredEvents.length;
+    const prevCount = prevEventCountRef.current;
+    
+    if (prevCount === 0 && currentCount > 0) {
+      // Initial load — scroll to bottom
+      requestAnimationFrame(() => {
+        el.scrollTop = el.scrollHeight;
+        setIsAtBottom(true);
+      });
+    } else if (currentCount > prevCount && isAtBottom) {
+      // New events + was at bottom — sticky scroll
+      requestAnimationFrame(() => {
+        el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+      });
+    }
+    prevEventCountRef.current = currentCount;
+  }, [filteredEvents.length, isAtBottom]);
+
+  const scrollToBottom = useCallback(() => {
+    const el = scrollAreaRef.current;
+    if (el) {
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+      setIsAtBottom(true);
+    }
+  }, []);
 
   const getEventIcon = (event: MemoryEvent) => {
     switch (event.type) {
@@ -501,11 +564,33 @@ export function AgentMemory({ agent }: AgentMemoryProps) {
                   <p className="text-xs mt-1">Events will appear here after agent interactions</p>
                 </div>
               ) : viewMode === 'conversation' ? (
-                <ScrollArea className="h-[400px] pr-4">
-                  <MemoryConversationView events={filteredEvents} />
-                </ScrollArea>
+                <div className="relative">
+                  <div
+                    ref={scrollAreaRef}
+                    className="h-[400px] overflow-y-auto pr-4"
+                    onScroll={handleScroll}
+                  >
+                    <MemoryConversationView events={filteredEvents} />
+                  </div>
+                  {!isAtBottom && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="absolute bottom-2 right-6 rounded-full shadow-md h-8 w-8 p-0"
+                      onClick={scrollToBottom}
+                      data-testid="memory-scroll-bottom"
+                    >
+                      <ArrowDown className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
               ) : (
-                <ScrollArea className="h-[400px] pr-4">
+                <div className="relative">
+                  <div
+                    ref={scrollAreaRef}
+                    className="h-[400px] overflow-y-auto pr-4"
+                    onScroll={handleScroll}
+                  >
                   <div className="space-y-3">
                     {[...filteredEvents].reverse().map((event, index) => (
                       <div
@@ -540,7 +625,19 @@ export function AgentMemory({ agent }: AgentMemoryProps) {
                       </div>
                     ))}
                   </div>
-                </ScrollArea>
+                  </div>
+                  {!isAtBottom && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="absolute bottom-2 right-6 rounded-full shadow-md h-8 w-8 p-0"
+                      onClick={scrollToBottom}
+                      data-testid="memory-scroll-bottom-raw"
+                    >
+                      <ArrowDown className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
               )}
             </CardContent>
           </Card>
