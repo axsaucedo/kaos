@@ -32,7 +32,6 @@ import { AgentCreateDialog } from '@/components/resources/AgentCreateDialog';
 import { MCPServerCreateDialog } from '@/components/resources/MCPServerCreateDialog';
 import { ModelAPICreateDialog } from '@/components/resources/ModelAPICreateDialog';
 
-import type { Agent, MCPServer, ModelAPI } from '@/types/kubernetes';
 
 const VIEWPORT_STORAGE_KEY = 'visual-map-viewport';
 
@@ -84,7 +83,7 @@ const edgeTypes: EdgeTypes = {
 
 // ── Inner component (needs ReactFlowProvider) ──
 function VisualMapInner() {
-  const { modelAPIs, mcpServers, agents, selectedResource, setSelectedResource, setSelectedResourceMode } = useKubernetesStore();
+  const { modelAPIs, mcpServers, agents } = useKubernetesStore();
   const [zoom, setZoom] = useState(1);
 
   // Create dialog state
