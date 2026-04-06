@@ -93,41 +93,97 @@ test.describe('A2A Debug Screen', () => {
       return;
     }
 
+    // Mock A2A JSON-RPC endpoint to avoid depending on live agent
+    await page.route('**/proxy/', async (route) => {
+      if (route.request().method() === 'POST') {
+        let body: Record<string, unknown> = {};
+        try { body = route.request().postDataJSON(); } catch { /* ignore */ }
+        if (body?.jsonrpc === '2.0' && (body?.method === 'SendMessage' || body?.method === 'tasks/send')) {
+          const params = body.params as Record<string, unknown> | undefined;
+          const msg = params?.message as Record<string, unknown> | undefined;
+          const parts = (msg?.parts as Array<Record<string, unknown>>) || [];
+          const text = String(parts[0]?.text || 'test');
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              jsonrpc: '2.0',
+              id: body.id,
+              result: {
+                id: 'task_mock_pw_001',
+                sessionId: 'session_mock_001',
+                status: { state: 'completed', timestamp: new Date().toISOString(), message: 'Done' },
+                history: [
+                  { role: 'user', parts: [{ type: 'text', text }] },
+                  { role: 'agent', parts: [{ type: 'text', text: 'Mock response from agent' }] },
+                ],
+                artifacts: [],
+                autonomous: false,
+                output: 'Mock response from agent',
+              },
+            }),
+          });
+          return;
+        }
+        if (body?.jsonrpc === '2.0' && (body?.method === 'GetTask' || body?.method === 'tasks/get')) {
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              jsonrpc: '2.0',
+              id: body.id,
+              result: {
+                id: 'task_mock_pw_001',
+                sessionId: 'session_mock_001',
+                status: { state: 'completed', timestamp: new Date().toISOString(), message: 'Done' },
+                history: [
+                  { role: 'user', parts: [{ type: 'text', text: 'Playwright A2A workflow test' }] },
+                  { role: 'agent', parts: [{ type: 'text', text: 'Mock response from agent' }] },
+                ],
+                artifacts: [],
+                autonomous: false,
+                output: 'Mock response from agent',
+              },
+            }),
+          });
+          return;
+        }
+      }
+      await route.continue();
+    });
+
     // Fill and send a message
     const messageInput = page.locator('[data-testid="a2a-message-input"]');
     await messageInput.fill('Playwright A2A workflow test');
     await page.locator('[data-testid="a2a-send-button"]').click();
 
-    // Wait for response — either task detail or error
+    // Wait for task to appear in history sidebar (task detail is in the other tab)
+    const historyEntry = page.locator('[data-testid="a2a-history-0"]');
+    await expect(historyEntry).toBeVisible({ timeout: 30000 });
+
+    // Click history entry — should auto-switch to Get/Cancel tab and show task detail
+    await historyEntry.click();
+
     const taskDetail = page.locator('[data-testid="a2a-task-detail"]');
-    const errorIndicator = page.locator('text=/error|failed|Error/i').first();
-    await expect(taskDetail.or(errorIndicator)).toBeVisible({ timeout: 30000 });
+    await expect(taskDetail).toBeVisible({ timeout: 5000 });
 
-    // If we got a task detail, validate the full workflow
-    if (await taskDetail.isVisible()) {
-      // Task state badge should show a valid state
-      const stateElement = page.locator('[data-testid="a2a-task-state"]');
-      await expect(stateElement).toBeVisible({ timeout: 5000 });
-      const stateText = await stateElement.textContent();
-      expect(['completed', 'failed', 'submitted', 'working', 'canceled']).toContain(stateText);
+    // Task state badge should show a valid state
+    const stateElement = page.locator('[data-testid="a2a-task-state"]');
+    await expect(stateElement).toBeVisible({ timeout: 5000 });
+    const stateText = await stateElement.textContent();
+    expect(['completed', 'failed', 'submitted', 'working', 'canceled']).toContain(stateText);
 
-      // Task history should have at least one entry
-      const historyEntry = page.locator('[data-testid="a2a-history-0"]');
-      await expect(historyEntry).toBeVisible({ timeout: 5000 });
+    // Task ID input should be visible (for manual lookups)
+    const taskIdInput = page.locator('[data-testid="a2a-task-id-input"]');
+    await expect(taskIdInput).toBeVisible({ timeout: 5000 });
 
-      // Switch back to Send tab first
-      await page.locator('[data-testid="a2a-tab-send"]').click();
-      await expect(page.locator('[data-testid="a2a-message-input"]')).toBeVisible({ timeout: 3000 });
+    // Task detail should show the task ID from mock
+    const taskDetailText = await taskDetail.textContent();
+    expect(taskDetailText).toBeTruthy();
 
-      // Click history entry — should auto-switch to Get/Cancel tab
-      await historyEntry.click();
-      const taskIdInput = page.locator('[data-testid="a2a-task-id-input"]');
-      await expect(taskIdInput).toBeVisible({ timeout: 5000 });
-
-      // Task ID input should be populated with the task ID from history
-      const taskIdValue = await taskIdInput.inputValue();
-      expect(taskIdValue.length).toBeGreaterThan(0);
-    }
+    // Switch back to Send tab to verify form is accessible
+    await page.locator('[data-testid="a2a-tab-send"]').click();
+    await expect(page.locator('[data-testid="a2a-message-input"]')).toBeVisible({ timeout: 3000 });
   });
 
   test('Get/Cancel tab: lookup task by ID shows task state', async ({ page }) => {

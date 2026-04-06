@@ -27,10 +27,6 @@ import { useVisualMapLayout } from './useVisualMapLayout';
 import { useVisualMapFilters } from './useVisualMapFilters';
 import type { ResourceNodeData, ResourceKind } from './types';
 
-// Edit dialogs
-import { AgentEditDialog } from '@/components/resources/AgentEditDialog';
-import { MCPServerEditDialog } from '@/components/resources/MCPServerEditDialog';
-import { ModelAPIEditDialog } from '@/components/resources/ModelAPIEditDialog';
 // Create dialogs
 import { AgentCreateDialog } from '@/components/resources/AgentCreateDialog';
 import { MCPServerCreateDialog } from '@/components/resources/MCPServerCreateDialog';
@@ -88,7 +84,7 @@ const edgeTypes: EdgeTypes = {
 
 // ── Inner component (needs ReactFlowProvider) ──
 function VisualMapInner() {
-  const { modelAPIs, mcpServers, agents, selectedResource, selectedResourceMode, setSelectedResource, setSelectedResourceMode } = useKubernetesStore();
+  const { modelAPIs, mcpServers, agents, selectedResource, setSelectedResource, setSelectedResourceMode } = useKubernetesStore();
   const [zoom, setZoom] = useState(1);
 
   // Create dialog state
@@ -175,16 +171,6 @@ function VisualMapInner() {
     setCreateKind(kind);
   }, []);
 
-  // Determine what's being edited
-  const editingAgent = selectedResourceMode === 'edit' && selectedResource?.kind === 'Agent' ? selectedResource as Agent : null;
-  const editingMCPServer = selectedResourceMode === 'edit' && selectedResource?.kind === 'MCPServer' ? selectedResource as MCPServer : null;
-  const editingModelAPI = selectedResourceMode === 'edit' && selectedResource?.kind === 'ModelAPI' ? selectedResource as ModelAPI : null;
-
-  const closeEdit = useCallback(() => {
-    setSelectedResource(null);
-    setSelectedResourceMode(null);
-  }, [setSelectedResource, setSelectedResourceMode]);
-
   const isEmpty = modelAPIs.length === 0 && mcpServers.length === 0 && agents.length === 0;
 
   if (isEmpty) {
@@ -242,18 +228,7 @@ function VisualMapInner() {
             <ResourceStatusLegend modelAPIs={modelAPIs} mcpServers={mcpServers} agents={agents} />
           </div>
 
-          {/* Edit Dialogs */}
-          {editingAgent && (
-            <AgentEditDialog agent={editingAgent} open onClose={closeEdit} />
-          )}
-          {editingMCPServer && (
-            <MCPServerEditDialog mcpServer={editingMCPServer} open onClose={closeEdit} />
-          )}
-          {editingModelAPI && (
-            <ModelAPIEditDialog modelAPI={editingModelAPI} open onClose={closeEdit} />
-          )}
-
-          {/* Create Dialogs */}
+          {/* Edit/Create Dialogs are handled by Index.tsx to avoid duplicate dialogs */}
           <AgentCreateDialog open={createKind === 'Agent'} onClose={() => setCreateKind(null)} />
           <MCPServerCreateDialog open={createKind === 'MCPServer'} onClose={() => setCreateKind(null)} />
           <ModelAPICreateDialog open={createKind === 'ModelAPI'} onClose={() => setCreateKind(null)} />
