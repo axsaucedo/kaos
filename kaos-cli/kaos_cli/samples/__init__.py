@@ -76,7 +76,11 @@ def _apply_overrides(
     namespace: str | None,
     provider: str | None = None,
 ) -> str:
-    """Apply CLI overrides to sample YAML content using YAML parser."""
+    """Apply CLI overrides to sample YAML content using YAML parser.
+
+    Filters out Namespace kind documents. When modelapi_name is provided,
+    filters out ModelAPI kind documents (uses an existing ModelAPI instead).
+    """
     docs = list(yaml.safe_load_all(yaml_content))
 
     # Parse api_secret (must be secretname:key format at this point)
@@ -87,19 +91,26 @@ def _apply_overrides(
         else:
             raise ValueError(f"Invalid api_secret format: {api_secret!r}. Expected secretname:key.")
 
+    filtered = []
     for doc in docs:
         if not doc or not isinstance(doc, dict):
             continue
 
         kind = doc.get("kind", "")
+
+        # Skip Namespace resources (samples install into current/provided namespace)
+        if kind == "Namespace":
+            continue
+
+        # Skip ModelAPI when --modelapi override is used (using existing ModelAPI)
+        if kind == "ModelAPI" and modelapi_name:
+            continue
+
         meta = doc.get("metadata", {})
 
         # Namespace override
         if namespace:
-            if kind == "Namespace":
-                meta["name"] = namespace
-            else:
-                meta["namespace"] = namespace
+            meta["namespace"] = namespace
 
         spec = doc.get("spec", {})
 
@@ -128,7 +139,9 @@ def _apply_overrides(
                     }
                 }
 
-    return yaml.dump_all(docs, default_flow_style=False, sort_keys=False)
+        filtered.append(doc)
+
+    return yaml.dump_all(filtered, default_flow_style=False, sort_keys=False)
 
 
 def list_samples() -> None:
@@ -246,14 +259,7 @@ def deploy_sample(
 
         if wait:
             # Determine the namespace to wait in
-            ns = namespace
-            if not ns:
-                docs = list(yaml.safe_load_all(yaml_content))
-                for doc in docs:
-                    if doc and doc.get("kind") == "Namespace":
-                        ns = doc["metadata"]["name"]
-                        break
-                ns = ns or "default"
+            ns = namespace or "default"
             typer.echo(f"⏳ Waiting for resources in namespace '{ns}'...")
             wait_args = [
                 "kubectl",
@@ -274,36 +280,33 @@ def deploy_sample(
         Path(tmp_path).unlink()
 
 
-def delete_sample(name: str, namespace: str | None = None) -> None:
-    """Delete a sample's resources."""
+def delete_sample(
+    name: str, namespace: str | None = None, modelapi: str | None = None
+) -> None:
+    """Delete a sample's resources (excluding Namespace and overridden ModelAPI)."""
     sample_path = _find_sample(name)
     if not sample_path:
         typer.echo(f"Error: Sample '{name}' not found.", err=True)
         typer.echo(f"Available samples: {', '.join(_get_sample_names())}", err=True)
         raise typer.Exit(1)
 
-    if namespace:
-        # Apply namespace override and delete from temp file
-        raw_content = sample_path.read_text()
-        yaml_content = _apply_overrides(
-            raw_content,
-            modelapi_name=None,
-            mode=None,
-            model=None,
-            api_secret=None,
-            namespace=namespace,
-        )
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
-            f.write(yaml_content)
-            tmp_path = f.name
-        try:
-            args = ["kubectl", "delete", "-f", tmp_path, "--ignore-not-found"]
-            result = subprocess.run(args, capture_output=True, text=True)
-        finally:
-            Path(tmp_path).unlink()
-    else:
-        args = ["kubectl", "delete", "-f", str(sample_path), "--ignore-not-found"]
+    raw_content = sample_path.read_text()
+    yaml_content = _apply_overrides(
+        raw_content,
+        modelapi_name=modelapi,
+        mode=None,
+        model=None,
+        api_secret=None,
+        namespace=namespace,
+    )
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        f.write(yaml_content)
+        tmp_path = f.name
+    try:
+        args = ["kubectl", "delete", "-f", tmp_path, "--ignore-not-found"]
         result = subprocess.run(args, capture_output=True, text=True)
+    finally:
+        Path(tmp_path).unlink()
 
     if result.returncode != 0:
         typer.echo(result.stderr or result.stdout, err=True)
@@ -387,12 +390,18 @@ def deploy_cmd(
 ) -> None:
     """Deploy a sample configuration.
 
+    Resources are deployed to the current kubectl context namespace by default.
+    Use -n to specify a target namespace. Namespace resources in samples are
+    skipped (not created). When --modelapi is used, the sample's built-in
+    ModelAPI is skipped (uses your existing ModelAPI instead).
+
     Examples:
-      kaos samples deploy 1-simple-echo-agent
+      kaos samples deploy 1-simple-echo-agent -n my-ns
       kaos samples deploy 3-hierarchical-agents --namespace my-ns
       kaos samples deploy 1-simple-echo-agent --model "llama3:8b" --dry-run
       kaos samples deploy 1-simple-echo-agent --api-secret nebius-secrets:api-key
       kaos samples deploy 5-proxy-external-api --provider openai
+      kaos samples deploy 1-simple-echo-agent -n my-ns --modelapi existing-api
     """
     deploy_sample(
         name=name,
@@ -417,11 +426,20 @@ def delete_cmd(
         "-n",
         help="Namespace override (must match the namespace used during deploy).",
     ),
+    modelapi: str = typer.Option(
+        None,
+        "--modelapi",
+        help="Skip deleting ModelAPI (use when deployed with --modelapi override).",
+    ),
 ) -> None:
     """Delete a sample's resources.
+
+    Does not delete Namespaces. When --modelapi is provided, skips deleting the
+    sample's ModelAPI resources (preserves the external ModelAPI you referenced).
 
     Examples:
       kaos samples delete 1-simple-echo-agent
       kaos samples delete 1-simple-echo-agent --namespace custom-ns
+      kaos samples delete 1-simple-echo-agent --namespace custom-ns --modelapi my-api
     """
-    delete_sample(name=name, namespace=namespace)
+    delete_sample(name=name, namespace=namespace, modelapi=modelapi)

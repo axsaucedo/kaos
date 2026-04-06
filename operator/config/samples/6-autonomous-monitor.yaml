@@ -1,23 +1,15 @@
 # Autonomous cluster monitoring agent with Kubernetes MCP tools
 ---
 apiVersion: v1
-kind: Namespace
-metadata:
-  name: kaos-autonomous
-
----
-apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: k8s-monitor-sa
-  namespace: kaos-autonomous
 
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: k8s-monitor-role
-  namespace: kaos-autonomous
 rules:
 - apiGroups: [""]
   resources: ["pods", "services", "events", "namespaces"]
@@ -31,7 +23,6 @@ apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: k8s-monitor-binding
-  namespace: kaos-autonomous
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -39,14 +30,12 @@ roleRef:
 subjects:
 - kind: ServiceAccount
   name: k8s-monitor-sa
-  namespace: kaos-autonomous
 
 ---
 apiVersion: kaos.tools/v1alpha1
 kind: ModelAPI
 metadata:
   name: monitor-modelapi
-  namespace: kaos-autonomous
 spec:
   mode: Hosted
   hostedConfig:
@@ -57,7 +46,6 @@ apiVersion: kaos.tools/v1alpha1
 kind: MCPServer
 metadata:
   name: monitor-k8s-mcp
-  namespace: kaos-autonomous
 spec:
   runtime: kubernetes
   serviceAccountName: k8s-monitor-sa
@@ -70,7 +58,6 @@ apiVersion: kaos.tools/v1alpha1
 kind: MCPServer
 metadata:
   name: monitor-report-mcp
-  namespace: kaos-autonomous
 spec:
   runtime: python-string
   params: |
@@ -115,7 +102,6 @@ apiVersion: kaos.tools/v1alpha1
 kind: Agent
 metadata:
   name: cluster-monitor
-  namespace: kaos-autonomous
 spec:
   modelAPI: monitor-modelapi
   model: "smollm2:135m"

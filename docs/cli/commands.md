@@ -423,6 +423,8 @@ kaos ui [OPTIONS]
 
 Deploy and manage example configurations from `operator/config/samples/`.
 
+Samples install into the current kubectl context namespace by default. Use `-n` to specify a target namespace. Namespace resources are never created or deleted — the namespace must already exist.
+
 ### kaos samples list
 
 List available sample configurations.
@@ -441,34 +443,39 @@ kaos samples deploy NAME [OPTIONS]
 
 | Option | Short | Description |
 |--------|-------|-------------|
-| `--namespace` | `-n` | Override namespace for all resources |
+| `--namespace` | `-n` | Target namespace (default: current kubectl context) |
 | `--wait` | | Wait for deployments to be available |
 | `--wait-timeout` | | Timeout in seconds (default: 120) |
 | `--dry-run` | | Print YAML instead of deploying |
-| `--modelapi` | | Override ModelAPI name reference |
+| `--modelapi` | | Use existing ModelAPI instead of sample's built-in one |
 | `--mode` | | Override ModelAPI mode (Proxy/Hosted) |
 | `--model` | `-m` | Override model name |
 | `--api-secret` | | Override API secret (secretname:key) |
+| `--provider` | | Override LiteLLM provider (e.g., openai, nebius) |
+
+When `--modelapi` is used, the sample's ModelAPI resource is skipped (not deployed). Agents reference the specified existing ModelAPI instead.
 
 **Examples:**
 ```bash
-kaos samples deploy 1-simple-echo-agent
+kaos samples deploy 1-simple-echo-agent -n my-ns
 kaos samples deploy 3-hierarchical-agents --namespace my-ns
 kaos samples deploy 1-simple-echo-agent --model "llama3:8b" --dry-run
 kaos samples deploy 1-simple-echo-agent --api-secret nebius-secrets:api-key
+kaos samples deploy 1-simple-echo-agent -n my-ns --modelapi my-existing-api
 ```
 
 ### kaos samples delete
 
-Delete a sample's resources.
+Delete a sample's resources. Does not delete namespaces.
 
 ```bash
 kaos samples delete NAME [OPTIONS]
 ```
 
-| Option | Default | Description |
+| Option | Short | Description |
 |--------|---------|-------------|
-| `--namespace` | | Namespace override (must match namespace used during deploy) |
+| `--namespace` | `-n` | Namespace override (must match namespace used during deploy) |
+| `--modelapi` | | Skip deleting ModelAPI (use when deployed with --modelapi) |
 
 ---
 

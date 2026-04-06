@@ -1,20 +1,13 @@
 ---
 # Sample 5: Agent with External API Provider
 # Uses a Proxy ModelAPI with an external LLM provider (e.g., Nebius, OpenAI)
-# Deploy: kubectl apply -f 5-proxy-external-api.yaml
+# Deploy: kaos samples deploy 5-proxy-external-api -n <namespace>
 #
 # IMPORTANT:
 # Create the API key secret before deploying:
 # kubectl create secret generic api-secrets \
-#     -n kaos-external \
+#     -n <namespace> \
 #     --from-literal "api-key=$API_KEY"
-
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: kaos-external
-  labels:
-    app.kubernetes.io/part-of: kaos-sample-external
 
 ---
 # ModelAPI: Proxy to external provider with API key
@@ -22,7 +15,6 @@ apiVersion: kaos.tools/v1alpha1
 kind: ModelAPI
 metadata:
   name: external-modelapi
-  namespace: kaos-external
 spec:
   mode: Proxy
   proxyConfig:
@@ -41,7 +33,6 @@ apiVersion: kaos.tools/v1alpha1
 kind: MCPServer
 metadata:
   name: external-calc-mcp
-  namespace: kaos-external
 spec:
   runtime: python-string
   params: |
@@ -62,7 +53,6 @@ apiVersion: kaos.tools/v1alpha1
 kind: Agent
 metadata:
   name: external-agent
-  namespace: kaos-external
 spec:
   modelAPI: external-modelapi
   model: deepseek-ai/DeepSeek-V3-0324-fast

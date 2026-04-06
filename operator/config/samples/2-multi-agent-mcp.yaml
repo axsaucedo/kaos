@@ -1,14 +1,7 @@
 ---
 # Sample 2: Multi-Agent with MCP Servers
 # A coordinator agent with two worker agents, all with access to echo MCP tool
-# Deploy: kubectl apply -f 2-multi-agent-mcp.yaml
-
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: kaos-multi
-  labels:
-    app.kubernetes.io/part-of: kaos-sample-multi
+# Deploy: kaos samples deploy 2-multi-agent-mcp -n <namespace>
 
 ---
 # ModelAPI: Hosted Ollama with smollm2 model (runs in-cluster)
@@ -16,7 +9,6 @@ apiVersion: kaos.tools/v1alpha1
 kind: ModelAPI
 metadata:
   name: multi-modelapi
-  namespace: kaos-multi
 spec:
   mode: Hosted
   hostedConfig:
@@ -32,7 +24,6 @@ apiVersion: kaos.tools/v1alpha1
 kind: MCPServer
 metadata:
   name: multi-echo-mcp
-  namespace: kaos-multi
 spec:
   runtime: python-string
   params: |
@@ -46,7 +37,6 @@ apiVersion: kaos.tools/v1alpha1
 kind: Agent
 metadata:
   name: coordinator
-  namespace: kaos-multi
 spec:
   modelAPI: multi-modelapi
   model: "smollm2:135m"  # Required: must match hosted model
@@ -71,7 +61,6 @@ apiVersion: kaos.tools/v1alpha1
 kind: Agent
 metadata:
   name: worker-1
-  namespace: kaos-multi
 spec:
   modelAPI: multi-modelapi
   model: "smollm2:135m"  # Required: must match hosted model
@@ -94,7 +83,6 @@ apiVersion: kaos.tools/v1alpha1
 kind: Agent
 metadata:
   name: worker-2
-  namespace: kaos-multi
 spec:
   modelAPI: multi-modelapi
   model: "smollm2:135m"  # Required: must match hosted model
