@@ -1,0 +1,146 @@
+# Autonomous cluster monitoring agent with Kubernetes MCP tools
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kaos-autonomous
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: k8s-monitor-sa
+  namespace: kaos-autonomous
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: k8s-monitor-role
+  namespace: kaos-autonomous
+rules:
+- apiGroups: [""]
+  resources: ["pods", "services", "events", "namespaces"]
+  verbs: ["get", "list"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets"]
+  verbs: ["get", "list"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: k8s-monitor-binding
+  namespace: kaos-autonomous
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: k8s-monitor-role
+subjects:
+- kind: ServiceAccount
+  name: k8s-monitor-sa
+  namespace: kaos-autonomous
+
+---
+apiVersion: kaos.tools/v1alpha1
+kind: ModelAPI
+metadata:
+  name: monitor-modelapi
+  namespace: kaos-autonomous
+spec:
+  mode: Hosted
+  hostedConfig:
+    model: "smollm2:135m"
+
+---
+apiVersion: kaos.tools/v1alpha1
+kind: MCPServer
+metadata:
+  name: monitor-k8s-mcp
+  namespace: kaos-autonomous
+spec:
+  runtime: kubernetes
+  serviceAccountName: k8s-monitor-sa
+  params: |
+    allowedNamespaces:
+      - kaos-autonomous
+
+---
+apiVersion: kaos.tools/v1alpha1
+kind: MCPServer
+metadata:
+  name: monitor-report-mcp
+  namespace: kaos-autonomous
+spec:
+  runtime: python-string
+  params: |
+    import json
+    from datetime import datetime
+
+    def generate_health_report(pod_data: str) -> str:
+        """Generate a formatted cluster health report from pod status data.
+
+        Args:
+            pod_data: JSON string or text describing pod statuses
+
+        Returns:
+            A formatted health report string
+        """
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        report = f"=== Cluster Health Report ===\n"
+        report += f"Generated: {timestamp}\n"
+        report += f"---\n"
+        report += f"{pod_data}\n"
+        report += f"=== End Report ===\n"
+        return report
+
+    def check_pod_status(pod_name: str, status: str) -> str:
+        """Check whether a pod status indicates a healthy or unhealthy state.
+
+        Args:
+            pod_name: Name of the pod to check
+            status: Current status of the pod (e.g. Running, Pending, CrashLoopBackOff)
+
+        Returns:
+            A health assessment string for the pod
+        """
+        healthy_states = ["Running", "Succeeded", "Completed"]
+        if status in healthy_states:
+            return f"✅ {pod_name}: HEALTHY ({status})"
+        else:
+            return f"❌ {pod_name}: UNHEALTHY ({status}) - Requires attention"
+
+---
+apiVersion: kaos.tools/v1alpha1
+kind: Agent
+metadata:
+  name: cluster-monitor
+  namespace: kaos-autonomous
+spec:
+  modelAPI: monitor-modelapi
+  model: "smollm2:135m"
+  mcpServers:
+  - monitor-k8s-mcp
+  - monitor-report-mcp
+  config:
+    description: "Autonomous cluster monitoring agent that checks Kubernetes health and generates reports"
+    instructions: |
+      You are a Kubernetes cluster monitoring agent. Your goal is to:
+      1. List all pods in the namespace using the kubernetes MCP tools
+      2. Check the status of each pod
+      3. Generate a health report summarizing the cluster state
+
+      Use the available tools to gather information and produce reports.
+      Focus on identifying any unhealthy or failing pods.
+    autonomous:
+      goal: "Monitor the Kubernetes cluster health. List pods, check their status, and generate a health report."
+      intervalSeconds: 60
+      maxIterRuntimeSeconds: 120
+    taskConfig:
+      maxIterations: 5
+      maxRuntimeSeconds: 300
+      maxToolCalls: 20
+    reasoningLoopMaxSteps: 10
+  agentNetwork:
+    expose: true
+    access: []
