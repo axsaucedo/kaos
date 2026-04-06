@@ -406,9 +406,9 @@ class AgentServer:
             for p in getattr(msg, "parts", [])
             if isinstance(p, ToolCallPart)
         )
-        await self.memory.add_event(session_id, "agent_response", content)
         for msg in result.new_messages():
             await self.memory.store_pydantic_message(session_id, msg)
+        await self.memory.add_event(session_id, "agent_response", content)
         return content, tool_call_count
 
     async def _process_message(
@@ -458,10 +458,10 @@ class AgentServer:
                     full_response = str(run.result.output)
                     yield full_response
 
-                await self.memory.add_event(session_id, "agent_response", full_response)
                 new_msgs = run.result.new_messages() if run.result else []
                 for msg in new_msgs:
                     await self.memory.store_pydantic_message(session_id, msg)
+                await self.memory.add_event(session_id, "agent_response", full_response)
             else:
                 content, _ = await self._run_agent(message, session_id)
                 yield content
