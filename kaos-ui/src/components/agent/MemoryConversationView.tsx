@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
 import { User, Bot, Wrench, AlertCircle, Users, ChevronDown, ChevronRight, CheckCircle2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { cn } from '@/lib/utils';
 
 interface MemoryEvent {
   id: string;
@@ -74,7 +77,42 @@ function MessageBubble({ event }: { event: MemoryEvent }) {
       <div className={`max-w-[80%] rounded-lg px-3 py-2 text-sm ${
         isUser ? 'bg-blue-500/10 text-foreground' : 'bg-muted text-foreground'
       }`}>
-        <p className="whitespace-pre-wrap break-words">{content}</p>
+        <div className={cn(
+          "prose prose-sm dark:prose-invert max-w-none",
+          "prose-headings:text-foreground prose-p:text-foreground/90",
+          "prose-strong:text-foreground prose-code:text-primary prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded",
+          "prose-pre:bg-muted prose-pre:border prose-pre:border-border",
+          "prose-ul:text-foreground/90 prose-ol:text-foreground/90 prose-li:text-foreground/90",
+          "prose-a:text-primary prose-a:underline"
+        )}>
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+              p: ({ children }) => <p className="leading-relaxed mb-2 last:mb-0">{children}</p>,
+              ul: ({ children }) => <ul className="list-disc list-inside mb-2 space-y-0.5">{children}</ul>,
+              ol: ({ children }) => <ol className="list-decimal list-inside mb-2 space-y-0.5">{children}</ol>,
+              li: ({ children }) => <li className="leading-relaxed">{children}</li>,
+              h1: ({ children }) => <h1 className="text-xl font-bold mb-2 mt-3 first:mt-0">{children}</h1>,
+              h2: ({ children }) => <h2 className="text-lg font-bold mb-2 mt-2 first:mt-0">{children}</h2>,
+              h3: ({ children }) => <h3 className="text-base font-semibold mb-1.5 mt-2 first:mt-0">{children}</h3>,
+              strong: ({ children }) => <strong className="font-bold">{children}</strong>,
+              em: ({ children }) => <em className="italic">{children}</em>,
+              code: ({ children, className }) => {
+                const isBlock = className?.includes('language-');
+                return isBlock ? (
+                  <code className={cn("block overflow-x-auto p-2 rounded bg-muted", className)}>{children}</code>
+                ) : (
+                  <code className="text-sm bg-muted px-1 py-0.5 rounded">{children}</code>
+                );
+              },
+              pre: ({ children }) => <pre className="overflow-x-auto mb-2 rounded border border-border">{children}</pre>,
+              blockquote: ({ children }) => <blockquote className="border-l-2 border-primary pl-4 italic my-2">{children}</blockquote>,
+              hr: () => <hr className="my-3 border-border" />,
+            }}
+          >
+            {content}
+          </ReactMarkdown>
+        </div>
         {event.timestamp && (
           <p className="text-[10px] text-muted-foreground mt-1">
             {new Date(event.timestamp).toLocaleTimeString()}
