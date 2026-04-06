@@ -80,7 +80,7 @@ export function A2ASendMessage({ isSending, error, onSend }: A2ASendMessageProps
             <SelectItem value="autonomous">
               <div className="flex items-center gap-1.5">
                 <Zap className="h-3 w-3" />
-                Autonomous
+                Async Task
               </div>
             </SelectItem>
           </SelectContent>
