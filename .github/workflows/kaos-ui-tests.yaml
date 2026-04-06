@@ -201,6 +201,7 @@ jobs:
 
       - name: Deploy sample resources
         run: |
+          kubectl create namespace kaos-hierarchy || true
           kubectl apply --server-side -f operator/config/samples/ -n kaos-hierarchy || true
           sleep 10
           kubectl get agents,mcpservers,modelapis -n kaos-hierarchy
