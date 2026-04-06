@@ -36,18 +36,121 @@ This report covers the comprehensive A2A protocol, autonomous execution, TaskEve
 | 5 | Add autonomous CLI sample | ✅ Done | `200b824` | Sample 6: kubernetes MCP + report tools monitoring agent |
 | 6 | Enhance Playwright tests | ✅ Done | `96f91d9` | Rewrote shallow tests → real multi-step workflow tests |
 | 7 | Manual testing + bug fix | ✅ Done | `3f21130` | Found & fixed missing autonomous section in AgentOverview |
-| 8 | Update REPORT.md | ✅ Done | This commit | Comprehensive report |
+| 8 | Update REPORT.md | ✅ Done | `06ccab5` | Comprehensive report |
 
-### Manual Testing Results
+### Phase 3: Autonomous Sample Deployment & Playwright Stability (Tasks 1-4)
 
-**Environment:** KIND cluster, kaos-hierarchy namespace, 7 agents, 5 MCP servers, 5 ModelAPIs
+| # | Task | Status | Commit | Details |
+|---|------|--------|--------|---------|
+| 1 | Deploy autonomous monitoring sample | ✅ Done | — | Deployed to kaos-hierarchy with zalando-modelapi |
+| 2 | Manual test autonomous sample | ✅ Done | — | Verified tool calls, health reports, interactive chat |
+| 3 | Fix all broken Playwright tests | ✅ Done | `9b5aacd` | Fixed 12 pre-existing failures → 125/125 pass (2 skipped) |
+| 4 | Debug guide & REPORT update | ✅ Done | This commit | Setup/debugging guide included below |
 
+### Phase 3: Autonomous Sample Testing Results
+
+**Deployed resources** (kaos-hierarchy namespace):
+- Agent: `cluster-monitor` — autonomous monitoring with 120s interval
+- MCPServers: `monitor-k8s-mcp` (kubernetes runtime), `monitor-report-mcp` (python-string)
+- Model: `gemini/gemini-flash-latest` via `zalando-modelapi`
+- ClusterRole: Cross-namespace read access (kaos-hierarchy, kaos-autonomous, envoy-gateway-system, kube-system, kaos-operator)
+
+**Manual testing results:**
 | Test | Result | Details |
 |------|--------|---------|
-| 1.1 Memory default conversation view | ✅ PASS | Chat/Raw toggle buttons visible, conversation is default |
-| 1.2 Memory live mode no jitter | ✅ PASS | Toggle on/off without errors, diff-based append works |
-| 2.1 A2A mode shows "Async Task" | ✅ PASS | Options: [Interactive, Async Task] — "Autonomous" absent |
-| 2.2 A2A send → history → auto-switch | ✅ PASS | Message sent, history entry created, clicking auto-switches to tasks tab |
+| Autonomous task submission | ✅ PASS | Task `task_52103afe7275` submitted on startup |
+| Tool calls (pods_list, events_list, etc.) | ✅ PASS | 23 memory events, 6+ different tool types used |
+| Health report generation | ✅ PASS | Detailed reports: 46 pods checked, 3 unhealthy identified |
+| Interactive chat via /v1/chat/completions | ✅ PASS | Agent correctly listed 8 agents in namespace |
+| Budget enforcement (120s interval) | ✅ PASS | Autonomous loop runs within configured budgets |
+
+### Phase 3: Playwright Fix Details
+
+**Root causes found and fixed:**
+
+1. **Duplicate edit dialogs (visual-map bug)** — Both `Index.tsx` and `visual-map/index.tsx` rendered edit dialogs from shared state. Since visual map is always-mounted, clicking edit opened TWO identical dialogs. Fix: removed duplicate dialog rendering from visual-map (Index.tsx already handles it).
+
+2. **Memory mock tests (7 failures)** — Default view changed to 'conversation' but tests asserted badge content only visible in 'raw' view. Fix: added `page.locator('[data-testid="memory-view-raw"]').click()` before assertions.
+
+3. **A2A send test (1 failure)** — Test waited for `[data-testid="a2a-task-detail"]` after sending, but that element only exists in the "Get/Cancel Task" tab. Fix: added route mocking + corrected flow (wait for history entry → click → auto-switches to tasks tab).
+
+4. **CRUD UPDATE button click (2 failures)** — CSS selector `button[type="submit"]` failed silently within dialog's ScrollArea. Fix: changed to `getByRole('button', { name: /Update ModelAPI/i })` which handles scroll/viewport correctly.
+
+**Final Playwright results:** 125 passed, 0 failed, 2 skipped
+
+### Autonomous Monitoring Sample — Setup & Debugging Guide
+
+#### Deploying the Sample
+
+```bash
+# 1. Ensure KIND cluster is running with KAOS installed
+kaos system install --gateway-enabled --metallb-enabled --wait
+
+# 2. Deploy the autonomous monitoring sample
+cd operator/config/samples
+kubectl apply -f 6-autonomous-monitor.yaml -n kaos-hierarchy
+
+# 3. Wait for resources to be ready
+kubectl wait --for=condition=Ready agent/cluster-monitor -n kaos-hierarchy --timeout=120s
+kubectl wait --for=condition=Ready mcpserver/monitor-k8s-mcp -n kaos-hierarchy --timeout=120s
+kubectl wait --for=condition=Ready mcpserver/monitor-report-mcp -n kaos-hierarchy --timeout=120s
+```
+
+#### Checking Agent Status
+
+```bash
+# Check agent pod logs
+kubectl logs -n kaos-hierarchy -l app=agent-cluster-monitor --tail=50
+
+# Check autonomous task submission
+kubectl logs -n kaos-hierarchy -l app=agent-cluster-monitor | grep -i "autonomous\|task"
+
+# View memory events (via port-forward)
+kubectl port-forward -n kaos-hierarchy svc/agent-cluster-monitor 8000:8000
+curl http://localhost:8000/memory/events?session_id=autonomous | jq '.events | length'
+curl http://localhost:8000/memory/events?session_id=autonomous | jq '.events[-3:]'
+```
+
+#### Interacting with the Agent
+
+```bash
+# Interactive chat
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"messages": [{"role": "user", "content": "List all agents in the cluster"}]}'
+
+# A2A SendMessage
+curl -X POST http://localhost:8000/ \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc": "2.0", "method": "SendMessage", "params": {"message": {"role": "user", "parts": [{"type": "text", "text": "Generate a health report"}]}}, "id": "1"}'
+
+# Using kaos CLI
+kaos agent a2a send cluster-monitor -n kaos-hierarchy -m "Check pod status"
+kaos agent a2a card cluster-monitor -n kaos-hierarchy
+```
+
+#### macOS/KIND Port-Forward Setup
+
+```bash
+# Gateway access (MetalLB IPs not accessible from macOS host)
+kubectl port-forward -n envoy-gateway-system svc/envoy-gateway 8888:80 &
+export GATEWAY_URL=http://localhost:8888
+
+# Direct agent access
+kubectl port-forward -n kaos-hierarchy svc/agent-cluster-monitor 8000:8000 &
+
+# UI proxy
+kaos ui --no-browser  # Proxy at http://localhost:8010
+```
+
+#### Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| Agent pod CrashLoopBackOff | Check ModelAPI secret: `kubectl get secret -n kaos-hierarchy` |
+| No tool calls in logs | Verify MCP servers are Ready: `kubectl get mcpserver -n kaos-hierarchy` |
+| Empty memory events | Check autonomous goal is set: `kubectl get agent cluster-monitor -o yaml` |
+| 503 from Gateway | Wait for Gateway pods: `kubectl wait -n envoy-gateway-system --for=condition=available deploy --all` |
 | 3.1 Visual map no edge labels | ✅ PASS | 22 nodes, 17 edges, 0 text labels |
 | 4.1 Auto badge in agent list | ✅ PASS | test-auto-agent shows "Auto" badge |
 | 4.2 Agent detail shows goal | ✅ PASS | Autonomous Execution section with goal, intervals, budgets |
@@ -58,16 +161,11 @@ This report covers the comprehensive A2A protocol, autonomous execution, TaskEve
 - `AgentOverview.tsx` was missing the Autonomous Execution section (only `ResourceDetailDrawer.tsx` had it)
 - Fixed in commit `3f21130`: Added Autonomous Execution card showing goal, interval, iteration runtime, and task budgets
 
-### Playwright Test Results
+### Playwright Test Results (Final)
 
 **Unit tests:** 63/63 passed  
-**Playwright tests:** 113/125 passed (10 pre-existing failures, 2 skipped)
-
-Pre-existing failures (not introduced by this PR):
-- `crud/mcpserver.spec.ts`: UPDATE dialog doesn't close after save (2 tests)
-- `crud/modelapi.spec.ts`: UPDATE dialog doesn't close after save (2 tests)
-- `functional/agent-memory.spec.ts`: Mock data tests with outdated DOM expectations (7 tests)
-- A2A send message: Flaky in parallel execution (1 test, passes individually)
+**Playwright tests:** 125/125 passed, 0 failed, 2 skipped  
+All pre-existing failures fixed in Phase 3 (commit `9b5aacd`)
 
 ### Enhanced Playwright Tests Summary
 
