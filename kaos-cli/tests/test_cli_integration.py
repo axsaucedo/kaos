@@ -364,7 +364,7 @@ class TestAgentA2ACommands:
         assert result.exit_code == 0
         output = strip_ansi(result.output)
         assert "--message" in output
-        assert "--mode" in output
+        assert "--async" in output
         assert "--session-id" in output
         assert "--json" in output
 
