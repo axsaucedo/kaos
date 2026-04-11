@@ -36,9 +36,7 @@ Goal: "Check system health and fix issues"
   Iteration 3: Agent calls health_check again ->  all clear, done!
 ```
 
-KAOS supports two activation modes:
-1. **Startup-activated**: Agent begins autonomous execution on pod boot (CRD config)
-2. **A2A-triggered**: Send an autonomous task via the A2A protocol at any time
+Autonomous execution is activated by setting a `goal` in the Agent CRD's `spec.config.autonomous` section. When the agent pod starts, it immediately begins working toward the goal in a self-loop with configurable intervals between iterations.
 
 ## Prerequisites
 
@@ -50,171 +48,290 @@ KAOS supports two activation modes:
 
 ```python
 import os
-os.environ['NAMESPACE'] = 'autonomous-agent-example'
+import subprocess
+import json
+import time
+
+NAMESPACE = "autonomous-example"
+os.environ["NAMESPACE"] = NAMESPACE
 ```
 
-```bash
-kubectl create namespace $NAMESPACE 2>/dev/null || true
-kubectl config set-context --current --namespace=$NAMESPACE
+```python
+subprocess.run(
+    ["kubectl", "create", "namespace", NAMESPACE],
+    capture_output=True, text=True,
+)
+subprocess.run(
+    ["kubectl", "config", "set-context", "--current", f"--namespace={NAMESPACE}"],
+    check=True, capture_output=True, text=True,
+)
+print(f"✅ Namespace '{NAMESPACE}' ready")
 ```
 
 ## Step 1: Create a ModelAPI
 
-```bash
-kaos modelapi deploy auto-api --mode Proxy --wait
+Create a ModelAPI in Proxy mode. We use mock responses so no real LLM is needed:
+
+```python
+result = subprocess.run(
+    ["kaos", "modelapi", "deploy", "auto-api", "--mode", "Proxy", "--wait"],
+    capture_output=True, text=True, check=True,
+)
+print("✅ ModelAPI 'auto-api' deployed")
 ```
 
 ## Step 2: Create an MCP Server (Echo Tool)
 
-Deploy a simple echo MCP server that the agent can use as a tool:
+Deploy a simple echo MCP server that the agent can call as a tool:
 
-```bash
-export ECHO_FUNC='
+```python
+echo_func = '''
 def echo(message: str) -> str:
     """Echo the provided message back."""
     return f"Echo: {message}"
-'
+'''
 
-kaos mcp deploy auto-echo --runtime python-string --params "$ECHO_FUNC" --wait
+result = subprocess.run(
+    ["kaos", "mcp", "deploy", "auto-echo",
+     "--runtime", "python-string",
+     "--params", echo_func,
+     "--wait"],
+    capture_output=True, text=True, check=True,
+)
+print("✅ MCP Server 'auto-echo' deployed")
 ```
 
-## Step 3: Deploy an Autonomous Agent (Startup-Activated)
+## Step 3: Deploy an Autonomous Agent
 
-Deploy an agent with autonomous mode enabled. Using mock responses for deterministic behavior:
+Deploy an agent with autonomous mode enabled. The `--autonomous` flag sets the goal, and `--auto-interval` controls the pause between iterations. Mock responses simulate two iterations of tool usage:
 
-```bash
-kaos agent deploy auto-agent \
-  --modelapi auto-api \
-  --model gpt-4o \
-  --mcp auto-echo \
-  --instructions "You are a test agent. Use the echo tool when asked." \
-  --mock-response '{"tool_calls": [{"id": "call_1", "name": "echo", "arguments": {"message": "hello from autonomous"}}]}' \
-  --mock-response "The echo tool confirmed: hello from autonomous. Goal achieved." \
-  --autonomous "Use the echo tool to say hello and report the result" \
-  --auto-interval 1.0 \
-  --wait
+```python
+mock1 = json.dumps({
+    "tool_calls": [{
+        "id": "call_1",
+        "name": "echo",
+        "arguments": {"message": "checking system status"}
+    }]
+})
+mock2 = "System check complete. Echo confirmed: checking system status. Goal achieved."
+
+result = subprocess.run(
+    ["kaos", "agent", "deploy", "auto-agent",
+     "--modelapi", "auto-api",
+     "--model", "gpt-4o",
+     "--mcp", "auto-echo",
+     "--instructions", "You are a test agent. Use the echo tool when asked.",
+     "--mock-response", mock1,
+     "--mock-response", mock2,
+     "--autonomous", "Use the echo tool to check system status and report the result",
+     "--auto-interval", "1",
+     "--wait"],
+    capture_output=True, text=True, check=True,
+)
+print("✅ Autonomous agent 'auto-agent' deployed")
 ```
+
+The agent starts its autonomous loop immediately on pod boot:
+- **Iteration 1**: Calls the `echo` tool with "checking system status"
+- **Iteration 2**: Receives mock text response (no tool calls) → loop completes
 
 ## Step 4: Verify Autonomous Execution via Memory
 
-The agent runs autonomously on startup. Check that memory recorded the execution:
+The agent runs autonomously on startup. Give it a moment, then check that memory recorded the execution:
 
-```bash
-sleep 5
-kaos agent memory auto-agent
-```
+```python
+time.sleep(8)
 
-Verify the autonomous session was recorded:
+result = subprocess.run(
+    ["kaos", "agent", "memory", "auto-agent", "--json"],
+    capture_output=True, text=True, check=True,
+)
+data = json.loads(result.stdout)
+events = data.get("events", [])
+assert len(events) >= 2, f"Expected at least 2 memory events, got {len(events)}"
 
-```bash
-kaos agent memory auto-agent --json | python3 -c "
-import json, sys
-data = json.load(sys.stdin)
-events = data.get('events', [])
-assert len(events) >= 2, f'Expected at least 2 events, got {len(events)}'
-types = [e['event_type'] for e in events]
-assert 'user_message' in types, 'Missing goal user_message'
-assert 'agent_response' in types, 'Missing agent_response'
-print(f'Autonomous session recorded: {len(events)} events')
+types = [e["event_type"] for e in events]
+assert "user_message" in types, "Missing goal user_message"
+assert "agent_response" in types, "Missing agent_response"
+
+print(f"✅ Autonomous session recorded: {len(events)} events")
 for e in events:
-    print(f'  [{e[\"event_type\"]}] {str(e.get(\"content\",\"\"))[:80]}')
-"
+    content = str(e.get("content", ""))[:80]
+    print(f"  [{e['event_type']}] {content}")
 ```
 
-## Step 5: Check Agent Status
+## Step 5: Verify Agent Card
 
-Verify the agent is healthy and has discovered the echo tool:
+Check the agent's A2A card to confirm it's healthy and has discovered the echo tool:
 
-```bash
-kaos agent status auto-agent
+```python
+result = subprocess.run(
+    ["kaos", "agent", "status", "auto-agent", "--json"],
+    capture_output=True, text=True, check=True,
+)
+card = json.loads(result.stdout)
+
+assert "jsonrpc" in card.get("supportedProtocols", []), "Missing A2A protocol support"
+skills = [s["name"] for s in card.get("skills", [])]
+assert "echo" in skills, f"Echo tool not found in skills: {skills}"
+
+print(f"✅ Agent healthy: {len(skills)} tool(s), A2A enabled")
+print(f"  Skills: {skills}")
 ```
 
-Verify capabilities:
+## Step 6: Send a Sync A2A Message
 
-```bash
-kaos agent status auto-agent --json | python3 -c "
-import json, sys
-card = json.load(sys.stdin)
-assert 'jsonrpc' in card.get('supportedProtocols', []), 'Missing A2A protocol support'
-skills = [s['name'] for s in card.get('skills', [])]
-assert 'echo' in skills, f'Echo tool not found in skills: {skills}'
-print(f'Agent healthy: {len(skills)} tools, A2A enabled')
-"
+Even though the agent is autonomous, you can still send interactive messages via A2A. This uses the sync (default) mode:
+
+```python
+result = subprocess.run(
+    ["kaos", "agent", "a2a", "send", "auto-agent",
+     "--message", "Say hello via A2A",
+     "--json"],
+    capture_output=True, text=True, check=True,
+)
+data = json.loads(result.stdout)
+task = data.get("result", {})
+state = task.get("status", {}).get("state")
+
+assert state == "completed", f"Expected completed, got {state}"
+
+history = task.get("history", [])
+agent_msgs = [h for h in history if h.get("role") == "agent"]
+assert len(agent_msgs) > 0, "No agent response in history"
+
+print(f"✅ A2A sync message completed: {state}")
+print(f"  Agent response: {agent_msgs[0]['parts'][0]['text'][:100]}")
 ```
 
-## Step 6: A2A Sync Message
+## Production Setup: Kubernetes Cluster Monitor
 
-Send a synchronous message via the A2A protocol:
+The simple example above demonstrates the mechanics. For production autonomous agents, you need:
+- **RBAC**: Service accounts with least-privilege access
+- **Real tools**: Kubernetes MCP server for cluster introspection
+- **Meaningful goals**: Multi-step monitoring and reporting tasks
+- **Tuned intervals**: Balance between freshness and resource usage
 
-```bash
-kaos agent a2a send auto-agent --message "Say hello via A2A" --json 2>/dev/null | python3 -c "
-import json, sys
-data = json.load(sys.stdin)
-result = data.get('result', {})
-state = result.get('status', {}).get('state')
-assert state == 'completed', f'Expected completed, got {state}'
-history = result.get('history', [])
-assert len(history) >= 2, f'Expected at least 2 history entries, got {len(history)}'
-agent_msg = [h for h in history if h.get('role') == 'agent']
-assert len(agent_msg) > 0, 'No agent response in history'
-print(f'A2A sync completed: {state}')
-print(f'Agent response: {agent_msg[0][\"parts\"][0][\"text\"][:100]}')
-"
+KAOS includes a ready-made autonomous monitoring sample. Deploy it with:
+
+```
+kaos samples deploy 6-autonomous-monitor
 ```
 
-## Step 7: A2A Autonomous Task
+Here's what the production sample includes, annotated:
 
-Trigger an autonomous task via the A2A protocol. The task executes asynchronously, so we send it and poll for completion:
+### RBAC: Least-privilege Kubernetes access
 
-```bash
-TASK_OUTPUT=$(kaos agent a2a send auto-agent \
-  --message "Run autonomous echo check" \
-  --mode autonomous \
-  --json 2>/dev/null)
-
-TASK_ID=$(echo "$TASK_OUTPUT" | python3 -c "import json,sys; print(json.load(sys.stdin)['result']['id'])")
-echo "Task ID: $TASK_ID"
-
-sleep 3
-
-kaos agent a2a get auto-agent --task-id "$TASK_ID" --json 2>/dev/null | python3 -c "
-import json, sys
-data = json.load(sys.stdin)
-result = data.get('result', {})
-state = result.get('status', {}).get('state')
-events = result.get('events', [])
-event_types = [e['type'] for e in events]
-print(f'Task state: {state}')
-print(f'Events: {len(events)}')
-for e in events:
-    print(f'  {e[\"type\"]}: {json.dumps(e.get(\"data\", {}))[:80]}')
-assert state in ('completed', 'failed'), f'Task not terminal: {state}'
-assert 'task.submitted' in event_types, 'Missing task.submitted event'
-"
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: k8s-monitor-sa
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: k8s-monitor-role
+rules:
+  # Read-only access to core resources
+  - apiGroups: [""]
+    resources: ["pods", "services", "events", "namespaces"]
+    verbs: ["get", "list"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["get", "list"]
 ```
 
-## Step 8: Verify Memory Across Sessions
+### MCP Servers: Kubernetes introspection + report generation
 
-Multiple sessions should exist (startup + A2A sync + A2A autonomous):
+```yaml
+# Kubernetes MCP server — queries cluster state
+apiVersion: kaos.tools/v1alpha1
+kind: MCPServer
+metadata:
+  name: monitor-k8s-mcp
+spec:
+  runtime: kubernetes                    # Built-in Kubernetes runtime
+  serviceAccountName: k8s-monitor-sa     # Uses the RBAC service account
+  params: |
+    allowedNamespaces:
+      - kaos-autonomous                  # Scoped to specific namespace
+---
+# Python MCP server — generates health reports
+apiVersion: kaos.tools/v1alpha1
+kind: MCPServer
+metadata:
+  name: monitor-report-mcp
+spec:
+  runtime: python-string
+  params: |
+    from datetime import datetime
 
-```bash
-kaos agent memory auto-agent --json | python3 -c "
-import json, sys
-data = json.load(sys.stdin)
-total = data.get('total', 0)
-assert total >= 4, f'Expected at least 4 events across sessions, got {total}'
-print(f'Total memory events across all sessions: {total}')
-"
+    def generate_health_report(pod_data: str) -> str:
+        """Generate a formatted cluster health report."""
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        return f"=== Cluster Health Report ===\nGenerated: {timestamp}\n---\n{pod_data}\n=== End Report ==="
+
+    def check_pod_status(pod_name: str, status: str) -> str:
+        """Check whether a pod is healthy or needs attention."""
+        healthy = ["Running", "Succeeded", "Completed"]
+        icon = "✅" if status in healthy else "❌"
+        state = "HEALTHY" if status in healthy else "UNHEALTHY"
+        return f"{icon} {pod_name}: {state} ({status})"
 ```
+
+### Autonomous Agent: Self-looping cluster monitor
+
+```yaml
+apiVersion: kaos.tools/v1alpha1
+kind: Agent
+metadata:
+  name: cluster-monitor
+spec:
+  modelAPI: monitor-modelapi
+  model: "smollm2:135m"
+  mcpServers:
+    - monitor-k8s-mcp        # Kubernetes introspection tools
+    - monitor-report-mcp      # Report generation tools
+  config:
+    description: "Autonomous cluster monitoring agent"
+    instructions: |
+      You are a Kubernetes cluster monitoring agent. Your goal is to:
+      1. List all pods in the namespace
+      2. Check the status of each pod
+      3. Generate a health report
+    autonomous:
+      goal: "Monitor cluster health. List pods, check status, generate report."
+      intervalSeconds: 60             # Run every 60 seconds
+      maxIterRuntimeSeconds: 120      # Max 2 minutes per iteration
+    taskConfig:
+      maxIterations: 5                # A2A async tasks: max 5 iterations
+      maxRuntimeSeconds: 300          # A2A async tasks: max 5 minutes
+      maxToolCalls: 20                # A2A async tasks: max 20 tool calls
+    reasoningLoopMaxSteps: 10         # Max model calls per iteration
+  agentNetwork:
+    expose: true                      # Expose via Gateway API for A2A access
+```
+
+Key configuration differences from the demo:
+- `intervalSeconds: 60` — production agents don't need sub-second intervals
+- `maxIterRuntimeSeconds: 120` — per-iteration timeout prevents runaway execution
+- `taskConfig` — separate budgets for A2A async tasks (independent of autonomous loop)
+- Real model (`smollm2:135m` via Ollama) instead of mock responses
+- Multiple MCP servers working together (Kubernetes + Python report tools)
 
 ## Cleanup
 
-```bash
-kubectl delete namespace $NAMESPACE --wait=false
+```python
+subprocess.run(
+    ["kubectl", "delete", "namespace", NAMESPACE, "--wait=false"],
+    capture_output=True, text=True,
+)
+print(f"✅ Namespace '{NAMESPACE}' deletion initiated")
 ```
 
 ## Next Steps
 
-- [Multi-Agent Telemetry](/examples/multi-agent-telemetry) - Multi-agent delegation with OpenTelemetry tracing
-- [FastMCP Code Mode](/examples/fastmcp-codemode) - Aggregate MCP servers with Python sandbox
+- [KAOS Monkey](/examples/kaos-monkey) - Chaos engineering agent with Kubernetes tools
+- [Multi-Agent Telemetry](/examples/multi-agent-telemetry) - Multi-agent delegation with OpenTelemetry
 - [Agent CRD Reference](/operator/agent-crd) - Full autonomous configuration options
