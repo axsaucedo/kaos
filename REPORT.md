@@ -227,6 +227,41 @@ All pre-existing failures fixed in Phase 3 (commit `9b5aacd`)
 
 ---
 
+## PR #115: CLI A2A `--async` Flag & Autonomous Example Rewrite
+
+**Branch:** `fix/cli-a2a-async-autonomous-example`  
+**Status:** ✅ Complete — All CI passing
+
+### Problem
+- CLI `kaos agent a2a send --mode autonomous` conflated autonomous (CRD self-loop) with async task (A2A background execution)
+- `autonomous-agent.md` example tested A2A protocol mechanics rather than demonstrating autonomous execution
+- Example missing from docs sidebar
+
+### Tasks
+
+| # | Task | Status | Commit |
+|---|------|--------|--------|
+| 1 | Replace CLI `--mode` with `--async` flag | ✅ Done | `f940c29` |
+| 2 | Rewrite autonomous-agent.md with Python cells | ✅ Done | `4e2e40d` |
+| 3 | Add to docs sidebar | ✅ Done | `4e2e40d` |
+| 4 | Manual + notebook local testing | ✅ Done | — |
+| 5 | Sync `.ipynb`, push PR, validate CI | ✅ Done | `b05a112` |
+| 6 | Update REPORT.md | ✅ Done | This commit |
+
+### Key Changes
+- **CLI**: `--mode` string option → `--async` boolean flag (breaking, alpha stage)
+- **Example**: 6 executable Python steps + production walkthrough (sample 6 YAML)
+- **Sidebar**: Added "Autonomous Agent" to Examples section in docs config
+- **Notebook**: Regenerated `.ipynb` from rewritten markdown
+
+### CI Results
+- Python Tests: ✅
+- E2E Tests: ✅ (including `example-autonomous` shard)
+- Docs Lint: ✅
+- Subtree Sync: ✅
+
+---
+
 ## Architecture Decisions
 
 1. **A2A Protocol**: JSON-RPC 2.0 at root path, separate from `/v1/chat/completions`
@@ -234,3 +269,4 @@ All pre-existing failures fixed in Phase 3 (commit `9b5aacd`)
 3. **Delegation**: DelegationToolset as AbstractToolset (same pattern as MCPServerStreamableHTTP)
 4. **Memory over TaskEvents**: Single source of truth for execution history
 5. **UI detail page**: Full-page route (`/agents/:ns/:name`) with tabs, not drawer
+6. **CLI terminology**: A2A tasks are sync vs async (not "autonomous" vs "sync")
