@@ -581,7 +581,7 @@ class TestSamples:
         assert result.exit_code == 0
         docs = list(yaml.safe_load_all(result.output))
         kinds = {d["kind"] for d in docs if d}
-        assert "Namespace" in kinds
+        assert "Namespace" not in kinds
         assert "ModelAPI" in kinds
         assert "MCPServer" in kinds
         assert "Agent" in kinds
@@ -600,11 +600,12 @@ class TestSamples:
         )
         assert result.exit_code == 0
         docs = list(yaml.safe_load_all(result.output))
-        ns_doc = next(d for d in docs if d and d["kind"] == "Namespace")
-        assert ns_doc["metadata"]["name"] == "custom-ns"
-        # All non-Namespace resources get the namespace override
+        # No Namespace doc should be present
+        ns_docs = [d for d in docs if d and d["kind"] == "Namespace"]
+        assert len(ns_docs) == 0
+        # All resources get the namespace override
         for doc in docs:
-            if doc and doc["kind"] != "Namespace":
+            if doc:
                 assert doc["metadata"]["namespace"] == "custom-ns"
 
     def test_deploy_sample_with_model_override(self):
@@ -724,7 +725,7 @@ class TestSamples:
         assert len(agents) == 3  # coordinator + 2 workers
 
     def test_namespace_override_applies_to_all_resources(self):
-        """Verify namespace override applies even to resources without existing namespace."""
+        """Verify namespace override applies to all resources (no Namespace doc)."""
         result = runner.invoke(
             app,
             [
@@ -739,10 +740,43 @@ class TestSamples:
         assert result.exit_code == 0
         docs = list(yaml.safe_load_all(result.output))
         for doc in docs:
-            if doc and doc["kind"] != "Namespace":
+            if doc:
+                assert doc["kind"] != "Namespace", "Namespace doc should be filtered out"
                 assert doc["metadata"].get("namespace") == "test-ns", (
                     f"{doc['kind']} {doc['metadata']['name']} missing namespace override"
                 )
+
+    def test_modelapi_override_skips_modelapi_resource(self):
+        """When --modelapi is used, ModelAPI resources are filtered out."""
+        result = runner.invoke(
+            app,
+            [
+                "samples",
+                "deploy",
+                "1-simple-echo-agent",
+                "--modelapi",
+                "my-existing-api",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0
+        docs = list(yaml.safe_load_all(result.output))
+        kinds = {d["kind"] for d in docs if d}
+        assert "ModelAPI" not in kinds
+        # Agent should reference the overridden modelapi
+        agent = next(d for d in docs if d and d["kind"] == "Agent")
+        assert agent["spec"]["modelAPI"] == "my-existing-api"
+
+    def test_no_namespace_resource_in_output(self):
+        """Namespace resources are always filtered out from samples."""
+        result = runner.invoke(
+            app, ["samples", "deploy", "1-simple-echo-agent", "--dry-run"]
+        )
+        assert result.exit_code == 0
+        docs = list(yaml.safe_load_all(result.output))
+        for doc in docs:
+            if doc:
+                assert doc["kind"] != "Namespace"
 
 
 # ─── Package data bundling ──────────────────────────────────────────────
@@ -756,7 +790,7 @@ class TestPackageData:
     def test_samples_dir_contains_files(self):
         from kaos_cli.samples import _get_sample_files
         files = _get_sample_files()
-        assert len(files) == 5
+        assert len(files) == 6
         names = [f.stem for f in files]
         assert "1-simple-echo-agent" in names
         assert "5-proxy-external-api" in names

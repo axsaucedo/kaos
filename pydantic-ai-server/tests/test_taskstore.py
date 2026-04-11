@@ -9,6 +9,7 @@ from pais.a2a import (
     TaskEvent,
     Task,
     TaskBudgets,
+    AutonomousConfig,
     LocalTaskManager,
     NullTaskManager,
     VALID_TRANSITIONS,
@@ -420,6 +421,49 @@ class TestLocalTaskManagerAutonomous:
         assert task.id in manager._running_tasks
         await manager.shutdown()
         assert len(manager._running_tasks) == 0
+
+    @pytest.mark.asyncio
+    async def test_autonomous_mode_resilient_to_iteration_errors(self):
+        """Autonomous CRD-mode should survive per-iteration failures and continue."""
+        import asyncio
+
+        call_count = 0
+        event = asyncio.Event()
+
+        async def flaky_process(msg, session_id):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RuntimeError("Temporary MCP tool failure")
+            # Signal that we survived the error and got called again
+            event.set()
+            # Yield to event loop so cancellation can be processed
+            await asyncio.sleep(0)
+            return ("Recovery successful", 1)
+
+        manager = LocalTaskManager(flaky_process)
+        config = AutonomousConfig(goal="test resilience", interval_seconds=0)
+        task = await manager.submit_autonomous(
+            "Test resilience",
+            autonomous_config=config,
+        )
+        # Wait for the second call (proving error was survived)
+        await asyncio.wait_for(event.wait(), timeout=5.0)
+        assert call_count >= 2, f"Expected at least 2 calls, got {call_count}"
+        await manager.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_async_task_mode_fails_on_error(self):
+        """Async task mode (no autonomous_config) should still fail on errors."""
+
+        async def failing_process(msg, session_id):
+            raise RuntimeError("Fatal error")
+
+        manager = LocalTaskManager(failing_process)
+        task = await manager.submit_autonomous("Fail fast")
+        completed = await manager.wait_for_completion(task.id, timeout=5.0)
+        assert completed is not None
+        assert completed.status.state == TaskState.FAILED
 
 
 class TestNullTaskManager:

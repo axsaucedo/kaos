@@ -1,11 +1,11 @@
 import React from 'react';
-import { Bot, Server, Network, Clock, Tag, FileCode, Settings, Activity, Globe, Brain } from 'lucide-react';
+import { Bot, Server, Network, Clock, Tag, FileCode, Settings, Activity, Globe, Brain, Zap } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { DeploymentStatusCard } from '@/components/shared/DeploymentStatusCard';
 import type { Agent } from '@/types/kubernetes';
-import { getStatusVariant } from '@/lib/status-utils';
+import { getStatusVariant, isAutonomousAgent } from '@/lib/status-utils';
 
 interface AgentOverviewProps {
   agent: Agent;
@@ -250,7 +250,59 @@ export function AgentOverview({ agent }: AgentOverviewProps) {
         </CardContent>
       </Card>
 
-      {/* Network Settings */}
+      {/* Autonomous Execution */}
+      {isAutonomousAgent(agent) && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Zap className="h-4 w-4 text-yellow-500" />
+              Autonomous Execution
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div>
+              <span className="text-sm text-muted-foreground">Goal</span>
+              <p className="text-sm mt-1 bg-muted/50 px-2 py-1 rounded">{spec.config?.autonomous?.goal}</p>
+            </div>
+            {spec.config?.autonomous?.intervalSeconds !== undefined && (
+              <InfoRow
+                label="Interval"
+                value={<span className="font-mono">{spec.config.autonomous.intervalSeconds}s</span>}
+              />
+            )}
+            {spec.config?.autonomous?.maxIterRuntimeSeconds !== undefined && (
+              <InfoRow
+                label="Max Iteration Runtime"
+                value={<span className="font-mono">{spec.config.autonomous.maxIterRuntimeSeconds}s</span>}
+              />
+            )}
+            {spec.config?.taskConfig && (
+              <>
+                <Separator />
+                <span className="text-sm text-muted-foreground block">Task Budgets</span>
+                {spec.config.taskConfig.maxIterations !== undefined && (
+                  <InfoRow
+                    label="Max Iterations"
+                    value={<span className="font-mono">{spec.config.taskConfig.maxIterations}</span>}
+                  />
+                )}
+                {spec.config.taskConfig.maxRuntimeSeconds !== undefined && (
+                  <InfoRow
+                    label="Max Runtime"
+                    value={<span className="font-mono">{spec.config.taskConfig.maxRuntimeSeconds}s</span>}
+                  />
+                )}
+                {spec.config.taskConfig.maxToolCalls !== undefined && (
+                  <InfoRow
+                    label="Max Tool Calls"
+                    value={<span className="font-mono">{spec.config.taskConfig.maxToolCalls}</span>}
+                  />
+                )}
+              </>
+            )}
+          </CardContent>
+        </Card>
+      )}
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base">

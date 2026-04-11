@@ -1,11 +1,13 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Bot, Link2 } from 'lucide-react';
+import { Bot, Link2, Zap } from 'lucide-react';
 import { ResourceList, DeploymentAwareStatus } from '@/components/resources/ResourceList';
 import { useKubernetesStore } from '@/stores/kubernetesStore';
 import { useKubernetesConnection } from '@/contexts/KubernetesConnectionContext';
 import { Badge } from '@/components/ui/badge';
+import { Tooltip, TooltipTrigger, TooltipContent } from '@/components/ui/tooltip';
 import { AgentCreateDialog } from '@/components/resources/AgentCreateDialog';
+import { isAutonomousAgent } from '@/lib/status-utils';
 import type { Agent } from '@/types/kubernetes';
 
 const getDeploymentAwareStatus = (item: Agent): DeploymentAwareStatus => {
@@ -74,7 +76,22 @@ export function AgentList() {
             <Bot className="h-4 w-4 text-agent" />
           </div>
           <div>
-            <p className="text-sm font-medium text-foreground">{item.metadata.name}</p>
+            <div className="flex items-center gap-1.5">
+              <p className="text-sm font-medium text-foreground">{item.metadata.name}</p>
+              {isAutonomousAgent(item) && (
+                <Tooltip>
+                  <TooltipTrigger>
+                    <Badge variant="outline" className="text-[10px] gap-0.5 px-1.5 py-0 h-4 border-yellow-500/50 text-yellow-600 dark:text-yellow-400">
+                      <Zap className="h-2.5 w-2.5" />
+                      Auto
+                    </Badge>
+                  </TooltipTrigger>
+                  <TooltipContent side="top" className="max-w-[300px]">
+                    <p className="text-xs">Autonomous: {item.spec.config?.autonomous?.goal}</p>
+                  </TooltipContent>
+                </Tooltip>
+              )}
+            </div>
             <p className="text-xs text-muted-foreground font-mono">{item.metadata.namespace}</p>
           </div>
         </div>

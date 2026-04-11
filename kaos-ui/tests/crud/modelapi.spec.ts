@@ -125,18 +125,18 @@ test.describe('ModelAPI CRUD Operations', () => {
       // Click the edit button using data-testid
       await testRow.getByTestId(`edit-${TEST_RESOURCE_NAME}`).click();
       
-      // Wait for edit dialog — use last() because create+edit dialogs may both mount
+      // Wait for edit dialog
       const dialog = page.locator('[role="dialog"]').last();
       await dialog.waitFor({ state: 'visible', timeout: 5000 });
       
-      // Modify the models — scope to the active dialog to avoid duplicate #models
+      // Modify the models
       const modelsInput = dialog.locator('#models');
       if (await modelsInput.isVisible()) {
         await modelsInput.fill('openai/gpt-4\nopenai/gpt-3.5-turbo\nanthropic/claude-3');
       }
       
-      // Submit the update — scope to the active dialog
-      await dialog.locator('button:has-text("Update ModelAPI")').click();
+      // Submit the update
+      await dialog.getByRole('button', { name: /Update ModelAPI/i }).click();
       
       // Wait for the dialog to close
       await expect(dialog).not.toBeVisible({ timeout: 10000 });

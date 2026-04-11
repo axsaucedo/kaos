@@ -133,7 +133,7 @@ test.describe('MCPServer CRUD Operations', () => {
       // Click the edit button using data-testid
       await testRow.getByTestId(`edit-${TEST_RESOURCE_NAME}`).click();
       
-      // Wait for edit dialog — use last() because create+edit dialogs may both mount
+      // Wait for edit dialog
       const dialog = page.locator('[role="dialog"]').last();
       await dialog.waitFor({ state: 'visible', timeout: 5000 });
       
@@ -145,8 +145,8 @@ test.describe('MCPServer CRUD Operations', () => {
     return f"Hello there, {name}!"`);
       }
       
-      // Submit the update — scope to the active dialog
-      await dialog.locator('button:has-text("Save Changes")').click();
+      // Submit the update
+      await dialog.getByRole('button', { name: /Save Changes/i }).click();
       
       // Wait for the dialog to close
       await expect(dialog).not.toBeVisible({ timeout: 10000 });

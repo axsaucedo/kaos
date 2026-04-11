@@ -2,14 +2,7 @@
 # Sample 4: Development Agent with Ollama Proxy
 # For local development with Ollama running on host machine
 # Uses LiteLLM proxy to connect to host Ollama (via Docker Desktop)
-# Deploy: kubectl apply -f 4-dev-ollama-proxy-agent.yaml
-
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: kaos-dev
-  labels:
-    app.kubernetes.io/part-of: kaos-sample-dev
+# Deploy: kaos samples deploy 4-dev-ollama-proxy-agent -n <namespace>
 
 ---
 # ModelAPI: LiteLLM proxy to host Ollama (WILDCARD MODE)
@@ -18,7 +11,6 @@ apiVersion: kaos.tools/v1alpha1
 kind: ModelAPI
 metadata:
   name: dev-ollama-proxy
-  namespace: kaos-dev
 spec:
   mode: Proxy
   proxyConfig:
@@ -37,7 +29,6 @@ apiVersion: kaos.tools/v1alpha1
 kind: MCPServer
 metadata:
   name: dev-echo-mcp
-  namespace: kaos-dev
 spec:
   runtime: python-string
   params: |
@@ -51,7 +42,6 @@ apiVersion: kaos.tools/v1alpha1
 kind: Agent
 metadata:
   name: dev-agent
-  namespace: kaos-dev
 spec:
   modelAPI: dev-ollama-proxy
   model: "ollama/smollm2:135m"  # Required: any model works with wildcard

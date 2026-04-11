@@ -2,6 +2,15 @@
  * Shared status utility functions extracted from overview/pods components.
  */
 
+import type { Agent } from '@/types/kubernetes';
+
+/**
+ * Check whether an agent is configured for autonomous execution.
+ */
+export function isAutonomousAgent(agent: Agent): boolean {
+  return !!agent.spec.config?.autonomous?.goal;
+}
+
 /**
  * Maps a resource phase/status string to a badge variant.
  * Used by AgentOverview, ModelAPIOverview, MCPServerOverview, etc.

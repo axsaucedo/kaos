@@ -142,14 +142,34 @@ export async function setupConnection(
   const proxyUrl = options.proxyUrl || TEST_CONFIG.proxyUrl;
   const namespace = options.namespace || TEST_CONFIG.namespace;
 
+  // Clear localStorage to prevent stale connection state
+  await page.addInitScript(() => {
+    localStorage.removeItem('k8s-config');
+  });
+
   // Navigate with query params to auto-connect
   await page.goto(`/?kubernetesUrl=${encodeURIComponent(proxyUrl)}&namespace=${encodeURIComponent(namespace)}`);
   
-  // Wait for the app to load and connect
+  // Wait for the app to load
   await page.waitForLoadState('networkidle');
-  
-  // Wait for the dashboard to be visible (indicates successful connection)
-  await expect(page.locator('body')).toBeVisible();
+
+  // Wait for the "Disconnected" text in the header to disappear,
+  // indicating the connection has been established
+  const disconnectedBadge = page.locator('header').getByText('Disconnected')
+    .or(page.locator('banner').getByText('Disconnected'));
+  try {
+    await expect(disconnectedBadge).not.toBeVisible({ timeout: 15000 });
+  } catch {
+    // If "Disconnected" is still visible, try clicking refresh to force reconnection
+    const refreshButton = page.getByRole('button', { name: /refresh now/i });
+    if (await refreshButton.isEnabled({ timeout: 1000 }).catch(() => false)) {
+      await refreshButton.click();
+      await page.waitForLoadState('networkidle');
+    }
+  }
+
+  // Final wait for data to load
+  await page.waitForLoadState('networkidle');
 }
 
 /**

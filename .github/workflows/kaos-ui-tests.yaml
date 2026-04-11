@@ -95,9 +95,13 @@ jobs:
         run: npm run test:unit
 
   e2e-tests:
-    name: E2E Tests
+    name: E2E Tests (shard ${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -197,6 +201,7 @@ jobs:
 
       - name: Deploy sample resources
         run: |
+          kubectl create namespace kaos-hierarchy || true
           kubectl apply --server-side -f operator/config/samples/ -n kaos-hierarchy || true
           sleep 10
           kubectl get agents,mcpservers,modelapis -n kaos-hierarchy
@@ -231,13 +236,13 @@ jobs:
 
       - name: Run Playwright E2E tests
         working-directory: kaos-ui
-        run: npx playwright test --reporter=list --workers=1
+        run: npx playwright test --shard=${{ matrix.shard }}/3 --max-failures=5 --reporter=list --workers=1
 
       - name: Upload test report
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
+          name: playwright-report-shard-${{ matrix.shard }}
           path: kaos-ui/playwright-report/
           retention-days: 7
 
@@ -245,7 +250,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: test-results
+          name: test-results-shard-${{ matrix.shard }}
           path: kaos-ui/test-results/
           retention-days: 7
 

@@ -153,6 +153,13 @@ test.describe('Agent Memory Event Display', () => {
     await memoryTab.click();
     await page.waitForLoadState('networkidle');
 
+    // Switch to Raw view to see badges and structured content
+    const rawViewBtn = page.locator('[data-testid="memory-view-raw"]');
+    if (await rawViewBtn.isVisible({ timeout: 3000 })) {
+      await rawViewBtn.click();
+      await page.waitForTimeout(500);
+    }
+
     return true;
   }
 

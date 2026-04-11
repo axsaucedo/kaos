@@ -1,14 +1,7 @@
 ---
 # Sample 1: Simple Echo Agent with MCP Server
 # A single agent with access to an echo MCP tool and a hosted Ollama model
-# Deploy: kubectl apply -f 1-simple-echo-agent.yaml
-
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: kaos-simple
-  labels:
-    app.kubernetes.io/part-of: kaos-sample-simple
+# Deploy: kaos samples deploy 1-simple-echo-agent -n <namespace>
 
 ---
 # ModelAPI: Hosted Ollama with smollm2 model (runs in-cluster)
@@ -16,7 +9,6 @@ apiVersion: kaos.tools/v1alpha1
 kind: ModelAPI
 metadata:
   name: simple-modelapi
-  namespace: kaos-simple
 spec:
   mode: Hosted
   hostedConfig:
@@ -32,7 +24,6 @@ apiVersion: kaos.tools/v1alpha1
 kind: MCPServer
 metadata:
   name: simple-echo-mcp
-  namespace: kaos-simple
 spec:
   runtime: python-string
   params: |
@@ -46,7 +37,6 @@ apiVersion: kaos.tools/v1alpha1
 kind: Agent
 metadata:
   name: simple-agent
-  namespace: kaos-simple
 spec:
   modelAPI: simple-modelapi
   model: "smollm2:135m"  # Required: must be supported by ModelAPI

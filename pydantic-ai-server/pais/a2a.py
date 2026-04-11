@@ -632,7 +632,36 @@ class LocalTaskManager(TaskManager):
                         "kaos.autonomous.iteration",
                         attributes={"autonomous.iteration": iteration},
                     ):
-                        last_response, tool_call_count = await self._process_fn(message, session_id)
+                        try:
+                            iter_timeout = (
+                                autonomous_config.max_iter_runtime_seconds
+                                if is_autonomous
+                                and autonomous_config
+                                and autonomous_config.max_iter_runtime_seconds > 0
+                                else 0
+                            )
+                            if iter_timeout > 0:
+                                last_response, tool_call_count = await asyncio.wait_for(
+                                    self._process_fn(message, session_id),
+                                    timeout=iter_timeout,
+                                )
+                            else:
+                                last_response, tool_call_count = await self._process_fn(
+                                    message, session_id
+                                )
+                        except Exception as iter_err:
+                            if is_autonomous:
+                                err_type = type(iter_err).__name__
+                                logger.warning(
+                                    f"Autonomous iteration {iteration} failed ({err_type}): "
+                                    f"{iter_err}, continuing after interval..."
+                                )
+                                iteration += 1
+                                if interval_seconds > 0:
+                                    await asyncio.sleep(interval_seconds)
+                                continue
+                            else:
+                                raise
 
                     if tool_call_count > 0:
                         total_tool_calls += tool_call_count
