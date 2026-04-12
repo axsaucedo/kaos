@@ -82,6 +82,18 @@ jobs:
       - name: Package chart
         run: |
           VERSION=${{ needs.validate.outputs.version }}
+
+          # Update image tags in values.yaml to match release version
+          sed -i "s|^\(\s*tag:\s*\)[0-9]*\.[0-9]*\.[0-9]*[^\"]*|\1$VERSION|" operator/chart/values.yaml
+          sed -i "s|axsauze/kaos-agent:[0-9]*\.[0-9]*\.[0-9]*[^\"]*|axsauze/kaos-agent:$VERSION|g" operator/chart/values.yaml
+          sed -i "s|axsauze/kaos-mcp-server:[0-9]*\.[0-9]*\.[0-9]*[^\"]*|axsauze/kaos-mcp-server:$VERSION|g" operator/chart/values.yaml
+          sed -i "s|axsauze/kaos-mcp-python-string:[0-9]*\.[0-9]*\.[0-9]*[^\"]*|axsauze/kaos-mcp-python-string:$VERSION|g" operator/chart/values.yaml
+          sed -i "s|axsauze/kaos-mcp-pctx-codemode:[0-9]*\.[0-9]*\.[0-9]*[^\"]*|axsauze/kaos-mcp-pctx-codemode:$VERSION|g" operator/chart/values.yaml
+          sed -i "s|axsauze/kaos-mcp-fastmcp-codemode:[0-9]*\.[0-9]*\.[0-9]*[^\"]*|axsauze/kaos-mcp-fastmcp-codemode:$VERSION|g" operator/chart/values.yaml
+
+          echo "Updated chart image tags to $VERSION:"
+          grep -E "tag:|kaos-(agent|mcp)" operator/chart/values.yaml
+
           mkdir -p ./charts
           helm package operator/chart \
             --version "$VERSION" \
