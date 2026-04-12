@@ -246,13 +246,18 @@ All pre-existing failures fixed in Phase 3 (commit `9b5aacd`)
 | 3 | Add to docs sidebar | ✅ Done | `4e2e40d` |
 | 4 | Manual + notebook local testing | ✅ Done | — |
 | 5 | Sync `.ipynb`, push PR, validate CI | ✅ Done | `b05a112` |
-| 6 | Update REPORT.md | ✅ Done | This commit |
+| 6 | Update REPORT.md | ✅ Done | `46a040b` |
+| 7 | Rewrite with mermaid, bang syntax, OpenClaw ref | ✅ Done | `b7aadf4` |
 
 ### Key Changes
 - **CLI**: `--mode` string option → `--async` boolean flag (breaking, alpha stage)
 - **Example**: 6 executable Python steps + production walkthrough (sample 6 YAML)
 - **Sidebar**: Added "Autonomous Agent" to Examples section in docs config
 - **Notebook**: Regenerated `.ipynb` from rewritten markdown
+- **Mermaid diagrams**: Autonomous self-loop flow + Kubernetes cluster monitor architecture
+- **OpenClaw reference**: Similar always-on agent infrastructure for context
+- **Bang syntax**: `!command` Jupyter syntax for cleaner CLI cells
+- **Fixed loop explanation**: Autonomous agents run forever (not until goal achieved)
 
 ### CI Results
 - Python Tests: ✅
