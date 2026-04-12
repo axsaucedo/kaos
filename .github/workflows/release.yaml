@@ -354,6 +354,9 @@ jobs:
           sed -i "s/^version = .*/version = \"$PYTHON_DEV\"/" pydantic-ai-server/pyproject.toml
           sed -i "s/^version = .*/version = \"$PYTHON_DEV\"/" kaos-cli/pyproject.toml
 
+          # Update CLI __init__.py fallback version
+          sed -i "s/__version__ = \"[^\"]*\"/__version__ = \"$PYTHON_DEV\"/" kaos-cli/kaos_cli/__init__.py
+
           # Update Helm chart version
           sed -i "s/^version: .*/version: $NEXT_DEV/" operator/chart/Chart.yaml
           sed -i "s/^appVersion: .*/appVersion: \"$NEXT_DEV\"/" operator/chart/Chart.yaml
@@ -372,6 +375,7 @@ jobs:
           cat VERSION
           grep "^version" pydantic-ai-server/pyproject.toml
           grep "^version" kaos-cli/pyproject.toml
+          grep "__version__" kaos-cli/kaos_cli/__init__.py
           grep "^version:\|^appVersion:" operator/chart/Chart.yaml
           grep -E "tag:|kaos-(agent|mcp-server|mcp-python-string|mcp-pctx-codemode|mcp-fastmcp-codemode):" operator/chart/values.yaml
 
@@ -388,6 +392,7 @@ jobs:
             ## Changes
             - `VERSION` → `${{ steps.next.outputs.next_dev }}`
             - Python packages → `${{ steps.next.outputs.python_dev }}`
+            - CLI `__init__.py` fallback → `${{ steps.next.outputs.python_dev }}`
             - Helm chart → `${{ steps.next.outputs.next_dev }}`
             - Helm values.yaml image tags → `${{ steps.next.outputs.next_dev }}`
 
