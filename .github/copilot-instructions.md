@@ -90,7 +90,7 @@ tmp/                       # Local work files (gitignored)
 - `operator/api/v1alpha1/*_types.go`: CRD schemas
 - `operator/controllers/*_controller.go`: Reconciliation logic
 - `operator/chart/`: Helm chart (generated from kustomize)
-- `pydantic-ai-server/pais/server.py`: AgentServer, create_agent_server, routes, _run_agent
+- `pydantic-ai-server/pais/server.py`: AgentServer, create_agent_server, routes, _run_autonomous
 - `pydantic-ai-server/pais/serverutils.py`: AgentDeps, AgentCard (Pydantic BaseModel, A2A-compliant), RemoteAgent (A2A + chat delegation), AgentServerSettings
 - `pydantic-ai-server/pais/a2a.py`: TaskManager ABC, LocalTaskManager, NullTaskManager, Task data model, JSON-RPC, autonomous execution, setup_a2a_routes
 - `pydantic-ai-server/pais/tools.py`: DelegationToolset (AbstractToolset), string-mode handler
@@ -111,3 +111,4 @@ Detailed instructions are in `.github/instructions/`:
 - `python.instructions.md`: Data Plane Python runtime framework details
 - `operator.instructions.md`: Control Plane Golang operator development
 - `docs.instructions.md`: VitePress docs, mermaid diagrams, multi-version builds
+- `release.instructions.md`: Release process, versioning, CI pipeline, validation checklist
