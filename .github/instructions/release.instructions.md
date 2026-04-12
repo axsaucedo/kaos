@@ -2,8 +2,8 @@
 
 ## Quick Reference
 ```bash
-# Tag and release (triggers full release pipeline)
-git tag v0.X.Y && git push origin v0.X.Y
+# Create release with auto-generated PR changelog (preferred)
+gh release create v0.X.Y --target main --title "v0.X.Y" --generate-notes
 
 # Test release (docs only, no images/PyPI)
 git tag v0.0.X && git push origin v0.0.X
@@ -36,17 +36,18 @@ validate
   │     ├── build-images (3 images × 2 arch)
   │     ├── publish-python (kaos-cli → PyPI)
   │     └── publish-pydantic-ai-server (pais → PyPI)
-  ├── build-helm (Helm chart package)
+  ├── build-helm (Helm chart package, updates image tags to release version)
   ├── publish-docs (VitePress → gh-pages)
   └── deploy-ui (kaos-ui → kaos-ui gh-pages)
 create-release (needs: validate, build-images, build-helm)
   ├── release-standalone-repos (tags on standalone repos)
-  └── bump-version (PR: next dev version)
+  └── bump-version (PR: next dev version, updates all version files including __init__.py)
 ```
 
 ### Version Handling
 - The workflow reads version **from the git tag**, NOT from VERSION file
 - `sed` commands in publish jobs update pyproject.toml at build time (not committed)
+- `build-helm` job updates `values.yaml` image tags to release version before packaging
 - VERSION file is only updated by the `bump-version` job's PR after release
 - Jumping versions (e.g., 0.2.8-dev → v0.3.0) is safe — tag determines version
 
@@ -56,9 +57,12 @@ create-release (needs: validate, build-images, build-helm)
 |------|--------|---------|
 | `VERSION` | `X.Y.Z-dev` | `0.3.1-dev` |
 | `kaos-cli/pyproject.toml` | PEP 440: `X.Y.Z.dev0` | `0.3.1.dev0` |
+| `kaos-cli/kaos_cli/__init__.py` | PEP 440 fallback: `X.Y.Z.dev0` | `0.3.1.dev0` |
 | `pydantic-ai-server/pyproject.toml` | PEP 440: `X.Y.Z.dev0` | `0.3.1.dev0` |
 | `operator/chart/Chart.yaml` | `version:` + `appVersion:` | `0.3.1-dev` |
 | `operator/chart/values.yaml` | Image tags | `0.3.1-dev` |
+
+**Note:** `kaos version` uses `importlib.metadata` to read the installed package version dynamically. The `__init__.py` fallback is only used when metadata is unavailable.
 
 ## PyPI Trusted Publishers
 
@@ -103,13 +107,14 @@ Both packages use [OIDC trusted publishing](https://docs.pypi.org/trusted-publis
 # 1. Ensure on main with latest code
 git checkout main && git pull
 
-# 2. Create and push tag
-git tag v0.X.Y
-git push origin v0.X.Y
+# 2. Create release with auto-generated PR changelog
+gh release create v0.X.Y --target main --title "v0.X.Y" --generate-notes
 
-# 3. Monitor workflow
+# 3. Monitor workflow (all 28 jobs should pass)
 gh run list --workflow=release.yaml --limit 3
 gh run watch <run-id>
+# Or check job status:
+gh run view <run-id> --json jobs --jq '.jobs[] | "\(.name): \(.status) \(.conclusion)"'
 
 # 4. Validate artifacts
 pip install kaos-cli==0.X.Y
@@ -119,11 +124,46 @@ curl -sI https://axsaucedo.github.io/kaos-ui/v0.X.Y/
 docker pull axsauze/kaos-operator:0.X.Y
 docker pull axsauze/kaos-agent:0.X.Y
 docker pull axsauze/kaos-mcp-python-string:0.X.Y
+helm repo update kaos && helm search repo kaos/kaos-operator --versions | head -5
 
-# 5. Merge version bump PR
+# 5. Merge version bump PR (auto-created by pipeline)
 gh pr list  # find the automated bump PR
 gh pr merge <pr-number> --merge
 ```
+
+## Post-Release Validation
+
+### Smoke Test on KIND Cluster
+```bash
+# Upgrade operator (always set image tags explicitly)
+helm upgrade kaos kaos/kaos-operator --version X.Y.Z -n kaos-system \
+  --set controllerManager.manager.image.tag=X.Y.Z \
+  --set defaultImages.agentRuntime=axsauze/kaos-agent:X.Y.Z \
+  --set defaultImages.mcpPythonString=axsauze/kaos-mcp-python-string:X.Y.Z \
+  --reuse-values
+
+# Verify operator image
+kubectl get deployment kaos-kaos-operator-controller-manager -n kaos-system \
+  -o jsonpath='{.spec.template.spec.containers[0].image}'
+
+# Deploy test agent with mock responses
+kubectl create namespace release-test
+# Apply Agent + ModelAPI resources, verify Ready status
+# Test /v1/chat/completions and A2A JSON-RPC endpoints
+kubectl delete namespace release-test
+```
+
+### Full Validation Checklist
+- [ ] All CI jobs passed (28 expected)
+- [ ] Docker images: 3 images pullable at version tag
+- [ ] PyPI: kaos-cli and pydantic-ai-server installable at version
+- [ ] Docs: version page, /latest/, /dev/ all working
+- [ ] UI: version page and /latest/ working
+- [ ] Helm: chart available in repo at version
+- [ ] Standalone repos: releases created on pydantic-ai-server and kaos-ui
+- [ ] GitHub Release: has Helm chart asset and PR changelog
+- [ ] Bump PR merged
+- [ ] Smoke test: operator upgraded, test agent responds correctly
 
 ## Test Releases
 
@@ -151,6 +191,23 @@ This triggers `test-release.yaml` which only runs `publish-docs` (no images, no 
 ### Helm chart not in release
 - `build-helm` must complete before `create-release`
 - Check artifact upload/download between jobs
+
+### Docs 404 after release (race condition)
+When `release.yaml` (publish-docs) and `docs.yaml` (dev docs) deploy concurrently to `github-pages` environment, the later artifact-based deployment may overwrite content. Fix:
+```bash
+gh workflow run rebuild-docs.yaml -f version=X.Y.Z
+# Wait ~2 minutes, then verify
+```
+
+### Helm upgrade uses old images
+The `defaultImages` in `values.yaml` uses flat strings (e.g., `agentRuntime: axsauze/kaos-agent:X.Y.Z`). When upgrading with `--reuse-values`, old image tags persist. Always set image tags explicitly:
+```bash
+helm upgrade kaos kaos/kaos-operator --version X.Y.Z -n kaos-system \
+  --set controllerManager.manager.image.tag=X.Y.Z \
+  --set defaultImages.agentRuntime=axsauze/kaos-agent:X.Y.Z \
+  --set defaultImages.mcpPythonString=axsauze/kaos-mcp-python-string:X.Y.Z \
+  --reuse-values
+```
 
 ### Version bump PR not created
 - `create-release` must succeed first
