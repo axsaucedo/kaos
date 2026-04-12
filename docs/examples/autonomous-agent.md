@@ -21,13 +21,11 @@ This example demonstrates **autonomous (self-looping) agent execution** in KAOS.
 
 ## How Autonomous Execution Works
 
-Traditional agent interaction is request-response — one message in, one response out:
+**Normal agents** follow a request-response pattern — a user sends a message, the agent processes it (optionally calling tools or sub-agents), and returns a single response. The agent is idle until the next request arrives.
 
-```
-User: "Check system health"  →  Agent runs once  →  Response
-```
+**Autonomous agents** work fundamentally differently. Instead of waiting for external requests, they run in a **perpetual self-loop** that starts automatically when the pod launches. On each iteration, the agent receives its configured goal, reasons about the current state of the world, uses any available tools to gather information or take action, stores the results in memory, pauses for a configurable interval, and then repeats — indefinitely. The agent never stops on its own; it continues running until the pod is terminated or the CRD is deleted. This is conceptually similar to always-on agent infrastructure like [OpenClaw](https://docs.openclaw.ai), where agents run continuously across messaging platforms.
 
-Autonomous agents run in a **perpetual self-loop**. The goal is provided to the agent on every iteration, and the agent continues running forever (or until the pod is terminated):
+The following diagram illustrates the autonomous self-loop:
 
 ```mermaid
 flowchart TD
