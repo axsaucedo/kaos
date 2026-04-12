@@ -110,8 +110,8 @@ def send_message(
     message: str = typer.Option(
         ..., "--message", "-m", help="Message to send."
     ),
-    mode: str = typer.Option(
-        None, "--mode", help="Execution mode (e.g., 'autonomous')."
+    async_task: bool = typer.Option(
+        False, "--async", help="Execute as async task (returns task ID for polling)."
     ),
     session_id: str = typer.Option(
         None, "--session-id", "-s", help="Session/context ID."
@@ -135,8 +135,8 @@ def send_message(
     }
     if session_id:
         params["contextId"] = session_id
-    if mode:
-        params["configuration"] = {"mode": mode}
+    if async_task:
+        params["configuration"] = {"mode": "autonomous"}
 
     payload = {
         "jsonrpc": "2.0",

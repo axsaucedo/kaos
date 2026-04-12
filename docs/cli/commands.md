@@ -318,6 +318,64 @@ Delete an Agent.
 kaos agent delete NAME [OPTIONS]
 ```
 
+### kaos agent a2a send
+
+Send a message to an Agent via A2A JSON-RPC protocol.
+
+```bash
+kaos agent a2a send NAME --message "Hello" [OPTIONS]
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `NAME` | | Agent name (required) |
+| `--message` | `-m` | Message to send (required) |
+| `--async` | | Execute as async task (returns task ID for polling) |
+| `--session-id` | `-s` | Session/context ID |
+| `--namespace` | `-n` | Namespace of the Agent |
+| `--port` | `-p` | Local port for port-forwarding (default: 9004) |
+| `--json` | | Output raw JSON response |
+
+```bash
+# Sync message (waits for response)
+kaos agent a2a send my-agent --message "Check status"
+
+# Async task (returns task ID immediately)
+kaos agent a2a send my-agent --message "Analyze logs" --async --json
+```
+
+### kaos agent a2a get
+
+Get task status from an Agent via A2A GetTask.
+
+```bash
+kaos agent a2a get NAME --task-id TASK_ID [OPTIONS]
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `NAME` | | Agent name (required) |
+| `--task-id` | `-t` | Task ID to retrieve (required) |
+| `--namespace` | `-n` | Namespace of the Agent |
+| `--port` | `-p` | Local port for port-forwarding (default: 9004) |
+| `--json` | | Output raw JSON response |
+
+### kaos agent a2a cancel
+
+Cancel a task on an Agent via A2A CancelTask.
+
+```bash
+kaos agent a2a cancel NAME --task-id TASK_ID [OPTIONS]
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `NAME` | | Agent name (required) |
+| `--task-id` | `-t` | Task ID to cancel (required) |
+| `--namespace` | `-n` | Namespace of the Agent |
+| `--port` | `-p` | Local port for port-forwarding (default: 9004) |
+| `--json` | | Output raw JSON response |
+
 ---
 
 ## kaos modelapi
