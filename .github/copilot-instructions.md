@@ -112,3 +112,6 @@ Detailed instructions are in `.github/instructions/`:
 - `operator.instructions.md`: Control Plane Golang operator development
 - `docs.instructions.md`: VitePress docs, mermaid diagrams, multi-version builds
 - `release.instructions.md`: Release process, versioning, CI pipeline, validation checklist
+
+### Skills
+- `/release-kaos`: Invoke with a version (e.g., "Use /release-kaos to release v0.5.0") — executes full release pipeline
