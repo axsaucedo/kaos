@@ -8,6 +8,10 @@ updates:
       day: "wednesday"
     groups:
       all:
+        applies-to: version-updates
+        patterns: ["*"]
+      all-security:
+        applies-to: security-updates
         patterns: ["*"]
 
   # Python - pydantic-ai-server
@@ -18,6 +22,10 @@ updates:
       day: "wednesday"
     groups:
       all:
+        applies-to: version-updates
+        patterns: ["*"]
+      all-security:
+        applies-to: security-updates
         patterns: ["*"]
 
   # Python - MCP python-string
@@ -28,6 +36,10 @@ updates:
       day: "wednesday"
     groups:
       all:
+        applies-to: version-updates
+        patterns: ["*"]
+      all-security:
+        applies-to: security-updates
         patterns: ["*"]
 
   # Python - MCP fastmcp-codemode
@@ -38,6 +50,10 @@ updates:
       day: "wednesday"
     groups:
       all:
+        applies-to: version-updates
+        patterns: ["*"]
+      all-security:
+        applies-to: security-updates
         patterns: ["*"]
 
   # Python - E2E test deps
@@ -48,6 +64,10 @@ updates:
       day: "wednesday"
     groups:
       all:
+        applies-to: version-updates
+        patterns: ["*"]
+      all-security:
+        applies-to: security-updates
         patterns: ["*"]
 
   # npm - kaos-ui
@@ -58,6 +78,10 @@ updates:
       day: "wednesday"
     groups:
       all:
+        applies-to: version-updates
+        patterns: ["*"]
+      all-security:
+        applies-to: security-updates
         patterns: ["*"]
 
   # npm - docs
@@ -68,6 +92,10 @@ updates:
       day: "wednesday"
     groups:
       all:
+        applies-to: version-updates
+        patterns: ["*"]
+      all-security:
+        applies-to: security-updates
         patterns: ["*"]
 
   # Go - operator
@@ -78,6 +106,10 @@ updates:
       day: "wednesday"
     groups:
       all:
+        applies-to: version-updates
+        patterns: ["*"]
+      all-security:
+        applies-to: security-updates
         patterns: ["*"]
 
   # GitHub Actions
@@ -88,4 +120,8 @@ updates:
       day: "wednesday"
     groups:
       all:
+        applies-to: version-updates
+        patterns: ["*"]
+      all-security:
+        applies-to: security-updates
         patterns: ["*"]
