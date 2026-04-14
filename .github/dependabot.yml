@@ -1,0 +1,91 @@
+version: 2
+updates:
+  # Python - kaos-cli
+  - package-ecosystem: "pip"
+    directory: "/kaos-cli"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+    groups:
+      all:
+        patterns: ["*"]
+
+  # Python - pydantic-ai-server
+  - package-ecosystem: "pip"
+    directory: "/pydantic-ai-server"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+    groups:
+      all:
+        patterns: ["*"]
+
+  # Python - MCP python-string
+  - package-ecosystem: "pip"
+    directory: "/mcp-servers/python-string"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+    groups:
+      all:
+        patterns: ["*"]
+
+  # Python - MCP fastmcp-codemode
+  - package-ecosystem: "pip"
+    directory: "/mcp-servers/fastmcp-codemode"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+    groups:
+      all:
+        patterns: ["*"]
+
+  # Python - E2E test deps
+  - package-ecosystem: "pip"
+    directory: "/operator/tests"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+    groups:
+      all:
+        patterns: ["*"]
+
+  # npm - kaos-ui
+  - package-ecosystem: "npm"
+    directory: "/kaos-ui"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+    groups:
+      all:
+        patterns: ["*"]
+
+  # npm - docs
+  - package-ecosystem: "npm"
+    directory: "/docs"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+    groups:
+      all:
+        patterns: ["*"]
+
+  # Go - operator
+  - package-ecosystem: "gomod"
+    directory: "/operator"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+    groups:
+      all:
+        patterns: ["*"]
+
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+    groups:
+      all:
+        patterns: ["*"]
