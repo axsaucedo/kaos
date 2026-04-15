@@ -27,7 +27,7 @@ jobs:
       version: ${{ steps.parse.outputs.version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Parse tag
         id: parse
@@ -72,10 +72,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Helm
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@v5
         with:
           version: v3.14.0
 
@@ -102,7 +102,7 @@ jobs:
           echo "Packaged chart: kaos-operator-${VERSION}.tgz"
 
       - name: Upload chart artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: helm-chart
           path: ./charts/*.tgz
@@ -119,7 +119,7 @@ jobs:
       id-token: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Check if version already published
         id: check-pypi
@@ -135,7 +135,7 @@ jobs:
 
       - name: Setup Python
         if: steps.check-pypi.outputs.skip != 'true'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -187,16 +187,16 @@ jobs:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Download Helm chart
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: helm-chart
           path: ./charts
 
       - name: Create Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           name: v${{ needs.validate.outputs.version }}
           generate_release_notes: true
@@ -216,7 +216,7 @@ jobs:
       id-token: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Check if version already published
         id: check-pypi
@@ -232,7 +232,7 @@ jobs:
 
       - name: Setup Python
         if: steps.check-pypi.outputs.skip != 'true'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -308,7 +308,7 @@ jobs:
       pull-requests: write
     steps:
       - name: Checkout main
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: main
           fetch-depth: 0
@@ -382,7 +382,7 @@ jobs:
       - name: Create Pull Request
         if: steps.check-bump.outputs.skip != 'true'
         id: cpr
-        uses: peter-evans/create-pull-request@v6
+        uses: peter-evans/create-pull-request@v8
         with:
           branch: bump/${{ steps.next.outputs.next_dev }}
           title: "chore: bump version to ${{ steps.next.outputs.next_dev }}"
