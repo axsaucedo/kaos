@@ -31,10 +31,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '20'
           cache: 'npm'
@@ -54,10 +54,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '20'
           cache: 'npm'
@@ -77,10 +77,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '20'
           cache: 'npm'
@@ -104,25 +104,25 @@ jobs:
         shard: [1, 2, 3]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: '20'
           cache: 'npm'
           cache-dependency-path: kaos-ui/package-lock.json
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v4
+        uses: astral-sh/setup-uv@v7
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Create KIND cluster
         uses: helm/kind-action@v1
@@ -139,7 +139,7 @@ jobs:
           echo "AGENT_TAG=$VERSION" >> $GITHUB_ENV
 
       - name: Build operator image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ./operator
           load: true
@@ -149,7 +149,7 @@ jobs:
           github-token: ${{ github.token }}
 
       - name: Build agent image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ./pydantic-ai-server
           load: true
@@ -159,7 +159,7 @@ jobs:
           github-token: ${{ github.token }}
 
       - name: Build LiteLLM image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ./operator/hack
           file: ./operator/hack/Dockerfile.litellm
@@ -177,7 +177,7 @@ jobs:
           docker tag ${{ env.REGISTRY }}/kaos-agent:${{ env.AGENT_TAG }} ${{ env.REGISTRY }}/kaos-mcp-server:${{ env.AGENT_TAG }}
 
       - name: Build MCP python-string image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ./mcp-servers/python-string
           load: true
@@ -240,7 +240,7 @@ jobs:
 
       - name: Upload test report
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: playwright-report-shard-${{ matrix.shard }}
           path: kaos-ui/playwright-report/
@@ -248,7 +248,7 @@ jobs:
 
       - name: Upload test results
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-results-shard-${{ matrix.shard }}
           path: kaos-ui/test-results/

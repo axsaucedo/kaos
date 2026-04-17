@@ -42,18 +42,18 @@ jobs:
       name: github-pages
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 20
 
       - name: Install Helm
         if: inputs.package-helm
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@v5
         with:
           version: v3.14.0
 
@@ -168,15 +168,15 @@ jobs:
           git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" HEAD:gh-pages
 
       - name: Setup Pages
-        uses: actions/configure-pages@v4
+        uses: actions/configure-pages@v6
 
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@v5
         with:
           path: deploy
           name: github-pages-${{ inputs.deploy-path }}-attempt-${{ github.run_attempt }}
 
       - name: Deploy to GitHub Pages
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
         with:
           artifact_name: github-pages-${{ inputs.deploy-path }}-attempt-${{ github.run_attempt }}
