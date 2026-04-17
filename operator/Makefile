@@ -61,7 +61,7 @@ manifests:
 
 # Install envtest binary (one-time setup)
 envtest:
-	@test -n "$(SETUP_ENVTEST)" || { echo "Installing setup-envtest..."; go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest; }
+	@test -n "$(SETUP_ENVTEST)" || { echo "Installing setup-envtest..."; go install sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.22; }
 	$(SETUP_ENVTEST) use 1.28 --bin-dir $(shell pwd)/bin
 
 # Run Go unit/integration tests
@@ -74,7 +74,7 @@ test: test-unit
 # Generate Helm chart from kustomize manifests
 # CRDs are moved to crds/ dir so --skip-crds works properly during install
 helm: manifests
-	@test -x $(HELMIFY) || { echo "Installing helmify..."; go install github.com/arttor/helmify/cmd/helmify@latest; }
+	@test -x $(HELMIFY) || { echo "Installing helmify..."; go install github.com/arttor/helmify/cmd/helmify@v0.4.18; }
 	kustomize build config/ | $(HELMIFY) chart
 	@mkdir -p chart/crds
 	@mv chart/templates/*-crd.yaml chart/crds/ 2>/dev/null || true
