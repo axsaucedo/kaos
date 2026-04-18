@@ -41,8 +41,9 @@ jobs:
           fi
           # Use Authorization: Bearer header — works for both classic and fine-grained PATs
           # (the older https://x-access-token:TOKEN@... URL form is rejected by fine-grained PATs).
-          AUTH_HEADER="AUTHORIZATION: bearer ${CROSS_REPO_TOKEN}"
-          git config --local http.https://github.com/axsaucedo/pydantic-ai-server.git/.extraheader "${AUTH_HEADER}"
+          # Generic https://github.com/ match is safe because persist-credentials:false on checkout
+          # means there's no conflicting github-actions[bot] header to collide with.
+          git config --local http.https://github.com/.extraheader "AUTHORIZATION: bearer ${CROSS_REPO_TOKEN}"
           git remote add pydantic-ai-server https://github.com/axsaucedo/pydantic-ai-server.git 2>/dev/null || true
           # Fetch remote so subtree split can resolve upstream commit references
           git fetch pydantic-ai-server main
@@ -71,8 +72,9 @@ jobs:
           fi
           # Use Authorization: Bearer header — works for both classic and fine-grained PATs
           # (the older https://x-access-token:TOKEN@... URL form is rejected by fine-grained PATs).
-          AUTH_HEADER="AUTHORIZATION: bearer ${CROSS_REPO_TOKEN}"
-          git config --local http.https://github.com/axsaucedo/kaos-ui.git/.extraheader "${AUTH_HEADER}"
+          # Generic https://github.com/ match is safe because persist-credentials:false on checkout
+          # means there's no conflicting github-actions[bot] header to collide with.
+          git config --local http.https://github.com/.extraheader "AUTHORIZATION: bearer ${CROSS_REPO_TOKEN}"
           git remote add kaos-ui https://github.com/axsaucedo/kaos-ui.git 2>/dev/null || true
           # Fetch remote so subtree split can resolve upstream commit references
           git fetch kaos-ui main
