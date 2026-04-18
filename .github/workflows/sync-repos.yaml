@@ -39,11 +39,14 @@ jobs:
             echo "::error::CROSS_REPO_TOKEN secret is empty or missing. Refresh the PAT in repo settings (needs Contents: write on axsaucedo/pydantic-ai-server)."
             exit 1
           fi
-          # Use Authorization: Bearer header — works for both classic and fine-grained PATs
-          # (the older https://x-access-token:TOKEN@... URL form is rejected by fine-grained PATs).
-          # Generic https://github.com/ match is safe because persist-credentials:false on checkout
-          # means there's no conflicting github-actions[bot] header to collide with.
-          git config --local http.https://github.com/.extraheader "AUTHORIZATION: bearer ${CROSS_REPO_TOKEN}"
+          # Use Basic auth extraheader (same pattern actions/checkout uses internally) —
+          # GitHub reliably accepts Basic auth with x-access-token:<PAT> for both classic
+          # and fine-grained PATs. Generic https://github.com/ match is safe because
+          # persist-credentials:false on checkout removes any conflicting runner-token header.
+          AUTH_B64=$(printf "x-access-token:%s" "${CROSS_REPO_TOKEN}" | base64 -w0)
+          git config --local http.https://github.com/.extraheader "Authorization: Basic ${AUTH_B64}"
+          # Debug: confirm config is set (value redacted by Actions secret masking)
+          git config --local --get http.https://github.com/.extraheader | sed 's/Basic.*/Basic [redacted]/'
           git remote add pydantic-ai-server https://github.com/axsaucedo/pydantic-ai-server.git 2>/dev/null || true
           # Fetch remote so subtree split can resolve upstream commit references
           git fetch pydantic-ai-server main
@@ -70,11 +73,14 @@ jobs:
             echo "::error::CROSS_REPO_TOKEN secret is empty or missing. Refresh the PAT in repo settings (needs Contents: write on axsaucedo/kaos-ui)."
             exit 1
           fi
-          # Use Authorization: Bearer header — works for both classic and fine-grained PATs
-          # (the older https://x-access-token:TOKEN@... URL form is rejected by fine-grained PATs).
-          # Generic https://github.com/ match is safe because persist-credentials:false on checkout
-          # means there's no conflicting github-actions[bot] header to collide with.
-          git config --local http.https://github.com/.extraheader "AUTHORIZATION: bearer ${CROSS_REPO_TOKEN}"
+          # Use Basic auth extraheader (same pattern actions/checkout uses internally) —
+          # GitHub reliably accepts Basic auth with x-access-token:<PAT> for both classic
+          # and fine-grained PATs. Generic https://github.com/ match is safe because
+          # persist-credentials:false on checkout removes any conflicting runner-token header.
+          AUTH_B64=$(printf "x-access-token:%s" "${CROSS_REPO_TOKEN}" | base64 -w0)
+          git config --local http.https://github.com/.extraheader "Authorization: Basic ${AUTH_B64}"
+          # Debug: confirm config is set (value redacted by Actions secret masking)
+          git config --local --get http.https://github.com/.extraheader | sed 's/Basic.*/Basic [redacted]/'
           git remote add kaos-ui https://github.com/axsaucedo/kaos-ui.git 2>/dev/null || true
           # Fetch remote so subtree split can resolve upstream commit references
           git fetch kaos-ui main
