@@ -36,10 +36,14 @@ jobs:
           CROSS_REPO_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
         run: |
           if [ -z "${CROSS_REPO_TOKEN}" ]; then
-            echo "::error::CROSS_REPO_TOKEN secret is empty or missing. Refresh the PAT in repo settings (needs 'repo' scope on axsaucedo/pydantic-ai-server)."
+            echo "::error::CROSS_REPO_TOKEN secret is empty or missing. Refresh the PAT in repo settings (needs Contents: write on axsaucedo/pydantic-ai-server)."
             exit 1
           fi
-          git remote add pydantic-ai-server https://x-access-token:${CROSS_REPO_TOKEN}@github.com/axsaucedo/pydantic-ai-server.git 2>/dev/null || true
+          # Use Authorization: Bearer header — works for both classic and fine-grained PATs
+          # (the older https://x-access-token:TOKEN@... URL form is rejected by fine-grained PATs).
+          AUTH_HEADER="AUTHORIZATION: bearer ${CROSS_REPO_TOKEN}"
+          git config --local http.https://github.com/axsaucedo/pydantic-ai-server.git/.extraheader "${AUTH_HEADER}"
+          git remote add pydantic-ai-server https://github.com/axsaucedo/pydantic-ai-server.git 2>/dev/null || true
           # Fetch remote so subtree split can resolve upstream commit references
           git fetch pydantic-ai-server main
           git subtree push --prefix=pydantic-ai-server pydantic-ai-server main
@@ -62,10 +66,14 @@ jobs:
           CROSS_REPO_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
         run: |
           if [ -z "${CROSS_REPO_TOKEN}" ]; then
-            echo "::error::CROSS_REPO_TOKEN secret is empty or missing. Refresh the PAT in repo settings (needs 'repo' scope on axsaucedo/kaos-ui)."
+            echo "::error::CROSS_REPO_TOKEN secret is empty or missing. Refresh the PAT in repo settings (needs Contents: write on axsaucedo/kaos-ui)."
             exit 1
           fi
-          git remote add kaos-ui https://x-access-token:${CROSS_REPO_TOKEN}@github.com/axsaucedo/kaos-ui.git 2>/dev/null || true
+          # Use Authorization: Bearer header — works for both classic and fine-grained PATs
+          # (the older https://x-access-token:TOKEN@... URL form is rejected by fine-grained PATs).
+          AUTH_HEADER="AUTHORIZATION: bearer ${CROSS_REPO_TOKEN}"
+          git config --local http.https://github.com/axsaucedo/kaos-ui.git/.extraheader "${AUTH_HEADER}"
+          git remote add kaos-ui https://github.com/axsaucedo/kaos-ui.git 2>/dev/null || true
           # Fetch remote so subtree split can resolve upstream commit references
           git fetch kaos-ui main
           git subtree push --prefix=kaos-ui kaos-ui main
