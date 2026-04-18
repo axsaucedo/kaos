@@ -1,6 +1,6 @@
 ---
 name: dependabot-fix
-description: Comprehensively diagnose and fix a failing Dependabot PR. Use this skill when asked to run /dependabot-fix <pr-number>. The user provides the PR number in their prompt. The skill loads PR context, surveys errors at a high level, ingests relevant repo instructions / docs / source via subagents, performs a deep root-cause diagnosis, designs a risk-tiered fix with a manual testing strategy, ships the fix on a replacement PR, and posts a REPORT.md as a comment on that PR (never commits it).
+description: Comprehensively diagnose and fix a failing Dependabot PR. Use this skill when asked to run /dependabot-fix <pr-number>. The user provides the PR number in their prompt. The skill loads PR context, surveys errors at a high level, ingests relevant repo instructions / docs / source via subagents, performs a deep root-cause diagnosis, designs a risk-tiered fix with a manual testing strategy, commits the fix directly to the Dependabot PR branch, posts a REPORT.md as a comment on it (never commits it), and evaluates whether the skill itself needs updating afterwards.
 allowed-tools: shell
 ---
 
@@ -145,19 +145,13 @@ python -m pytest tests/test_x.py -v 2>./tmp/null
 
 ## Phase E — Finalise
 
-### Step 9 · Ship
+### Step 9 · Ship directly on the Dependabot PR
+
+Keep it simple: commit fixes **on the existing Dependabot PR branch**. No replacement PR, no cherry-picking.
 
 ```bash
-git fetch origin main --quiet
-git checkout -b ci/fix-pr-${PR_NUM} origin/main
+gh pr checkout $PR_NUM --repo $REPO
 
-# Preserve dependabot authorship
-DB_BRANCH=$(gh pr view $PR_NUM --repo $REPO --json headRefName -q .headRefName)
-git fetch origin $DB_BRANCH
-DB_SHA=$(git log -1 --format=%H origin/$DB_BRANCH)
-git cherry-pick $DB_SHA
-
-# Apply fix commits (one or several small, focused commits)
 # ...make edits...
 git add -A
 git commit -m "ci(<scope>): <one-line summary>
@@ -168,58 +162,51 @@ Testing: <how verified>
 
 Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"
 
-git push -u origin ci/fix-pr-${PR_NUM}
-
-gh pr create --base main \
-  --title "ci: fix #${PR_NUM} — <summary>" \
-  --body "Replaces #${PR_NUM}. Root cause: <...>. Fix: <...>. Closes #${PR_NUM} once merged."
-NEW_PR=$(gh pr list --repo $REPO --head ci/fix-pr-${PR_NUM} --json number -q '.[0].number')
+git push
 ```
 
 Monitor CI; rerun known flakes once before investigating:
 
 ```bash
-gh pr checks $NEW_PR --repo $REPO
-# For a known flake after a prior success:
-gh run rerun <run-id> --failed --repo $REPO
+gh pr checks $PR_NUM --repo $REPO
+gh run rerun <run-id> --failed --repo $REPO  # only for known flakes
 ```
 
-Merge when green, then close the original:
+Merge when green:
 
 ```bash
-gh pr merge $NEW_PR --repo $REPO --merge --delete-branch
-gh pr close $PR_NUM --repo $REPO --comment "Superseded by #${NEW_PR} (merged)."
+gh pr merge $PR_NUM --repo $REPO --merge
 ```
+
+**Caveat:** do not use `@dependabot rebase` after pushing fix commits — it will discard them. Let the PR merge as-is.
 
 ### Step 10 · REPORT.md as PR comment — never commit
 
-Write `REPORT.md` at the repo root (it is gitignored) covering:
-- Original PR context (number, title, ecosystem, scope)
-- High-level symptoms (Phase A step 2 output)
-- Context ingested (brief bullets per subagent briefing)
-- Root cause (Phase C)
-- Fix plan with risk rating and testing evidence (Phase D)
-- Ship summary: replacement PR, CI status, merge outcome
-
-Then post its contents as a comment on the replacement PR:
+Write `REPORT.md` at the repo root (gitignored) covering: PR context, symptoms, root cause, fix plan + testing evidence, CI/merge outcome. Then:
 
 ```bash
-gh pr comment $NEW_PR --repo $REPO --body-file REPORT.md
-# Do NOT commit REPORT.md — it lives only locally.
+gh pr comment $PR_NUM --repo $REPO --body-file REPORT.md
 ```
+
+### Step 11 · Evaluate skill currency
+
+After the PR merges, ask whether this run surfaced a **major, repeatable** learning that future runs would miss without it. Examples:
+- A new failure pattern not in the appendix (new ecosystem, new toolchain)
+- A repo-level invariant that changed (e.g. Go toolchain bump, new CI job name)
+- A workflow step that proved redundant in practice
+
+If yes — and only if the learning is non-obvious — open a small follow-up PR updating this SKILL.md. Resist adding minor details that a competent operator would infer; bloat degrades the skill.
 
 ---
 
 ## Invariants
 
-- Always branch from **latest** `origin/main`, never from the dependabot branch directly
-- Always cherry-pick the dependabot commit to preserve authorship
-- Prefer version **pinning** over version rollback when dealing with `@latest` toolchain drift
-- Never push directly to `main`
-- Scratch files live under `./tmp/` (never `/tmp/`); suppress output with `2>./tmp/null`
-- Conventional-commit style; include the Copilot co-author trailer
+- Work directly on the Dependabot PR branch; do not open replacement PRs
+- Never `@dependabot rebase` after pushing fix commits (it discards them)
+- Prefer version **pinning** over version rollback for `@latest` toolchain drift
+- Scratch files under `./tmp/` (never `/tmp/`); suppress output with `2>./tmp/null`
+- Conventional-commit style with Copilot co-author trailer
 - REPORT.md is **posted as a PR comment**, never committed
-- Skip Phase B subagents only if the PR touches a single file that is clearly self-contained (rare)
 
 ---
 
