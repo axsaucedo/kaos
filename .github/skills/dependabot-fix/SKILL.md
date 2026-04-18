@@ -106,6 +106,23 @@ For a grouped PR, diagnose **each** failing check separately — failures may ha
 
 ## Phase D — Fix design
 
+### Step 6.5 · Scope triage — is this a fix, or a Dependabot config problem?
+
+Before planning a fix, check whether the PR is **in-scope** for fixing at all. A grouped Dependabot PR that bundles framework-migration majors cannot be fixed in a single pass; the right move is to reconfigure `.github/dependabot.yml` so the majors come through individually.
+
+**Scope-reject triggers** (any one is sufficient):
+- A single group PR contains **≥ 2 major bumps** on framework-tier packages
+- A major bump on: `react`, `react-dom`, `react-router-dom`, `vite`, `vitest`, `@tanstack/react-query`, `tailwindcss`, `typescript`, `eslint`, `zod`, `zustand` (npm); `controller-runtime`, `k8s.io/*`, `pydantic`, `pydantic-ai`, `litellm` (other ecosystems) when bundled with unrelated updates
+- The PR touches > ~40 packages and the majority are routine but a minority are migrations
+
+When triggered, **do not attempt a fix**. Instead:
+1. Update `.github/dependabot.yml` to split the offending group (typically add `update-types: ["minor", "patch"]` to the `all` group so majors get individual PRs).
+2. Open that config change as a separate small PR, merge it.
+3. Close the original Dependabot PR(s) as superseded with a comment explaining that smaller PRs will replace them next cycle.
+4. Skip Phase E's "commit on Dependabot branch" flow — the PR is closed, not fixed. Post REPORT.md as a comment on each closed PR.
+
+Security-update groups (`all-security`) are usually left bundled because security majors are rare and time-sensitive — only split them if a concrete blocker (e.g. a framework major) forces it.
+
 ### Step 7 · Comprehensive plan
 
 Write a plan covering the following; scale depth to risk:
@@ -235,12 +252,12 @@ Common failure modes observed on bundled Dependabot PRs in this repo. Treat thes
 - For E2E deps (`operator/tests/`): `cd operator/tests && source .venv/bin/activate && make e2e-test` (requires KIND)
 
 ### `npm` in `kaos-ui/` (e.g. PR #143, #146)
-- `vitest` majors change config shape and matcher behaviour
-- `react-router` majors change route definitions
-- `@tanstack/react-query` majors change `useQuery` signature
-- ESLint 9 flat-config drift when `eslint-*` plugins bump
+- **Scope-reject first** (see Step 6.5). React / React Router / Vite / Vitest / Zod / Zustand / Tailwind majors bundled with routine bumps = close and reconfigure, don't fix.
+- Risk is automatically **high** for any kaos-ui PR with a major bump on a framework package — visual regressions do not show up in CI.
 - Local reproduction: `cd kaos-ui && npm ci && npm run build && npm run lint && npm run test:unit`
-- Playwright E2E usually only runs in CI for UI PRs; skip locally unless a unit test cannot reproduce
+- **Playwright required**, not optional: `npm run test:e2e` against a running dev server + `kaos ui --no-browser` proxy + KIND cluster (per `kaos-ui-testing.instructions.md`). CI's E2E alone is not sufficient evidence.
+- **Host smoke before merge**: use `ask_user` with a concrete click-through script (Agents list → create dialog dry-run → Visual Map pan/zoom → MCP list → ModelAPI list → Chat drawer → detail drawer tabs → theme toggle; check console for errors). Wait for confirmation.
+- Common breakage: `vitest` majors change config shape and matcher behaviour; `react-router` majors change route definitions; `@tanstack/react-query` majors change `useQuery` signature; ESLint 9 flat-config drift when `eslint-*` plugins bump.
 
 ### `npm` in `docs/` or root
 - VitePress / mermaid plugin API drift — verify `npm run build` under `docs/`
