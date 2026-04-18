@@ -71,6 +71,9 @@ updates:
         patterns: ["*"]
 
   # npm - kaos-ui
+  # Major bumps are excluded from the `all` group so each major gets its own
+  # PR — framework migrations (React, React Router, Vite, Zod, Zustand, etc.)
+  # need individual review and are unsafe to bundle.
   - package-ecosystem: "npm"
     directory: "/kaos-ui"
     schedule:
@@ -80,6 +83,7 @@ updates:
       all:
         applies-to: version-updates
         patterns: ["*"]
+        update-types: ["minor", "patch"]
       all-security:
         applies-to: security-updates
         patterns: ["*"]
