@@ -258,6 +258,7 @@ Common failure modes observed on bundled Dependabot PRs in this repo. Treat thes
 - **Playwright required**, not optional: `npm run test:e2e` against a running dev server + `kaos ui --no-browser` proxy + KIND cluster (per `kaos-ui-testing.instructions.md`). CI's E2E alone is not sufficient evidence.
 - **Host smoke before merge**: use `ask_user` with a concrete click-through script (Agents list → create dialog dry-run → Visual Map pan/zoom → MCP list → ModelAPI list → Chat drawer → detail drawer tabs → theme toggle; check console for errors). Wait for confirmation.
 - Common breakage: `vitest` majors change config shape and matcher behaviour; `react-router` majors change route definitions; `@tanstack/react-query` majors change `useQuery` signature; ESLint 9 flat-config drift when `eslint-*` plugins bump.
+- **Lockfile desync** is the dominant failure mode on routine grouped PRs — every UI check fails at `npm ci` with `Missing: <pkg> from lock file`. Fix: delete **both** `node_modules` **and** `package-lock.json`, then `npm install`. Deleting only `node_modules` can trigger a secondary `Cannot find native binding` error from `rolldown`/vitest 4.x optional deps.
 
 ### `npm` in `docs/` or root
 - VitePress / mermaid plugin API drift — verify `npm run build` under `docs/`
