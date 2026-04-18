@@ -29,6 +29,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Push subtree to pydantic-ai-server
         env:
@@ -38,8 +39,6 @@ jobs:
             echo "::error::CROSS_REPO_TOKEN secret is empty or missing. Refresh the PAT in repo settings (needs 'repo' scope on axsaucedo/pydantic-ai-server)."
             exit 1
           fi
-          # Remove default credential helper set by actions/checkout so our token is used
-          git config --unset-all http.https://github.com/.extraheader || true
           git remote add pydantic-ai-server https://x-access-token:${CROSS_REPO_TOKEN}@github.com/axsaucedo/pydantic-ai-server.git 2>/dev/null || true
           # Fetch remote so subtree split can resolve upstream commit references
           git fetch pydantic-ai-server main
@@ -56,6 +55,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Push subtree to kaos-ui
         env:
@@ -65,8 +65,6 @@ jobs:
             echo "::error::CROSS_REPO_TOKEN secret is empty or missing. Refresh the PAT in repo settings (needs 'repo' scope on axsaucedo/kaos-ui)."
             exit 1
           fi
-          # Remove default credential helper set by actions/checkout so our token is used
-          git config --unset-all http.https://github.com/.extraheader || true
           git remote add kaos-ui https://x-access-token:${CROSS_REPO_TOKEN}@github.com/axsaucedo/kaos-ui.git 2>/dev/null || true
           # Fetch remote so subtree split can resolve upstream commit references
           git fetch kaos-ui main
