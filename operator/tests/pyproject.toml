@@ -12,7 +12,7 @@ dependencies = [
     "sh>=2.2.2",
     "mcp>=1.0.0",
     "jupytext>=1.16.0",
-    "nbconvert>=7.0.0",
+    "nbconvert>=7.17.1",
     "ipykernel>=6.0.0",
 ]
 
