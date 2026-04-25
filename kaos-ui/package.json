@@ -62,7 +62,7 @@
     "react-router-dom": "^7.14.2",
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
-    "sonner": "^1.7.4",
+    "sonner": "^2.0.7",
     "tailwind-merge": "^2.6.0",
     "tailwindcss-animate": "^1.0.7",
     "zod": "^3.25.76",
