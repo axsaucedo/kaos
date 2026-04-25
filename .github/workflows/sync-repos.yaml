@@ -39,13 +39,10 @@ jobs:
             echo "::error::CROSS_REPO_TOKEN secret is empty or missing. Refresh the PAT in repo settings (needs Contents: write on axsaucedo/pydantic-ai-server)."
             exit 1
           fi
-          # Use unscoped http.extraheader with Basic auth (same pattern actions/checkout uses).
-          # Unscoped form reliably applies to all git HTTP requests; URL-scoped form
-          # (http.https://github.com/.extraheader) proved not to match in practice.
-          # Safe because persist-credentials:false on checkout removes the runner-token header.
-          AUTH_B64=$(printf "x-access-token:%s" "${CROSS_REPO_TOKEN}" | base64 -w0)
-          git config --local http.extraheader "Authorization: Basic ${AUTH_B64}"
-          git remote add pydantic-ai-server https://github.com/axsaucedo/pydantic-ai-server.git 2>/dev/null || true
+          # PAT is embedded in the remote URL. This is safe (no header collision)
+          # because actions/checkout above is configured with persist-credentials:false,
+          # which means no runner GITHUB_TOKEN extraheader is set in git config.
+          git remote add pydantic-ai-server "https://x-access-token:${CROSS_REPO_TOKEN}@github.com/axsaucedo/pydantic-ai-server.git" 2>/dev/null || true
           # Fetch remote so subtree split can resolve upstream commit references
           git fetch pydantic-ai-server main
           git subtree push --prefix=pydantic-ai-server pydantic-ai-server main
@@ -71,13 +68,10 @@ jobs:
             echo "::error::CROSS_REPO_TOKEN secret is empty or missing. Refresh the PAT in repo settings (needs Contents: write on axsaucedo/kaos-ui)."
             exit 1
           fi
-          # Use unscoped http.extraheader with Basic auth (same pattern actions/checkout uses).
-          # Unscoped form reliably applies to all git HTTP requests; URL-scoped form
-          # (http.https://github.com/.extraheader) proved not to match in practice.
-          # Safe because persist-credentials:false on checkout removes the runner-token header.
-          AUTH_B64=$(printf "x-access-token:%s" "${CROSS_REPO_TOKEN}" | base64 -w0)
-          git config --local http.extraheader "Authorization: Basic ${AUTH_B64}"
-          git remote add kaos-ui https://github.com/axsaucedo/kaos-ui.git 2>/dev/null || true
+          # PAT is embedded in the remote URL. This is safe (no header collision)
+          # because actions/checkout above is configured with persist-credentials:false,
+          # which means no runner GITHUB_TOKEN extraheader is set in git config.
+          git remote add kaos-ui "https://x-access-token:${CROSS_REPO_TOKEN}@github.com/axsaucedo/kaos-ui.git" 2>/dev/null || true
           # Fetch remote so subtree split can resolve upstream commit references
           git fetch kaos-ui main
           git subtree push --prefix=kaos-ui kaos-ui main
