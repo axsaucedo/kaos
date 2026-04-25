@@ -42,8 +42,8 @@ jobs:
 
       - name: Install Go tools
         run: |
-          go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest
-          go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
+          go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.20.1
+          go install sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.22
 
       - name: Run Go tests
         working-directory: operator
