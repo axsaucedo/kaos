@@ -189,13 +189,33 @@ gh pr checks $PR_NUM --repo $REPO
 gh run rerun <run-id> --failed --repo $REPO  # only for known flakes
 ```
 
-Merge when green:
+Merge when green — **but** for kaos-ui framework majors, gate the merge on a host smoke confirmation (see Step 9.5):
 
 ```bash
 gh pr merge $PR_NUM --repo $REPO --merge
 ```
 
-**Caveat:** do not use `@dependabot rebase` after pushing fix commits — it will discard them. Let the PR merge as-is.
+**Caveats:**
+- Do not use `@dependabot rebase` after pushing fix commits — it will discard them. Let the PR merge as-is.
+- If the merge gate (Step 9.5) is unresolved, **do not merge**. Leave the PR open with the report posted; the host will merge after their visual review.
+
+### Step 9.5 · Host smoke gate (kaos-ui framework majors only)
+
+When the PR is a kaos-ui major bump on a framework package (`react`, `react-dom`, `react-router-dom`, `vite`, `vitest`, `@tanstack/react-query`, `tailwindcss`, `typescript`, `eslint`, `zod`, `zustand`), CI alone is insufficient evidence — visual regressions are invisible to Playwright assertions.
+
+Use the **`ask_user` tool** (the built-in Copilot CLI prompt — no other mechanism) with a concrete click-through script. Example:
+
+> Agents list → detail drawer (Overview / Logs / YAML / Events tabs) → Create dialog Dry Run → Visual Map pan/zoom/node click → MCP list + drawer → ModelAPI list + drawer → Chat drawer streaming → theme toggle. Watch DevTools console for red errors and React `Warning:` messages.
+
+Decision matrix on the `ask_user` response:
+
+| Response | Action |
+|---|---|
+| Host confirms all checks pass | Merge (Step 9 `gh pr merge`) |
+| Host reports issues | Diagnose and push more commits; re-prompt |
+| Host unavailable (autonomous-mode fallback) | **Do NOT merge.** Post the report (Step 10) and stop. |
+
+`ask_user` is the **only** sanctioned host-prompt mechanism for this skill. Do not substitute plain-text questions in the chat output, comments on the PR, or any other channel — those do not block execution and the prompt will be missed.
 
 ### Step 10 · REPORT.md as PR comment — never commit
 
@@ -256,7 +276,7 @@ Common failure modes observed on bundled Dependabot PRs in this repo. Treat thes
 - Risk is automatically **high** for any kaos-ui PR with a major bump on a framework package — visual regressions do not show up in CI.
 - Local reproduction: `cd kaos-ui && npm ci && npm run build && npm run lint && npm run test:unit`
 - **Playwright required**, not optional: `npm run test:e2e` against a running dev server + `kaos ui --no-browser` proxy + KIND cluster (per `kaos-ui-testing.instructions.md`). CI's E2E alone is not sufficient evidence.
-- **Host smoke before merge**: use `ask_user` with a concrete click-through script (Agents list → create dialog dry-run → Visual Map pan/zoom → MCP list → ModelAPI list → Chat drawer → detail drawer tabs → theme toggle; check console for errors). Wait for confirmation.
+- **Host smoke before merge**: gated by Step 9.5 using the `ask_user` tool. If the host is unavailable, do not merge — leave the PR open with the report posted.
 - Common breakage: `vitest` majors change config shape and matcher behaviour; `react-router` majors change route definitions; `@tanstack/react-query` majors change `useQuery` signature; ESLint 9 flat-config drift when `eslint-*` plugins bump.
 - **Lockfile desync** is the dominant failure mode on routine grouped PRs — every UI check fails at `npm ci` with `Missing: <pkg> from lock file`. Fix: delete **both** `node_modules` **and** `package-lock.json`, then `npm install`. Deleting only `node_modules` can trigger a secondary `Cannot find native binding` error from `rolldown`/vitest 4.x optional deps.
 
