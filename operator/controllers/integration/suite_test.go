@@ -22,6 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	kaosv1alpha1 "github.com/axsaucedo/kaos/operator/api/v1alpha1"
 	"github.com/axsaucedo/kaos/operator/controllers"
@@ -105,7 +106,8 @@ runtimes:
 
 	// Start controller manager with all controllers
 	k8sManager, err := ctrl.NewManager(cfg, ctrl.Options{
-		Scheme: scheme.Scheme,
+		Scheme:  scheme.Scheme,
+		Metrics: metricsserver.Options{BindAddress: "0"},
 	})
 	Expect(err).ToNot(HaveOccurred())
 
