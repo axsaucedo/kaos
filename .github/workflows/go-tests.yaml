@@ -30,7 +30,7 @@ jobs:
       - name: Install tools
         run: |
           go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.19.0
-          go install sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.22
+          go install sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.24
 
       - name: Run Go tests
         working-directory: operator

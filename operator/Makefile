@@ -61,7 +61,7 @@ manifests:
 
 # Install envtest binary (one-time setup)
 envtest:
-	@test -n "$(SETUP_ENVTEST)" || { echo "Installing setup-envtest..."; go install sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.22; }
+	@test -n "$(SETUP_ENVTEST)" || { echo "Installing setup-envtest..."; go install sigs.k8s.io/controller-runtime/tools/setup-envtest@release-0.24; }
 	$(SETUP_ENVTEST) use 1.28 --bin-dir $(shell pwd)/bin
 
 # Run Go unit/integration tests
