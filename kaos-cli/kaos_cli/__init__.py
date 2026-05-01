@@ -5,4 +5,4 @@ try:
 
     __version__ = version("kaos-cli")
 except Exception:
-    __version__ = "0.4.3.dev0"
+    __version__ = "0.4.4.dev0"
