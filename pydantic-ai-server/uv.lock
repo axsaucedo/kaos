@@ -2125,7 +2125,7 @@ wheels = [
 
 [[package]]
 name = "pydantic-ai-server"
-version = "0.4.2.dev0"
+version = "0.4.4.dev0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
@@ -2174,7 +2174,7 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-starlette", specifier = ">=0.41b0" },
     { name = "opentelemetry-sdk", specifier = ">=1.20.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
-    { name = "pydantic-ai", specifier = ">=0.2.0" },
+    { name = "pydantic-ai", specifier = ">=1.75.0,<2.0.0" },
     { name = "pydantic-settings", specifier = ">=2.0.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21.0" },
