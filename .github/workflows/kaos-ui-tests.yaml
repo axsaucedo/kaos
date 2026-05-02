@@ -94,6 +94,49 @@ jobs:
         working-directory: kaos-ui
         run: npm run test:unit
 
+  visual-tests:
+    name: Visual Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: kaos-ui/package-lock.json
+
+      - name: Install dependencies
+        working-directory: kaos-ui
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: kaos-ui
+        run: npx playwright install --with-deps chromium
+
+      - name: Visual tests
+        working-directory: kaos-ui
+        run: npm run test:visual:ci
+
+      - name: Upload visual report
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: visual-playwright-report
+          path: kaos-ui/playwright-report/visual/
+          retention-days: 7
+
+      - name: Upload visual test results
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: visual-test-results
+          path: kaos-ui/test-results/
+          retention-days: 7
+
   e2e-tests:
     name: E2E Tests (shard ${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
