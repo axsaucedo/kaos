@@ -248,6 +248,14 @@ jobs:
           sed -i "s/^version = .*/version = \"$VERSION\"/" pyproject.toml
           python -m build
 
+      - name: Validate pydantic-ai-server wheel install
+        if: steps.check-pypi.outputs.skip != 'true'
+        run: |
+          python -m venv /tmp/pais-wheel-venv
+          /tmp/pais-wheel-venv/bin/python -m pip install --upgrade pip
+          /tmp/pais-wheel-venv/bin/python -m pip install pydantic-ai-server/dist/*.whl
+          /tmp/pais-wheel-venv/bin/python -c "import pais, importlib.metadata as metadata; print(metadata.version('pydantic-ai-server'))"
+
       - name: Publish to PyPI
         if: steps.check-pypi.outputs.skip != 'true'
         uses: pypa/gh-action-pypi-publish@release/v1
