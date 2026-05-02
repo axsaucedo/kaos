@@ -1,0 +1,27 @@
+*,
+*::before,
+*::after {
+  animation-delay: 0s !important;
+  animation-duration: 0s !important;
+  animation-iteration-count: 1 !important;
+  caret-color: transparent !important;
+  scroll-behavior: auto !important;
+  transition-delay: 0s !important;
+  transition-duration: 0s !important;
+}
+
+body {
+  font-variant-ligatures: none !important;
+  text-rendering: geometricPrecision !important;
+}
+
+.react-flow__edge-path--animated,
+.connection-line,
+.animate-pulse,
+.animate-spin {
+  animation: none !important;
+}
+
+iframe {
+  visibility: hidden !important;
+}

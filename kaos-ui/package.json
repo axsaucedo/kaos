@@ -11,6 +11,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build && npm run verify:styles",
+    "build:visual": "VITE_BASE=/ vite build && npm run verify:styles",
     "build:dev": "vite build --mode development",
     "lint": "eslint . --max-warnings 0",
     "preview": "vite preview",
@@ -18,6 +19,9 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",
+    "test:visual": "npm run build:visual && playwright test -c playwright.visual.config.ts",
+    "test:visual:update": "npm run build:visual && playwright test -c playwright.visual.config.ts --update-snapshots",
+    "test:visual:ci": "npm run build:visual && playwright test -c playwright.visual.config.ts --reporter=list",
     "test:unit": "vitest run",
     "test:smoke": "playwright test tests/smoke/",
     "test:read": "playwright test tests/read/"
