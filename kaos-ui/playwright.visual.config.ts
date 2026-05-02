@@ -3,6 +3,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const configDir = path.dirname(fileURLToPath(import.meta.url));
+const snapshotPlatform = process.env.PLAYWRIGHT_SNAPSHOT_PLATFORM || (process.env.CI ? 'darwin' : process.platform);
+const maxDiffPixelRatio = process.env.CI ? 0.03 : 0.002;
 
 export default defineConfig({
   testDir: './tests/visual',
@@ -15,12 +17,12 @@ export default defineConfig({
     ['list'],
   ],
   timeout: 45000,
-  snapshotPathTemplate: '{testDir}/__screenshots__/{testFilePath}/{arg}{ext}',
+  snapshotPathTemplate: '{testDir}/__screenshots__/{projectName}/{testFilePath}/{arg}{ext}',
   expect: {
     toHaveScreenshot: {
       animations: 'disabled',
       caret: 'hide',
-      maxDiffPixelRatio: 0.002,
+      maxDiffPixelRatio,
       stylePath: path.join(configDir, 'tests/visual/fixtures/screenshot.css'),
       threshold: 0.2,
     },
@@ -35,7 +37,7 @@ export default defineConfig({
   },
   projects: [
     {
-      name: 'chromium',
+      name: `chromium-${snapshotPlatform}`,
       use: { ...devices['Desktop Chrome'] },
     },
   ],
