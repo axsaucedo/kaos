@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { getAgentCard, sendA2AMessage, getA2ATask, cancelA2ATask } from '@/lib/k8s/a2a';
+import { getAgentCard, sendA2AMessage, getA2ATask, cancelA2ATask, listA2ATasks } from '@/lib/k8s/a2a';
 import type { Agent } from '@/types/kubernetes';
 import type { AgentCard, A2ATask, SendMessageParams } from '@/types/a2a';
 
@@ -9,6 +9,42 @@ export interface TaskHistoryEntry {
   mode: string;
   createdAt: Date;
   message: string;
+}
+
+const TERMINAL_STATES = ['completed', 'failed', 'canceled'];
+
+function parseTaskDate(timestamp?: string): Date {
+  if (!timestamp) return new Date();
+  const date = new Date(timestamp);
+  return Number.isNaN(date.getTime()) ? new Date() : date;
+}
+
+function getTaskMessage(task: A2ATask): string {
+  const userMessage = task.history?.find(message => message.role === 'user');
+  const text = userMessage?.parts
+    ?.map(part => part.text)
+    .filter(Boolean)
+    .join(' ') || '';
+  return text.slice(0, 100);
+}
+
+function taskToHistoryEntry(task: A2ATask): TaskHistoryEntry {
+  return {
+    taskId: task.id,
+    state: task.status?.state || 'unknown',
+    mode: task.autonomous ? 'autonomous' : 'interactive',
+    createdAt: parseTaskDate(task.status?.timestamp),
+    message: getTaskMessage(task),
+  };
+}
+
+function mergeTaskHistory(prev: TaskHistoryEntry[], tasks: A2ATask[]): TaskHistoryEntry[] {
+  const byId = new Map(prev.map(entry => [entry.taskId, entry]));
+  for (const task of tasks) {
+    const next = taskToHistoryEntry(task);
+    byId.set(task.id, { ...byId.get(task.id), ...next });
+  }
+  return Array.from(byId.values()).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 }
 
 export function useA2ADebug(agent: Agent) {
@@ -31,6 +67,8 @@ export function useA2ADebug(agent: Agent) {
 
   // Task history
   const [taskHistory, setTaskHistory] = useState<TaskHistoryEntry[]>([]);
+  const [isLoadingTaskList, setIsLoadingTaskList] = useState(false);
+  const [taskListError, setTaskListError] = useState<string | null>(null);
 
   // Auto-poll
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -61,6 +99,26 @@ export function useA2ADebug(agent: Agent) {
     }
   }, [serviceName, namespace]);
 
+  const refreshTasks = useCallback(async () => {
+    setIsLoadingTaskList(true);
+    setTaskListError(null);
+    try {
+      const result = await listA2ATasks(serviceName, namespace);
+      const tasks = result.tasks || [];
+      setTaskHistory(prev => mergeTaskHistory(prev, tasks));
+      setCurrentTask(prev => {
+        if (!prev) return prev;
+        return tasks.find(task => task.id === prev.id) || prev;
+      });
+      return tasks;
+    } catch (err) {
+      setTaskListError(err instanceof Error ? err.message : 'Failed to list tasks');
+      return [];
+    } finally {
+      setIsLoadingTaskList(false);
+    }
+  }, [serviceName, namespace]);
+
   const startPolling = useCallback((taskId: string) => {
     stopPolling();
     setIsPolling(true);
@@ -68,11 +126,8 @@ export function useA2ADebug(agent: Agent) {
       try {
         const task = await getA2ATask(serviceName, taskId, namespace);
         setCurrentTask(task);
-        setTaskHistory(prev => prev.map(entry =>
-          entry.taskId === taskId ? { ...entry, state: task.status?.state || entry.state } : entry
-        ));
-        const terminalStates = ['completed', 'failed', 'canceled'];
-        if (task.status && terminalStates.includes(task.status.state)) {
+        setTaskHistory(prev => mergeTaskHistory(prev, [task]));
+        if (task.status && TERMINAL_STATES.includes(task.status.state)) {
           stopPolling();
         }
       } catch {
@@ -87,19 +142,10 @@ export function useA2ADebug(agent: Agent) {
     try {
       const task = await sendA2AMessage(serviceName, params, namespace);
       setCurrentTask(task);
-      // Add to history
-      const messageText = params.message?.parts?.[0]?.text || '';
-      setTaskHistory(prev => [{
-        taskId: task.id,
-        state: task.status?.state || 'unknown',
-        mode: params.configuration?.mode === 'autonomous' ? 'autonomous' : 'interactive',
-        createdAt: new Date(),
-        message: messageText.slice(0, 100),
-      }, ...prev]);
+      setTaskHistory(prev => mergeTaskHistory(prev, [task]));
 
       // Start polling if task is not terminal
-      const terminalStates = ['completed', 'failed', 'canceled'];
-      if (task.status && !terminalStates.includes(task.status.state)) {
+      if (task.status && !TERMINAL_STATES.includes(task.status.state)) {
         startPolling(task.id);
       }
 
@@ -118,10 +164,7 @@ export function useA2ADebug(agent: Agent) {
     try {
       const task = await getA2ATask(serviceName, taskId, namespace);
       setCurrentTask(task);
-      // Update history entry
-      setTaskHistory(prev => prev.map(entry =>
-        entry.taskId === taskId ? { ...entry, state: task.status?.state || entry.state } : entry
-      ));
+      setTaskHistory(prev => mergeTaskHistory(prev, [task]));
       return task;
     } catch (err) {
       setTaskError(err instanceof Error ? err.message : 'Failed to fetch task');
@@ -138,10 +181,7 @@ export function useA2ADebug(agent: Agent) {
       const task = await cancelA2ATask(serviceName, taskId, namespace);
       setCurrentTask(task);
       stopPolling();
-      // Update history
-      setTaskHistory(prev => prev.map(entry =>
-        entry.taskId === taskId ? { ...entry, state: 'canceled' } : entry
-      ));
+      setTaskHistory(prev => mergeTaskHistory(prev, [task]));
       return task;
     } catch (err) {
       setTaskError(err instanceof Error ? err.message : 'Failed to cancel task');
@@ -181,6 +221,9 @@ export function useA2ADebug(agent: Agent) {
 
     // History
     taskHistory,
+    isLoadingTaskList,
+    taskListError,
+    refreshTasks,
     loadTaskFromHistory,
   };
 }

@@ -65,6 +65,11 @@ export interface A2ATask {
   output: string;
 }
 
+export interface ListTasksResult {
+  tasks: A2ATask[];
+  count: number;
+}
+
 // ============= JSON-RPC Types =============
 
 export interface JsonRpcRequest {
