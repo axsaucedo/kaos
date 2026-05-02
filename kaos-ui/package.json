@@ -10,10 +10,11 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && npm run verify:styles",
     "build:dev": "vite build --mode development",
     "lint": "eslint . --max-warnings 0",
     "preview": "vite preview",
+    "verify:styles": "node scripts/verify-tailwind-css.mjs",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",
@@ -63,7 +64,7 @@
     "remark-breaks": "^4.0.0",
     "remark-gfm": "^4.0.1",
     "sonner": "^2.0.7",
-    "tailwind-merge": "^3.5.0",
+    "tailwind-merge": "^2.6.1",
     "tailwindcss-animate": "^1.0.7",
     "zod": "^3.25.76",
     "zustand": "^4.5.7"
@@ -71,7 +72,6 @@
   "devDependencies": {
     "@eslint/js": "^9.32.0",
     "@playwright/test": "^1.59.1",
-    "@tailwindcss/postcss": "^4.2.4",
     "@tailwindcss/typography": "^0.5.19",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
@@ -88,7 +88,7 @@
     "happy-dom": "^20.9.0",
     "jsdom": "^27.0.1",
     "postcss": "^8.5.13",
-    "tailwindcss": "^4.2.4",
+    "tailwindcss": "^3.4.19",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.59.1",
     "vite": "^8.0.9",
