@@ -123,8 +123,8 @@ helm search repo kaos/kaos-operator --versions | head -5
 gh release view $VERSION --json assets,body | head -20
 
 # Standalone repos
-gh release view $VERSION_NUM --repo axsaucedo/pydantic-ai-server 2>&1 | head -5
-gh release view $VERSION_NUM --repo axsaucedo/kaos-ui 2>&1 | head -5
+gh release view $VERSION --repo axsaucedo/pydantic-ai-server 2>&1 | head -5
+gh release view $VERSION --repo axsaucedo/kaos-ui 2>&1 | head -5
 ```
 
 ## Step 7: Docs Race Condition Check
