@@ -8,6 +8,7 @@ The A2A subsystem provides:
 - **TaskManager ABC** with `LocalTaskManager` (in-memory) and `NullTaskManager` (no-op) implementations
 - **Synchronous task execution** — `SendMessage` returns a completed task
 - **JSON-RPC 2.0 endpoint** at `POST /` with A2A spec-compliant methods
+- **Task listing** — `ListTasks` returns all tasks retained by the current agent process
 - **Agent card** discovery at `/.well-known/agent.json` with A2A capabilities
 - **A2A-compliant delegation** — RemoteAgent uses `SendMessage` for inter-agent communication
 
@@ -84,6 +85,40 @@ curl -X POST http://agent:8000/ \
   -d '{"jsonrpc": "2.0", "method": "GetTask", "id": 2, "params": {"id": "task-uuid"}}'
 ```
 
+### ListTasks
+
+Retrieve all tasks retained by the current agent process, including terminal tasks. Results are sorted newest-first by status timestamp. `LocalTaskManager` stores tasks in memory, so this list is ephemeral and does not survive pod restarts.
+
+```bash
+curl -X POST http://agent:8000/ \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc": "2.0", "method": "ListTasks", "id": 3}'
+```
+
+Response:
+```json
+{
+  "jsonrpc": "2.0",
+  "id": 3,
+  "result": {
+    "tasks": [
+      {
+        "id": "task-uuid",
+        "sessionId": "session-uuid",
+        "status": {"state": "completed", "message": "Done", "timestamp": "..."},
+        "history": [],
+        "artifacts": [],
+        "metadata": {},
+        "events": [],
+        "autonomous": false,
+        "output": ""
+      }
+    ],
+    "count": 1
+  }
+}
+```
+
 ### CancelTask
 
 Cancel a task. Returns the task in its current state. Since execution is synchronous, tasks are typically already completed.
@@ -99,6 +134,7 @@ curl -X POST http://agent:8000/ \
 For backward compatibility, lowercase aliases are supported:
 - `tasks/send` → `SendMessage`
 - `tasks/get` → `GetTask`
+- `tasks/list` → `ListTasks`
 - `tasks/cancel` → `CancelTask`
 
 ## Error Codes
@@ -142,7 +178,7 @@ When TaskManager is active (not NullTaskManager), the agent card reflects A2A ca
 
 ### TaskManager ABC
 
-TaskManager ABC defines the interface: `send_message()`, `get_task()`, `cancel_task()`, `wait_for_completion()`, `shutdown()`.
+TaskManager ABC defines the interface: `send_message()`, `list_tasks()`, `get_task()`, `cancel_task()`, `wait_for_completion()`, `shutdown()`.
 
 - **LocalTaskManager**: In-memory dict storage, synchronous process_fn execution, OTel instrumentation
 - **NullTaskManager**: No-op implementation (like NullMemory)
@@ -152,8 +188,9 @@ TaskManager ABC defines the interface: `send_message()`, `get_task()`, `cancel_t
 1. `SendMessage` → `TaskManager.send_message()` creates task, executes process_fn inline
 2. Task transitions: submitted → working → completed/failed
 3. Completed task returned immediately to caller
-4. `GetTask` → retrieves stored task
-5. `CancelTask` → no-op for completed tasks (synchronous execution)
+4. `ListTasks` → retrieves all retained tasks, newest-first
+5. `GetTask` → retrieves stored task
+6. `CancelTask` → no-op for completed tasks (synchronous execution)
 
 ### A2A Delegation
 

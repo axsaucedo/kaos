@@ -2,7 +2,7 @@
 
 Provides:
 - Task data model (TaskState, TaskStatus, TaskMessage, TaskEvent, Task, AutonomousConfig, TaskBudgets)
-- TaskManager ABC: send_message, get_task, cancel_task, shutdown
+- TaskManager ABC: send_message, list_tasks, get_task, cancel_task, shutdown
 - LocalTaskManager: in-process execution with internal dict storage and OTel
 - NullTaskManager: no-op implementation
 - JSON-RPC 2.0 models and error codes
@@ -263,6 +263,11 @@ class TaskManager(ABC):
         ...
 
     @abstractmethod
+    async def list_tasks(self) -> List[Task]:
+        """Return all retained tasks, newest first."""
+        ...
+
+    @abstractmethod
     async def cancel_task(self, task_id: str) -> bool:
         """Cancel a task. Returns True if cancellation was initiated."""
         ...
@@ -371,6 +376,13 @@ class LocalTaskManager(TaskManager):
 
     async def get_task(self, task_id: str) -> Optional[Task]:
         return self._tasks.get(task_id)
+
+    async def list_tasks(self) -> List[Task]:
+        return sorted(
+            list(self._tasks.values()),
+            key=lambda task: task.status.timestamp,
+            reverse=True,
+        )
 
     async def cancel_task(self, task_id: str) -> bool:
         tracer = trace_api.get_tracer(SERVICE_NAME)
@@ -769,6 +781,9 @@ class NullTaskManager(TaskManager):
     async def get_task(self, task_id: str) -> Optional[Task]:
         return None
 
+    async def list_tasks(self) -> List[Task]:
+        return []
+
     async def cancel_task(self, task_id: str) -> bool:
         return False
 
@@ -853,6 +868,8 @@ async def _handle_jsonrpc(request: Request, task_manager: TaskManager) -> JSONRe
         return await _jsonrpc_send_message(task_manager, params, rpc_id)
     elif method in ("GetTask", "tasks/get"):
         return await _jsonrpc_get_task(task_manager, params, rpc_id)
+    elif method in ("ListTasks", "tasks/list"):
+        return await _jsonrpc_list_tasks(task_manager, rpc_id)
     elif method in ("CancelTask", "tasks/cancel"):
         return await _jsonrpc_cancel_task(task_manager, params, rpc_id)
     else:
@@ -971,6 +988,16 @@ async def _jsonrpc_get_task(
         )
 
     return JSONResponse(JsonRpcResponse(id=rpc_id, result=task.to_dict()).to_dict())
+
+
+async def _jsonrpc_list_tasks(
+    task_manager: TaskManager,
+    rpc_id: Optional[Union[str, int]],
+) -> JSONResponse:
+    """Handle ListTasks: retrieve all retained task statuses."""
+    tasks = await task_manager.list_tasks()
+    result = {"tasks": [task.to_dict() for task in tasks], "count": len(tasks)}
+    return JSONResponse(JsonRpcResponse(id=rpc_id, result=result).to_dict())
 
 
 async def _jsonrpc_cancel_task(
