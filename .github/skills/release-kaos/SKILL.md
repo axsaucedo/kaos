@@ -32,17 +32,51 @@ gh run list --branch main --limit 3 --json conclusion,name
 git tag -l "$VERSION"  # must be empty
 ```
 
-## Step 3: Create the Release
+## Step 3: Generate and Review Release Notes
 
-Use `gh release create` with auto-generated changelog from PRs:
+Generate GitHub's release notes before creating the release, then review them and write a semantic overview. The final release notes must keep the generated PR changelog, but they must start with a human-readable summary of what changed and why it matters.
 
 ```bash
-gh release create $VERSION --target main --title "$VERSION" --generate-notes
+GENERATED_NOTES="$(mktemp)"
+RELEASE_NOTES="$(mktemp)"
+
+gh api "repos/axsaucedo/kaos/releases/generate-notes" \
+  -f tag_name="$VERSION" \
+  -f target_commitish=main \
+  --jq .body > "$GENERATED_NOTES"
+
+# Review the generated PR list and supporting commits before writing the overview.
+cat "$GENERATED_NOTES"
+git log --oneline "$(git describe --tags --abbrev=0 origin/main 2>/dev/null || echo HEAD~50)"..origin/main
+```
+
+Write a concise semantic overview in `$RELEASE_NOTES`:
+
+```markdown
+## Overview
+Summarize the release as a coherent product/update narrative, not as a PR list.
+
+## Highlights
+- Group related work by user-visible outcome or operational impact.
+- Mention compatibility, migration, or validation notes when relevant.
+
+## Generated changelog
+<paste the generated notes here unchanged, except for obvious duplicate headings>
+```
+
+If the generated notes are sparse, use merged PR titles, commit messages, docs, and changed files to infer the overview. Do not invent claims that cannot be supported by the release contents.
+
+## Step 4: Create the Release
+
+Create the release using the reviewed release notes:
+
+```bash
+gh release create "$VERSION" --target main --title "$VERSION" --notes-file "$RELEASE_NOTES"
 ```
 
 This triggers `.github/workflows/release.yaml` which runs ~28 jobs.
 
-## Step 4: Monitor CI Pipeline
+## Step 5: Monitor CI Pipeline
 
 Poll the release workflow until ALL jobs complete. Do NOT stop until every job succeeds or fails.
 
@@ -58,7 +92,7 @@ gh run view <RUN_ID> --json jobs --jq '.jobs[] | "\(.name): \(.status) \(.conclu
 
 **If any job fails:** investigate logs with `gh run view <RUN_ID> --log-failed`, diagnose, fix, and re-trigger if needed.
 
-## Step 5: Validate All Artifacts
+## Step 6: Validate All Artifacts
 
 Check EVERY artifact. Report status for each.
 
@@ -93,7 +127,7 @@ gh release view $VERSION_NUM --repo axsaucedo/pydantic-ai-server 2>&1 | head -5
 gh release view $VERSION_NUM --repo axsaucedo/kaos-ui 2>&1 | head -5
 ```
 
-## Step 6: Docs Race Condition Check
+## Step 7: Docs Race Condition Check
 
 If docs pages return 404, a race condition may have occurred between `release.yaml` and `docs.yaml` deployments:
 
@@ -103,7 +137,7 @@ gh workflow run rebuild-docs.yaml -f version=$VERSION_NUM
 # Wait ~2 minutes, then re-check
 ```
 
-## Step 7: Smoke Test on KIND Cluster (if available)
+## Step 8: Smoke Test on KIND Cluster (if available)
 
 If a KIND cluster is available, upgrade and test:
 
@@ -120,7 +154,7 @@ kubectl get deployment kaos-kaos-operator-controller-manager -n kaos-system \
   -o jsonpath='{.spec.template.spec.containers[0].image}'
 ```
 
-## Step 8: Merge Version Bump PR
+## Step 9: Merge Version Bump PR
 
 The release pipeline creates an automated PR to bump VERSION to the next dev version. Find and merge it:
 
@@ -129,7 +163,19 @@ gh pr list --search "bump" --json number,title
 gh pr merge <PR_NUMBER> --merge
 ```
 
-## Step 9: Final Report
+## Step 10: Maintain Historical Release Notes
+
+When asked to update historical release notes, apply the same format to existing releases:
+
+1. List releases in tag order with `gh release list --limit 100`.
+2. For each release, inspect the current body with `gh release view <tag> --json body`.
+3. Compare the tag with the previous release tag using `git log <previous>..<tag> --oneline` and, where possible, merged PRs from the generated changelog.
+4. Edit the release body so it starts with `## Overview`, has grouped semantic highlights, and preserves the original/generated PR changelog under `## Generated changelog`.
+5. If there is not enough evidence for a meaningful summary, say so briefly in the overview instead of inventing details.
+
+Use `gh release edit <tag> --notes-file <file>` for each update. Retain existing assets and release metadata.
+
+## Step 11: Final Report
 
 Print a summary table of all artifacts and their status:
 
