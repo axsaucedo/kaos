@@ -2,8 +2,13 @@
 
 ## Quick Reference
 ```bash
-# Create release with auto-generated PR changelog (preferred)
-gh release create v0.X.Y --target main --title "v0.X.Y" --generate-notes
+# Preview generated notes, add semantic overview, then create release
+gh api repos/axsaucedo/kaos/releases/generate-notes \
+  -f tag_name=v0.X.Y \
+  -f target_commitish=main \
+  --jq .body > generated-notes.md
+# Review generated-notes.md, write release-notes.md with overview + generated changelog
+gh release create v0.X.Y --target main --title "v0.X.Y" --notes-file release-notes.md
 
 # Test release (docs only, no images/PyPI)
 git tag v0.0.X && git push origin v0.0.X
@@ -107,16 +112,24 @@ Both packages use [OIDC trusted publishing](https://docs.pypi.org/trusted-publis
 # 1. Ensure on main with latest code
 git checkout main && git pull
 
-# 2. Create release with auto-generated PR changelog
-gh release create v0.X.Y --target main --title "v0.X.Y" --generate-notes
+# 2. Generate and review release notes
+gh api repos/axsaucedo/kaos/releases/generate-notes \
+  -f tag_name=v0.X.Y \
+  -f target_commitish=main \
+  --jq .body > generated-notes.md
+git log --oneline "$(git describe --tags --abbrev=0 origin/main)"..origin/main
+# Write release-notes.md with a semantic overview, grouped highlights, and generated-notes.md preserved under "Generated changelog".
 
-# 3. Monitor workflow (all 28 jobs should pass)
+# 3. Create release with reviewed notes
+gh release create v0.X.Y --target main --title "v0.X.Y" --notes-file release-notes.md
+
+# 4. Monitor workflow (all 28 jobs should pass)
 gh run list --workflow=release.yaml --limit 3
 gh run watch <run-id>
 # Or check job status:
 gh run view <run-id> --json jobs --jq '.jobs[] | "\(.name): \(.status) \(.conclusion)"'
 
-# 4. Validate artifacts
+# 5. Validate artifacts
 pip install kaos-cli==0.X.Y
 pip install pydantic-ai-server==0.X.Y
 curl -sI https://axsaucedo.github.io/kaos/v0.X.Y/
@@ -126,10 +139,28 @@ docker pull axsauze/kaos-agent:0.X.Y
 docker pull axsauze/kaos-mcp-python-string:0.X.Y
 helm repo update kaos && helm search repo kaos/kaos-operator --versions | head -5
 
-# 5. Merge version bump PR (auto-created by pipeline)
+# 6. Merge version bump PR (auto-created by pipeline)
 gh pr list  # find the automated bump PR
 gh pr merge <pr-number> --merge
 ```
+
+### Release Notes Standard
+
+Every release should use generated GitHub notes as the source changelog, but the published body should lead with a reviewed semantic overview:
+
+```markdown
+## Overview
+One or two short paragraphs describing the release as a coherent product, operator, runtime, CLI, docs, or UI update.
+
+## Highlights
+- Group related changes by user-visible outcome or operational impact.
+- Mention compatibility, migration, or validation notes when relevant.
+
+## Generated changelog
+<GitHub-generated notes / PR list>
+```
+
+When updating historical releases, preserve the original generated notes and assets. Add the semantic overview using evidence from the generated changelog, merged PRs, commits between adjacent tags, and changed files. If older releases lack enough context, say that the release is summarized from the available changelog rather than inventing detail.
 
 ## Post-Release Validation
 
