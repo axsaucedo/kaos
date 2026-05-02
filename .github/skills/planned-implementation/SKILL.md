@@ -18,6 +18,7 @@ IMPORTANT INSRTUCTIONS: This is quite a comprehensive request, so please ensure 
 - Create or overwrite `REPORT.md` at the end, but never commit it. Post its contents as a PR comment.
 - Commit each numbered TODO separately with a succinct conventional commit message and the required co-author trailer.
 - Do not skip validation for a TODO before committing it. If validation cannot run locally, document why in `REPORT.md` and rely on PR CI.
+- Prefer real local validation when the host already has Docker, Kubernetes, KAOS, UI dev servers, or proxy configuration running. Detect and reuse that setup before falling back to mocked tests or CI-only validation.
 
 ## Phase 0 - Scope and setup
 
@@ -37,6 +38,23 @@ git --no-pager status --short --branch
 ```
 
 Stop and ask the user if existing unrelated changes conflict with the requested work.
+
+5. Detect reusable local runtime configuration and record what is available:
+
+```bash
+{
+  echo "## Local validation environment"
+  command -v docker >/dev/null && docker ps --format 'docker: {{.Names}} {{.Status}}' || true
+  command -v kubectl >/dev/null && kubectl config current-context 2>./tmp/null || true
+  command -v kubectl >/dev/null && kubectl cluster-info 2>./tmp/null || true
+  command -v kaos >/dev/null && kaos version 2>./tmp/null || true
+  curl -sS -o ./tmp/null -w 'ui:%{http_code}\n' http://localhost:8080/ || true
+  curl -sS -o ./tmp/null -w 'ui-alt:%{http_code}\n' http://localhost:8081/ || true
+  curl -sS -o ./tmp/null -w 'proxy:%{http_code}\n' http://localhost:8010/ || true
+} | tee ./tmp/local-validation-context.txt
+```
+
+If the user says a local KAOS cluster is running, treat the local runtime as the primary E2E validation target. Do not skip local E2E solely because CI will run later.
 
 ## Phase 1 - Backend context
 
@@ -134,6 +152,15 @@ Do not batch unrelated TODOs into one commit.
 
 Use targeted local validation first, then PR CI for broader coverage.
 
+Before running E2E, inspect `./tmp/local-validation-context.txt` and reuse available configuration:
+
+- If `kubectl cluster-info` works, use the current kube context; do not create a new KIND cluster unless tests require isolation.
+- If `kaos ui --no-browser` or another proxy is already serving on `localhost:8010`, use that proxy.
+- If the UI is already serving on `localhost:8080` or `localhost:8081`, use the matching Playwright base URL or config instead of starting a duplicate server.
+- If Docker is running and a KAOS cluster is installed, prefer a small real-browser Playwright path through the local UI and proxy for UI changes.
+- If the proxy or UI is missing, start only the missing process, capture logs under `./tmp`, and stop only processes you started.
+- Keep all temporary logs/config under `./tmp`.
+
 Common commands:
 
 ```bash
@@ -156,6 +183,17 @@ make test-unit
 ```
 
 For end-to-end coverage, prefer GitHub Actions on a PR. If many CI failures occur, reproduce 1-3 relevant tests locally before pushing follow-up fixes.
+
+For UI work against an existing local KAOS cluster, run at least one targeted Playwright test against the real local setup when available, for example:
+
+```bash
+cd kaos-ui
+KAOS_UI_BASE_URL=http://localhost:8080 \
+KAOS_PROXY_URL=http://localhost:8010 \
+npm run test:e2e -- tests/functional/<relevant-test>.spec.ts
+```
+
+If the repo's Playwright config does not read those environment variables, either use the default ports expected by the config or pass an equivalent Playwright `--config`/environment setup already used in the repo. Record the exact command and observed result in `REPORT.md`.
 
 ## Phase 8 - REPORT.md and PR comment
 
