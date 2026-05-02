@@ -6,9 +6,9 @@ import { Page, expect } from '@playwright/test';
 
 /** Default test configuration */
 export const TEST_CONFIG = {
-  proxyUrl: 'http://localhost:8010',
-  namespace: 'kaos-hierarchy',
-  baseUrl: 'http://localhost:8080',
+  proxyUrl: process.env.KAOS_PROXY_URL || 'http://localhost:8010',
+  namespace: process.env.KAOS_TEST_NAMESPACE || 'kaos-hierarchy',
+  baseUrl: process.env.KAOS_UI_BASE_URL || 'http://localhost:8080',
 };
 
 /**
