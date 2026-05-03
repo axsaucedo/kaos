@@ -14,6 +14,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 concurrency:
   group: kaos-ui-tests-${{ github.ref }}
@@ -136,6 +137,19 @@ jobs:
           name: visual-test-results
           path: kaos-ui/test-results/
           retention-days: 7
+
+      - name: Prepare visual failure comment
+        if: failure() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        working-directory: kaos-ui
+        env:
+          ACTIONS_RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: node scripts/summarize-visual-failures.mjs
+
+      - name: Comment visual failure details
+        if: failure() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh pr comment ${{ github.event.pull_request.number }} --body-file tmp/visual-failure-comment.md
 
   e2e-tests:
     name: E2E Tests (shard ${{ matrix.shard }}/3)
