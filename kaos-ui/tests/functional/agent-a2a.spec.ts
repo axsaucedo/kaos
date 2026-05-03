@@ -23,6 +23,23 @@ async function navigateToA2ATab(page: import('@playwright/test').Page): Promise<
   return true;
 }
 
+function mockTask(id: string, text: string, state = 'completed') {
+  return {
+    id,
+    sessionId: `session-${id}`,
+    status: { state, timestamp: new Date().toISOString(), message: 'Done' },
+    history: [
+      { role: 'user', parts: [{ type: 'text', text }] },
+      { role: 'agent', parts: [{ type: 'text', text: 'Mock response from agent' }] },
+    ],
+    artifacts: [],
+    metadata: {},
+    events: [],
+    autonomous: false,
+    output: 'Mock response from agent',
+  };
+}
+
 test.describe('A2A Debug Screen', () => {
   test.beforeEach(async ({ page }) => {
     page.on('pageerror', (err) => {
@@ -84,6 +101,59 @@ test.describe('A2A Debug Screen', () => {
       const hasBudgetAfter = await body.getByText(/max iterations/i).count();
       expect(hasBudgetAfter).toBe(0);
     }
+  });
+
+  test('task history loads retained tasks and refreshes from ListTasks', async ({ page }) => {
+    let listCalls = 0;
+
+    await page.route('**/proxy/', async (route) => {
+      if (route.request().method() === 'POST') {
+        let body: Record<string, unknown> = {};
+        try { body = route.request().postDataJSON(); } catch { /* ignore */ }
+        if (body?.jsonrpc === '2.0' && (body?.method === 'ListTasks' || body?.method === 'tasks/list')) {
+          listCalls += 1;
+          const task = listCalls === 1
+            ? mockTask('task_retained_pw_001', 'Retained task from backend')
+            : mockTask('task_retained_pw_002', 'Refreshed retained task');
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              jsonrpc: '2.0',
+              id: body.id,
+              result: { tasks: [task], count: 1 },
+            }),
+          });
+          return;
+        }
+        if (body?.jsonrpc === '2.0' && (body?.method === 'GetTask' || body?.method === 'tasks/get')) {
+          const params = body.params as Record<string, unknown> | undefined;
+          await route.fulfill({
+            status: 200,
+            contentType: 'application/json',
+            body: JSON.stringify({
+              jsonrpc: '2.0',
+              id: body.id,
+              result: mockTask(String(params?.id || 'task_retained_pw_001'), 'Retained task from backend'),
+            }),
+          });
+          return;
+        }
+      }
+      await route.continue();
+    });
+
+    if (!(await navigateToA2ATab(page))) {
+      test.skip(true, 'A2A tab not available');
+      return;
+    }
+
+    const historyEntry = page.locator('[data-testid="a2a-history-0"]');
+    await expect(historyEntry).toBeVisible({ timeout: 10000 });
+    await expect(historyEntry).toContainText('Retained task from backend');
+
+    await page.locator('[data-testid="a2a-refresh-tasks"]').click();
+    await expect(page.locator('[data-testid="a2a-history-0"]')).toContainText('Refreshed retained task', { timeout: 10000 });
   });
 
   test('send message → task appears in history → clicking history auto-switches to task tab', async ({ page }) => {

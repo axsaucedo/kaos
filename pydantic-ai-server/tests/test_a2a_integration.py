@@ -79,6 +79,28 @@ class TestA2AIntegrationLifecycle:
         assert len(set(r["id"] for r in results)) == 3  # unique task ids
 
     @pytest.mark.asyncio
+    async def test_list_tasks_returns_all_retained_tasks(self):
+        """Test ListTasks returns all tasks retained by the task manager."""
+        model = TestModel(custom_output_text="Listed result")
+        server = make_test_server(model=model, task_manager_type="local")
+        transport = ASGITransport(app=server.app)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            first_resp = await client.post("/", json=_send_message("First retained task", req_id=1))
+            second_resp = await client.post(
+                "/", json=_send_message("Second retained task", req_id=2)
+            )
+            list_resp = await client.post("/", json=_jsonrpc("ListTasks", req_id=3))
+
+        first_task = _get_result(first_resp)
+        second_task = _get_result(second_resp)
+        result = _get_result(list_resp)
+
+        assert result["count"] == 2
+        assert [task["id"] for task in result["tasks"]] == [second_task["id"], first_task["id"]]
+        assert {task["id"] for task in result["tasks"]} == {first_task["id"], second_task["id"]}
+
+    @pytest.mark.asyncio
     async def test_task_with_shared_session(self):
         """Test multiple tasks sharing a sessionId."""
         model = TestModel(custom_output_text="Session result")
@@ -216,6 +238,19 @@ class TestA2AIntegrationLifecycle:
 
         # NullTaskManager.send_message returns a stub task
         assert "result" in data
+
+    @pytest.mark.asyncio
+    async def test_list_tasks_without_task_manager_returns_empty_list(self):
+        """Test ListTasks with NullTaskManager returns an empty task list."""
+        model = TestModel(custom_output_text="test")
+        server = make_test_server(model=model)
+        transport = ASGITransport(app=server.app)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post("/", json=_jsonrpc("ListTasks"))
+            data = resp.json()
+
+        assert data["result"] == {"tasks": [], "count": 0}
 
 
 class TestA2AAutonomousMode:

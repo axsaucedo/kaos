@@ -3,7 +3,7 @@
  * Uses K8s service proxy to communicate with agent pods.
  */
 
-import type { AgentCard, A2ATask, JsonRpcResponse } from '@/types/a2a';
+import type { AgentCard, A2ATask, JsonRpcResponse, ListTasksResult } from '@/types/a2a';
 import { k8sClient } from './index';
 
 /**
@@ -113,6 +113,29 @@ export async function getA2ATask(
   }
 
   return rpcResponse.result as A2ATask;
+}
+
+/**
+ * List retained A2A tasks for an agent.
+ */
+export async function listA2ATasks(
+  serviceName: string,
+  namespace?: string,
+  port: number = 8000
+): Promise<ListTasksResult> {
+  const rpcResponse = await sendA2AJsonRpc(
+    serviceName,
+    'ListTasks',
+    {},
+    namespace,
+    port
+  );
+
+  if (rpcResponse.error) {
+    throw new Error(rpcResponse.error.message || 'A2A ListTasks failed');
+  }
+
+  return rpcResponse.result as ListTasksResult;
 }
 
 /**

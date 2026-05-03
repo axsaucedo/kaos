@@ -115,3 +115,4 @@ Detailed instructions are in `.github/instructions/`:
 
 ### Skills
 - `/release-kaos`: Invoke with a version (e.g., "Use /release-kaos to release v0.5.0") — executes full release pipeline
+- `/planned-implementation`: Use for complex staged KAOS work that needs backend/UI context gathering, a written plan, task-scoped commits, PR/CI validation, and an uncommitted REPORT.md PR comment

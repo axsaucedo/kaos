@@ -118,8 +118,8 @@ make format                     # Auto-format code
 - `AgentDeps`: Per-run dependencies (session_id, memory) injected via RunContext
 - `DelegationToolset`: AbstractToolset that exposes sub-agents as delegate_to_ tools
 - `RemoteAgent`: HTTP client for sub-agent delegation — tries A2A SendMessage first, falls back to /v1/chat/completions
-- `TaskManager`: ABC for task lifecycle — `send_message()`, `get_task()`, `cancel_task()`, `wait_for_completion()`, `shutdown()`
-- `LocalTaskManager`: In-memory implementation with synchronous execution, OTel instrumentation
+- `TaskManager`: ABC for task lifecycle — `send_message()`, `list_tasks()`, `get_task()`, `cancel_task()`, `wait_for_completion()`, `shutdown()`
+- `LocalTaskManager`: In-memory implementation with retained task listing, synchronous execution, OTel instrumentation
 - `NullTaskManager`: No-op implementation (like NullMemory)
 - `Task`: Task dataclass with id, session_id, status, history, metadata, timestamps
 - `TaskState`: Enum — submitted, working, completed, failed, canceled
@@ -131,8 +131,8 @@ make format                     # Auto-format code
 - `_MockResponseState`: Mutable mock response state shared via closure (workaround for ContextVar + FunctionModel issue)
 
 ### TaskManager
-- **TaskManager** ABC: `send_message()`, `submit_autonomous()`, `get_task()`, `cancel_task()`, `wait_for_completion()`, `shutdown()`
-- **LocalTaskManager**: In-memory dict storage, synchronous process_fn execution, async autonomous execution, OTel spans/metrics
+- **TaskManager** ABC: `send_message()`, `submit_autonomous()`, `list_tasks()`, `get_task()`, `cancel_task()`, `wait_for_completion()`, `shutdown()`
+- **LocalTaskManager**: In-memory dict storage, retained task listing, synchronous process_fn execution, async autonomous execution, OTel spans/metrics
 - **NullTaskManager**: No-op — `send_message()` returns a stub task, nothing persisted
 - State transitions enforced via `VALID_TRANSITIONS` dict — terminal states allow no further transitions
 - `TASK_STORE_TYPE` env var controls backend selection (`local` default, `null` to disable)
@@ -156,8 +156,8 @@ make format                     # Auto-format code
 
 ### A2A JSON-RPC Endpoint (POST /) — a2a.py
 - JSON-RPC 2.0 dispatcher at root path, separate from `/v1/chat/completions`
-- A2A RC v1.0 methods: `SendMessage`, `GetTask`, `CancelTask` (PascalCase)
-- Legacy aliases: `tasks/send`, `tasks/get`, `tasks/cancel` (backward compatible)
+- A2A RC v1.0 methods: `SendMessage`, `ListTasks`, `GetTask`, `CancelTask` (PascalCase)
+- Legacy aliases: `tasks/send`, `tasks/list`, `tasks/get`, `tasks/cancel` (backward compatible)
 - `SendMessage` supports two modes: synchronous (default) returns completed/failed task, autonomous (`configuration.mode: "autonomous"`) spawns background task
 - `contextId` param maps to session_id
 - Standard error codes: -32700 (parse), -32600 (invalid request), -32601 (method not found), -32602 (invalid params), -32603 (internal), -32001 (task not found)
@@ -222,6 +222,6 @@ Pydantic AI runs `FunctionModel` handlers in a copied context — `ContextVar` s
 - `GET /ready`: Readiness probe
 - `GET /.well-known/agent.json`: A2A-compliant agent card (discovers tools from MCP servers)
 - `POST /v1/chat/completions`: OpenAI-compatible chat endpoint
-- `POST /`: A2A JSON-RPC 2.0 endpoint (SendMessage, GetTask, CancelTask + legacy aliases)
+- `POST /`: A2A JSON-RPC 2.0 endpoint (SendMessage, ListTasks, GetTask, CancelTask + legacy aliases)
 - `GET /memory/events?session_id=X`: Memory events for a session
 - `GET /memory/sessions`: List all memory sessions

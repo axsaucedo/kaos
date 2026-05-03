@@ -1,6 +1,6 @@
 """Tests for A2A JSON-RPC endpoint (POST /).
 
-Tests the JSON-RPC 2.0 dispatcher with tasks/send, tasks/get, tasks/cancel.
+Tests the JSON-RPC 2.0 dispatcher with tasks/send, tasks/list, tasks/get, tasks/cancel.
 """
 
 import pytest
@@ -185,6 +185,88 @@ class TestJsonRpcEndpoint:
         data = response.json()
         assert "error" in data
         assert data["error"]["code"] == -32001  # TASK_NOT_FOUND
+
+    @pytest.mark.asyncio
+    async def test_tasks_list_returns_retained_tasks_newest_first(self):
+        """Test ListTasks returns retained tasks sorted newest first."""
+        server = _make_server_with_task_manager()
+        transport = ASGITransport(app=server.app)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            first_resp = await client.post(
+                "/",
+                json={
+                    "jsonrpc": "2.0",
+                    "method": "SendMessage",
+                    "id": 1,
+                    "params": {
+                        "message": {
+                            "role": "user",
+                            "parts": [{"type": "text", "text": "First task"}],
+                        }
+                    },
+                },
+            )
+            second_resp = await client.post(
+                "/",
+                json={
+                    "jsonrpc": "2.0",
+                    "method": "SendMessage",
+                    "id": 2,
+                    "params": {
+                        "message": {
+                            "role": "user",
+                            "parts": [{"type": "text", "text": "Second task"}],
+                        }
+                    },
+                },
+            )
+            list_resp = await client.post(
+                "/",
+                json={"jsonrpc": "2.0", "method": "ListTasks", "id": 3},
+            )
+
+        first_task = first_resp.json()["result"]
+        second_task = second_resp.json()["result"]
+        data = list_resp.json()
+        assert data["jsonrpc"] == "2.0"
+        assert data["id"] == 3
+        assert data["result"]["count"] == 2
+        assert [task["id"] for task in data["result"]["tasks"]] == [
+            second_task["id"],
+            first_task["id"],
+        ]
+        assert data["result"]["tasks"][0]["history"][0]["parts"][0]["text"] == "Second task"
+
+    @pytest.mark.asyncio
+    async def test_tasks_list_legacy_alias(self):
+        """Test tasks/list returns retained tasks using the legacy alias."""
+        server = _make_server_with_task_manager()
+        transport = ASGITransport(app=server.app)
+
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            await client.post(
+                "/",
+                json={
+                    "jsonrpc": "2.0",
+                    "method": "tasks/send",
+                    "id": 1,
+                    "params": {
+                        "message": {
+                            "role": "user",
+                            "parts": [{"type": "text", "text": "Alias task"}],
+                        }
+                    },
+                },
+            )
+            response = await client.post(
+                "/",
+                json={"jsonrpc": "2.0", "method": "tasks/list", "id": 2},
+            )
+
+        data = response.json()
+        assert data["result"]["count"] == 1
+        assert data["result"]["tasks"][0]["status"]["state"] == "completed"
 
     @pytest.mark.asyncio
     async def test_tasks_get_missing_id(self):

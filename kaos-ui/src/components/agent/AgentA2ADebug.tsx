@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Radio, Clock, Loader2 } from 'lucide-react';
+import { Radio, Clock, Loader2, RefreshCw } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -31,12 +32,13 @@ export function AgentA2ADebug({ agent }: AgentA2ADebugProps) {
     currentTask, isLoadingTask, taskError,
     isPolling, stopPolling, startPolling,
     fetchTask, cancelTask,
-    taskHistory, loadTaskFromHistory,
+    taskHistory, isLoadingTaskList, taskListError, refreshTasks, loadTaskFromHistory,
   } = useA2ADebug(agent);
 
   useEffect(() => {
     fetchAgentCard();
-  }, [fetchAgentCard]);
+    refreshTasks();
+  }, [fetchAgentCard, refreshTasks]);
 
   const handleLoadTaskFromHistory = (entry: TaskHistoryEntry) => {
     loadTaskFromHistory(entry);
@@ -99,21 +101,42 @@ export function AgentA2ADebug({ agent }: AgentA2ADebugProps) {
 
       {/* Task history sidebar */}
       <div className="w-56 shrink-0 border-l pl-3">
-        <div className="flex items-center gap-2 mb-3">
-          <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Task History</h4>
-          {taskHistory.length > 0 && (
-            <Badge variant="outline" className="text-[10px] h-4 px-1.5">{taskHistory.length}</Badge>
-          )}
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <h4 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Task History</h4>
+            {taskHistory.length > 0 && (
+              <Badge variant="outline" className="text-[10px] h-4 px-1.5">{taskHistory.length}</Badge>
+            )}
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 w-6 p-0 shrink-0"
+            onClick={refreshTasks}
+            disabled={isLoadingTaskList}
+            data-testid="a2a-refresh-tasks"
+            title="Refresh task history"
+          >
+            <RefreshCw className={`h-3 w-3 ${isLoadingTaskList ? 'animate-spin' : ''}`} />
+          </Button>
         </div>
+
+        {taskListError && (
+          <p className="text-[10px] text-destructive mb-2" data-testid="a2a-task-list-error">
+            {taskListError}
+          </p>
+        )}
 
         <ScrollArea className="h-[calc(100%-32px)]">
           {taskHistory.length === 0 ? (
-            <p className="text-[10px] text-muted-foreground italic py-2">No tasks yet</p>
+            <p className="text-[10px] text-muted-foreground italic py-2">
+              {isLoadingTaskList ? 'Loading tasks...' : 'No retained tasks'}
+            </p>
           ) : (
             <div className="space-y-1.5">
               {taskHistory.map((entry, i) => (
                 <button
-                  key={i}
+                  key={entry.taskId}
                   onClick={() => handleLoadTaskFromHistory(entry)}
                   className={`w-full text-left p-2 rounded-md border text-xs transition-colors hover:bg-muted/50 ${
                     currentTask?.id === entry.taskId ? 'bg-muted border-primary/30' : ''
