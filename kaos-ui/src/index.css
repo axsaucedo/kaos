@@ -1,12 +1,13 @@
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap') layer(base);
 
 @import "tailwindcss" source(none);
-@import "tw-animate-css";
 
 @source ".";
 @source "../index.html";
 
 @custom-variant dark (&:is(.dark *));
+
+@plugin "tailwindcss-animate";
 
 @theme {
   --font-sans: Inter, system-ui, sans-serif;
@@ -73,6 +74,7 @@
   --shadow-glow-success: 0 0 15px hsl(var(--success) / 0.2);
   --shadow-glow-warning: 0 0 15px hsl(var(--warning) / 0.2);
   --shadow-glow-error: 0 0 15px hsl(var(--destructive) / 0.2);
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
 
   --default-ring-width: 3px;
   --default-ring-color: var(--color-ring);
@@ -379,4 +381,114 @@
       transform: translateX(0);
     }
   }
+}
+
+@layer utilities {
+  /* Preserve Tailwind 3 visual output for semantic opacity, focus rings, and small shadows. */
+  .bg-agent\/10 { background-color: hsl(var(--agent-color) / 0.1); }
+  .bg-agent\/20 { background-color: hsl(var(--agent-color) / 0.2); }
+  .bg-agent\/60 { background-color: hsl(var(--agent-color) / 0.6); }
+  .bg-agent\/90 { background-color: hsl(var(--agent-color) / 0.9); }
+  .bg-background\/50 { background-color: hsl(var(--background) / 0.5); }
+  .bg-card\/50 { background-color: hsl(var(--card) / 0.5); }
+  .bg-card\/90 { background-color: hsl(var(--card) / 0.9); }
+  .bg-deployment\/20 { background-color: hsl(var(--deployment-color) / 0.2); }
+  .bg-destructive\/5 { background-color: hsl(var(--destructive) / 0.05); }
+  .bg-destructive\/10 { background-color: hsl(var(--destructive) / 0.1); }
+  .bg-destructive\/20 { background-color: hsl(var(--destructive) / 0.2); }
+  .bg-destructive\/80 { background-color: hsl(var(--destructive) / 0.8); }
+  .bg-destructive\/90 { background-color: hsl(var(--destructive) / 0.9); }
+  .bg-mcpserver\/5 { background-color: hsl(var(--mcpserver-color) / 0.05); }
+  .bg-mcpserver\/10 { background-color: hsl(var(--mcpserver-color) / 0.1); }
+  .bg-mcpserver\/20 { background-color: hsl(var(--mcpserver-color) / 0.2); }
+  .bg-mcpserver\/90 { background-color: hsl(var(--mcpserver-color) / 0.9); }
+  .bg-modelapi\/10 { background-color: hsl(var(--modelapi-color) / 0.1); }
+  .bg-modelapi\/20 { background-color: hsl(var(--modelapi-color) / 0.2); }
+  .bg-muted\/20 { background-color: hsl(var(--muted) / 0.2); }
+  .bg-muted\/30 { background-color: hsl(var(--muted) / 0.3); }
+  .bg-muted\/50 { background-color: hsl(var(--muted) / 0.5); }
+  .bg-muted\/80 { background-color: hsl(var(--muted) / 0.8); }
+  .bg-pod\/10 { background-color: hsl(var(--pod-color) / 0.1); }
+  .bg-pod\/20 { background-color: hsl(var(--pod-color) / 0.2); }
+  .bg-primary\/5 { background-color: hsl(var(--primary) / 0.05); }
+  .bg-primary\/10 { background-color: hsl(var(--primary) / 0.1); }
+  .bg-primary\/20 { background-color: hsl(var(--primary) / 0.2); }
+  .bg-primary\/80 { background-color: hsl(var(--primary) / 0.8); }
+  .bg-primary\/90 { background-color: hsl(var(--primary) / 0.9); }
+  .bg-secondary\/80 { background-color: hsl(var(--secondary) / 0.8); }
+  .bg-success\/10 { background-color: hsl(var(--success) / 0.1); }
+  .bg-success\/20 { background-color: hsl(var(--success) / 0.2); }
+  .bg-success\/90 { background-color: hsl(var(--success) / 0.9); }
+  .bg-volume\/20 { background-color: hsl(var(--volume-color) / 0.2); }
+  .bg-warning\/10 { background-color: hsl(var(--warning) / 0.1); }
+  .bg-warning\/20 { background-color: hsl(var(--warning) / 0.2); }
+  .bg-warning\/90 { background-color: hsl(var(--warning) / 0.9); }
+  .border-border\/50 { border-color: hsl(var(--border) / 0.5); }
+  .border-destructive\/20 { border-color: hsl(var(--destructive) / 0.2); }
+  .border-destructive\/30 { border-color: hsl(var(--destructive) / 0.3); }
+  .border-destructive\/50 { border-color: hsl(var(--destructive) / 0.5); }
+  .border-mcpserver\/30 { border-color: hsl(var(--mcpserver-color) / 0.3); }
+  .border-muted\/40 { border-color: hsl(var(--muted) / 0.4); }
+  .border-primary\/20 { border-color: hsl(var(--primary) / 0.2); }
+  .border-primary\/30 { border-color: hsl(var(--primary) / 0.3); }
+  .border-primary\/50 { border-color: hsl(var(--primary) / 0.5); }
+  .border-success\/20 { border-color: hsl(var(--success) / 0.2); }
+  .text-destructive\/80 { color: hsl(var(--destructive) / 0.8); }
+  .text-foreground\/50 { color: hsl(var(--foreground) / 0.5); }
+  .text-foreground\/80 { color: hsl(var(--foreground) / 0.8); }
+  .text-foreground\/90 { color: hsl(var(--foreground) / 0.9); }
+
+  .outline-none {
+    outline: 2px solid transparent;
+    outline-offset: 2px;
+  }
+
+  .focus\:outline-none:focus {
+    outline: 2px solid transparent;
+    outline-offset: 2px;
+  }
+
+  .focus-visible\:outline-none:focus-visible {
+    outline: 2px solid transparent;
+    outline-offset: 2px;
+  }
+
+  .focus\:ring-2:focus {
+    --tw-ring-offset-shadow: var(--tw-ring-inset) 0 0 0 var(--tw-ring-offset-width) var(--tw-ring-offset-color);
+    --tw-ring-shadow: var(--tw-ring-inset) 0 0 0 calc(2px + var(--tw-ring-offset-width)) var(--tw-ring-color);
+    box-shadow: var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow, 0 0 #0000);
+  }
+
+  .focus-visible\:ring-2:focus-visible {
+    --tw-ring-offset-shadow: var(--tw-ring-inset) 0 0 0 var(--tw-ring-offset-width) var(--tw-ring-offset-color);
+    --tw-ring-shadow: var(--tw-ring-inset) 0 0 0 calc(2px + var(--tw-ring-offset-width)) var(--tw-ring-color);
+    box-shadow: var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow, 0 0 #0000);
+  }
+
+  .shadow-sm,
+  .data-\[state\=active\]\:shadow-sm[data-state="active"] {
+    --tw-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    box-shadow: var(--tw-ring-offset-shadow, 0 0 #0000), var(--tw-ring-shadow, 0 0 #0000), var(--tw-shadow);
+  }
+
+  .group:hover .group-hover\:bg-agent\/20 { background-color: hsl(var(--agent-color) / 0.2); }
+  .group:hover .group-hover\:bg-mcpserver\/20 { background-color: hsl(var(--mcpserver-color) / 0.2); }
+  .group:hover .group-hover\:bg-modelapi\/20 { background-color: hsl(var(--modelapi-color) / 0.2); }
+  .group:hover .group-hover\:bg-pod\/20 { background-color: hsl(var(--pod-color) / 0.2); }
+  .hover\:bg-agent\/90:hover { background-color: hsl(var(--agent-color) / 0.9); }
+  .hover\:bg-destructive\/10:hover { background-color: hsl(var(--destructive) / 0.1); }
+  .hover\:bg-destructive\/80:hover { background-color: hsl(var(--destructive) / 0.8); }
+  .hover\:bg-destructive\/90:hover { background-color: hsl(var(--destructive) / 0.9); }
+  .hover\:bg-mcpserver\/90:hover { background-color: hsl(var(--mcpserver-color) / 0.9); }
+  .hover\:bg-muted\/30:hover { background-color: hsl(var(--muted) / 0.3); }
+  .hover\:bg-muted\/50:hover { background-color: hsl(var(--muted) / 0.5); }
+  .hover\:bg-muted\/80:hover { background-color: hsl(var(--muted) / 0.8); }
+  .hover\:bg-primary\/80:hover { background-color: hsl(var(--primary) / 0.8); }
+  .hover\:bg-primary\/90:hover { background-color: hsl(var(--primary) / 0.9); }
+  .hover\:bg-secondary\/80:hover { background-color: hsl(var(--secondary) / 0.8); }
+  .hover\:bg-success\/20:hover { background-color: hsl(var(--success) / 0.2); }
+  .hover\:bg-success\/90:hover { background-color: hsl(var(--success) / 0.9); }
+  .hover\:bg-warning\/90:hover { background-color: hsl(var(--warning) / 0.9); }
+  .hover\:border-primary\/30:hover { border-color: hsl(var(--primary) / 0.3); }
+  .hover\:border-primary\/50:hover { border-color: hsl(var(--primary) / 0.5); }
 }
