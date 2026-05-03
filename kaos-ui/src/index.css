@@ -1,8 +1,154 @@
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@300;400;500;600;700&display=swap') layer(base);
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss" source(none);
+@import "tw-animate-css";
+
+@source ".";
+@source "../index.html";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme {
+  --font-sans: Inter, system-ui, sans-serif;
+  --font-mono: JetBrains Mono, monospace;
+
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-success: hsl(var(--success));
+  --color-success-foreground: hsl(var(--success-foreground));
+  --color-warning: hsl(var(--warning));
+  --color-warning-foreground: hsl(var(--warning-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+
+  --color-sidebar: hsl(var(--sidebar-background));
+  --color-sidebar-foreground: hsl(var(--sidebar-foreground));
+  --color-sidebar-primary: hsl(var(--sidebar-primary));
+  --color-sidebar-primary-foreground: hsl(var(--sidebar-primary-foreground));
+  --color-sidebar-accent: hsl(var(--sidebar-accent));
+  --color-sidebar-accent-foreground: hsl(var(--sidebar-accent-foreground));
+  --color-sidebar-border: hsl(var(--sidebar-border));
+  --color-sidebar-ring: hsl(var(--sidebar-ring));
+
+  --color-modelapi: hsl(var(--modelapi-color));
+  --color-mcpserver: hsl(var(--mcpserver-color));
+  --color-agent: hsl(var(--agent-color));
+  --color-pod: hsl(var(--pod-color));
+  --color-deployment: hsl(var(--deployment-color));
+  --color-volume: hsl(var(--volume-color));
+  --color-canvas-bg: hsl(var(--canvas-bg));
+  --color-canvas-grid: hsl(var(--canvas-grid));
+  --color-node-bg: hsl(var(--node-bg));
+  --color-node-border: hsl(var(--node-border));
+  --color-node-selected: hsl(var(--node-selected));
+
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+  --animate-fade-in: fade-in 0.3s ease-out forwards;
+  --animate-slide-in: slide-in-right 0.3s ease-out forwards;
+  --animate-pulse-glow: pulse-glow 2s ease-in-out infinite;
+  --animate-tab-switch: tab-switch 0.15s ease-out forwards;
+
+  --shadow-glow-primary: 0 0 20px hsl(var(--primary) / 0.2);
+  --shadow-glow-success: 0 0 15px hsl(var(--success) / 0.2);
+  --shadow-glow-warning: 0 0 15px hsl(var(--warning) / 0.2);
+  --shadow-glow-error: 0 0 15px hsl(var(--destructive) / 0.2);
+
+  --default-ring-width: 3px;
+  --default-ring-color: var(--color-ring);
+}
+
+@utility container {
+  margin-inline: auto;
+  padding-inline: 2rem;
+
+  @media (width >= 1400px) {
+    max-width: 1400px;
+  }
+}
+
+@utility resource-node {
+  @apply relative rounded-lg border transition-all duration-200;
+  background: hsl(var(--node-bg));
+  border-color: hsl(var(--node-border));
+
+  &:hover {
+    border-color: hsl(var(--primary) / 0.5);
+    box-shadow: var(--glow-primary);
+  }
+
+  &.selected {
+    border-color: hsl(var(--node-selected));
+    box-shadow: var(--glow-primary);
+  }
+}
+
+@utility canvas-grid {
+  background-image:
+    linear-gradient(hsl(var(--canvas-grid)) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(var(--canvas-grid)) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+@utility status-running {
+  @apply bg-success;
+  box-shadow: var(--glow-success);
+}
+
+@utility status-pending {
+  @apply bg-warning;
+  box-shadow: var(--glow-warning);
+}
+
+@utility status-error {
+  @apply bg-destructive;
+  box-shadow: var(--glow-error);
+}
+
+@utility connection-line {
+  stroke: hsl(var(--connection-line));
+  stroke-width: 2;
+  fill: none;
+  stroke-dasharray: 8 4;
+  animation: flow 1s linear infinite;
+}
+
+@utility pulse-status {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+@utility text-gradient-primary {
+  @apply bg-clip-text text-transparent;
+  background-image: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--accent)));
+}
+
+@utility bg-gradient-card {
+  background: linear-gradient(135deg, hsl(var(--card)) 0%, hsl(var(--muted)) 100%);
+}
+
+@utility border-gradient {
+  border-image: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--accent))) 1;
+}
 
 @layer base {
   :root {
@@ -50,7 +196,7 @@
     --node-border: 220 13% 91%;
     --node-selected: 221 83% 53%;
     --connection-line: 221 83% 53%;
-    
+
     /* Resource type colors */
     --modelapi-color: 220 10% 50%;
     --mcpserver-color: 200 80% 55%;
@@ -134,16 +280,33 @@
     --sidebar-border: 222 30% 16%;
     --sidebar-ring: 221 83% 60%;
   }
-}
 
-@layer base {
-  * {
-    @apply border-border;
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-border, currentColor);
   }
 
   body {
     @apply bg-background text-foreground font-sans antialiased;
     font-family: 'Inter', system-ui, sans-serif;
+  }
+
+  button,
+  [role="button"] {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [role="button"][aria-disabled="true"] {
+    cursor: default;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: hsl(215 16% 47%);
   }
 
   code, pre, .font-mono {
@@ -152,47 +315,6 @@
 }
 
 @layer components {
-  /* Resource node styles for canvas */
-  .resource-node {
-    @apply relative rounded-lg border transition-all duration-200;
-    background: hsl(var(--node-bg));
-    border-color: hsl(var(--node-border));
-  }
-
-  .resource-node:hover {
-    border-color: hsl(var(--primary) / 0.5);
-    box-shadow: var(--glow-primary);
-  }
-
-  .resource-node.selected {
-    border-color: hsl(var(--node-selected));
-    box-shadow: var(--glow-primary);
-  }
-
-  /* Canvas grid pattern */
-  .canvas-grid {
-    background-image: 
-      linear-gradient(hsl(var(--canvas-grid)) 1px, transparent 1px),
-      linear-gradient(90deg, hsl(var(--canvas-grid)) 1px, transparent 1px);
-    background-size: 20px 20px;
-  }
-
-  /* Status indicators */
-  .status-running {
-    @apply bg-success;
-    box-shadow: var(--glow-success);
-  }
-
-  .status-pending {
-    @apply bg-warning;
-    box-shadow: var(--glow-warning);
-  }
-
-  .status-error {
-    @apply bg-destructive;
-    box-shadow: var(--glow-error);
-  }
-
   /* Scrollbar styling */
   ::-webkit-scrollbar {
     width: 8px;
@@ -213,7 +335,6 @@
     background: hsl(var(--primary) / 0.5);
   }
 
-  /* Connection lines animation */
   @keyframes flow {
     0% {
       stroke-dashoffset: 24;
@@ -223,15 +344,6 @@
     }
   }
 
-  .connection-line {
-    stroke: hsl(var(--connection-line));
-    stroke-width: 2;
-    fill: none;
-    stroke-dasharray: 8 4;
-    animation: flow 1s linear infinite;
-  }
-
-  /* Pulse animation for status */
   @keyframes pulse-glow {
     0%, 100% {
       opacity: 1;
@@ -241,11 +353,6 @@
     }
   }
 
-  .pulse-status {
-    animation: pulse-glow 2s ease-in-out infinite;
-  }
-
-  /* Fade in animation (used on detail pages, not tab content) */
   @keyframes fade-in {
     from {
       opacity: 0;
@@ -257,21 +364,11 @@
     }
   }
 
-  .animate-fade-in {
-    animation: fade-in 0.3s ease-out forwards;
-  }
-
-  /* Tab switch — instant opacity, no translateY flash */
   @keyframes tab-switch {
     from { opacity: 0.6; }
     to { opacity: 1; }
   }
 
-  .animate-tab-switch {
-    animation: tab-switch 0.15s ease-out forwards;
-  }
-
-  /* Slide in from right */
   @keyframes slide-in-right {
     from {
       opacity: 0;
@@ -281,24 +378,5 @@
       opacity: 1;
       transform: translateX(0);
     }
-  }
-
-  .animate-slide-in {
-    animation: slide-in-right 0.3s ease-out forwards;
-  }
-}
-
-@layer utilities {
-  .text-gradient-primary {
-    @apply bg-clip-text text-transparent;
-    background-image: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--accent)));
-  }
-
-  .bg-gradient-card {
-    background: linear-gradient(135deg, hsl(var(--card)) 0%, hsl(var(--muted)) 100%);
-  }
-
-  .border-gradient {
-    border-image: linear-gradient(135deg, hsl(var(--primary)), hsl(var(--accent))) 1;
   }
 }
