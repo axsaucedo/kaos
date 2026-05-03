@@ -10,6 +10,7 @@ Instructions for writing and running tests in KAOS-UI.
 
 - **Vitest** for unit tests (components, hooks, stores, utilities)
 - **Playwright** for end-to-end testing against a real Kubernetes cluster
+- **Playwright visual tests** for deterministic screenshot regression coverage
 - **CI**: `.github/workflows/kaos-ui-tests.yaml` runs build + lint + unit tests on PRs
 
 ## Directory Structure
@@ -29,7 +30,8 @@ kaos-ui/tests/
 ├── read/                       # List/detail page tests
 ├── crud/                       # Create/update/delete tests
 ├── functional/                 # Feature workflow tests (chat, tools, visual-map)
-└── integration/                # End-to-end lifecycle tests
+├── integration/                # End-to-end lifecycle tests
+└── visual/                     # Offline visual regression screenshots
 ```
 
 ## Prerequisites
@@ -58,6 +60,15 @@ npm run test:e2e -- --headed               # Visible browser
 npm run test:e2e:ui                        # Interactive UI mode
 npm run test:e2e -- -g "should CREATE"     # By test name
 ```
+
+### Visual Tests (Playwright)
+```bash
+npm run test:visual                        # Verify committed screenshots
+npm run test:visual:update                 # Update screenshots for intentional UI changes
+npm run test:visual:ci                     # CI command
+```
+
+Visual-test details live in `kaos-ui-visual-testing.instructions.md`. Keep snapshots committed, keep failure artifacts uncommitted, and explain intentional screenshot updates in the PR.
 
 ## Writing Tests
 
@@ -133,4 +144,5 @@ Screenshots auto-captured on failure in `test-results/`.
 
 The `.github/workflows/kaos-ui-tests.yaml` workflow runs on PRs touching `kaos-ui/`:
 - **Build + Lint + Unit**: `npm run build`, `npm run lint`, `npm run test:unit`
+- **Visual Tests**: `npm run test:visual:ci`
 - Triggered on PRs and pushes to main

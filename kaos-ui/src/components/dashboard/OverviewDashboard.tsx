@@ -12,14 +12,35 @@ interface StatCardProps {
   title: string;
   count: number;
   icon: React.ElementType;
-  color: string;
+  color: keyof typeof STAT_COLOR_CLASSES;
   running: number;
   pending: number;
   error: number;
   onClick: () => void;
 }
 
+const STAT_COLOR_CLASSES = {
+  'modelapi-color': {
+    background: 'bg-modelapi/10 group-hover:bg-modelapi/20',
+    icon: 'text-modelapi',
+  },
+  'mcpserver-color': {
+    background: 'bg-mcpserver/10 group-hover:bg-mcpserver/20',
+    icon: 'text-mcpserver',
+  },
+  'agent-color': {
+    background: 'bg-agent/10 group-hover:bg-agent/20',
+    icon: 'text-agent',
+  },
+  'pod-color': {
+    background: 'bg-pod/10 group-hover:bg-pod/20',
+    icon: 'text-pod',
+  },
+} as const;
+
 function StatCard({ title, count, icon: Icon, color, running, pending, error, onClick }: StatCardProps) {
+  const colorClasses = STAT_COLOR_CLASSES[color];
+
   return (
     <div 
       className="bg-card rounded-xl border border-border p-5 hover:border-primary/30 transition-all duration-300 group cursor-pointer"
@@ -29,11 +50,10 @@ function StatCard({ title, count, icon: Icon, color, running, pending, error, on
         <div
           className={cn(
             'h-12 w-12 rounded-xl flex items-center justify-center transition-all duration-300',
-            `bg-${color}/10 group-hover:bg-${color}/20`
+            colorClasses.background
           )}
-          style={{ backgroundColor: `hsl(var(--${color}) / 0.1)` }}
         >
-          <Icon className="h-6 w-6" style={{ color: `hsl(var(--${color}))` }} />
+          <Icon className={cn('h-6 w-6', colorClasses.icon)} />
         </div>
         <Badge variant="secondary" className="text-xs">
           {count} total
@@ -74,11 +94,12 @@ interface ResourceItemProps {
 
 function ResourceItem({ name, namespace, type, status, icon: Icon, onClick }: ResourceItemProps) {
   const colors = {
-    modelapi: 'modelapi',
-    mcpserver: 'mcpserver',
-    agent: 'agent',
-    pod: 'pod-color',
-  };
+    modelapi: { background: 'bg-modelapi/20', icon: 'text-modelapi' },
+    mcpserver: { background: 'bg-mcpserver/20', icon: 'text-mcpserver' },
+    agent: { background: 'bg-agent/20', icon: 'text-agent' },
+    pod: { background: 'bg-pod/20', icon: 'text-pod' },
+  } as const;
+  const colorClasses = colors[type];
   
   return (
     <div 
@@ -86,9 +107,8 @@ function ResourceItem({ name, namespace, type, status, icon: Icon, onClick }: Re
       onClick={onClick}
     >
       <div className="flex items-center gap-3">
-        <div className={`h-8 w-8 rounded-lg bg-${colors[type]}/20 flex items-center justify-center`}
-          style={{ backgroundColor: `hsl(var(--${colors[type]}) / 0.2)` }}>
-          <Icon className="h-4 w-4" style={{ color: `hsl(var(--${colors[type]}))` }} />
+        <div className={cn('h-8 w-8 rounded-lg flex items-center justify-center', colorClasses.background)}>
+          <Icon className={cn('h-4 w-4', colorClasses.icon)} />
         </div>
         <div>
           <p className="text-sm font-medium text-foreground">{name}</p>

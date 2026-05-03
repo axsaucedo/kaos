@@ -31,9 +31,9 @@ interface ResourceDetailDrawerProps<T extends ResourceType> {
 }
 
 const RESOURCE_CONFIG = {
-  Agent: { icon: Bot, colorClass: 'agent', label: 'Agent' },
-  MCPServer: { icon: Server, colorClass: 'mcpserver', label: 'MCPServer' },
-  ModelAPI: { icon: Box, colorClass: 'modelapi', label: 'ModelAPI' },
+  Agent: { icon: Bot, bgClass: 'bg-agent/20', textClass: 'text-agent', label: 'Agent' },
+  MCPServer: { icon: Server, bgClass: 'bg-mcpserver/20', textClass: 'text-mcpserver', label: 'MCPServer' },
+  ModelAPI: { icon: Box, bgClass: 'bg-modelapi/20', textClass: 'text-modelapi', label: 'ModelAPI' },
 } as const;
 
 function EnvVarsSection({ envVars }: { envVars: { name: string; value?: string; valueFrom?: unknown }[] }) {
@@ -519,8 +519,8 @@ export function ResourceDetailDrawer<T extends ResourceType>({
       <SheetContent className="w-full sm:max-w-lg">
         <SheetHeader className="pb-4">
           <div className="flex items-center gap-3">
-            <div className={`h-10 w-10 rounded-lg bg-${config.colorClass}/20 flex items-center justify-center`}>
-              <Icon className={`h-5 w-5 text-${config.colorClass}`} />
+            <div className={`h-10 w-10 rounded-lg flex items-center justify-center ${config.bgClass}`}>
+              <Icon className={`h-5 w-5 ${config.textClass}`} />
             </div>
             <div className="flex-1">
               <SheetTitle className="text-lg">{resource.metadata.name}</SheetTitle>

@@ -122,11 +122,13 @@ Bot (Agent), Server (MCP), Box (ModelAPI), Boxes (Pods), KeyRound (Secrets)
 ## Testing
 
 See `kaos-ui-testing.instructions.md` for full testing details.
+See `kaos-ui-visual-testing.instructions.md` before changing visual specs, snapshots, Tailwind/theme CSS, UI components, pages, or the visual CI workflow.
 
 ```bash
 npm run dev              # UI at http://localhost:8081
 kaos ui --no-browser     # Proxy at http://localhost:8010
 npm run test:unit        # Vitest unit tests (63 tests)
+npm run test:visual      # Offline visual regression tests
 npm run test:e2e         # Playwright E2E tests (109 tests)
 npm run lint             # ESLint
 npm run build            # Type-check + build
@@ -137,4 +139,5 @@ CI runs automatically via `.github/workflows/kaos-ui-tests.yaml` on PRs touching
 ## Additional Instruction Files
 - `kaos-ui-components.instructions.md` — UI component patterns, Visual Map
 - `kaos-ui-testing.instructions.md` — Playwright test patterns
+- `kaos-ui-visual-testing.instructions.md` — visual regression snapshots and CI comments
 - `kaos-ui-kubernetes-types.instructions.md` — CRD type sync guidelines
