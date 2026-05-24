@@ -12,11 +12,18 @@ import time
 import logging
 import json
 from multiprocessing import Process
+from typing import TypedDict
 
 from pais.server import create_agent_server
 from pais.serverutils import AgentServerSettings, RemoteAgent
 
 logger = logging.getLogger(__name__)
+
+
+class AgentProcessInfo(TypedDict):
+    name: str
+    port: int
+    url: str
 
 
 def run_agent_server(
@@ -99,7 +106,7 @@ def multi_agent_cluster(ollama_available):
     model_name = "smollm2:135m"
 
     processes = []
-    agents = []
+    agents: list[AgentProcessInfo] = []
 
     # Start workers first
     for i, (name, port) in enumerate([("worker-1", 8070), ("worker-2", 8071)]):
