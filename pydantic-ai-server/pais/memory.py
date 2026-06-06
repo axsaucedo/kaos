@@ -498,8 +498,10 @@ class RedisMemory(Memory):
         await self._cleanup_sessions_if_needed()
 
         pipe = self._redis.pipeline()
-        pipe.hset(name=self._session_key(session_id), mapping=session_data)
-        pipe.expire(self._session_key(session_id), self._session_ttl)
+        session_key = self._session_key(session_id)
+        session_items = [item for pair in session_data.items() for item in pair]
+        pipe.hset(name=session_key, items=session_items)
+        pipe.expire(session_key, self._session_ttl)
         pipe.zadd(self._sessions_index_key(), {session_id: now.timestamp()})
         await pipe.execute()
 
