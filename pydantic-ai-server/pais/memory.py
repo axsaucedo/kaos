@@ -5,7 +5,8 @@ import uuid
 import logging
 from abc import ABC, abstractmethod
 from collections import deque
-from typing import Dict, Any, List, Optional, Union, Deque
+from inspect import isawaitable
+from typing import Dict, Any, List, Optional, Union, Deque, Mapping
 from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
 
@@ -450,6 +451,28 @@ class RedisMemory(Memory):
     def _sessions_index_key(self) -> str:
         return f"{self._prefix}:sessions"
 
+    @staticmethod
+    def _redis_str(value: Any) -> str:
+        if isinstance(value, str):
+            return value
+        if isinstance(value, bytes):
+            return value.decode()
+        raise TypeError(f"Expected Redis string response, got {type(value).__name__}")
+
+    @classmethod
+    def _redis_hash(cls, data: Mapping[Any, Any]) -> Dict[str, str]:
+        return {cls._redis_str(key): cls._redis_str(value) for key, value in data.items()}
+
+    @classmethod
+    def _redis_str_list(cls, values: List[Any]) -> List[str]:
+        return [cls._redis_str(value) for value in values]
+
+    @staticmethod
+    async def _redis_result(value: Any) -> Any:
+        if isawaitable(value):
+            return await value
+        return value
+
     async def close(self):
         try:
             await self._redis.aclose()
@@ -464,7 +487,7 @@ class RedisMemory(Memory):
             session_id = f"session_{uuid.uuid4().hex[:12]}"
 
         now = datetime.now(timezone.utc)
-        session_data = {
+        session_data: Dict[str, str] = {
             "session_id": session_id,
             "user_id": user_id,
             "app_name": app_name,
@@ -475,7 +498,7 @@ class RedisMemory(Memory):
         await self._cleanup_sessions_if_needed()
 
         pipe = self._redis.pipeline()
-        pipe.hset(self._session_key(session_id), mapping=session_data)
+        pipe.hset(name=self._session_key(session_id), mapping=session_data)
         pipe.expire(self._session_key(session_id), self._session_ttl)
         pipe.zadd(self._sessions_index_key(), {session_id: now.timestamp()})
         await pipe.execute()
@@ -484,9 +507,10 @@ class RedisMemory(Memory):
         return session_id
 
     async def get_session(self, session_id: str) -> Optional[SessionMemory]:
-        data = await self._redis.hgetall(self._session_key(session_id))  # ty: ignore[invalid-await]
-        if not data:
+        raw_data = await self._redis_result(self._redis.hgetall(self._session_key(session_id)))
+        if not raw_data:
             return None
+        data = self._redis_hash(raw_data)
 
         events = await self._get_raw_events(session_id)
         return SessionMemory(
@@ -532,7 +556,11 @@ class RedisMemory(Memory):
         pipe = self._redis.pipeline()
         pipe.rpush(self._events_key(session_id), event_json)
         pipe.ltrim(self._events_key(session_id), -self.max_events_per_session, -1)
-        pipe.hset(self._session_key(session_id), "updated_at", now.isoformat())
+        pipe.hset(
+            name=self._session_key(session_id),
+            key="updated_at",
+            value=now.isoformat(),
+        )
         pipe.zadd(self._sessions_index_key(), {session_id: now.timestamp()})
         pipe.expire(self._session_key(session_id), self._session_ttl)
         pipe.expire(self._events_key(session_id), self._session_ttl)
@@ -550,9 +578,9 @@ class RedisMemory(Memory):
         return events
 
     async def _get_raw_events(self, session_id: str) -> List[MemoryEvent]:
-        raw = await self._redis.lrange(
-            self._events_key(session_id), 0, -1
-        )  # ty: ignore[invalid-await]
+        raw = self._redis_str_list(
+            await self._redis_result(self._redis.lrange(self._events_key(session_id), 0, -1))
+        )
         events = []
         seen_ids: set = set()
         for item in raw:
@@ -569,7 +597,9 @@ class RedisMemory(Memory):
         return events
 
     async def list_sessions(self, user_id: Optional[str] = None) -> List[str]:
-        session_ids = await self._redis.zrange(self._sessions_index_key(), 0, -1)
+        session_ids = self._redis_str_list(
+            await self._redis_result(self._redis.zrange(self._sessions_index_key(), 0, -1))
+        )
 
         # Session index hygiene: remove stale entries whose keys have expired
         stale = []
@@ -592,9 +622,10 @@ class RedisMemory(Memory):
 
         filtered = []
         for sid in live:
-            stored_uid = await self._redis.hget(
-                self._session_key(sid), "user_id"
-            )  # ty: ignore[invalid-await]
+            raw_stored_uid = await self._redis_result(
+                self._redis.hget(self._session_key(sid), "user_id")
+            )
+            stored_uid = self._redis_str(raw_stored_uid) if raw_stored_uid is not None else None
             if stored_uid == user_id:
                 filtered.append(sid)
         return filtered
@@ -615,7 +646,9 @@ class RedisMemory(Memory):
 
     async def get_memory_stats(self) -> Dict[str, int]:
         total_sessions = await self._redis.zcard(self._sessions_index_key())
-        session_ids = await self._redis.zrange(self._sessions_index_key(), 0, -1)
+        session_ids = self._redis_str_list(
+            await self._redis_result(self._redis.zrange(self._sessions_index_key(), 0, -1))
+        )
 
         total_events = 0
         if session_ids:
@@ -633,8 +666,10 @@ class RedisMemory(Memory):
 
     async def cleanup_old_sessions(self, max_age_hours: int = 24) -> int:
         cutoff = datetime.now(timezone.utc) - timedelta(hours=max_age_hours)
-        old_sessions = await self._redis.zrangebyscore(
-            self._sessions_index_key(), "-inf", cutoff.timestamp()
+        old_sessions = self._redis_str_list(
+            await self._redis_result(
+                self._redis.zrangebyscore(self._sessions_index_key(), "-inf", cutoff.timestamp())
+            )
         )
 
         for sid in old_sessions:
@@ -648,7 +683,11 @@ class RedisMemory(Memory):
         count = await self._redis.zcard(self._sessions_index_key())
         if count >= self.max_sessions:
             sessions_to_remove = max(1, self.max_sessions // 10)
-            oldest = await self._redis.zrange(self._sessions_index_key(), 0, sessions_to_remove - 1)
+            oldest = self._redis_str_list(
+                await self._redis_result(
+                    self._redis.zrange(self._sessions_index_key(), 0, sessions_to_remove - 1)
+                )
+            )
             for sid in oldest:
                 await self.delete_session(sid)
             logger.info(f"Cleaned up {len(oldest)} oldest sessions to stay under limit")
