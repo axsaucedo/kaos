@@ -74,7 +74,7 @@ jobs:
           uv run pytest tests/ -v --cov=. --cov-report=xml
 
       - name: Upload coverage
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           files: pydantic-ai-server/coverage.xml
           flags: python
