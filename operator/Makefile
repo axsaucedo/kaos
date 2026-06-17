@@ -94,7 +94,7 @@ VERSION := $(shell cat $(shell pwd)/../VERSION 2>/dev/null || echo "dev")
 OPERATOR_TAG ?= $(VERSION)
 AGENT_TAG ?= $(VERSION)
 LITELLM_IMAGE ?= ghcr.io/berriai/litellm:main-stable
-OLLAMA_IMAGE ?= alpine/ollama:0.22.1
+OLLAMA_IMAGE ?= ollama/ollama:latest
 
 # Create KIND cluster with registry
 kind-create:
