@@ -102,7 +102,7 @@ runtimes:
 	os.Setenv("DEFAULT_AGENT_IMAGE", "axsauze/kaos-agent:test")
 	os.Setenv("DEFAULT_MCP_SERVER_IMAGE", "axsauze/kaos-mcp-server:test")
 	os.Setenv("DEFAULT_LITELLM_IMAGE", "ghcr.io/berriai/litellm:test")
-	os.Setenv("DEFAULT_OLLAMA_IMAGE", "alpine/ollama:latest")
+	os.Setenv("DEFAULT_OLLAMA_IMAGE", "alpine/ollama:0.22.1")
 
 	// Start controller manager with all controllers
 	k8sManager, err := ctrl.NewManager(cfg, ctrl.Options{

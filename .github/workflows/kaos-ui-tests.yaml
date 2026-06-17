@@ -227,7 +227,7 @@ jobs:
           github-token: ${{ github.token }}
 
       - name: Pull Ollama image
-        run: docker pull alpine/ollama:latest
+        run: docker pull alpine/ollama:0.22.1
 
       - name: Tag MCP server image
         run: |
@@ -250,7 +250,7 @@ jobs:
           kind load docker-image ${{ env.REGISTRY }}/kaos-mcp-server:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }} &
           kind load docker-image ${{ env.REGISTRY }}/kaos-mcp-python-string:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }} &
           kind load docker-image ghcr.io/berriai/litellm:main-stable --name ${{ env.KIND_CLUSTER_NAME }} &
-          kind load docker-image alpine/ollama:latest --name ${{ env.KIND_CLUSTER_NAME }} &
+          kind load docker-image alpine/ollama:0.22.1 --name ${{ env.KIND_CLUSTER_NAME }} &
           wait
 
       - name: Install KAOS operator

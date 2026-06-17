@@ -14,6 +14,7 @@ from e2e.conftest import (
     async_wait_for_healthy,
     create_custom_resource,
     wait_for_deployment,
+    wait_for_modelapi_ready,
     wait_for_resource_ready,
     gateway_url,
     create_modelapi_hosted_resource,
@@ -33,6 +34,8 @@ async def test_agent_health_discovery_and_invocation(test_namespace: str):
     # Use Hosted mode - runs Ollama in-cluster
     modelapi_spec = create_modelapi_hosted_resource(test_namespace, modelapi_name)
     create_custom_resource(modelapi_spec, test_namespace)
+    wait_for_deployment(test_namespace, f"modelapi-{modelapi_name}", timeout=180)
+    wait_for_modelapi_ready(test_namespace, modelapi_name, timeout=180)
 
     agent_spec = create_agent_resource(
         namespace=test_namespace,
@@ -43,8 +46,6 @@ async def test_agent_health_discovery_and_invocation(test_namespace: str):
     )
     create_custom_resource(agent_spec, test_namespace)
 
-    # Hosted mode needs longer timeout for model pull
-    wait_for_deployment(test_namespace, f"modelapi-{modelapi_name}", timeout=180)
     wait_for_deployment(test_namespace, f"agent-{agent_name}", timeout=120)
 
     agent_base = gateway_url(test_namespace, "agent", agent_name)
@@ -138,4 +139,3 @@ async def test_agent_chat_completions(test_namespace: str, shared_modelapi: str)
         assert len(data["choices"]) > 0
         assert data["choices"][0]["message"]["role"] == "assistant"
         assert len(data["choices"][0]["message"]["content"]) > 0
-

@@ -131,6 +131,63 @@ def wait_for_resource_ready(
     raise TimeoutError(f"Resource not ready at {url} after {max_wait}s{detail}")
 
 
+def wait_for_modelapi_ready(namespace: str, name: str, timeout: int = 180):
+    """Wait for the ModelAPI CR status to report Ready."""
+    start_time = time.time()
+    last_ready = ""
+    last_phase = ""
+    last_message = ""
+
+    while time.time() - start_time < timeout:
+        try:
+            last_ready = str(
+                kubectl(
+                    "get",
+                    "modelapi",
+                    name,
+                    "-n",
+                    namespace,
+                    "-o",
+                    "jsonpath={.status.ready}",
+                    _ok_code=[0, 1],
+                )
+            )
+            last_phase = str(
+                kubectl(
+                    "get",
+                    "modelapi",
+                    name,
+                    "-n",
+                    namespace,
+                    "-o",
+                    "jsonpath={.status.phase}",
+                    _ok_code=[0, 1],
+                )
+            )
+            if last_ready == "true" and last_phase == "Ready":
+                return
+            last_message = str(
+                kubectl(
+                    "get",
+                    "modelapi",
+                    name,
+                    "-n",
+                    namespace,
+                    "-o",
+                    "jsonpath={.status.message}",
+                    _ok_code=[0, 1],
+                )
+            )
+        except Exception as e:
+            last_message = str(e)
+        time.sleep(1)
+
+    raise TimeoutError(
+        f"ModelAPI {namespace}/{name} not ready after {timeout}s "
+        f"(ready={last_ready}, phase={last_phase}, message={last_message})"
+    )
+
+
 async def wait_for_mcp_server_ready(mcp_url: str, max_wait: int = 60):
     """Wait for MCPServer to be reachable via Gateway.
     
@@ -356,6 +413,7 @@ def shared_modelapi(shared_namespace: str) -> Generator[str, None, None]:
     modelapi_spec = create_modelapi_resource(shared_namespace, name)
     create_custom_resource(modelapi_spec, shared_namespace)
     wait_for_deployment(shared_namespace, f"modelapi-{name}", timeout=120)
+    wait_for_modelapi_ready(shared_namespace, name, timeout=120)
 
     # Wait for HTTPRoute to be ready (LiteLLM uses /health/liveliness)
     url = gateway_url(shared_namespace, "modelapi", name)

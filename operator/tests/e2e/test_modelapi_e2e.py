@@ -16,6 +16,7 @@ import httpx
 from e2e.conftest import (
     create_custom_resource,
     wait_for_deployment,
+    wait_for_modelapi_ready,
     wait_for_resource_ready,
     gateway_url,
     create_modelapi_resource,
@@ -111,6 +112,7 @@ async def test_modelapi_proxy_with_hosted_backend(test_namespace: str):
 
     # Wait for Hosted backend to be ready (longer timeout for model pull)
     wait_for_deployment(test_namespace, f"modelapi-{backend_name}", timeout=180)
+    wait_for_modelapi_ready(test_namespace, backend_name, timeout=180)
 
     # Give Ollama time to fully initialize after deployment is ready
     time.sleep(5)
@@ -140,6 +142,7 @@ async def test_modelapi_proxy_with_hosted_backend(test_namespace: str):
     create_custom_resource(proxy_spec, test_namespace)
 
     wait_for_deployment(test_namespace, f"modelapi-{proxy_name}", timeout=120)
+    wait_for_modelapi_ready(test_namespace, proxy_name, timeout=120)
 
     # Use Gateway API URL with the extended timeout configured in the CRD
     proxy_url = gateway_url(test_namespace, "modelapi", proxy_name)

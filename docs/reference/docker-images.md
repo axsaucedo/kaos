@@ -37,7 +37,7 @@ defaultImages:
   agentRuntime: "axsauze/kaos-agent:latest"
   mcpServer: "axsauze/kaos-agent:latest"
   litellm: "ghcr.io/berriai/litellm:main-latest"
-  ollama: "alpine/ollama:latest"
+  ollama: "alpine/ollama:0.22.1"
 ```
 
 ## Overriding Images
@@ -130,6 +130,6 @@ KAOS uses these third-party images:
 | Image | Used By | Purpose |
 |-------|---------|---------|
 | `ghcr.io/berriai/litellm:main-latest` | ModelAPI (Proxy mode) | LLM API proxy |
-| `alpine/ollama:latest` | ModelAPI (Hosted mode) | In-cluster Ollama |
+| `alpine/ollama:0.22.1` | ModelAPI (Hosted mode) | In-cluster Ollama |
 
 These can be overridden in the Helm chart values.

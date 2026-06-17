@@ -223,7 +223,7 @@ spec:
 
 Runs Ollama in-cluster with the specified model.
 
-**Container:** `alpine/ollama:latest`  
+**Container:** `alpine/ollama:0.22.1`
 **Port:** 11434
 
 ```yaml

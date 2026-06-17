@@ -267,7 +267,10 @@ var _ = Describe("ModelAPI Controller", func() {
 		Expect(initContainer.Args[0]).To(ContainSubstring("smollm2:135m"))
 
 		// Verify main container uses ollama
-		Expect(deployment.Spec.Template.Spec.Containers[0].Image).To(Equal("alpine/ollama:latest"))
+		container := deployment.Spec.Template.Spec.Containers[0]
+		Expect(container.Image).To(Equal("alpine/ollama:0.22.1"))
+		Expect(container.Command).To(Equal([]string{"ollama"}))
+		Expect(container.Args).To(Equal([]string{"serve"}))
 
 		// Verify Service uses port 11434
 		service := &corev1.Service{}
