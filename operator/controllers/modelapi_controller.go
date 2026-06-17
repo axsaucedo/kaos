@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/go-logr/logr"
+	"gopkg.in/yaml.v3"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -19,7 +20,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
-	"gopkg.in/yaml.v3"
 
 	kaosv1alpha1 "github.com/axsaucedo/kaos/operator/api/v1alpha1"
 	"github.com/axsaucedo/kaos/operator/pkg/gateway"
@@ -419,6 +419,7 @@ func (r *ModelAPIReconciler) constructDeployment(modelapi *kaosv1alpha1.ModelAPI
 // constructContainer creates the container spec based on ModelAPI mode
 func (r *ModelAPIReconciler) constructContainer(modelapi *kaosv1alpha1.ModelAPI) (corev1.Container, error) {
 	var image string
+	var command []string
 	var args []string
 	var env []corev1.EnvVar
 	var port int32 = 8000
@@ -528,7 +529,8 @@ func (r *ModelAPIReconciler) constructContainer(modelapi *kaosv1alpha1.ModelAPI)
 		if image == "" {
 			return corev1.Container{}, fmt.Errorf("DEFAULT_OLLAMA_IMAGE environment variable is required but not set")
 		}
-		args = []string{}
+		command = []string{"ollama"}
+		args = []string{"serve"}
 		port = 11434
 		healthPath = "/"
 
@@ -585,6 +587,7 @@ func (r *ModelAPIReconciler) constructContainer(modelapi *kaosv1alpha1.ModelAPI)
 		Name:            "model-api",
 		Image:           image,
 		ImagePullPolicy: corev1.PullIfNotPresent,
+		Command:         command,
 		Args:            args,
 		Ports: []corev1.ContainerPort{
 			{
