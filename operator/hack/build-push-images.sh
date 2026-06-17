@@ -10,7 +10,7 @@
 #   OPERATOR_TAG - Tag for operator image (default: from VERSION file)
 #   AGENT_TAG - Tag for agent image (default: from VERSION file)
 #   LITELLM_IMAGE - Full LiteLLM image tag (default: ghcr.io/berriai/litellm:main-stable)
-#   OLLAMA_IMAGE - Full Ollama image (default: alpine/ollama:latest)
+#   OLLAMA_IMAGE - Full Ollama image (default: alpine/ollama:0.22.1)
 #
 # Note: LiteLLM is built from our minimal Dockerfile (~200MB) and tagged to override
 # the upstream image (1.5GB). This keeps the same image reference in values.yaml.
@@ -34,7 +34,7 @@ KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-kaos-e2e}"
 OPERATOR_TAG="${OPERATOR_TAG:-${DEFAULT_VERSION}}"
 AGENT_TAG="${AGENT_TAG:-${DEFAULT_VERSION}}"
 LITELLM_IMAGE="${LITELLM_IMAGE:-ghcr.io/berriai/litellm:main-stable}"
-OLLAMA_IMAGE="${OLLAMA_IMAGE:-alpine/ollama:latest}"
+OLLAMA_IMAGE="${OLLAMA_IMAGE:-alpine/ollama:0.22.1}"
 
 echo "Building images..."
 echo "  REGISTRY: ${REGISTRY}"
