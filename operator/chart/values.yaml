@@ -38,7 +38,7 @@ defaultImages:
   mcpKubernetes: quay.io/containers/kubernetes_mcp_server:latest
   mcpSlack: zencoderai/slack-mcp:latest
   litellm: ghcr.io/berriai/litellm:main-stable
-  ollama: alpine/ollama:0.22.1
+  ollama: ollama/ollama:latest
 
 # MCP Runtime registry configuration
 mcpRuntimes:

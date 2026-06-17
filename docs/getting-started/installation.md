@@ -47,7 +47,7 @@ Key configurable values in `chart/values.yaml`:
 | `defaultImages.agentRuntime` | Default agent container image | `axsauze/kaos-agent:latest` |
 | `defaultImages.mcpServer` | Default MCP server image | `axsauze/kaos-agent:latest` |
 | `defaultImages.litellm` | Default LiteLLM proxy image | `ghcr.io/berriai/litellm:main-latest` |
-| `defaultImages.ollama` | Default Ollama image | `alpine/ollama:0.22.1` |
+| `defaultImages.ollama` | Default Ollama image | `ollama/ollama:latest` |
 | `gateway.defaultTimeouts.agent` | Default timeout for Agent HTTPRoutes | `120s` |
 | `gateway.defaultTimeouts.modelAPI` | Default timeout for ModelAPI HTTPRoutes | `120s` |
 | `gateway.defaultTimeouts.mcp` | Default timeout for MCPServer HTTPRoutes | `30s` |
