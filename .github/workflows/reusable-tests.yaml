@@ -160,6 +160,13 @@ jobs:
           cache-to: type=gha,scope=litellm-e2e,mode=max
           github-token: ${{ github.token }}
 
+      - name: Free runner disk for E2E images
+        run: |
+          df -h
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /usr/local/share/boost
+          docker builder prune -af || true
+          df -h
+
       - name: Pull Ollama image
         run: docker pull ollama/ollama:latest
 
@@ -203,17 +210,18 @@ jobs:
 
       - name: Load images into KIND
         run: |
-          # Load images in parallel for faster execution
+          # Load KAOS images in parallel, then load larger external images
+          # sequentially to avoid multiple temporary docker-save tarballs.
           kind load docker-image ${{ env.REGISTRY }}/kaos-operator:${{ env.OPERATOR_TAG }} --name ${{ env.KIND_CLUSTER_NAME }} &
           kind load docker-image ${{ env.REGISTRY }}/kaos-agent:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }} &
           kind load docker-image ${{ env.REGISTRY }}/kaos-mcp-server:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }} &
           kind load docker-image ${{ env.REGISTRY }}/kaos-mcp-python-string:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }} &
           kind load docker-image ${{ env.REGISTRY }}/kaos-mcp-pctx-codemode:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }} &
           kind load docker-image ${{ env.REGISTRY }}/kaos-mcp-fastmcp-codemode:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }} &
-          kind load docker-image ghcr.io/berriai/litellm:main-stable --name ${{ env.KIND_CLUSTER_NAME }} &
-          kind load docker-image ollama/ollama:latest --name ${{ env.KIND_CLUSTER_NAME }} &
-          kind load docker-image redis:7-alpine --name ${{ env.KIND_CLUSTER_NAME }} &
           wait
+          kind load docker-image ghcr.io/berriai/litellm:main-stable --name ${{ env.KIND_CLUSTER_NAME }}
+          kind load docker-image ollama/ollama:latest --name ${{ env.KIND_CLUSTER_NAME }}
+          kind load docker-image redis:7-alpine --name ${{ env.KIND_CLUSTER_NAME }}
 
 
       - name: Install KAOS operator

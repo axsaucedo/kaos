@@ -226,6 +226,13 @@ jobs:
           cache-to: type=gha,scope=litellm-ui-e2e,mode=max
           github-token: ${{ github.token }}
 
+      - name: Free runner disk for E2E images
+        run: |
+          df -h
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /usr/local/share/boost
+          docker builder prune -af || true
+          df -h
+
       - name: Pull Ollama image
         run: docker pull ollama/ollama:latest
 
@@ -249,9 +256,9 @@ jobs:
           kind load docker-image ${{ env.REGISTRY }}/kaos-agent:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }} &
           kind load docker-image ${{ env.REGISTRY }}/kaos-mcp-server:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }} &
           kind load docker-image ${{ env.REGISTRY }}/kaos-mcp-python-string:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }} &
-          kind load docker-image ghcr.io/berriai/litellm:main-stable --name ${{ env.KIND_CLUSTER_NAME }} &
-          kind load docker-image ollama/ollama:latest --name ${{ env.KIND_CLUSTER_NAME }} &
           wait
+          kind load docker-image ghcr.io/berriai/litellm:main-stable --name ${{ env.KIND_CLUSTER_NAME }}
+          kind load docker-image ollama/ollama:latest --name ${{ env.KIND_CLUSTER_NAME }}
 
       - name: Install KAOS operator
         run: make -C operator kind-e2e-install-kaos IMAGE_TAG=${{ env.OPERATOR_TAG }} REGISTRY=${{ env.REGISTRY }}
