@@ -29,6 +29,7 @@ from .instrument import (
     ctx,
     current,
     instrument_fastapi,
+    instrument_httpx,
     to_headers,
 )
 
@@ -37,6 +38,7 @@ __all__ = [
     "current",
     "to_headers",
     "instrument_fastapi",
+    "instrument_httpx",
     "HEADER_REQUEST_ID",
     "HEADER_SESSION_ID",
     "HEADER_PRINCIPAL",

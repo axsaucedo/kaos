@@ -271,3 +271,53 @@ def instrument_fastapi(
         default_principal=os.environ.get("AIB_PRINCIPAL"),
     )
     return app
+
+
+# --- Outbound injection instrumentation ---------------------------------------------
+
+_httpx_patched = False
+
+
+def _inject_request_headers(request: Any) -> None:
+    """Merge the current context's propagation headers into an outbound request.
+
+    Strictly **additive**: a header already present on the request (for example the
+    ModelAPI/LLM provider's own ``Authorization`` API key) is never overwritten.
+    """
+    for header, value in ctx.to_headers().items():
+        if header not in request.headers:
+            request.headers[header] = value
+
+
+def instrument_httpx() -> None:
+    """Patch ``httpx`` so outbound requests carry the propagation headers.
+
+    Both ``httpx.Client`` and ``httpx.AsyncClient`` route ``get``/``post``/``request``
+    through ``send``, so patching ``send`` covers every transport — A2A, MCP, and
+    ModelAPI clients alike — and injection happens at request time, so clients built once
+    at startup still propagate per-request context. Idempotent.
+
+    Injection is additive and reads from :data:`ctx`; in internet-facing deployments,
+    callers are responsible for not placing sensitive tokens in :data:`ctx` for requests
+    bound to untrusted destinations.
+    """
+    global _httpx_patched
+    if _httpx_patched:
+        return
+
+    import httpx
+
+    sync_send = httpx.Client.send
+    async_send = httpx.AsyncClient.send
+
+    def _patched_sync_send(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
+        _inject_request_headers(request)
+        return sync_send(self, request, *args, **kwargs)
+
+    async def _patched_async_send(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
+        _inject_request_headers(request)
+        return await async_send(self, request, *args, **kwargs)
+
+    httpx.Client.send = _patched_sync_send  # type: ignore[method-assign]
+    httpx.AsyncClient.send = _patched_async_send  # type: ignore[method-assign]
+    _httpx_patched = True
