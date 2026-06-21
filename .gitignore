@@ -78,3 +78,6 @@ ROADMAP.md
 tmp/
 REPORT*
 PLAN*
+
+# Nested clone of the Agentic Identity Broker (separate repo; not part of KAOS)
+agentic-identity-broker/
