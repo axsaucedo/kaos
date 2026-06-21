@@ -35,6 +35,9 @@ class AgentDeps:
 
     session_id: str = ""
     memory: Optional["Memory"] = None
+    # Non-secret request security context (request_id/session_id/principal/actor/scopes)
+    # populated from the aib SDK for audit/correlation; never carries raw bearer tokens.
+    security_context: Optional[Dict[str, Any]] = None
 
 
 class _MockResponseState:
@@ -419,6 +422,12 @@ class AgentServerSettings(BaseSettings):
 
     # Logging settings
     agent_access_log: bool = False
+
+    # AIB identity propagation (dummy/static at this stage; real minting comes later).
+    # aib_actor defaults to kaos://agent/{agent_name} when unset.
+    aib_actor: str = ""
+    aib_actor_token: str = ""
+    aib_principal: str = ""
 
     # Pydantic AI OTEL instrumentation settings
     otel_instrumentation_version: int = 4

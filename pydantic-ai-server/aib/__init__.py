@@ -30,12 +30,14 @@ from .instrument import (
     current,
     instrument_fastapi,
     instrument_httpx,
+    security_context,
     to_headers,
 )
 
 __all__ = [
     "ctx",
     "current",
+    "security_context",
     "to_headers",
     "instrument_fastapi",
     "instrument_httpx",

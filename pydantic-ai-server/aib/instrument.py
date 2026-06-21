@@ -121,6 +121,20 @@ def current() -> Dict[str, Any]:
     return dict(_ctx_var.get())
 
 
+#: Context fields safe to expose to application code / persist (no raw bearer tokens).
+_NON_SECRET_FIELDS = ("request_id", "session_id", "principal", "actor", "scopes")
+
+
+def security_context() -> Dict[str, Any]:
+    """Return the non-secret subset of the current context.
+
+    Excludes raw bearer tokens (``subject_token``/``actor_token``) so the result is safe
+    to expose to tools or persist for audit/correlation (ADR-KAOS-003).
+    """
+    data = _ctx_var.get()
+    return {key: data[key] for key in _NON_SECRET_FIELDS if data.get(key)}
+
+
 def to_headers() -> Dict[str, str]:
     """Module-level convenience for :meth:`ctx.to_headers`."""
     return ctx.to_headers()
@@ -254,21 +268,23 @@ def instrument_fastapi(
     *,
     actor: Optional[str] = None,
     actor_token: Optional[str] = None,
+    principal: Optional[str] = None,
     principal_resolver: Optional[PrincipalResolver] = None,
 ) -> Any:
     """Instrument a FastAPI/Starlette app to populate :data:`ctx` per request.
 
-    Local runtime identity (``actor``/``actor_token``) falls back to the ``AIB_ACTOR`` /
-    ``AIB_ACTOR_TOKEN`` environment variables; an optional fixed principal falls back to
-    ``AIB_PRINCIPAL``. The user principal otherwise comes from the inbound ``x-principal``
-    header or the ``principal_resolver``.
+    Local runtime identity (``actor``/``actor_token``/``principal``) falls back to the
+    ``AIB_ACTOR`` / ``AIB_ACTOR_TOKEN`` / ``AIB_PRINCIPAL`` environment variables. The
+    user principal is normally taken from the inbound ``x-principal`` header or the
+    ``principal_resolver``; the fixed ``principal`` is only a fallback for processes with
+    a constant trusted principal.
     """
     app.add_middleware(
         _PropagationMiddleware,
         actor=actor or os.environ.get("AIB_ACTOR"),
         actor_token=actor_token or os.environ.get("AIB_ACTOR_TOKEN"),
         principal_resolver=principal_resolver,
-        default_principal=os.environ.get("AIB_PRINCIPAL"),
+        default_principal=principal or os.environ.get("AIB_PRINCIPAL"),
     )
     return app
 

@@ -8,6 +8,8 @@ import sys
 from typing import Dict, Any, AsyncIterator, List, Optional, Union, TYPE_CHECKING
 from contextlib import asynccontextmanager
 
+import aib
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from opentelemetry import trace as trace_api
@@ -132,6 +134,18 @@ class AgentServer:
             description=self.settings.agent_description,
             lifespan=self._lifespan,
         )
+
+        # AIB two-identity propagation (ADR-KAOS-003): extract inbound user context at the
+        # server boundary and inject the user subject + this agent's actor on outbound
+        # A2A/MCP/ModelAPI calls. The SDK is not the enforcement boundary; it propagates.
+        local_actor = self.settings.aib_actor or f"kaos://agent/{self.settings.agent_name}"
+        aib.instrument_fastapi(
+            self.app,
+            actor=local_actor,
+            actor_token=self.settings.aib_actor_token or None,
+            principal=self.settings.aib_principal or None,
+        )
+        aib.instrument_httpx()
 
         self._setup_routes()
         setup_a2a_routes(self.app, self.task_manager)
@@ -380,7 +394,11 @@ class AgentServer:
         message_history = await self.memory.build_message_history(
             session_id, self.settings.memory_context_limit
         )
-        deps = AgentDeps(session_id=session_id, memory=self.memory)
+        deps = AgentDeps(
+            session_id=session_id,
+            memory=self.memory,
+            security_context=aib.security_context(),
+        )
         usage_limits = UsageLimits(request_limit=self.settings.agentic_loop_max_steps)
         return user_prompt, message_history, deps, usage_limits
 
