@@ -28,6 +28,7 @@ from .instrument import (
     HEADER_SUBJECT_TOKEN,
     ctx,
     current,
+    instrument_fastapi,
     to_headers,
 )
 
@@ -35,6 +36,7 @@ __all__ = [
     "ctx",
     "current",
     "to_headers",
+    "instrument_fastapi",
     "HEADER_REQUEST_ID",
     "HEADER_SESSION_ID",
     "HEADER_PRINCIPAL",

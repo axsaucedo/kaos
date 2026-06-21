@@ -16,7 +16,9 @@ a header serializer (:meth:`_Context.to_headers`), and the inbound/outbound inst
 from __future__ import annotations
 
 import contextvars
-from typing import Any, Dict, Iterator, MutableMapping, Optional
+import os
+import uuid
+from typing import Any, Callable, Dict, Iterator, MutableMapping, Optional
 
 # --- Header model (ADR-AIB-001) -----------------------------------------------------
 # Generic headers for concepts not owned by AIB; ``x-aib-*`` reserved for AIB-owned context.
@@ -145,3 +147,127 @@ def _build_context(
         "scopes": scopes,
     }
     return {key: value for key, value in fields.items() if value}
+
+
+# --- Inbound boundary instrumentation -----------------------------------------------
+
+# Inbound header an upstream/UI uses to carry the session when AIB's own is absent.
+_LEGACY_SESSION_HEADER = "x-session-id"
+
+# Resolver derives the verified user principal from inbound headers (e.g. gateway-set).
+PrincipalResolver = Callable[[Dict[str, str]], Optional[str]]
+
+
+def _strip_bearer(value: Optional[str]) -> Optional[str]:
+    """Return the raw token from an ``Authorization: Bearer <token>`` value."""
+    if value and value.lower().startswith("bearer "):
+        return value[7:]
+    return value
+
+
+def _scope_headers(scope: Dict[str, Any]) -> Dict[str, str]:
+    """Lower-cased header map from an ASGI scope (last value wins)."""
+    headers: Dict[str, str] = {}
+    for raw_key, raw_value in scope.get("headers", []):
+        headers[raw_key.decode("latin-1").lower()] = raw_value.decode("latin-1")
+    return headers
+
+
+def _extract_inbound(
+    headers: Dict[str, str],
+    *,
+    actor: Optional[str],
+    actor_token: Optional[str],
+    principal_resolver: Optional[PrincipalResolver],
+    default_principal: Optional[str],
+) -> Dict[str, Any]:
+    """Build the request context from trusted inbound headers + local defaults.
+
+    The user **subject** (principal + token) is taken from the inbound request and
+    propagated unchanged. The **actor** (this agent's own identity/token) is always the
+    *local* value, never the inbound caller's actor — so each hop authenticates as
+    itself. A ``request_id`` is generated when the caller does not supply one.
+    """
+    request_id = headers.get(HEADER_REQUEST_ID) or f"req-{uuid.uuid4().hex[:16]}"
+    session_id = headers.get(HEADER_SESSION_ID) or headers.get(_LEGACY_SESSION_HEADER)
+
+    principal = headers.get(HEADER_PRINCIPAL)
+    if not principal and principal_resolver is not None:
+        principal = principal_resolver(headers)
+    if not principal:
+        principal = default_principal
+
+    return _build_context(
+        request_id=request_id,
+        session_id=session_id,
+        principal=principal,
+        subject_token=_strip_bearer(headers.get(HEADER_SUBJECT_TOKEN)),
+        scopes=headers.get(HEADER_SCOPES),
+        actor=actor,
+        actor_token=actor_token,
+    )
+
+
+class _PropagationMiddleware:
+    """Pure ASGI middleware that initializes :data:`ctx` per request.
+
+    A pure ASGI middleware (rather than ``BaseHTTPMiddleware``) runs the downstream app
+    in the *same* task, so the ``ContextVar`` set here is visible to the endpoint and to
+    every outbound call it makes.
+    """
+
+    def __init__(
+        self,
+        app: Any,
+        *,
+        actor: Optional[str],
+        actor_token: Optional[str],
+        principal_resolver: Optional[PrincipalResolver],
+        default_principal: Optional[str],
+    ) -> None:
+        self.app = app
+        self._actor = actor
+        self._actor_token = actor_token
+        self._principal_resolver = principal_resolver
+        self._default_principal = default_principal
+
+    async def __call__(self, scope: Dict[str, Any], receive: Any, send: Any) -> None:
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+        context = _extract_inbound(
+            _scope_headers(scope),
+            actor=self._actor,
+            actor_token=self._actor_token,
+            principal_resolver=self._principal_resolver,
+            default_principal=self._default_principal,
+        )
+        token = ctx.replace(context)
+        try:
+            await self.app(scope, receive, send)
+        finally:
+            ctx.reset(token)
+
+
+def instrument_fastapi(
+    app: Any,
+    *,
+    actor: Optional[str] = None,
+    actor_token: Optional[str] = None,
+    principal_resolver: Optional[PrincipalResolver] = None,
+) -> Any:
+    """Instrument a FastAPI/Starlette app to populate :data:`ctx` per request.
+
+    Local runtime identity (``actor``/``actor_token``) falls back to the ``AIB_ACTOR`` /
+    ``AIB_ACTOR_TOKEN`` environment variables; an optional fixed principal falls back to
+    ``AIB_PRINCIPAL``. The user principal otherwise comes from the inbound ``x-principal``
+    header or the ``principal_resolver``.
+    """
+    app.add_middleware(
+        _PropagationMiddleware,
+        actor=actor or os.environ.get("AIB_ACTOR"),
+        actor_token=actor_token or os.environ.get("AIB_ACTOR_TOKEN"),
+        principal_resolver=principal_resolver,
+        default_principal=os.environ.get("AIB_PRINCIPAL"),
+    )
+    return app
