@@ -1,8 +1,8 @@
 """AIB propagation SDK (KAOS temporary home).
 
-Two-identity request-context propagation for agentic runtimes — the propagation slice of
-ADR-AIB-001 / ADR-KAOS-003. Instrument once and the user subject + agent actor identities
-flow across A2A, MCP, and ModelAPI calls automatically.
+Two-identity request-context propagation for agentic runtimes. Instrument once and the
+user subject + agent actor identities flow across A2A, MCP, and ModelAPI calls
+automatically.
 
 Public API::
 

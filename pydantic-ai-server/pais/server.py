@@ -135,7 +135,7 @@ class AgentServer:
             lifespan=self._lifespan,
         )
 
-        # AIB two-identity propagation (ADR-KAOS-003): extract inbound user context at the
+        # AIB two-identity propagation: extract inbound user context at the
         # server boundary and inject the user subject + this agent's actor on outbound
         # A2A/MCP/ModelAPI calls. The SDK is not the enforcement boundary; it propagates.
         local_actor = self.settings.security_actor or f"kaos://agent/{self.settings.agent_name}"

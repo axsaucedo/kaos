@@ -1,7 +1,6 @@
 """AIB propagation SDK — request-local security context and header propagation.
 
-This module is the propagation slice of the AIB Python SDK (ADR-AIB-001 /
-ADR-KAOS-003). It carries two identities across agent hops:
+This module carries two identities across agent hops:
 
 * the user **subject** (principal + ``Authorization`` bearer), propagated unchanged, and
 * the calling agent **actor** (the local agent's own identity + ``x-agent-authorization``
@@ -20,7 +19,7 @@ import os
 import uuid
 from typing import Any, Callable, Dict, Iterator, MutableMapping, Optional
 
-# --- Header model (ADR-AIB-001) -----------------------------------------------------
+# --- Header model -----------------------------------------------------
 # Generic headers for concepts not owned by AIB; ``x-aib-*`` reserved for AIB-owned context.
 HEADER_REQUEST_ID = "x-request-id"
 HEADER_SESSION_ID = "x-aib-session-id"
@@ -129,7 +128,7 @@ def security_context() -> Dict[str, Any]:
     """Return the non-secret subset of the current context.
 
     Excludes raw bearer tokens (``subject_token``/``actor_token``) so the result is safe
-    to expose to tools or persist for audit/correlation (ADR-KAOS-003).
+    to expose to tools or persist for audit/correlation.
     """
     data = _ctx_var.get()
     return {key: data[key] for key in _NON_SECRET_FIELDS if data.get(key)}
