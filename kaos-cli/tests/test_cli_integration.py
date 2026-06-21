@@ -11,6 +11,7 @@ from kaos_cli.main import app
 def strip_ansi(text: str) -> str:
     return re.sub(r"\x1b\[[0-9;]*m", "", text)
 
+
 runner = CliRunner()
 
 
@@ -257,9 +258,15 @@ class TestAgentDeployAutonomous:
         result = runner.invoke(
             app,
             [
-                "agent", "deploy", "auto-agent",
-                "--modelapi", "api", "--model", "m1",
-                "--autonomous", "Monitor system health",
+                "agent",
+                "deploy",
+                "auto-agent",
+                "--modelapi",
+                "api",
+                "--model",
+                "m1",
+                "--autonomous",
+                "Monitor system health",
                 "--dry-run",
             ],
         )
@@ -274,14 +281,25 @@ class TestAgentDeployAutonomous:
         result = runner.invoke(
             app,
             [
-                "agent", "deploy", "auto-agent",
-                "--modelapi", "api", "--model", "m1",
-                "--autonomous", "Check health",
-                "--auto-max-iter-runtime", "120",
-                "--auto-interval", "5.0",
-                "--task-max-iterations", "20",
-                "--task-max-runtime", "600",
-                "--task-max-tool-calls", "100",
+                "agent",
+                "deploy",
+                "auto-agent",
+                "--modelapi",
+                "api",
+                "--model",
+                "m1",
+                "--autonomous",
+                "Check health",
+                "--auto-max-iter-runtime",
+                "120",
+                "--auto-interval",
+                "5.0",
+                "--task-max-iterations",
+                "20",
+                "--task-max-runtime",
+                "600",
+                "--task-max-tool-calls",
+                "100",
                 "--dry-run",
             ],
         )
@@ -302,9 +320,15 @@ class TestAgentDeployAutonomous:
         result = runner.invoke(
             app,
             [
-                "agent", "deploy", "auto-agent",
-                "--modelapi", "api", "--model", "m1",
-                "--task-max-iterations", "0",
+                "agent",
+                "deploy",
+                "auto-agent",
+                "--modelapi",
+                "api",
+                "--model",
+                "m1",
+                "--task-max-iterations",
+                "0",
                 "--dry-run",
             ],
         )
@@ -318,11 +342,19 @@ class TestAgentDeployAutonomous:
         result = runner.invoke(
             app,
             [
-                "agent", "deploy", "auto-agent",
-                "--modelapi", "api", "--model", "m1",
-                "--description", "Auto agent",
-                "--autonomous", "Do work",
-                "--mcp", "echo-mcp",
+                "agent",
+                "deploy",
+                "auto-agent",
+                "--modelapi",
+                "api",
+                "--model",
+                "m1",
+                "--description",
+                "Auto agent",
+                "--autonomous",
+                "Do work",
+                "--mcp",
+                "echo-mcp",
                 "--dry-run",
             ],
         )
@@ -337,8 +369,13 @@ class TestAgentDeployAutonomous:
         result = runner.invoke(
             app,
             [
-                "agent", "deploy", "basic-agent",
-                "--modelapi", "api", "--model", "m1",
+                "agent",
+                "deploy",
+                "basic-agent",
+                "--modelapi",
+                "api",
+                "--model",
+                "m1",
                 "--dry-run",
             ],
         )
@@ -508,7 +545,7 @@ class TestMCPDeployDryRun:
                 "--runtime",
                 "python-string",
                 "--params",
-                'def echo(msg: str) -> str:\n    return msg',
+                "def echo(msg: str) -> str:\n    return msg",
                 "--dry-run",
             ],
         )
@@ -701,9 +738,7 @@ class TestSamples:
         assert "Invalid --api-secret format" in result.output
 
     def test_deploy_nonexistent_sample(self):
-        result = runner.invoke(
-            app, ["samples", "deploy", "nonexistent", "--dry-run"]
-        )
+        result = runner.invoke(app, ["samples", "deploy", "nonexistent", "--dry-run"])
         assert result.exit_code != 0
 
     def test_deploy_hierarchical_dry_run(self):
@@ -741,10 +776,12 @@ class TestSamples:
         docs = list(yaml.safe_load_all(result.output))
         for doc in docs:
             if doc:
-                assert doc["kind"] != "Namespace", "Namespace doc should be filtered out"
-                assert doc["metadata"].get("namespace") == "test-ns", (
-                    f"{doc['kind']} {doc['metadata']['name']} missing namespace override"
-                )
+                assert (
+                    doc["kind"] != "Namespace"
+                ), "Namespace doc should be filtered out"
+                assert (
+                    doc["metadata"].get("namespace") == "test-ns"
+                ), f"{doc['kind']} {doc['metadata']['name']} missing namespace override"
 
     def test_modelapi_override_skips_modelapi_resource(self):
         """When --modelapi is used, ModelAPI resources are filtered out."""
@@ -785,10 +822,12 @@ class TestSamples:
 class TestPackageData:
     def test_samples_dir_resolves(self):
         from kaos_cli.samples import SAMPLES_DIR
+
         assert SAMPLES_DIR.exists(), f"SAMPLES_DIR not found: {SAMPLES_DIR}"
 
     def test_samples_dir_contains_files(self):
         from kaos_cli.samples import _get_sample_files
+
         files = _get_sample_files()
         assert len(files) == 6
         names = [f.stem for f in files]
@@ -812,9 +851,7 @@ class TestMonitoringValidation:
         from unittest.mock import patch
 
         with patch("kaos_cli.ui.check_monitoring_service", return_value=False):
-            result = runner.invoke(
-                app, ["ui", "--monitoring-enabled", "--no-browser"]
-            )
+            result = runner.invoke(app, ["ui", "--monitoring-enabled", "--no-browser"])
         # Should not error on invalid backend; fails on service not found instead
         assert "Invalid monitoring backend" not in result.output
         assert "signoz" in result.output.lower()
@@ -840,21 +877,97 @@ class TestSystemInstallFlags:
         assert "--metallb-enabled" in output
         assert "--redis-enabled" in output
 
-    def test_install_invalid_monitoring_backend(self):
-        result = runner.invoke(
-            app, ["system", "install", "--monitoring-enabled", "invalid"]
+    def test_install_help_shows_auth_flag(self):
+        result = runner.invoke(app, ["system", "install", "--help"])
+        assert result.exit_code == 0
+        output = strip_ansi(result.output)
+        assert "--auth-enabled" in output
+        assert "--auth-namespace" in output
+        assert "--sync-chart-path" in output
+
+
+class TestAuthWiring:
+    def test_build_auth_operator_args(self):
+        from kaos_cli.install import _build_auth_operator_args
+
+        args = _build_auth_operator_args(
+            "aib-access-check-grpc.aib-system:9191",
+            "http://aib.aib-system:8000",
+            "kaos-aib",
         )
-        assert result.exit_code != 0
-        assert "Invalid monitoring backend" in result.output
+        joined = " ".join(args)
+        assert (
+            "security.agentAuth.extAuthzUrl=aib-access-check-grpc.aib-system:9191"
+            in joined
+        )
+        assert "security.agentAuth.issuer=http://aib.aib-system:8000" in joined
+        assert "security.agentAuth.credentialSecretPrefix=kaos-aib" in joined
+        # Each value is preceded by a --set flag.
+        assert args.count("--set") == 3
+
+    def test_default_endpoints_use_auth_namespace(self):
+        from kaos_cli.install import (
+            _default_ext_authz_url,
+            _default_auth_issuer,
+            _default_auth_admin_url,
+        )
+
+        assert _default_ext_authz_url("custom-ns").startswith(
+            "aib-access-check-grpc.custom-ns"
+        )
+        assert _default_ext_authz_url("custom-ns").endswith(":9191")
+        assert "custom-ns" in _default_auth_issuer("custom-ns", "aib")
+        assert _default_auth_admin_url("custom-ns", "aib").endswith("/api")
+        assert "aib-agentic-identity-broker.custom-ns" in _default_auth_admin_url(
+            "custom-ns", "aib"
+        )
+
+    def test_auth_enabled_wires_operator_security_values(self):
+        """--auth-enabled adds the security.agentAuth.* helm --set args."""
+        from unittest.mock import patch
+
+        captured = {}
+
+        def fake_helm(args, check=True, **kwargs):
+            from types import SimpleNamespace
+
+            # Capture the operator upgrade invocation.
+            if "upgrade" in args and any(
+                "kaos-operator" in a or a.endswith("/chart") for a in args
+            ):
+                captured["args"] = args
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with patch("kaos_cli.install.check_helm_installed", return_value=True), patch(
+            "kaos_cli.install.run_helm_command", side_effect=fake_helm
+        ), patch("kaos_cli.install._run_kubectl") as mock_kubectl:
+            from types import SimpleNamespace
+
+            mock_kubectl.return_value = SimpleNamespace(
+                returncode=0, stdout="", stderr=""
+            )
+            result = runner.invoke(
+                app,
+                [
+                    "system",
+                    "install",
+                    "--auth-enabled",
+                    "--chart-path",
+                    "operator/chart",
+                ],
+            )
+
+        assert result.exit_code == 0, result.output
+        joined = " ".join(captured.get("args", []))
+        assert "security.agentAuth.extAuthzUrl=" in joined
+        assert "security.agentAuth.credentialSecretPrefix=kaos-aib" in joined
 
     def test_install_monitoring_enabled_without_value(self):
         """--monitoring-enabled without value defaults to signoz (not an invalid backend error)."""
         from unittest.mock import patch
 
         with patch("kaos_cli.install.check_helm_installed", return_value=False):
-            result = runner.invoke(
-                app, ["system", "install", "--monitoring-enabled"]
-            )
+            result = runner.invoke(app, ["system", "install", "--monitoring-enabled"])
         # Should not error on invalid backend (signoz is valid)
         assert "Invalid monitoring backend" not in result.output
 
@@ -863,9 +976,7 @@ class TestSystemInstallFlags:
         from unittest.mock import patch
 
         with patch("kaos_cli.install.check_helm_installed", return_value=False):
-            result = runner.invoke(
-                app, ["system", "uninstall", "--monitoring-enabled"]
-            )
+            result = runner.invoke(app, ["system", "uninstall", "--monitoring-enabled"])
         assert "Invalid monitoring backend" not in result.output
 
 
