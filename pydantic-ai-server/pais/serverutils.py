@@ -424,10 +424,10 @@ class AgentServerSettings(BaseSettings):
     agent_access_log: bool = False
 
     # AIB identity propagation (dummy/static at this stage; real minting comes later).
-    # aib_actor defaults to kaos://agent/{agent_name} when unset.
-    aib_actor: str = ""
-    aib_actor_token: str = ""
-    aib_principal: str = ""
+    # security_actor defaults to kaos://agent/{agent_name} when unset.
+    security_actor: str = ""
+    security_actor_token: str = ""
+    security_principal: str = ""
 
     # Pydantic AI OTEL instrumentation settings
     otel_instrumentation_version: int = 4

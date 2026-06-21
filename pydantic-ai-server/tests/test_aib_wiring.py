@@ -35,8 +35,8 @@ def test_server_wires_fastapi_and_httpx_instrumentation():
     assert aib.instrument._httpx_patched is True
 
 
-def test_aib_actor_setting_overrides_default():
-    server = create_agent_server(_settings(aib_actor="kaos://agent/custom/id"))
+def test_security_actor_setting_overrides_default():
+    server = create_agent_server(_settings(security_actor="kaos://agent/custom/id"))
     mw = _propagation_middleware(server.app)
     assert mw.kwargs["actor"] == "kaos://agent/custom/id"
 

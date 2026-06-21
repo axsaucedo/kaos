@@ -138,12 +138,12 @@ class AgentServer:
         # AIB two-identity propagation (ADR-KAOS-003): extract inbound user context at the
         # server boundary and inject the user subject + this agent's actor on outbound
         # A2A/MCP/ModelAPI calls. The SDK is not the enforcement boundary; it propagates.
-        local_actor = self.settings.aib_actor or f"kaos://agent/{self.settings.agent_name}"
+        local_actor = self.settings.security_actor or f"kaos://agent/{self.settings.agent_name}"
         aib.instrument_fastapi(
             self.app,
             actor=local_actor,
-            actor_token=self.settings.aib_actor_token or None,
-            principal=self.settings.aib_principal or None,
+            actor_token=self.settings.security_actor_token or None,
+            principal=self.settings.security_principal or None,
         )
         aib.instrument_httpx()
 
