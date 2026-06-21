@@ -153,3 +153,9 @@ For infrastructure changes:
 - [ ] Test with different `DOCS_VERSION` and `DOCS_BASE` values
 - [ ] Verify version dropdown shows correct items
 - [ ] Check that `redirect-index.html` still works
+
+## Markdown authoring style
+
+- **No hard line wraps inside paragraphs or list items.** Write each paragraph and each list item as a single continuous line; let the renderer/editor soft-wrap. Do not insert manual newlines mid-sentence to keep a fixed column width — these break flow and produce noisy diffs.
+- Use blank lines to separate paragraphs, list blocks, headings, tables, and code fences.
+- ADRs and other long-form docs follow the same rule: prose flows as single-line paragraphs.
