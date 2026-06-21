@@ -1,0 +1,6 @@
+apiVersion: v2
+name: kaos-sync
+description: KAOS to broker sync service that projects KAOS resources into the identity broker and provisions per-agent credentials.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
