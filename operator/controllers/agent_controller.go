@@ -700,6 +700,55 @@ func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *
 		env = append(env, logLevelEnv...)
 	}
 
+	// AIB agent identity and credentials (when security credential mounting is enabled)
+	env = append(env, buildAgentAuthEnvVars(agent)...)
+
+	return env
+}
+
+// buildAgentAuthEnvVars returns the agent-auth environment variables that give the
+// agent its AIB actor identity and, when provisioned, the credentials it uses to mint
+// an actor token. The client_id/client_secret are sourced from the per-agent credential
+// Secret as optional references, so the pod can start before the sync service has written
+// the Secret; the values appear once it exists. Returns nil when credential mounting is
+// not enabled, leaving existing pods unchanged.
+func buildAgentAuthEnvVars(agent *kaosv1alpha1.Agent) []corev1.EnvVar {
+	cfg := security.GetConfig()
+	if !cfg.CredentialMountingEnabled() {
+		return nil
+	}
+
+	secretName := cfg.CredentialSecretName(agent.Name)
+	optional := true
+	env := []corev1.EnvVar{
+		{
+			Name:  "AIB_ACTOR",
+			Value: fmt.Sprintf("kaos://agent/%s/%s", agent.Namespace, agent.Name),
+		},
+		{
+			Name: "AIB_CLIENT_ID",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: secretName},
+					Key:                  "client_id",
+					Optional:             &optional,
+				},
+			},
+		},
+		{
+			Name: "AIB_CLIENT_SECRET",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: secretName},
+					Key:                  "client_secret",
+					Optional:             &optional,
+				},
+			},
+		},
+	}
+	if endpoint := cfg.TokenEndpoint(); endpoint != "" {
+		env = append(env, corev1.EnvVar{Name: "AIB_TOKEN_ENDPOINT", Value: endpoint})
+	}
 	return env
 }
 
