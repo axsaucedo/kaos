@@ -7,13 +7,7 @@ import (
 )
 
 func operationalConfig() Config {
-	return Config{
-		Enabled:                  true,
-		ExtAuthzServiceName:      "aib-access-check",
-		ExtAuthzServiceNamespace: "kaos-system",
-		ExtAuthzServicePort:      9191,
-		DefaultAction:            "access",
-	}
+	return Config{ExtAuthzURL: "aib-access-check.kaos-system.svc.cluster.local:9191"}
 }
 
 func TestConstructSecurityPolicyShape(t *testing.T) {
@@ -24,7 +18,10 @@ func TestConstructSecurityPolicyShape(t *testing.T) {
 		Labels:    map[string]string{"app": "kaos"},
 	}
 
-	policy := constructSecurityPolicy(params, operationalConfig())
+	policy, err := constructSecurityPolicy(params, operationalConfig())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	if gvk := policy.GroupVersionKind(); gvk != SecurityPolicyGVK {
 		t.Fatalf("unexpected GVK %v", gvk)
@@ -50,6 +47,14 @@ func TestConstructSecurityPolicyShape(t *testing.T) {
 		t.Errorf("expected failOpen=false, got %v (found=%v err=%v)", failOpen, found, err)
 	}
 
+	headers, found, err := unstructured.NestedStringSlice(policy.Object, "spec", "extAuth", "headersToExtAuth")
+	if err != nil || !found {
+		t.Fatalf("expected headersToExtAuth, found=%v err=%v", found, err)
+	}
+	if len(headers) != 2 || headers[0] != "authorization" || headers[1] != "x-agent-authorization" {
+		t.Errorf("unexpected headersToExtAuth %#v", headers)
+	}
+
 	backendRef, found, err := unstructured.NestedMap(policy.Object, "spec", "extAuth", "grpc", "backendRef")
 	if err != nil || !found {
 		t.Fatalf("expected grpc backendRef, found=%v err=%v", found, err)
@@ -64,8 +69,17 @@ func TestConstructSecurityPolicyShape(t *testing.T) {
 }
 
 func TestConstructSecurityPolicyNoLabels(t *testing.T) {
-	policy := constructSecurityPolicy(PolicyParams{Name: "a", Namespace: "ns", RouteName: "a"}, operationalConfig())
+	policy, err := constructSecurityPolicy(PolicyParams{Name: "a", Namespace: "ns", RouteName: "a"}, operationalConfig())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(policy.GetLabels()) != 0 {
 		t.Errorf("expected no labels, got %v", policy.GetLabels())
+	}
+}
+
+func TestConstructSecurityPolicyInvalidConfig(t *testing.T) {
+	if _, err := constructSecurityPolicy(PolicyParams{Name: "a", Namespace: "ns", RouteName: "a"}, Config{ExtAuthzURL: "no-port"}); err == nil {
+		t.Errorf("expected error for malformed ext_authz URL")
 	}
 }

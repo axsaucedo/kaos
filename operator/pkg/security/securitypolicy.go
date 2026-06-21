@@ -46,8 +46,14 @@ type PolicyParams struct {
 // constructSecurityPolicy builds an Envoy Gateway SecurityPolicy (as an
 // unstructured object) that attaches a fail-closed gRPC external authorization
 // check to the target HTTPRoute. The check is performed by the configured
-// access-check backend Service.
-func constructSecurityPolicy(params PolicyParams, cfg Config) *unstructured.Unstructured {
+// access-check backend Service. It returns an error if the configured ext_authz
+// URL cannot be resolved to a Service backend reference.
+func constructSecurityPolicy(params PolicyParams, cfg Config) (*unstructured.Unstructured, error) {
+	name, namespace, port, err := cfg.ExtAuthzBackendRef()
+	if err != nil {
+		return nil, err
+	}
+
 	policy := &unstructured.Unstructured{}
 	policy.SetGroupVersionKind(SecurityPolicyGVK)
 	policy.SetName(params.Name)
@@ -64,20 +70,28 @@ func constructSecurityPolicy(params PolicyParams, cfg Config) *unstructured.Unst
 		},
 	}, "spec", "targetRefs")
 
+	backendRef := map[string]interface{}{
+		"group": "",
+		"kind":  "Service",
+		"name":  name,
+		"port":  int64(port),
+	}
+	if namespace != "" {
+		backendRef["namespace"] = namespace
+	}
+
 	_ = unstructured.SetNestedMap(policy.Object, map[string]interface{}{
 		"failOpen": false,
+		"headersToExtAuth": []interface{}{
+			"authorization",
+			"x-agent-authorization",
+		},
 		"grpc": map[string]interface{}{
-			"backendRef": map[string]interface{}{
-				"group":     "",
-				"kind":      "Service",
-				"name":      cfg.ExtAuthzServiceName,
-				"namespace": cfg.ExtAuthzServiceNamespace,
-				"port":      int64(cfg.ExtAuthzServicePort),
-			},
+			"backendRef": backendRef,
 		},
 	}, "spec", "extAuth")
 
-	return policy
+	return policy, nil
 }
 
 // ReconcileSecurityPolicy creates or updates the SecurityPolicy that guards a
@@ -96,11 +110,14 @@ func ReconcileSecurityPolicy(
 		return nil
 	}
 
-	desired := constructSecurityPolicy(params, cfg)
+	desired, err := constructSecurityPolicy(params, cfg)
+	if err != nil {
+		return fmt.Errorf("construct SecurityPolicy: %w", err)
+	}
 
 	existing := &unstructured.Unstructured{}
 	existing.SetGroupVersionKind(SecurityPolicyGVK)
-	err := c.Get(ctx, types.NamespacedName{Name: params.Name, Namespace: params.Namespace}, existing)
+	err = c.Get(ctx, types.NamespacedName{Name: params.Name, Namespace: params.Namespace}, existing)
 	if err != nil && apierrors.IsNotFound(err) {
 		if err := controllerutil.SetControllerReference(owner, desired, scheme); err != nil {
 			return fmt.Errorf("set controller reference on SecurityPolicy: %w", err)

@@ -1,79 +1,69 @@
 // Package security provides operator-wide configuration for resource-level
-// authorization enforcement at the gateway. When enabled, the operator attaches
-// an external authorization check to protected routes so that requests are
-// allowed or denied based on the calling agent's granted permissions.
+// authorization enforcement at the gateway. When configured, the operator
+// attaches an external authorization (ext_authz) check to protected routes so
+// that requests are allowed or denied based on the calling agent's granted
+// permissions.
 package security
 
 import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 )
 
-// Config holds operator-wide authorization configuration read from the
-// environment. When Enabled is false the operator generates no authorization
-// policies and existing routing behavior is unchanged.
+// Config holds operator-wide security configuration read from the environment.
+// Security is enabled by the presence of an agent-auth ext_authz URL: when
+// ExtAuthzURL is empty the operator generates no authorization policies and
+// existing routing behavior is unchanged.
 type Config struct {
-	// Enabled turns on generation of authorization policies for protected routes.
-	Enabled bool
-	// ExtAuthzServiceName is the in-cluster Service name of the external
-	// authorization (access-check) gRPC backend.
-	ExtAuthzServiceName string
-	// ExtAuthzServiceNamespace is the namespace of the external authorization Service.
-	ExtAuthzServiceNamespace string
-	// ExtAuthzServicePort is the gRPC port of the external authorization Service.
-	ExtAuthzServicePort int
-	// DefaultAction is the action recorded for a protected resource when a route
-	// does not specify a more specific one.
-	DefaultAction string
+	// ExtAuthzURL is the host:port of the external authorization (ext_authz)
+	// access-check gRPC backend (agentAuth.extAuthzUrl). An empty value means
+	// gateway authorization enforcement is disabled.
+	ExtAuthzURL string
 }
 
-const (
-	defaultExtAuthzPort  = 9191
-	defaultDefaultAction = "access"
-	envEnabled           = "SECURITY_ENABLED"
-	envExtAuthzName      = "SECURITY_EXTAUTHZ_SERVICE_NAME"
-	envExtAuthzNamespace = "SECURITY_EXTAUTHZ_SERVICE_NAMESPACE"
-	envExtAuthzPort      = "SECURITY_EXTAUTHZ_SERVICE_PORT"
-	envDefaultAction     = "SECURITY_DEFAULT_ACTION"
-)
+const envExtAuthzURL = "SECURITY_AGENT_AUTH_EXT_AUTHZ_URL"
 
-// GetConfig reads authorization configuration from environment variables.
+// GetConfig reads security configuration from environment variables.
 func GetConfig() Config {
 	return Config{
-		Enabled:                  os.Getenv(envEnabled) == "true",
-		ExtAuthzServiceName:      os.Getenv(envExtAuthzName),
-		ExtAuthzServiceNamespace: os.Getenv(envExtAuthzNamespace),
-		ExtAuthzServicePort:      getEnvIntOrDefault(envExtAuthzPort, defaultExtAuthzPort),
-		DefaultAction:            getEnvOrDefault(envDefaultAction, defaultDefaultAction),
+		ExtAuthzURL: os.Getenv(envExtAuthzURL),
 	}
 }
 
-// IsOperational reports whether authorization is enabled and the external
-// authorization backend is fully specified. The operator should only generate
-// authorization policies when this returns true.
+// IsOperational reports whether gateway authorization enforcement is configured.
+// The operator only generates authorization policies when this returns true.
 func (c Config) IsOperational() bool {
-	return c.Enabled && c.ExtAuthzServiceName != "" && c.ExtAuthzServiceNamespace != "" && c.ExtAuthzServicePort > 0
+	return strings.TrimSpace(c.ExtAuthzURL) != ""
 }
 
-// ExtAuthzServiceHost returns the fully-qualified in-cluster DNS name of the
-// external authorization Service.
-func (c Config) ExtAuthzServiceHost() string {
-	return fmt.Sprintf("%s.%s.svc.cluster.local", c.ExtAuthzServiceName, c.ExtAuthzServiceNamespace)
-}
-
-func getEnvOrDefault(key, defaultValue string) string {
-	if value := os.Getenv(key); value != "" {
-		return value
+// ExtAuthzBackendRef parses the configured ext_authz host:port URL into the
+// Kubernetes Service name, namespace, and port used to build the SecurityPolicy
+// gRPC backendRef. The host is expected as a Service DNS name in the form
+// "name[.namespace[.svc.cluster.local]]"; the namespace is empty when not present.
+func (c Config) ExtAuthzBackendRef() (name, namespace string, port int, err error) {
+	url := strings.TrimSpace(c.ExtAuthzURL)
+	if url == "" {
+		return "", "", 0, fmt.Errorf("ext_authz URL is empty")
 	}
-	return defaultValue
-}
 
-func getEnvIntOrDefault(key string, defaultValue int) int {
-	if value := os.Getenv(key); value != "" {
-		if parsed, err := strconv.Atoi(value); err == nil {
-			return parsed
-		}
+	host, portStr, found := strings.Cut(url, ":")
+	if !found || host == "" || portStr == "" {
+		return "", "", 0, fmt.Errorf("ext_authz URL %q must be in host:port form", url)
 	}
-	return defaultValue
+	port, err = strconv.Atoi(portStr)
+	if err != nil || port <= 0 {
+		return "", "", 0, fmt.Errorf("ext_authz URL %q has an invalid port", url)
+	}
+
+	labels := strings.Split(host, ".")
+	name = labels[0]
+	if len(labels) > 1 {
+		namespace = labels[1]
+	}
+	if name == "" {
+		return "", "", 0, fmt.Errorf("ext_authz URL %q has an empty service name", url)
+	}
+	return name, namespace, port, nil
 }
