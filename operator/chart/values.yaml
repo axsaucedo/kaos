@@ -68,6 +68,20 @@ gateway:
     modelAPI: "120s"
     mcp: "60s"
 
+# Resource-level authorization (access-check) enforcement at the gateway.
+# When enabled, the operator attaches an external authorization check to
+# protected routes so requests are allowed or denied based on the calling
+# agent's granted permissions. Disabled by default — routing is unchanged.
+security:
+  enabled: false
+  # External authorization (access-check) gRPC backend.
+  extAuthz:
+    serviceName: ""
+    serviceNamespace: ""
+    servicePort: 9191
+  # Action recorded for a protected resource when a route does not specify one.
+  defaultAction: "access"
+
 serviceAccount:
   annotations: {}
   automount: true
