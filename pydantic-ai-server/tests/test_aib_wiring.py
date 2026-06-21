@@ -16,7 +16,7 @@ def _settings(**overrides):
         agent_log_level="WARNING",
     )
     base.update(overrides)
-    return AgentServerSettings(**base)
+    return AgentServerSettings.model_validate(base)
 
 
 def _propagation_middleware(app):

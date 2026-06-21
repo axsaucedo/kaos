@@ -334,6 +334,6 @@ def instrument_httpx() -> None:
         _inject_request_headers(request)
         return await async_send(self, request, *args, **kwargs)
 
-    httpx.Client.send = _patched_sync_send  # type: ignore[method-assign]
-    httpx.AsyncClient.send = _patched_async_send  # type: ignore[method-assign]
+    httpx.Client.send = _patched_sync_send  # ty: ignore[invalid-assignment]
+    httpx.AsyncClient.send = _patched_async_send  # ty: ignore[invalid-assignment]
     _httpx_patched = True
