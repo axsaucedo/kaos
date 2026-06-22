@@ -92,6 +92,37 @@ def modelapi_resource_uri(namespace: str, name: str) -> str:
     return edge_resource_uri(MODELAPI, namespace, name)
 
 
+_AGENT_DISPLAY_PREFIX = "kaos://agent/"
+_SERVICE_CLIENT_ID_PREFIXES = (f"kaos-{MCPSERVER.slug}-", f"kaos-{MODELAPI.slug}-")
+_PERMISSION_SET_PREFIX = "kaos:"
+
+
+def is_kaos_service_client_id(client_id: str) -> bool:
+    """True if a broker service ``client_id`` was projected by KAOS (safe to prune)."""
+    return client_id.startswith(_SERVICE_CLIENT_ID_PREFIXES)
+
+
+def is_kaos_permission_set_name(name: str) -> bool:
+    """True if a broker permission-set ``name`` was projected by KAOS (safe to prune)."""
+    return name.startswith(_PERMISSION_SET_PREFIX)
+
+
+def is_kaos_agent_display_name(display_name: str) -> bool:
+    """True if a broker agent ``display_name`` was projected by KAOS (safe to prune)."""
+    return display_name.startswith(_AGENT_DISPLAY_PREFIX)
+
+
+def parse_agent_external_id(external_id: str) -> tuple[str, str] | None:
+    """Parse ``kaos://agent/<ns>/<name>`` into ``(namespace, name)`` or ``None``."""
+    if not is_kaos_agent_display_name(external_id):
+        return None
+    rest = external_id[len(_AGENT_DISPLAY_PREFIX) :]
+    parts = rest.split("/")
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        return None
+    return parts[0], parts[1]
+
+
 @dataclass(frozen=True)
 class DesiredService:
     """A synthetic AIB service projected from an edge target (MCPServer or ModelAPI)."""

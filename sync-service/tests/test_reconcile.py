@@ -66,6 +66,14 @@ class FakeSecrets:
     def upsert(self, namespace, name, string_data):
         self.store[(namespace, name)] = dict(string_data)
 
+    def list(self, namespaces):
+        if not namespaces:
+            return list(self.store.keys())
+        return [(ns, name) for (ns, name) in self.store if ns in namespaces]
+
+    def delete(self, namespace, name):
+        return self.store.pop((namespace, name), None) is not None
+
 
 class FakeLister:
     def __init__(self, resources):
@@ -161,3 +169,57 @@ def test_run_once_projects_and_reconciles():
     assert summary.services == 2
     assert summary.permission_sets == 1
     assert summary.agents[0].secret_name == "kaos-aib-researcher"
+
+
+def test_reconcile_does_not_prune_by_default():
+    aib, secrets = FakeAIB(), FakeSecrets()
+    reconcile(project([_agent("a", ["github"]), _agent("b", ["slack"])]), aib, secrets, "kaos-aib")
+
+    # Re-reconcile a shrunk desired state without prune: orphans must remain.
+    summary = reconcile(project([_agent("a", ["github"])]), aib, secrets, "kaos-aib")
+
+    assert summary.pruned.agents == 0
+    assert secrets.get("demo", "kaos-aib-b") is not None
+    assert any(i["display_name"] == "kaos://agent/demo/b" for i in aib.list("agents"))
+
+
+def test_reconcile_prunes_orphaned_records_and_secrets():
+    aib, secrets = FakeAIB(), FakeSecrets()
+    reconcile(project([_agent("a", ["github"]), _agent("b", ["slack"])]), aib, secrets, "kaos-aib")
+    b_agent_id = aib.collections["agents"]["kaos://agent/demo/b"]["id"]
+
+    summary = reconcile(project([_agent("a", ["github"])]), aib, secrets, "kaos-aib", prune=True)
+
+    # Agent b plus its slack permission set, slack service and credential Secret are removed.
+    assert summary.pruned.agents == 1
+    assert summary.pruned.permission_sets == 1
+    assert summary.pruned.services == 1
+    assert summary.pruned.secrets == 1
+    assert b_agent_id in aib.revoke_calls
+
+    # Agent a and its records remain intact.
+    assert secrets.get("demo", "kaos-aib-a") is not None
+    assert secrets.get("demo", "kaos-aib-b") is None
+    remaining_agents = {i["display_name"] for i in aib.list("agents")}
+    assert remaining_agents == {"kaos://agent/demo/a"}
+    remaining_services = {i["client_id"] for i in aib.list("services")}
+    assert remaining_services == {"kaos-mcpserver-demo-github"}
+
+
+def test_prune_leaves_externally_managed_records_untouched():
+    aib, secrets = FakeAIB(), FakeSecrets()
+    reconcile(project([_agent("a", ["github"])]), aib, secrets, "kaos-aib")
+    # Inject broker records owned by something other than KAOS.
+    aib.collections["agents"]["ext"] = {"id": "ext-agent", "display_name": "external-agent"}
+    aib.collections["services"]["ext"] = {"id": "ext-svc", "client_id": "vendor-service"}
+    aib.collections["permission-sets"]["ext"] = {"id": "ext-ps", "name": "vendor:ps"}
+
+    # Prune against an empty desired state: only KAOS-owned records should go.
+    reconcile(project([]), aib, secrets, "kaos-aib", prune=True)
+
+    assert aib.get("agents", "ext-agent") is not None
+    assert aib.get("services", "ext-svc") is not None
+    assert aib.get("permission-sets", "ext-ps") is not None
+    assert "ext-agent" not in aib.revoke_calls
+    # The KAOS-owned agent a was pruned.
+    assert all(i["display_name"] != "kaos://agent/demo/a" for i in aib.list("agents"))

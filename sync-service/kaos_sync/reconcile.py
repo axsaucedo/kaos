@@ -10,7 +10,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Protocol
 
-from kaos_sync.projection import DesiredAgent, DesiredState
+from kaos_sync.projection import (
+    DesiredAgent,
+    DesiredState,
+    is_kaos_agent_display_name,
+    is_kaos_permission_set_name,
+    is_kaos_service_client_id,
+)
 
 
 def credential_secret_name(prefix: str, agent_name: str) -> str:
@@ -39,6 +45,10 @@ class SecretStore(Protocol):
 
     def upsert(self, namespace: str, name: str, string_data: dict[str, str]) -> None: ...
 
+    def list(self, namespaces: tuple[str, ...]) -> List[tuple[str, str]]: ...
+
+    def delete(self, namespace: str, name: str) -> bool: ...
+
 
 @dataclass
 class AgentSync:
@@ -52,10 +62,21 @@ class AgentSync:
 
 
 @dataclass
+class PruneSummary:
+    """Counts of orphaned broker records and Secrets removed during a prune pass."""
+
+    agents: int = 0
+    permission_sets: int = 0
+    services: int = 0
+    secrets: int = 0
+
+
+@dataclass
 class ReconcileSummary:
     services: int = 0
     permission_sets: int = 0
     agents: list[AgentSync] = field(default_factory=list)
+    pruned: PruneSummary = field(default_factory=PruneSummary)
 
 
 def reconcile(
@@ -63,6 +84,8 @@ def reconcile(
     aib: AIBAdminClient,
     secrets: SecretStore,
     secret_prefix: str = "kaos-aib",
+    prune: bool = False,
+    namespaces: tuple[str, ...] = (),
 ) -> ReconcileSummary:
     """Apply the desired AIB state and provision per-agent credential Secrets.
 
@@ -70,6 +93,11 @@ def reconcile(
     referenced; each agent is then created as a local AIB agent bound to its permission
     sets. Credentials are minted only when a Secret does not already carry them, keeping
     the pass idempotent and avoiding credential churn on every reconcile.
+
+    When ``prune`` is set, KAOS-managed broker records and credential Secrets that are no
+    longer in the desired state are removed in dependency-safe order (agents, then their
+    credentials and Secrets, then permission sets, then services), restricted to the
+    configured ``namespaces`` for Secret discovery.
     """
     summary = ReconcileSummary()
 
@@ -93,7 +121,78 @@ def reconcile(
             _reconcile_agent(agent, aib, secrets, secret_prefix, permission_set_ids)
         )
 
+    if prune:
+        summary.pruned = _prune(
+            desired,
+            aib,
+            secrets,
+            secret_prefix,
+            namespaces,
+            desired_client_ids=set(service_ids),
+            desired_permission_set_names=set(permission_set_ids),
+        )
+
     return summary
+
+
+def _prune(
+    desired: DesiredState,
+    aib: AIBAdminClient,
+    secrets: SecretStore,
+    secret_prefix: str,
+    namespaces: tuple[str, ...],
+    desired_client_ids: set[str],
+    desired_permission_set_names: set[str],
+) -> PruneSummary:
+    """Remove KAOS-managed broker records and Secrets absent from the desired state.
+
+    Deletion follows dependency order so a record is never removed while another still
+    references it: agents (and their credentials) first, then orphaned Secrets, then
+    permission sets, then services. Only records KAOS owns -- identified by the projection
+    encoding -- are considered, so externally-managed broker records are never touched.
+    """
+    pruned = PruneSummary()
+
+    desired_external_ids = {agent.external_id for agent in desired.agents}
+    for item in aib.list("agents"):
+        display_name = item.get("display_name", "")
+        if not is_kaos_agent_display_name(display_name):
+            continue
+        if display_name in desired_external_ids:
+            continue
+        aib.revoke_credentials(item["id"])
+        if aib.delete("agents", item["id"]):
+            pruned.agents += 1
+
+    desired_secret_keys = {
+        (agent.namespace, credential_secret_name(secret_prefix, agent.name))
+        for agent in desired.agents
+    }
+    for namespace, name in secrets.list(namespaces):
+        if (namespace, name) in desired_secret_keys:
+            continue
+        if secrets.delete(namespace, name):
+            pruned.secrets += 1
+
+    for item in aib.list("permission-sets"):
+        name = item.get("name", "")
+        if not is_kaos_permission_set_name(name):
+            continue
+        if name in desired_permission_set_names:
+            continue
+        if aib.delete("permission-sets", item["id"]):
+            pruned.permission_sets += 1
+
+    for item in aib.list("services"):
+        client_id = item.get("client_id", "")
+        if not is_kaos_service_client_id(client_id):
+            continue
+        if client_id in desired_client_ids:
+            continue
+        if aib.delete("services", item["id"]):
+            pruned.services += 1
+
+    return pruned
 
 
 def _reconcile_agent(
