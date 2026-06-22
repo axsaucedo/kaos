@@ -16,6 +16,8 @@ class Settings:
     namespaces: namespaces to watch; empty means cluster-wide.
     credential_secret_prefix: prefix for per-agent credential Secret names.
     reconcile_interval_seconds: delay between reconcile passes.
+    request_timeout_seconds: per-request timeout for AIB admin calls.
+    prune_enabled: whether to delete orphaned broker records and Secrets each pass.
     """
 
     aib_admin_url: str = "http://localhost:14000/api"
@@ -25,6 +27,7 @@ class Settings:
     credential_secret_prefix: str = "kaos-aib"
     reconcile_interval_seconds: int = 30
     request_timeout_seconds: float = 10.0
+    prune_enabled: bool = True
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "Settings":
@@ -46,4 +49,12 @@ class Settings:
             request_timeout_seconds=float(
                 env.get("KAOS_SYNC_REQUEST_TIMEOUT_SECONDS", cls.request_timeout_seconds)
             ),
+            prune_enabled=_env_bool(env, "KAOS_SYNC_PRUNE_ENABLED", cls.prune_enabled),
         )
+
+
+def _env_bool(env: dict[str, str], key: str, default: bool) -> bool:
+    raw = env.get(key)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")

@@ -7,7 +7,7 @@ import pytest
 from kaos_sync.config import Settings
 from kaos_sync.main import run_once
 from kaos_sync.projection import project
-from kaos_sync.reconcile import credential_secret_name, reconcile
+from kaos_sync.reconcile import ProblemCategory, credential_secret_name, reconcile
 
 
 class FakeAIB:
@@ -223,3 +223,117 @@ def test_prune_leaves_externally_managed_records_untouched():
     assert "ext-agent" not in aib.revoke_calls
     # The KAOS-owned agent a was pruned.
     assert all(i["display_name"] != "kaos://agent/demo/a" for i in aib.list("agents"))
+
+
+class _AgentCreateFailsAIB(FakeAIB):
+    def __init__(self, fail_display):
+        super().__init__()
+        self._fail_display = fail_display
+
+    def create_or_get(self, collection, match_field, match_value, body):
+        if collection == "agents" and match_value == self._fail_display:
+            raise RuntimeError("broker unreachable")
+        return super().create_or_get(collection, match_field, match_value, body)
+
+
+class _ServiceCreateFailsAIB(FakeAIB):
+    def __init__(self, fail_client_id):
+        super().__init__()
+        self._fail_client_id = fail_client_id
+
+    def create_or_get(self, collection, match_field, match_value, body):
+        if collection == "services" and match_value == self._fail_client_id:
+            raise RuntimeError("service create failed")
+        return super().create_or_get(collection, match_field, match_value, body)
+
+
+class _IncompleteMintAIB(FakeAIB):
+    def mint_credentials(self, agent_id):
+        self.mint_calls.append(agent_id)
+        return {"client_id": "", "client_secret": ""}
+
+
+class _DeleteFailsAIB(FakeAIB):
+    def delete(self, collection, resource_id):
+        if collection == "agents":
+            raise RuntimeError("delete failed")
+        return super().delete(collection, resource_id)
+
+
+def test_failure_on_one_agent_is_isolated_from_others():
+    desired = project([_agent("a", ["github"]), _agent("b", ["slack"])])
+    aib = _AgentCreateFailsAIB(fail_display="kaos://agent/demo/a")
+    secrets = FakeSecrets()
+
+    summary = reconcile(desired, aib, secrets, "kaos-aib")
+
+    assert summary.ok is False
+    by_id = {a.external_id: a for a in summary.agents}
+    assert by_id["kaos://agent/demo/a"].ok is False
+    assert by_id["kaos://agent/demo/b"].ok is True
+    # The failed agent never gets a credential Secret; the healthy one does.
+    assert secrets.get("demo", "kaos-aib-a") is None
+    assert secrets.get("demo", "kaos-aib-b") is not None
+    assert [p.category for p in summary.problems] == [ProblemCategory.AIB_UNREACHABLE]
+
+
+def test_unavailable_service_skips_dependent_edge_and_agent_fail_closed():
+    desired = project([_agent("a", ["github"]), _agent("b", ["slack"])])
+    aib = _ServiceCreateFailsAIB(fail_client_id="kaos-mcpserver-demo-github")
+    secrets = FakeSecrets()
+
+    summary = reconcile(desired, aib, secrets, "kaos-aib")
+
+    categories = {p.category for p in summary.problems}
+    assert ProblemCategory.UNSUPPORTED_EDGE in categories
+    by_id = {a.external_id: a for a in summary.agents}
+    # Agent a depends on the failed service and is skipped fail-closed (no credentials).
+    assert by_id["kaos://agent/demo/a"].ok is False
+    assert by_id["kaos://agent/demo/a"].credentials_minted is False
+    assert secrets.get("demo", "kaos-aib-a") is None
+    # Agent b is unaffected.
+    assert by_id["kaos://agent/demo/b"].ok is True
+    assert secrets.get("demo", "kaos-aib-b") is not None
+
+
+def test_incomplete_credentials_are_reported_and_not_stored():
+    desired = project([_agent("a", ["github"])])
+    aib = _IncompleteMintAIB()
+    secrets = FakeSecrets()
+
+    summary = reconcile(desired, aib, secrets, "kaos-aib")
+
+    assert summary.agents[0].ok is False
+    assert summary.agents[0].credentials_minted is False
+    assert secrets.get("demo", "kaos-aib-a") is None
+    assert [p.category for p in summary.problems] == [ProblemCategory.MISSING_CREDENTIALS]
+
+
+def test_prune_delete_failure_is_reported_and_pass_continues():
+    aib = _DeleteFailsAIB()
+    secrets = FakeSecrets()
+    reconcile(project([_agent("a", ["github"]), _agent("b", ["slack"])]), aib, secrets, "kaos-aib")
+
+    summary = reconcile(project([_agent("a", ["github"])]), aib, secrets, "kaos-aib", prune=True)
+
+    assert summary.pruned.agents == 0  # the agent delete failed
+    assert any(p.category == ProblemCategory.PRUNE_FAILED for p in summary.problems)
+    # Permission sets and services still get pruned despite the agent delete failure.
+    assert summary.pruned.services == 1
+
+
+def test_prune_skips_malformed_external_id_as_drift():
+    aib = FakeAIB()
+    secrets = FakeSecrets()
+    reconcile(project([_agent("a", ["github"])]), aib, secrets, "kaos-aib")
+    # Inject a KAOS-prefixed agent whose external id cannot be parsed into ns/name.
+    aib.collections["agents"]["kaos://agent/onlyone"] = {
+        "id": "malformed",
+        "display_name": "kaos://agent/onlyone",
+    }
+
+    summary = reconcile(project([]), aib, secrets, "kaos-aib", prune=True)
+
+    assert any(p.category == ProblemCategory.STALE_EXTERNAL_ID for p in summary.problems)
+    # The malformed record is left in place rather than blindly deleted.
+    assert aib.get("agents", "malformed") is not None

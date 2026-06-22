@@ -17,15 +17,38 @@ def run_once(settings: Settings, lister, aib, secrets) -> ReconcileSummary:
     """Run a single reconcile pass and return its summary."""
     resources = lister.list_resources(settings.namespaces)
     desired = project(resources)
-    summary = reconcile(desired, aib, secrets, settings.credential_secret_prefix)
+    summary = reconcile(
+        desired,
+        aib,
+        secrets,
+        settings.credential_secret_prefix,
+        prune=settings.prune_enabled,
+        namespaces=settings.namespaces,
+    )
     minted = sum(1 for a in summary.agents if a.credentials_minted)
+    failed = sum(1 for a in summary.agents if not a.ok)
     logger.info(
-        "reconciled services=%d permission_sets=%d agents=%d credentials_minted=%d",
+        "reconciled services=%d permission_sets=%d agents=%d credentials_minted=%d "
+        "failed=%d pruned_agents=%d pruned_permission_sets=%d pruned_services=%d "
+        "pruned_secrets=%d problems=%d",
         summary.services,
         summary.permission_sets,
         len(summary.agents),
         minted,
+        failed,
+        summary.pruned.agents,
+        summary.pruned.permission_sets,
+        summary.pruned.services,
+        summary.pruned.secrets,
+        len(summary.problems),
     )
+    for problem in summary.problems:
+        logger.warning(
+            "problem category=%s resource=%s detail=%s",
+            problem.category.value,
+            problem.resource,
+            problem.detail,
+        )
     return summary
 
 
