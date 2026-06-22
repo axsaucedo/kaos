@@ -7,6 +7,7 @@ import time
 
 from kaos_sync.aib_client import AIBAdmin
 from kaos_sync.config import Settings
+from kaos_sync.observability import HealthState, record_summary, start_http_servers
 from kaos_sync.projection import project
 from kaos_sync.reconcile import ReconcileSummary, reconcile
 
@@ -66,19 +67,31 @@ def main() -> int:
         principal=settings.aib_principal,
         principal_header=settings.aib_principal_header,
         timeout=settings.request_timeout_seconds,
+        retry_max_attempts=settings.retry_max_attempts,
+        retry_base_delay_seconds=settings.retry_base_delay_seconds,
     )
 
+    health = HealthState()
+    start_http_servers((settings.metrics_port, settings.health_port), health)
+
     logger.info(
-        "starting reconcile loop admin=%s interval=%ds namespaces=%s",
+        "starting reconcile loop admin=%s interval=%ds namespaces=%s "
+        "prune=%s metrics_port=%d health_port=%d",
         settings.aib_admin_url,
         settings.reconcile_interval_seconds,
         ",".join(settings.namespaces) or "<all>",
+        settings.prune_enabled,
+        settings.metrics_port,
+        settings.health_port,
     )
     while True:
         try:
-            run_once(settings, lister, aib, secrets)
+            summary = run_once(settings, lister, aib, secrets)
+            record_summary(summary)
         except Exception:  # noqa: BLE001 - keep the loop alive across transient failures
             logger.exception("reconcile pass failed")
+        finally:
+            health.mark_ready()
         time.sleep(settings.reconcile_interval_seconds)
 
 

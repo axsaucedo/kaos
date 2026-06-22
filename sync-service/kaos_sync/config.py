@@ -18,6 +18,10 @@ class Settings:
     reconcile_interval_seconds: delay between reconcile passes.
     request_timeout_seconds: per-request timeout for AIB admin calls.
     prune_enabled: whether to delete orphaned broker records and Secrets each pass.
+    metrics_port: port exposing the Prometheus ``/metrics`` endpoint.
+    health_port: port exposing ``/healthz`` and ``/readyz`` (often equal to metrics_port).
+    retry_max_attempts: max attempts per AIB admin request before giving up.
+    retry_base_delay_seconds: base delay for exponential backoff between retries.
     """
 
     aib_admin_url: str = "http://localhost:14000/api"
@@ -28,6 +32,10 @@ class Settings:
     reconcile_interval_seconds: int = 30
     request_timeout_seconds: float = 10.0
     prune_enabled: bool = True
+    metrics_port: int = 9090
+    health_port: int = 8080
+    retry_max_attempts: int = 4
+    retry_base_delay_seconds: float = 0.5
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "Settings":
@@ -50,6 +58,12 @@ class Settings:
                 env.get("KAOS_SYNC_REQUEST_TIMEOUT_SECONDS", cls.request_timeout_seconds)
             ),
             prune_enabled=_env_bool(env, "KAOS_SYNC_PRUNE_ENABLED", cls.prune_enabled),
+            metrics_port=int(env.get("KAOS_SYNC_METRICS_PORT", cls.metrics_port)),
+            health_port=int(env.get("KAOS_SYNC_HEALTH_PORT", cls.health_port)),
+            retry_max_attempts=int(env.get("KAOS_SYNC_RETRY_MAX_ATTEMPTS", cls.retry_max_attempts)),
+            retry_base_delay_seconds=float(
+                env.get("KAOS_SYNC_RETRY_BASE_DELAY_SECONDS", cls.retry_base_delay_seconds)
+            ),
         )
 
 
