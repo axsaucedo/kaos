@@ -17,6 +17,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # Copy source code (changes frequently, so copied last)
 COPY pais/ pais/
+COPY aib/ aib/
 
 # Install package (no deps - already installed above) for importlib.metadata
 RUN uv pip install --system --no-deps .
