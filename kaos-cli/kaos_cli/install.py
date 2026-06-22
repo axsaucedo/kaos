@@ -706,6 +706,11 @@ def _keycloak_realm_json(
             {
                 "username": username,
                 "enabled": True,
+                "emailVerified": True,
+                "email": f"{username}@example.com",
+                "firstName": "KAOS",
+                "lastName": "User",
+                "requiredActions": [],
                 "credentials": [
                     {"type": "password", "value": password, "temporary": False}
                 ],
