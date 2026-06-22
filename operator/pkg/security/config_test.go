@@ -100,6 +100,7 @@ func TestGetConfigReadsAllFields(t *testing.T) {
 	t.Setenv(envUserIssuer, "http://keycloak.kaos-system.svc.cluster.local:8080/realms/kaos")
 	t.Setenv(envUserAudience, "kaos")
 	t.Setenv(envUserJWKSURI, "")
+	t.Setenv(envExtProcURL, "aib-extproc.aib-system.svc.cluster.local:50051")
 
 	cfg := GetConfig()
 
@@ -114,6 +115,31 @@ func TestGetConfigReadsAllFields(t *testing.T) {
 	}
 	if cfg.UserAudience != "kaos" {
 		t.Errorf("unexpected user audience %q", cfg.UserAudience)
+	}
+	if !cfg.ExtProcEnabled() {
+		t.Errorf("expected ext_proc enabled")
+	}
+	if cfg.ExtProcURL != "aib-extproc.aib-system.svc.cluster.local:50051" {
+		t.Errorf("unexpected ext_proc URL %q", cfg.ExtProcURL)
+	}
+}
+
+func TestExtProcEnabled(t *testing.T) {
+	cases := []struct {
+		name string
+		url  string
+		want bool
+	}{
+		{"empty", "", false},
+		{"whitespace only", "   ", false},
+		{"set", "aib-extproc.aib-system:50051", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := (Config{ExtProcURL: tc.url}).ExtProcEnabled(); got != tc.want {
+				t.Errorf("ExtProcEnabled() = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -202,6 +228,42 @@ func TestExtAuthzBackendRef(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			name, ns, port, err := (Config{ExtAuthzURL: tc.url}).ExtAuthzBackendRef()
+			if tc.wantError {
+				if err == nil {
+					t.Fatalf("expected error for %q", tc.url)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if name != tc.wantName || ns != tc.wantNS || port != tc.wantPort {
+				t.Errorf("got (%q,%q,%d), want (%q,%q,%d)", name, ns, port, tc.wantName, tc.wantNS, tc.wantPort)
+			}
+		})
+	}
+}
+
+func TestExtProcBackendRef(t *testing.T) {
+	cases := []struct {
+		name      string
+		url       string
+		wantName  string
+		wantNS    string
+		wantPort  int
+		wantError bool
+	}{
+		{"fqdn", "aib-extproc.aib-system.svc.cluster.local:50051", "aib-extproc", "aib-system", 50051, false},
+		{"name and namespace", "aib-extproc.aib-system:50051", "aib-extproc", "aib-system", 50051, false},
+		{"name only", "aib-extproc:50051", "aib-extproc", "", 50051, false},
+		{"missing port", "aib-extproc.aib-system", "", "", 0, true},
+		{"empty", "", "", "", 0, true},
+		{"invalid port", "aib-extproc.aib-system:nope", "", "", 0, true},
+		{"zero port", "aib-extproc.aib-system:0", "", "", 0, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			name, ns, port, err := (Config{ExtProcURL: tc.url}).ExtProcBackendRef()
 			if tc.wantError {
 				if err == nil {
 					t.Fatalf("expected error for %q", tc.url)
