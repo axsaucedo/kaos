@@ -7,8 +7,8 @@ implementations live in :mod:`kaos_sync.aib_client` and :mod:`kaos_sync.secrets`
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Protocol
+from dataclasses import dataclass, field
+from typing import List, Protocol
 
 from kaos_sync.projection import DesiredAgent, DesiredState
 
@@ -19,11 +19,19 @@ def credential_secret_name(prefix: str, agent_name: str) -> str:
 
 
 class AIBAdminClient(Protocol):
+    def list(self, collection: str) -> List[dict]: ...
+
+    def get(self, collection: str, resource_id: str) -> dict | None: ...
+
     def create_or_get(
         self, collection: str, match_field: str, match_value: str, body: dict
     ) -> str: ...
 
+    def delete(self, collection: str, resource_id: str) -> bool: ...
+
     def mint_credentials(self, agent_id: str) -> dict: ...
+
+    def revoke_credentials(self, agent_id: str) -> bool: ...
 
 
 class SecretStore(Protocol):
@@ -47,11 +55,7 @@ class AgentSync:
 class ReconcileSummary:
     services: int = 0
     permission_sets: int = 0
-    agents: list[AgentSync] = None  # type: ignore[assignment]
-
-    def __post_init__(self) -> None:
-        if self.agents is None:
-            self.agents = []
+    agents: list[AgentSync] = field(default_factory=list)
 
 
 def reconcile(

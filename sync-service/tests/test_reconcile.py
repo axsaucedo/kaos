@@ -16,7 +16,18 @@ class FakeAIB:
     def __init__(self):
         self.collections: dict[str, dict[str, dict]] = {}
         self.mint_calls: list[str] = []
+        self.revoke_calls: list[str] = []
+        self.delete_calls: list[tuple[str, str]] = []
         self._next = 0
+
+    def _by_id(self, collection: str) -> dict[str, dict]:
+        return {item["id"]: item for item in self.collections.get(collection, {}).values()}
+
+    def list(self, collection):
+        return [dict(item, id=item["id"]) for item in self.collections.get(collection, {}).values()]
+
+    def get(self, collection, resource_id):
+        return self._by_id(collection).get(resource_id)
 
     def create_or_get(self, collection, match_field, match_value, body):
         store = self.collections.setdefault(collection, {})
@@ -24,12 +35,25 @@ class FakeAIB:
             return store[match_value]["id"]
         self._next += 1
         item_id = f"{collection}-{self._next}"
-        store[match_value] = {"id": item_id, "body": body}
+        store[match_value] = {"id": item_id, match_field: match_value, "body": body}
         return item_id
+
+    def delete(self, collection, resource_id):
+        self.delete_calls.append((collection, resource_id))
+        store = self.collections.get(collection, {})
+        for key, item in list(store.items()):
+            if item["id"] == resource_id:
+                del store[key]
+                return True
+        return False
 
     def mint_credentials(self, agent_id):
         self.mint_calls.append(agent_id)
         return {"client_id": f"cid-{agent_id}", "client_secret": f"secret-{agent_id}"}
+
+    def revoke_credentials(self, agent_id):
+        self.revoke_calls.append(agent_id)
+        return True
 
 
 class FakeSecrets:
