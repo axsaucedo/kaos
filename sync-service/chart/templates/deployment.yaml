@@ -47,6 +47,33 @@ spec:
               value: {{ .Values.sync.reconcileIntervalSeconds | quote }}
             - name: KAOS_SYNC_REQUEST_TIMEOUT_SECONDS
               value: {{ .Values.sync.requestTimeoutSeconds | quote }}
+            - name: KAOS_SYNC_PRUNE_ENABLED
+              value: {{ .Values.sync.pruneEnabled | quote }}
+            - name: KAOS_SYNC_RETRY_MAX_ATTEMPTS
+              value: {{ .Values.sync.retryMaxAttempts | quote }}
+            - name: KAOS_SYNC_RETRY_BASE_DELAY_SECONDS
+              value: {{ .Values.sync.retryBaseDelaySeconds | quote }}
+            - name: KAOS_SYNC_METRICS_PORT
+              value: {{ .Values.observability.metricsPort | quote }}
+            - name: KAOS_SYNC_HEALTH_PORT
+              value: {{ .Values.observability.healthPort | quote }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.observability.metricsPort }}
+            - name: health
+              containerPort: {{ .Values.observability.healthPort }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       {{- with .Values.nodeSelector }}

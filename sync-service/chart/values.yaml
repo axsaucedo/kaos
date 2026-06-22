@@ -37,6 +37,18 @@ sync:
   reconcileIntervalSeconds: 30
   # Per-request timeout to the broker admin API, in seconds.
   requestTimeoutSeconds: 10
+  # Delete orphaned broker records and credential Secrets no longer in the desired state.
+  pruneEnabled: true
+  # Max attempts per broker admin request before giving up.
+  retryMaxAttempts: 4
+  # Base delay for exponential backoff between broker admin retries, in seconds.
+  retryBaseDelaySeconds: 0.5
+
+# Metrics and health endpoint configuration. The ports may be equal, in which case a
+# single server backs /metrics, /healthz and /readyz.
+observability:
+  metricsPort: 9090
+  healthPort: 8080
 
 resources: {}
 

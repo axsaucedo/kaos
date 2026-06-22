@@ -9,10 +9,10 @@ rules:
   - apiGroups: ["kaos.tools"]
     resources: ["agents", "mcpservers", "modelapis"]
     verbs: ["get", "list", "watch"]
-  # Provision and refresh per-agent credential Secrets.
+  # Provision, refresh and prune per-agent credential Secrets.
   - apiGroups: [""]
     resources: ["secrets"]
-    verbs: ["get", "list", "watch", "create", "update", "patch"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
