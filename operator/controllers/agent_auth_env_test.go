@@ -50,32 +50,32 @@ func TestBuildAgentAuthEnvVarsEnabled(t *testing.T) {
 
 	env := buildAgentAuthEnvVars(newAgent("demo", "researcher"))
 
-	actor, ok := envByName(env, "AIB_ACTOR")
+	actor, ok := envByName(env, "AGENT_AUTH_IDENTITY")
 	if !ok || actor.Value != "kaos://agent/demo/researcher" {
-		t.Errorf("AIB_ACTOR = %q (found=%v), want kaos://agent/demo/researcher", actor.Value, ok)
+		t.Errorf("AGENT_AUTH_IDENTITY = %q (found=%v), want kaos://agent/demo/researcher", actor.Value, ok)
 	}
 
-	clientID, ok := envByName(env, "AIB_CLIENT_ID")
+	clientID, ok := envByName(env, "AGENT_AUTH_CLIENT_ID")
 	if !ok || clientID.ValueFrom == nil || clientID.ValueFrom.SecretKeyRef == nil {
-		t.Fatalf("AIB_CLIENT_ID missing a secretKeyRef")
+		t.Fatalf("AGENT_AUTH_CLIENT_ID missing a secretKeyRef")
 	}
 	ref := clientID.ValueFrom.SecretKeyRef
 	if ref.Name != "kaos-aib-researcher" || ref.Key != "client_id" {
-		t.Errorf("AIB_CLIENT_ID ref = %s/%s, want kaos-aib-researcher/client_id", ref.Name, ref.Key)
+		t.Errorf("AGENT_AUTH_CLIENT_ID ref = %s/%s, want kaos-aib-researcher/client_id", ref.Name, ref.Key)
 	}
 	if ref.Optional == nil || !*ref.Optional {
-		t.Errorf("AIB_CLIENT_ID secret ref must be optional so the pod can start before the Secret exists")
+		t.Errorf("AGENT_AUTH_CLIENT_ID secret ref must be optional so the pod can start before the Secret exists")
 	}
 
-	secret, ok := envByName(env, "AIB_CLIENT_SECRET")
+	secret, ok := envByName(env, "AGENT_AUTH_CLIENT_SECRET")
 	if !ok || secret.ValueFrom == nil || secret.ValueFrom.SecretKeyRef == nil ||
 		secret.ValueFrom.SecretKeyRef.Key != "client_secret" {
-		t.Errorf("AIB_CLIENT_SECRET missing a client_secret secretKeyRef")
+		t.Errorf("AGENT_AUTH_CLIENT_SECRET missing a client_secret secretKeyRef")
 	}
 
-	endpoint, ok := envByName(env, "AIB_TOKEN_ENDPOINT")
+	endpoint, ok := envByName(env, "AGENT_AUTH_TOKEN_ENDPOINT")
 	if !ok || endpoint.Value != "http://aib-enduser.aib-system.svc.cluster.local:8000/oauth2/token" {
-		t.Errorf("AIB_TOKEN_ENDPOINT = %q, want the issuer token endpoint", endpoint.Value)
+		t.Errorf("AGENT_AUTH_TOKEN_ENDPOINT = %q, want the issuer token endpoint", endpoint.Value)
 	}
 }
 
@@ -86,10 +86,10 @@ func TestBuildAgentAuthEnvVarsWithoutIssuer(t *testing.T) {
 
 	env := buildAgentAuthEnvVars(newAgent("demo", "researcher"))
 
-	if _, ok := envByName(env, "AIB_TOKEN_ENDPOINT"); ok {
-		t.Errorf("AIB_TOKEN_ENDPOINT must be omitted when no issuer is configured")
+	if _, ok := envByName(env, "AGENT_AUTH_TOKEN_ENDPOINT"); ok {
+		t.Errorf("AGENT_AUTH_TOKEN_ENDPOINT must be omitted when no issuer is configured")
 	}
-	if _, ok := envByName(env, "AIB_CLIENT_ID"); !ok {
+	if _, ok := envByName(env, "AGENT_AUTH_CLIENT_ID"); !ok {
 		t.Errorf("credentials must still be mounted without an issuer")
 	}
 }
