@@ -136,6 +136,20 @@ spec:
         cpu: "100m"
 ```
 
+### security (optional)
+
+Per-resource security configuration. The only field is `id`, which overrides the resource's logical security identity.
+
+```yaml
+spec:
+  security:
+    id: shared-tools
+```
+
+By default an MCPServer's logical identity is namespace-scoped — `kaos://mcpserver/<namespace>/<name>`. Setting `security.id` makes it namespace-independent — `kaos://mcpserver/<id>` — so the resource keeps the **same** identity (and the grants agents hold against it) across a namespace move or rename. An agent edge to this MCPServer is authorized against the resolved identity, so the agent's grant follows the stable id.
+
+An explicit `id` is a *shared* logical identity and must be unique per kind among active resources: if two MCPServers declare the same `id`, the oldest owns it and the newer is marked `Failed`; the survivor adopts the id if the holder is deleted. The value must be a safe path segment (lowercase alphanumerics, `-`, `_`, `.`).
+
 ### podSpec (optional)
 
 Override the generated pod spec using Kubernetes strategic merge patch.

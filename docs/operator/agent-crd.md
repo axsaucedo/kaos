@@ -351,9 +351,26 @@ The operator automatically:
 3. Sets `PEER_AGENT_WORKER_1_CARD_URL=http://agent-worker-1...`
 4. Sets `PEER_AGENT_WORKER_2_CARD_URL=http://agent-worker-2...`
 
-### podSpec (optional)
+### security (optional)
 
-Override the generated pod spec using Kubernetes strategic merge patch.
+Per-resource security configuration. The only field is `id`, which overrides the resource's logical security identity.
+
+```yaml
+spec:
+  security:
+    id: researcher
+```
+
+By default a resource's logical identity is namespace-scoped — `kaos://agent/<namespace>/<name>` for an Agent (and `kaos://mcpserver/...`, `kaos://modelapi/...` for the other kinds). Setting `security.id` makes the identity namespace-independent instead — `kaos://agent/<id>` — so the resource keeps the **same** identity (and therefore the same delegated grants and credentials) across a namespace move or a rename.
+
+| Behaviour | Resolved identity |
+|-----------|-------------------|
+| `security.id` unset | `kaos://<kind>/<namespace>/<name>` |
+| `security.id: researcher` | `kaos://<kind>/researcher` |
+
+An explicit `id` is a *shared* logical identity and must be unique per kind among active resources. If two resources of the same kind declare the same `id`, the **oldest** (by creation time) owns it; the newer one is marked `Failed` and is not provisioned. If the holder is later deleted, the remaining resource adopts the id on its next reconcile. The value must be a safe path segment (lowercase alphanumerics, `-`, `_`, `.`).
+
+### podSpec (optional)
 
 ```yaml
 spec:

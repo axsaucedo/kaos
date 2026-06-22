@@ -829,10 +829,11 @@ class TestPackageData:
         from kaos_cli.samples import _get_sample_files
 
         files = _get_sample_files()
-        assert len(files) == 6
+        assert len(files) == 7
         names = [f.stem for f in files]
         assert "1-simple-echo-agent" in names
         assert "5-proxy-external-api" in names
+        assert "7-stable-identity" in names
 
 
 # ─── Monitoring validation ──────────────────────────────────────────────

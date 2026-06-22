@@ -1,0 +1,63 @@
+---
+# Sample 7: Stable Security Identity Override
+# Demonstrates spec.security.id, which pins a resource's logical security
+# identity so it survives a namespace move or rename. The MCPServer and the
+# Agent each declare a stable id; the Agent's edge to the MCPServer is
+# authorized against the resolved identity kaos://mcpserver/shared-tools
+# rather than the namespaced default.
+#
+# Deploy: kaos samples deploy 7-stable-identity -n <namespace>
+
+---
+# ModelAPI: hosted Ollama for local development
+apiVersion: kaos.tools/v1alpha1
+kind: ModelAPI
+metadata:
+  name: stable-modelapi
+spec:
+  mode: Hosted
+  hostedConfig:
+    model: "smollm2:135m"
+
+---
+# MCPServer: stable identity, namespace-independent
+apiVersion: kaos.tools/v1alpha1
+kind: MCPServer
+metadata:
+  name: shared-calc-mcp
+spec:
+  security:
+    id: shared-tools
+  runtime: python-string
+  params: |
+    def calculate(expression: str) -> str:
+        """Evaluate a mathematical expression safely."""
+        allowed = set('0123456789+-*/.() ')
+        if not all(c in allowed for c in expression):
+            return "Error: Invalid characters in expression"
+        try:
+            return str(eval(expression))
+        except Exception as e:
+            return f"Error: {str(e)}"
+
+---
+# Agent: stable identity, keeps its grants across a namespace move
+apiVersion: kaos.tools/v1alpha1
+kind: Agent
+metadata:
+  name: stable-agent
+spec:
+  security:
+    id: researcher
+  modelAPI: stable-modelapi
+  model: "smollm2:135m"
+  mcpServers:
+  - shared-calc-mcp
+  config:
+    description: "Agent with a stable security identity and a calculator tool"
+    instructions: |
+      You are a helpful assistant with access to a calculator tool.
+      Use the calculator for any mathematical computations.
+    reasoningLoopMaxSteps: 5
+  agentNetwork:
+    expose: true
