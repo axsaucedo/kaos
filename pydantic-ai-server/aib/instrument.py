@@ -273,17 +273,18 @@ def instrument_fastapi(
     """Instrument a FastAPI/Starlette app to populate :data:`ctx` per request.
 
     Local runtime identity (``actor``/``actor_token``/``principal``) falls back to the
-    ``AIB_ACTOR`` / ``AIB_ACTOR_TOKEN`` / ``AIB_PRINCIPAL`` environment variables. The
+    ``AGENT_AUTH_IDENTITY`` / ``AGENT_AUTH_TOKEN`` / ``AGENT_AUTH_PRINCIPAL`` environment
+    variables (provider-agnostic; populated by the operator from the configured broker). The
     user principal is normally taken from the inbound ``x-principal`` header or the
     ``principal_resolver``; the fixed ``principal`` is only a fallback for processes with
     a constant trusted principal.
     """
     app.add_middleware(
         _PropagationMiddleware,
-        actor=actor or os.environ.get("AIB_ACTOR"),
-        actor_token=actor_token or os.environ.get("AIB_ACTOR_TOKEN"),
+        actor=actor or os.environ.get("AGENT_AUTH_IDENTITY"),
+        actor_token=actor_token or os.environ.get("AGENT_AUTH_TOKEN"),
         principal_resolver=principal_resolver,
-        default_principal=principal or os.environ.get("AIB_PRINCIPAL"),
+        default_principal=principal or os.environ.get("AGENT_AUTH_PRINCIPAL"),
     )
     return app
 

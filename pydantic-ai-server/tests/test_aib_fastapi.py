@@ -72,9 +72,9 @@ def test_principal_resolver_used_when_no_inbound_principal():
 
 
 def test_env_defaults_used(monkeypatch):
-    monkeypatch.setenv("AIB_ACTOR", "kaos://agent/default/env")
-    monkeypatch.setenv("AIB_ACTOR_TOKEN", "env-token")
-    monkeypatch.setenv("AIB_PRINCIPAL", "service://env")
+    monkeypatch.setenv("AGENT_AUTH_IDENTITY", "kaos://agent/default/env")
+    monkeypatch.setenv("AGENT_AUTH_TOKEN", "env-token")
+    monkeypatch.setenv("AGENT_AUTH_PRINCIPAL", "service://env")
     client = _make_app()
     seen = client.get("/seen").json()
     assert seen["actor"] == "kaos://agent/default/env"

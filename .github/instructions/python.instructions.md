@@ -37,7 +37,7 @@ make format                     # Auto-format code
 The `aib` SDK propagates two identities across agent hops (ADR-KAOS-003): the user **subject** (`Authorization` bearer + `x-principal`), forwarded unchanged, and the calling agent **actor** (`x-agent-authorization` bearer + `x-actor`), set to *this* agent on every outbound hop so each agent authenticates as itself. The SDK only propagates — it is not the enforcement boundary (the gateway enforces, later phases).
 
 - `AgentServer.__init__` calls `aib.instrument_fastapi(self.app, actor=...)` (extracts inbound context, generates `x-request-id` when absent) and `aib.instrument_httpx()` (injects context onto outbound calls). A single httpx patch covers A2A, MCP, and ModelAPI because all use httpx; injection is at request time, so clients built at startup still propagate, and it is **strictly additive** — an existing header (e.g. the ModelAPI API-key `Authorization`) is never overwritten.
-- The local actor defaults to `kaos://agent/{agent_name}`; override via `AIB_ACTOR`/`aib_actor` (and `AIB_ACTOR_TOKEN`, `AIB_PRINCIPAL`). Tokens are dummy/static at this stage — real minting + the machine-token lifecycle land in a later phase.
+- The local actor defaults to `kaos://agent/{agent_name}`; override via the `actor` kwarg or the provider-agnostic `AGENT_AUTH_IDENTITY` env var (and `AGENT_AUTH_TOKEN`, `AGENT_AUTH_PRINCIPAL`). Tokens are dummy/static at this stage — real minting + the machine-token lifecycle land in a later phase.
 - `AgentDeps.security_context` carries the non-secret context (request_id/session_id/principal/actor/scopes) for tools; raw bearer tokens are never placed on `AgentDeps` or persisted to memory.
 
 ## Key Environment Variables
