@@ -97,6 +97,9 @@ func TestGetConfigReadsAllFields(t *testing.T) {
 	t.Setenv(envExtAuthzURL, "aib-ext-authz.aib-system:9002")
 	t.Setenv(envIssuer, "http://aib-enduser.aib-system.svc.cluster.local:8000")
 	t.Setenv(envCredentialSecretPrefix, "kaos-aib")
+	t.Setenv(envUserIssuer, "http://keycloak.kaos-system.svc.cluster.local:8080/realms/kaos")
+	t.Setenv(envUserAudience, "kaos")
+	t.Setenv(envUserJWKSURI, "")
 
 	cfg := GetConfig()
 
@@ -105,6 +108,77 @@ func TestGetConfigReadsAllFields(t *testing.T) {
 	}
 	if cfg.TokenEndpoint() != "http://aib-enduser.aib-system.svc.cluster.local:8000/oauth2/token" {
 		t.Errorf("unexpected token endpoint %q", cfg.TokenEndpoint())
+	}
+	if cfg.UserIssuer != "http://keycloak.kaos-system.svc.cluster.local:8080/realms/kaos" {
+		t.Errorf("unexpected user issuer %q", cfg.UserIssuer)
+	}
+	if cfg.UserAudience != "kaos" {
+		t.Errorf("unexpected user audience %q", cfg.UserAudience)
+	}
+}
+
+func TestJWTEnabled(t *testing.T) {
+	cases := []struct {
+		name       string
+		issuer     string
+		userIssuer string
+		want       bool
+	}{
+		{"neither", "", "", false},
+		{"agent only", "http://aib:8000", "", true},
+		{"user only", "", "http://kc/realms/kaos", true},
+		{"both", "http://aib:8000", "http://kc/realms/kaos", true},
+		{"whitespace only", "  ", "  ", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := Config{Issuer: tc.issuer, UserIssuer: tc.userIssuer}
+			if cfg.JWTEnabled() != tc.want {
+				t.Errorf("JWTEnabled() = %v, want %v", cfg.JWTEnabled(), tc.want)
+			}
+		})
+	}
+}
+
+func TestAgentJWKSURI(t *testing.T) {
+	cases := []struct {
+		name   string
+		issuer string
+		want   string
+	}{
+		{"empty issuer", "", ""},
+		{"issuer without slash", "http://aib:8000", "http://aib:8000/oauth2/jwks.json"},
+		{"issuer with trailing slash", "http://aib:8000/", "http://aib:8000/oauth2/jwks.json"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := (Config{Issuer: tc.issuer}).AgentJWKSURI(); got != tc.want {
+				t.Errorf("AgentJWKSURI() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestUserJWKSURI(t *testing.T) {
+	cases := []struct {
+		name       string
+		userIssuer string
+		override   string
+		want       string
+	}{
+		{"empty", "", "", ""},
+		{"derived from realm issuer", "http://kc/realms/kaos", "", "http://kc/realms/kaos/protocol/openid-connect/certs"},
+		{"derived trims trailing slash", "http://kc/realms/kaos/", "", "http://kc/realms/kaos/protocol/openid-connect/certs"},
+		{"explicit override wins", "http://kc/realms/kaos", "http://kc/custom/jwks", "http://kc/custom/jwks"},
+		{"override without issuer", "", "http://kc/custom/jwks", "http://kc/custom/jwks"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := Config{UserIssuer: tc.userIssuer, UserJWKSURIOverride: tc.override}
+			if got := cfg.UserJWKSURI(); got != tc.want {
+				t.Errorf("UserJWKSURI() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
