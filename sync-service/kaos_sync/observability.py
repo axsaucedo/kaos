@@ -1,65 +1,175 @@
-"""Prometheus metrics and health/readiness endpoints for the sync service.
+"""OpenTelemetry metrics and health/readiness endpoints for the sync service.
 
-Metrics describe the most recent reconcile pass (counts, failures, prune activity) and
-are exposed on ``/metrics``. Liveness (``/healthz``) reports that the process is up;
-readiness (``/readyz``) reports that at least one reconcile pass has completed, so a
-deployment is only considered ready once it has projected the current desired state.
+Metrics are exported over OTLP (push) using the standard ``OTEL_*`` environment
+variables, consistent with the rest of KAOS — there is no scrape endpoint. Counters
+track cumulative reconcile activity (passes, mints, problems, prunes) and observable
+gauges report the most recent pass snapshot. Liveness (``/healthz``) and readiness
+(``/readyz``) are served over plain HTTP for the Kubernetes probes; readiness reports
+that at least one reconcile pass has completed.
 
 The path routing is factored into :func:`handle_path` so it can be unit tested without
-binding a socket; :func:`start_http_servers` wires that routing into a threaded HTTP
-server for the runtime.
+binding a socket; :func:`start_health_server` wires that routing into a threaded HTTP
+server for the runtime. Metric instruments live on :class:`SyncMetrics`, which binds to
+a meter provider so tests can drive it with an in-memory reader.
 """
 
 from __future__ import annotations
 
+import logging
+import os
 import threading
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Iterable, Optional
 
-from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, generate_latest
+from opentelemetry import metrics
+from opentelemetry.metrics import CallbackOptions, MeterProvider, Observation
 
-RECONCILE_PASSES = Counter("kaos_sync_reconcile_passes_total", "Total reconcile passes run.")
-RECONCILE_PROBLEMS = Counter(
-    "kaos_sync_reconcile_problems_total",
-    "Reconcile problems encountered, by category.",
-    ["category"],
-)
-CREDENTIALS_MINTED = Counter("kaos_sync_credentials_minted_total", "Credential mints performed.")
-PRUNED = Counter(
-    "kaos_sync_pruned_total", "Orphaned records removed during pruning, by kind.", ["kind"]
-)
-SERVICES_SYNCED = Gauge("kaos_sync_services", "Broker services reconciled in the last pass.")
-PERMISSION_SETS_SYNCED = Gauge(
-    "kaos_sync_permission_sets", "Broker permission sets reconciled in the last pass."
-)
-AGENTS_SYNCED = Gauge("kaos_sync_agents_synced", "Agents successfully synced in the last pass.")
-AGENTS_FAILED = Gauge("kaos_sync_agents_failed", "Agents that failed to sync in the last pass.")
-LAST_PASS_OK = Gauge(
-    "kaos_sync_last_pass_ok", "1 if the last reconcile pass had no problems, else 0."
-)
+logger = logging.getLogger("kaos_sync")
+
+_METER_NAME = "kaos-sync"
+_PREFIX = "kaos.sync."
+
+
+@dataclass
+class _Snapshot:
+    """Last-pass gauge values, replaced wholesale on each recorded pass."""
+
+    services: int = 0
+    permission_sets: int = 0
+    agents_synced: int = 0
+    agents_failed: int = 0
+    last_pass_ok: int = 0
+
+
+class SyncMetrics:
+    """OTel instruments describing the reconcile loop, bound to a meter provider.
+
+    Counters are cumulative; the last-pass values are reported through observable
+    gauges that read the current :class:`_Snapshot` at collection time.
+    """
+
+    def __init__(self, meter_provider: Optional[MeterProvider] = None) -> None:
+        meter = (meter_provider or metrics).get_meter(_METER_NAME)
+        self._snapshot = _Snapshot()
+
+        self._passes = meter.create_counter(
+            _PREFIX + "reconcile.passes",
+            unit="1",
+            description="Total reconcile passes run.",
+        )
+        self._problems = meter.create_counter(
+            _PREFIX + "reconcile.problems",
+            unit="1",
+            description="Reconcile problems encountered, by category.",
+        )
+        self._minted = meter.create_counter(
+            _PREFIX + "credentials.minted",
+            unit="1",
+            description="Credential mints performed.",
+        )
+        self._pruned = meter.create_counter(
+            _PREFIX + "pruned",
+            unit="1",
+            description="Orphaned records removed during pruning, by kind.",
+        )
+
+        for name, attr, description in (
+            ("services", "services", "Broker services reconciled in the last pass."),
+            (
+                "permission_sets",
+                "permission_sets",
+                "Broker permission sets reconciled in the last pass.",
+            ),
+            ("agents.synced", "agents_synced", "Agents successfully synced in the last pass."),
+            ("agents.failed", "agents_failed", "Agents that failed to sync in the last pass."),
+            ("last_pass_ok", "last_pass_ok", "1 if the last pass had no problems, else 0."),
+        ):
+            meter.create_observable_gauge(
+                _PREFIX + name,
+                callbacks=[self._observe(attr)],
+                unit="1",
+                description=description,
+            )
+
+    def _observe(self, attr: str):
+        def callback(_options: CallbackOptions) -> Iterable[Observation]:
+            return [Observation(getattr(self._snapshot, attr))]
+
+        return callback
+
+    def record(self, summary) -> None:
+        """Update instruments from a completed ``ReconcileSummary``."""
+        self._passes.add(1)
+
+        minted = sum(1 for agent in summary.agents if agent.credentials_minted)
+        if minted:
+            self._minted.add(minted)
+
+        for problem in summary.problems:
+            self._problems.add(1, {"category": problem.category.value})
+
+        for kind in ("agents", "permission_sets", "services", "secrets"):
+            count = getattr(summary.pruned, kind)
+            if count:
+                self._pruned.add(count, {"kind": kind})
+
+        self._snapshot = _Snapshot(
+            services=summary.services,
+            permission_sets=summary.permission_sets,
+            agents_synced=sum(1 for agent in summary.agents if agent.ok),
+            agents_failed=sum(1 for agent in summary.agents if not agent.ok),
+            last_pass_ok=1 if summary.ok else 0,
+        )
+
+
+_metrics: Optional[SyncMetrics] = None
+
+
+def setup_telemetry() -> bool:
+    """Configure OTLP metric export from the standard ``OTEL_*`` env vars.
+
+    Mirrors the rest of KAOS: a no-op unless both ``OTEL_SERVICE_NAME`` and
+    ``OTEL_EXPORTER_OTLP_ENDPOINT`` are set. When unset, :func:`record_summary` still
+    runs against the default no-op meter, so the reconcile loop is unaffected.
+    """
+    global _metrics
+    if not os.getenv("OTEL_SERVICE_NAME") or not os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT"):
+        logger.debug(
+            "OpenTelemetry not configured "
+            "(OTEL_SERVICE_NAME and OTEL_EXPORTER_OTLP_ENDPOINT required); "
+            "metrics export disabled"
+        )
+        return False
+
+    from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import OTLPMetricExporter
+    from opentelemetry.sdk.metrics import MeterProvider as SdkMeterProvider
+    from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+    from opentelemetry.sdk.resources import SERVICE_NAME, Resource
+
+    resource = Resource.create({SERVICE_NAME: os.environ["OTEL_SERVICE_NAME"]})
+    reader = PeriodicExportingMetricReader(OTLPMetricExporter())
+    provider = SdkMeterProvider(resource=resource, metric_readers=[reader])
+    metrics.set_meter_provider(provider)
+    _metrics = SyncMetrics(provider)
+    logger.info(
+        "OpenTelemetry metrics initialized (service=%s endpoint=%s)",
+        os.environ["OTEL_SERVICE_NAME"],
+        os.environ["OTEL_EXPORTER_OTLP_ENDPOINT"],
+    )
+    return True
 
 
 def record_summary(summary) -> None:
-    """Update metrics from a completed :class:`~kaos_sync.reconcile.ReconcileSummary`."""
-    RECONCILE_PASSES.inc()
-    minted = sum(1 for agent in summary.agents if agent.credentials_minted)
-    if minted:
-        CREDENTIALS_MINTED.inc(minted)
-    for problem in summary.problems:
-        RECONCILE_PROBLEMS.labels(category=problem.category.value).inc()
-    if summary.pruned.agents:
-        PRUNED.labels(kind="agents").inc(summary.pruned.agents)
-    if summary.pruned.permission_sets:
-        PRUNED.labels(kind="permission_sets").inc(summary.pruned.permission_sets)
-    if summary.pruned.services:
-        PRUNED.labels(kind="services").inc(summary.pruned.services)
-    if summary.pruned.secrets:
-        PRUNED.labels(kind="secrets").inc(summary.pruned.secrets)
-    SERVICES_SYNCED.set(summary.services)
-    PERMISSION_SETS_SYNCED.set(summary.permission_sets)
-    AGENTS_SYNCED.set(sum(1 for agent in summary.agents if agent.ok))
-    AGENTS_FAILED.set(sum(1 for agent in summary.agents if not agent.ok))
-    LAST_PASS_OK.set(1 if summary.ok else 0)
+    """Record a completed reconcile pass into OTel metrics.
+
+    Binds to the global meter provider on first use when telemetry was not explicitly
+    configured, so instruments are valid (and harmlessly no-op) regardless of setup.
+    """
+    global _metrics
+    if _metrics is None:
+        _metrics = SyncMetrics()
+    _metrics.record(summary)
 
 
 @dataclass
@@ -75,8 +185,6 @@ class HealthState:
 def handle_path(path: str, state: HealthState) -> tuple[int, str, bytes]:
     """Resolve an HTTP path to ``(status, content_type, body)`` for the health server."""
     route = path.split("?", 1)[0]
-    if route == "/metrics":
-        return 200, CONTENT_TYPE_LATEST, generate_latest()
     if route == "/healthz":
         return 200, "text/plain", b"ok"
     if route == "/readyz":
@@ -102,18 +210,8 @@ def _make_handler(state: HealthState) -> type[BaseHTTPRequestHandler]:
     return _Handler
 
 
-def start_http_servers(ports: tuple[int, ...], state: HealthState) -> list[ThreadingHTTPServer]:
-    """Start a daemon HTTP server on each distinct port serving the health routes.
-
-    The metrics and health ports are commonly the same; identical ports are de-duplicated
-    so a single server backs every route. Each server runs on a daemon thread so it never
-    blocks process shutdown.
-    """
-    handler = _make_handler(state)
-    servers: list[ThreadingHTTPServer] = []
-    for port in dict.fromkeys(ports):
-        server = ThreadingHTTPServer(("", port), handler)
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        servers.append(server)
-    return servers
+def start_health_server(port: int, state: HealthState) -> ThreadingHTTPServer:
+    """Start a daemon HTTP server serving ``/healthz`` and ``/readyz`` on ``port``."""
+    server = ThreadingHTTPServer(("", port), _make_handler(state))
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server

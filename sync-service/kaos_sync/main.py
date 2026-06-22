@@ -7,7 +7,12 @@ import time
 
 from kaos_sync.aib_client import AIBAdmin
 from kaos_sync.config import Settings
-from kaos_sync.observability import HealthState, record_summary, start_http_servers
+from kaos_sync.observability import (
+    HealthState,
+    record_summary,
+    setup_telemetry,
+    start_health_server,
+)
 from kaos_sync.projection import project
 from kaos_sync.reconcile import ReconcileSummary, reconcile
 
@@ -56,6 +61,7 @@ def run_once(settings: Settings, lister, aib, secrets) -> ReconcileSummary:
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     settings = Settings.from_env()
+    setup_telemetry()
 
     from kaos_sync.k8s import KaosResourceLister, KubeSecretStore, load_kube_config
 
@@ -72,16 +78,14 @@ def main() -> int:
     )
 
     health = HealthState()
-    start_http_servers((settings.metrics_port, settings.health_port), health)
+    start_health_server(settings.health_port, health)
 
     logger.info(
-        "starting reconcile loop admin=%s interval=%ds namespaces=%s "
-        "prune=%s metrics_port=%d health_port=%d",
+        "starting reconcile loop admin=%s interval=%ds namespaces=%s prune=%s health_port=%d",
         settings.aib_admin_url,
         settings.reconcile_interval_seconds,
         ",".join(settings.namespaces) or "<all>",
         settings.prune_enabled,
-        settings.metrics_port,
         settings.health_port,
     )
     while True:

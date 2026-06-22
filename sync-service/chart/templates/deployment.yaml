@@ -53,13 +53,15 @@ spec:
               value: {{ .Values.sync.retryMaxAttempts | quote }}
             - name: KAOS_SYNC_RETRY_BASE_DELAY_SECONDS
               value: {{ .Values.sync.retryBaseDelaySeconds | quote }}
-            - name: KAOS_SYNC_METRICS_PORT
-              value: {{ .Values.observability.metricsPort | quote }}
             - name: KAOS_SYNC_HEALTH_PORT
               value: {{ .Values.observability.healthPort | quote }}
+            {{- if .Values.observability.otel.endpoint }}
+            - name: OTEL_SERVICE_NAME
+              value: {{ .Values.observability.otel.serviceName | quote }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.observability.otel.endpoint | quote }}
+            {{- end }}
           ports:
-            - name: metrics
-              containerPort: {{ .Values.observability.metricsPort }}
             - name: health
               containerPort: {{ .Values.observability.healthPort }}
           livenessProbe:

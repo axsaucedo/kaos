@@ -17,7 +17,7 @@ The reconcile loop is resilient: every service, permission set and agent is reco
 
 ## Observability
 
-- Prometheus metrics on `KAOS_SYNC_METRICS_PORT` (default `9090`) at `/metrics`, including reconcile pass counts, minted credentials, projected resource counts and problems by category.
+- Metrics are pushed via OTLP to the endpoint in `OTEL_EXPORTER_OTLP_ENDPOINT` (using `OTEL_SERVICE_NAME`, default `kaos-sync`), including reconcile pass counts, minted credentials, projected resource counts and problems by category. Export is enabled only when both env vars are set.
 - Liveness probe at `/healthz` and readiness probe at `/readyz` on `KAOS_SYNC_HEALTH_PORT` (default `8080`); readiness flips to ready after the first reconcile pass completes.
 
 ## Layout
@@ -25,7 +25,7 @@ The reconcile loop is resilient: every service, permission set and agent is reco
 - `kaos_sync/projection.py` — pure projection of KAOS resources into desired AIB records (no I/O).
 - `kaos_sync/aib_client.py` — AIB admin API client with bounded retries.
 - `kaos_sync/reconcile.py` — reconcile loop, pruning and credential Secret writing.
-- `kaos_sync/observability.py` — Prometheus metrics and health/readiness endpoints.
+- `kaos_sync/observability.py` — OTLP metric export and health/readiness endpoints.
 - `kaos_sync/config.py` — settings.
 - `kaos_sync/main.py` — entrypoint.
 
