@@ -6,6 +6,7 @@ from kaos_sync.projection import (
     DesiredState,
     agent_external_id,
     mcpserver_resource_uri,
+    modelapi_resource_uri,
     permission_set_name,
     project,
     service_client_id,
@@ -20,11 +21,27 @@ def _mcpserver(name: str, namespace: str = "demo") -> dict:
     }
 
 
-def _agent(name: str, mcp_servers: list[str], namespace: str = "demo") -> dict:
+def _modelapi(name: str, namespace: str = "demo") -> dict:
+    return {
+        "kind": "ModelAPI",
+        "metadata": {"name": name, "namespace": namespace},
+        "spec": {"mode": "proxy"},
+    }
+
+
+def _agent(
+    name: str,
+    mcp_servers: list[str],
+    namespace: str = "demo",
+    model_api: str | None = "gpt",
+) -> dict:
+    spec: dict = {"model": "gpt-4", "mcpServers": mcp_servers}
+    if model_api is not None:
+        spec["modelAPI"] = model_api
     return {
         "kind": "Agent",
         "metadata": {"name": name, "namespace": namespace},
-        "spec": {"modelAPI": "gpt", "model": "gpt-4", "mcpServers": mcp_servers},
+        "spec": spec,
     }
 
 
@@ -33,6 +50,7 @@ def test_encoding_conventions():
     assert permission_set_name("demo", "github") == "kaos:mcpserver:demo:github:call"
     assert agent_external_id("demo", "researcher") == "kaos://agent/demo/researcher"
     assert mcpserver_resource_uri("demo", "github") == "kaos://mcpserver/demo/github"
+    assert modelapi_resource_uri("demo", "gpt") == "kaos://modelapi/demo/gpt"
 
 
 def test_project_full_graph():
@@ -40,35 +58,64 @@ def test_project_full_graph():
         [
             _mcpserver("github"),
             _mcpserver("slack"),
-            _agent("researcher", ["github"]),
+            _modelapi("gpt"),
+            _agent("researcher", ["github"], model_api="gpt"),
         ]
     )
 
-    # Both declared MCPServers become services even if only one is granted.
+    # Both declared MCPServers and the ModelAPI become services even if only some are granted.
     assert {s.client_id for s in state.services} == {
         "kaos-mcpserver-demo-github",
         "kaos-mcpserver-demo-slack",
+        "kaos-modelapi-demo-gpt",
     }
-    # Only the requested edge yields a permission set.
-    assert [ps.name for ps in state.permission_sets] == ["kaos:mcpserver:demo:github:call"]
+    # The requested MCP edge and the model API edge each yield a permission set.
+    assert {ps.name for ps in state.permission_sets} == {
+        "kaos:mcpserver:demo:github:call",
+        "kaos:modelapi:demo:gpt:call",
+    }
 
     assert len(state.agents) == 1
     agent = state.agents[0]
     assert agent.external_id == "kaos://agent/demo/researcher"
-    assert agent.permission_set_names == ("kaos:mcpserver:demo:github:call",)
-    assert agent.granted_resources == ("kaos://mcpserver/demo/github",)
+    # MCP edges are projected before the model API edge.
+    assert agent.permission_set_names == (
+        "kaos:mcpserver:demo:github:call",
+        "kaos:modelapi:demo:gpt:call",
+    )
+    assert agent.granted_resources == (
+        "kaos://mcpserver/demo/github",
+        "kaos://modelapi/demo/gpt",
+    )
 
 
-def test_agent_without_edges_is_skipped():
-    state = project([_mcpserver("github"), _agent("idle", [])])
+def test_model_api_edge_is_projected_without_mcp_servers():
+    # An agent with only a model API still gets a modelapi service, permission set and edge.
+    state = project([_agent("solo", [], model_api="gpt")])
+    assert [s.client_id for s in state.services] == ["kaos-modelapi-demo-gpt"]
+    assert [ps.name for ps in state.permission_sets] == ["kaos:modelapi:demo:gpt:call"]
+    assert len(state.agents) == 1
+    assert state.agents[0].granted_resources == ("kaos://modelapi/demo/gpt",)
+
+
+def test_agent_without_any_edge_is_skipped():
+    # No MCP servers and no model API: nothing to authorize, so the agent is skipped.
+    state = project([_mcpserver("github"), _agent("idle", [], model_api=None)])
     assert state.agents == []
     # The standalone MCPServer is still projected as a service.
     assert [s.client_id for s in state.services] == ["kaos-mcpserver-demo-github"]
 
 
+def test_declared_model_api_yields_service_even_when_ungranted():
+    state = project([_modelapi("gpt"), _agent("idle", [], model_api=None)])
+    assert [s.client_id for s in state.services] == ["kaos-modelapi-demo-gpt"]
+    assert state.permission_sets == []
+    assert state.agents == []
+
+
 def test_edge_to_undeclared_mcpserver_still_yields_service():
     # Agent references an MCPServer that has no standalone resource in the input.
-    state = project([_agent("researcher", ["ghost"])])
+    state = project([_agent("researcher", ["ghost"], model_api=None)])
     assert [s.client_id for s in state.services] == ["kaos-mcpserver-demo-ghost"]
     assert [ps.name for ps in state.permission_sets] == ["kaos:mcpserver:demo:ghost:call"]
     assert state.agents[0].granted_resources == ("kaos://mcpserver/demo/ghost",)
@@ -77,15 +124,16 @@ def test_edge_to_undeclared_mcpserver_still_yields_service():
 def test_projection_is_idempotent_and_deduplicates():
     resources = [
         _mcpserver("github"),
-        _agent("a", ["github"]),
-        _agent("b", ["github"]),
+        _modelapi("gpt"),
+        _agent("a", ["github"], model_api="gpt"),
+        _agent("b", ["github"], model_api="gpt"),
     ]
     first = project(resources)
     second = project(resources)
 
-    # Shared service/permission set are not duplicated across two agents.
-    assert len(first.services) == 1
-    assert len(first.permission_sets) == 1
+    # Shared services/permission sets are not duplicated across two agents.
+    assert len(first.services) == 2
+    assert len(first.permission_sets) == 2
     assert len(first.agents) == 2
 
     # Deterministic output: re-projecting the same input yields equal state.
@@ -93,7 +141,7 @@ def test_projection_is_idempotent_and_deduplicates():
 
 
 def test_admin_bodies_shape():
-    state = project([_mcpserver("github"), _agent("researcher", ["github"])])
+    state = project([_mcpserver("github"), _agent("researcher", ["github"], model_api=None)])
 
     svc_body = state.services[0].admin_body()
     assert svc_body["client_id"] == "kaos-mcpserver-demo-github"
@@ -109,6 +157,14 @@ def test_admin_bodies_shape():
     assert agent_body["permission_sets"] == [
         {"permission_set_id": "ps-1", "requirement_type": "mandatory"}
     ]
+
+
+def test_model_api_admin_body_uses_model_api_vocabulary():
+    state = project([_modelapi("gpt"), _agent("solo", [], model_api="gpt")])
+    svc = next(s for s in state.services if s.client_id == "kaos-modelapi-demo-gpt")
+    body = svc.admin_body()
+    assert body["display_name"] == "KAOS ModelAPI demo/gpt (synthetic)"
+    assert body["scopes"] == [{"scope_value": "call", "description": "Invoke the model API"}]
 
 
 def _as_tuple(state: DesiredState):

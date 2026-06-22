@@ -14,6 +14,7 @@ KAOS_GROUP = "kaos.tools"
 KAOS_VERSION = "v1alpha1"
 AGENT_PLURAL = "agents"
 MCPSERVER_PLURAL = "mcpservers"
+MODELAPI_PLURAL = "modelapis"
 
 
 def load_kube_config() -> None:
@@ -63,7 +64,7 @@ class KubeSecretStore:
 
 
 class KaosResourceLister:
-    """Lists KAOS Agent and MCPServer resources across the configured namespaces."""
+    """Lists KAOS Agent, MCPServer and ModelAPI resources across the configured namespaces."""
 
     def __init__(self, custom_api: client.CustomObjectsApi | None = None) -> None:
         self._api = custom_api or client.CustomObjectsApi()
@@ -84,6 +85,8 @@ class KaosResourceLister:
         return items
 
     def list_resources(self, namespaces: tuple[str, ...]) -> list[dict]:
-        return self._list(MCPSERVER_PLURAL, "MCPServer", namespaces) + self._list(
-            AGENT_PLURAL, "Agent", namespaces
+        return (
+            self._list(MCPSERVER_PLURAL, "MCPServer", namespaces)
+            + self._list(MODELAPI_PLURAL, "ModelAPI", namespaces)
+            + self._list(AGENT_PLURAL, "Agent", namespaces)
         )
