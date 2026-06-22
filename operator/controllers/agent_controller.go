@@ -700,18 +700,18 @@ func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *
 		env = append(env, logLevelEnv...)
 	}
 
-	// AIB agent identity and credentials (when security credential mounting is enabled)
+	// Agent identity and credentials (when security credential mounting is enabled)
 	env = append(env, buildAgentAuthEnvVars(agent)...)
 
 	return env
 }
 
 // buildAgentAuthEnvVars returns the agent-auth environment variables that give the
-// agent its AIB actor identity and, when provisioned, the credentials it uses to mint
-// an actor token. The client_id/client_secret are sourced from the per-agent credential
-// Secret as optional references, so the pod can start before the sync service has written
-// the Secret; the values appear once it exists. Returns nil when credential mounting is
-// not enabled, leaving existing pods unchanged.
+// agent its actor identity and, when provisioned, the credentials it uses to mint
+// an actor token, under the provider-agnostic AGENT_AUTH_ prefix. The client_id/client_secret
+// are sourced from the per-agent credential Secret as optional references, so the pod can
+// start before the sync service has written the Secret; the values appear once it exists.
+// Returns nil when credential mounting is not enabled, leaving existing pods unchanged.
 func buildAgentAuthEnvVars(agent *kaosv1alpha1.Agent) []corev1.EnvVar {
 	cfg := security.GetConfig()
 	if !cfg.CredentialMountingEnabled() {
@@ -722,11 +722,11 @@ func buildAgentAuthEnvVars(agent *kaosv1alpha1.Agent) []corev1.EnvVar {
 	optional := true
 	env := []corev1.EnvVar{
 		{
-			Name:  "AIB_ACTOR",
+			Name:  "AGENT_AUTH_IDENTITY",
 			Value: fmt.Sprintf("kaos://agent/%s/%s", agent.Namespace, agent.Name),
 		},
 		{
-			Name: "AIB_CLIENT_ID",
+			Name: "AGENT_AUTH_CLIENT_ID",
 			ValueFrom: &corev1.EnvVarSource{
 				SecretKeyRef: &corev1.SecretKeySelector{
 					LocalObjectReference: corev1.LocalObjectReference{Name: secretName},
@@ -736,7 +736,7 @@ func buildAgentAuthEnvVars(agent *kaosv1alpha1.Agent) []corev1.EnvVar {
 			},
 		},
 		{
-			Name: "AIB_CLIENT_SECRET",
+			Name: "AGENT_AUTH_CLIENT_SECRET",
 			ValueFrom: &corev1.EnvVarSource{
 				SecretKeyRef: &corev1.SecretKeySelector{
 					LocalObjectReference: corev1.LocalObjectReference{Name: secretName},
@@ -747,7 +747,7 @@ func buildAgentAuthEnvVars(agent *kaosv1alpha1.Agent) []corev1.EnvVar {
 		},
 	}
 	if endpoint := cfg.TokenEndpoint(); endpoint != "" {
-		env = append(env, corev1.EnvVar{Name: "AIB_TOKEN_ENDPOINT", Value: endpoint})
+		env = append(env, corev1.EnvVar{Name: "AGENT_AUTH_TOKEN_ENDPOINT", Value: endpoint})
 	}
 	return env
 }

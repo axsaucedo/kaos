@@ -88,7 +88,7 @@ security:
     # credentialSecretPrefix is the name prefix of the per-agent credential
     # Secret provisioned by the sync service. When set (and extAuthzUrl is set),
     # the operator mounts the matching Secret into each agent pod as the
-    # AIB_CLIENT_ID/AIB_CLIENT_SECRET environment variables. Empty disables
+    # AGENT_AUTH_CLIENT_ID/AGENT_AUTH_CLIENT_SECRET environment variables. Empty disables
     # credential mounting. Example: kaos-aib
     credentialSecretPrefix: ""
 
