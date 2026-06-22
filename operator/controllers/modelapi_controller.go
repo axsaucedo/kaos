@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/go-logr/logr"
 	"gopkg.in/yaml.v3"
@@ -23,6 +24,7 @@ import (
 
 	kaosv1alpha1 "github.com/axsaucedo/kaos/operator/api/v1alpha1"
 	"github.com/axsaucedo/kaos/operator/pkg/gateway"
+	"github.com/axsaucedo/kaos/operator/pkg/identity"
 	"github.com/axsaucedo/kaos/operator/pkg/security"
 	"github.com/axsaucedo/kaos/operator/pkg/util"
 )
@@ -89,6 +91,46 @@ func (r *ModelAPIReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 		// Requeue to continue with fresh object after status is set
 		return ctrl.Result{Requeue: true}, nil
+	}
+
+	// Reject a ModelAPI that claims an explicit security.id already held by an
+	// older resource; the oldest holder owns the shared identity and losers skip
+	// identity-dependent provisioning, adopting the id once the holder is gone.
+	if id := modelapi.Spec.Security.GetID(); id != "" {
+		var apis kaosv1alpha1.ModelAPIList
+		if err := r.List(ctx, &apis); err != nil {
+			log.Error(err, "failed to list ModelAPIs for identity conflict detection")
+			return ctrl.Result{}, err
+		}
+		candidates := make([]identity.Holder, 0, len(apis.Items))
+		for i := range apis.Items {
+			m := &apis.Items[i]
+			if m.DeletionTimestamp != nil {
+				continue
+			}
+			candidates = append(candidates, identity.Holder{
+				Namespace:         m.Namespace,
+				Name:              m.Name,
+				SecurityID:        m.Spec.Security.GetID(),
+				CreationTimestamp: m.CreationTimestamp.Time,
+			})
+		}
+		self := identity.Holder{
+			Namespace:         modelapi.Namespace,
+			Name:              modelapi.Name,
+			SecurityID:        id,
+			CreationTimestamp: modelapi.CreationTimestamp.Time,
+		}
+		if winner, conflict := identity.DetectConflict(self, candidates); conflict {
+			modelapi.Status.Phase = "Failed"
+			modelapi.Status.Ready = false
+			modelapi.Status.Message = fmt.Sprintf("security.id %q already in use by %s/%s", id, winner.Namespace, winner.Name)
+			if err := r.Status().Update(ctx, modelapi); err != nil {
+				log.Error(err, "failed to update status")
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{RequeueAfter: time.Second * 30}, nil
+		}
 	}
 
 	// Create ConfigMap for Proxy mode - always needed since we use config file mode

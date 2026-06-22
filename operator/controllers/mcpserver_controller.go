@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/go-logr/logr"
 	"gopkg.in/yaml.v3"
@@ -21,6 +22,7 @@ import (
 
 	kaosv1alpha1 "github.com/axsaucedo/kaos/operator/api/v1alpha1"
 	"github.com/axsaucedo/kaos/operator/pkg/gateway"
+	"github.com/axsaucedo/kaos/operator/pkg/identity"
 	"github.com/axsaucedo/kaos/operator/pkg/security"
 	"github.com/axsaucedo/kaos/operator/pkg/util"
 )
@@ -104,6 +106,46 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		}
 		// Requeue to continue with fresh object after status is set
 		return ctrl.Result{Requeue: true}, nil
+	}
+
+	// Reject an MCPServer that claims an explicit security.id already held by an
+	// older resource; the oldest holder owns the shared identity and losers skip
+	// identity-dependent provisioning, adopting the id once the holder is gone.
+	if id := mcpserver.Spec.Security.GetID(); id != "" {
+		var servers kaosv1alpha1.MCPServerList
+		if err := r.List(ctx, &servers); err != nil {
+			log.Error(err, "failed to list MCPServers for identity conflict detection")
+			return ctrl.Result{}, err
+		}
+		candidates := make([]identity.Holder, 0, len(servers.Items))
+		for i := range servers.Items {
+			s := &servers.Items[i]
+			if s.DeletionTimestamp != nil {
+				continue
+			}
+			candidates = append(candidates, identity.Holder{
+				Namespace:         s.Namespace,
+				Name:              s.Name,
+				SecurityID:        s.Spec.Security.GetID(),
+				CreationTimestamp: s.CreationTimestamp.Time,
+			})
+		}
+		self := identity.Holder{
+			Namespace:         mcpserver.Namespace,
+			Name:              mcpserver.Name,
+			SecurityID:        id,
+			CreationTimestamp: mcpserver.CreationTimestamp.Time,
+		}
+		if winner, conflict := identity.DetectConflict(self, candidates); conflict {
+			mcpserver.Status.Phase = "Failed"
+			mcpserver.Status.Ready = false
+			mcpserver.Status.Message = fmt.Sprintf("security.id %q already in use by %s/%s", id, winner.Namespace, winner.Name)
+			if err := r.Status().Update(ctx, mcpserver); err != nil {
+				log.Error(err, "failed to update status")
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{RequeueAfter: time.Second * 30}, nil
+		}
 	}
 
 	// Validate telemetry config

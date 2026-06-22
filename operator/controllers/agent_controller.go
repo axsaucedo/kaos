@@ -95,6 +95,47 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{Requeue: true}, nil
 	}
 
+	// Reject a resource that claims an explicit security.id already held by an
+	// older resource. The oldest holder owns the shared identity; losers are
+	// marked Failed and skip identity-dependent provisioning. A periodic requeue
+	// lets a loser adopt the id once the previous holder is gone.
+	if id := agent.Spec.Security.GetID(); id != "" {
+		var agents kaosv1alpha1.AgentList
+		if err := r.List(ctx, &agents); err != nil {
+			log.Error(err, "failed to list Agents for identity conflict detection")
+			return ctrl.Result{}, err
+		}
+		candidates := make([]identity.Holder, 0, len(agents.Items))
+		for i := range agents.Items {
+			a := &agents.Items[i]
+			if a.DeletionTimestamp != nil {
+				continue
+			}
+			candidates = append(candidates, identity.Holder{
+				Namespace:         a.Namespace,
+				Name:              a.Name,
+				SecurityID:        a.Spec.Security.GetID(),
+				CreationTimestamp: a.CreationTimestamp.Time,
+			})
+		}
+		self := identity.Holder{
+			Namespace:         agent.Namespace,
+			Name:              agent.Name,
+			SecurityID:        id,
+			CreationTimestamp: agent.CreationTimestamp.Time,
+		}
+		if winner, conflict := identity.DetectConflict(self, candidates); conflict {
+			agent.Status.Phase = "Failed"
+			agent.Status.Ready = false
+			agent.Status.Message = fmt.Sprintf("security.id %q already in use by %s/%s", id, winner.Namespace, winner.Name)
+			if err := r.Status().Update(ctx, agent); err != nil {
+				log.Error(err, "failed to update status")
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{RequeueAfter: time.Second * 30}, nil
+		}
+	}
+
 	// Validate telemetry config
 	var componentTelemetry *kaosv1alpha1.TelemetryConfig
 	if agent.Spec.Config != nil {
