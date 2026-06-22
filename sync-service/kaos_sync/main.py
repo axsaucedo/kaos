@@ -36,7 +36,7 @@ def run_once(settings: Settings, lister, aib, secrets) -> ReconcileSummary:
     logger.info(
         "reconciled services=%d permission_sets=%d agents=%d credentials_minted=%d "
         "failed=%d pruned_agents=%d pruned_permission_sets=%d pruned_services=%d "
-        "pruned_secrets=%d problems=%d",
+        "pruned_secrets=%d problems=%d conflicts=%d",
         summary.services,
         summary.permission_sets,
         len(summary.agents),
@@ -47,6 +47,7 @@ def run_once(settings: Settings, lister, aib, secrets) -> ReconcileSummary:
         summary.pruned.services,
         summary.pruned.secrets,
         len(summary.problems),
+        len(summary.conflicts),
     )
     for problem in summary.problems:
         logger.warning(
@@ -54,6 +55,17 @@ def run_once(settings: Settings, lister, aib, secrets) -> ReconcileSummary:
             problem.category.value,
             problem.resource,
             problem.detail,
+        )
+    for conflict in summary.conflicts:
+        logger.warning(
+            "identity conflict kind=%s security_id=%s resource=%s/%s held_by=%s/%s "
+            "(skipped, not projected)",
+            conflict.kind,
+            conflict.security_id,
+            conflict.namespace,
+            conflict.name,
+            conflict.holder_namespace,
+            conflict.holder_name,
         )
     return summary
 

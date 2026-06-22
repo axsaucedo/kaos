@@ -339,3 +339,31 @@ def test_prune_skips_malformed_external_id_as_drift():
     assert any(p.category == ProblemCategory.STALE_EXTERNAL_ID for p in summary.problems)
     # The malformed record is left in place rather than blindly deleted.
     assert aib.get("agents", "malformed") is not None
+
+
+def _agent_with_id(name, mcp_servers, security_id, namespace, creation):
+    return {
+        "kind": "Agent",
+        "metadata": {
+            "name": name,
+            "namespace": namespace,
+            "creationTimestamp": creation,
+        },
+        "spec": {"mcpServers": mcp_servers, "security": {"id": security_id}},
+    }
+
+
+def test_reconcile_surfaces_identity_conflicts_and_skips_loser():
+    older = _agent_with_id("older", ["github"], "shared", "ns-a", "2024-01-01T00:00:00Z")
+    newer = _agent_with_id("newer", ["github"], "shared", "ns-b", "2024-02-01T00:00:00Z")
+    aib = FakeAIB()
+    secrets = FakeSecrets()
+
+    summary = reconcile(project([newer, older]), aib, secrets, "kaos-aib")
+
+    assert len(summary.conflicts) == 1
+    conflict = summary.conflicts[0]
+    assert conflict.kind == "agent"
+    assert (conflict.namespace, conflict.name) == ("ns-b", "newer")
+    # Only the legitimate (oldest) holder is reconciled into AIB.
+    assert [a.external_id for a in summary.agents] == ["kaos://agent/shared"]

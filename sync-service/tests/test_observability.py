@@ -82,3 +82,17 @@ def test_counters_accumulate_across_passes():
 
     values = _collect(reader)
     assert values["kaos.sync.reconcile.passes"] == 2
+
+
+def test_record_counts_identity_conflicts():
+    from tests.test_reconcile import _agent_with_id
+
+    sync_metrics, reader = _metrics_with_reader()
+    older = _agent_with_id("older", ["github"], "shared", "ns-a", "2024-01-01T00:00:00Z")
+    newer = _agent_with_id("newer", ["github"], "shared", "ns-b", "2024-02-01T00:00:00Z")
+
+    summary = reconcile(project([newer, older]), FakeAIB(), FakeSecrets())
+    sync_metrics.record(summary)
+
+    values = _collect(reader)
+    assert values["kaos.sync.identity.conflicts"] == 1

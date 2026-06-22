@@ -73,6 +73,11 @@ class SyncMetrics:
             unit="1",
             description="Orphaned records removed during pruning, by kind.",
         )
+        self._conflicts = meter.create_counter(
+            _PREFIX + "identity.conflicts",
+            unit="1",
+            description="Duplicate explicit security.id conflicts detected, by kind.",
+        )
 
         for name, attr, description in (
             ("services", "services", "Broker services reconciled in the last pass."),
@@ -113,6 +118,9 @@ class SyncMetrics:
             count = getattr(summary.pruned, kind)
             if count:
                 self._pruned.add(count, {"kind": kind})
+
+        for conflict in getattr(summary, "conflicts", ()):
+            self._conflicts.add(1, {"kind": conflict.kind})
 
         self._snapshot = _Snapshot(
             services=summary.services,

@@ -14,6 +14,7 @@ from typing import List, Protocol
 from kaos_sync.projection import (
     DesiredAgent,
     DesiredState,
+    IdentityConflict,
     is_kaos_agent_display_name,
     is_kaos_permission_set_name,
     is_kaos_service_client_id,
@@ -101,6 +102,7 @@ class ReconcileSummary:
     agents: list[AgentSync] = field(default_factory=list)
     pruned: PruneSummary = field(default_factory=PruneSummary)
     problems: list[Problem] = field(default_factory=list)
+    conflicts: list[IdentityConflict] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -135,6 +137,7 @@ def reconcile(
     configured ``namespaces`` for Secret discovery.
     """
     summary = ReconcileSummary()
+    summary.conflicts = list(desired.conflicts)
 
     service_ids: dict[str, str] = {}
     for service in desired.services:
