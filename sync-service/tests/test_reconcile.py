@@ -326,10 +326,12 @@ def test_prune_skips_malformed_external_id_as_drift():
     aib = FakeAIB()
     secrets = FakeSecrets()
     reconcile(project([_agent("a", ["github"])]), aib, secrets, "kaos-aib")
-    # Inject a KAOS-prefixed agent whose external id cannot be parsed into ns/name.
-    aib.collections["agents"]["kaos://agent/onlyone"] = {
+    # Inject a KAOS-prefixed agent whose external id is neither the
+    # namespace-scoped form (<ns>/<name>) nor the explicit-id form (<id>): it has
+    # too many path segments and cannot be a valid KAOS agent identity.
+    aib.collections["agents"]["kaos://agent/a/b/c"] = {
         "id": "malformed",
-        "display_name": "kaos://agent/onlyone",
+        "display_name": "kaos://agent/a/b/c",
     }
 
     summary = reconcile(project([]), aib, secrets, "kaos-aib", prune=True)

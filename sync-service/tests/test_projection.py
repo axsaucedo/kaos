@@ -173,3 +173,80 @@ def _as_tuple(state: DesiredState):
         tuple(sorted(ps.name for ps in state.permission_sets)),
         tuple(sorted(a.external_id for a in state.agents)),
     )
+
+
+def _mcpserver_id(name, security_id, namespace="demo", creation="2024-01-01T00:00:00Z"):
+    return {
+        "kind": "MCPServer",
+        "metadata": {
+            "name": name,
+            "namespace": namespace,
+            "creationTimestamp": creation,
+        },
+        "spec": {"runtime": "python-string", "security": {"id": security_id}},
+    }
+
+
+def _agent_id(name, mcp_servers, security_id, namespace="demo", creation="2024-01-01T00:00:00Z"):
+    return {
+        "kind": "Agent",
+        "metadata": {
+            "name": name,
+            "namespace": namespace,
+            "creationTimestamp": creation,
+        },
+        "spec": {"model": "gpt-4", "mcpServers": mcp_servers, "security": {"id": security_id}},
+    }
+
+
+def test_resolve_logical_id_explicit_vs_default():
+    from kaos_sync.projection import resolve_logical_id
+
+    assert resolve_logical_id("agent", "ns", "n", "stable") == "kaos://agent/stable"
+    assert resolve_logical_id("agent", "ns", "n", "") == "kaos://agent/ns/n"
+
+
+def test_explicit_agent_id_is_namespace_independent():
+    state = project([_agent_id("researcher", ["github"], "team-researcher")])
+    assert [a.external_id for a in state.agents] == ["kaos://agent/team-researcher"]
+
+
+def test_explicit_mcpserver_id_resolves_edge_and_service():
+    # An agent edge to an MCPServer with an explicit id authorizes against the
+    # resolved URI, and the synthetic service client_id derives from the id.
+    state = project(
+        [
+            _mcpserver_id("github", "shared-github"),
+            _agent_id("researcher", ["github"], "team-researcher"),
+        ]
+    )
+    agent = state.agents[0]
+    assert agent.granted_resources == ("kaos://mcpserver/shared-github",)
+    assert any(s.client_id == "kaos-mcpserver-shared-github" for s in state.services)
+    assert any(ps.name == "kaos:mcpserver:shared-github:call" for ps in state.permission_sets)
+
+
+def test_duplicate_agent_id_keeps_oldest_and_records_conflict():
+    older = _agent_id(
+        "older", ["github"], "shared", namespace="ns-a", creation="2024-01-01T00:00:00Z"
+    )
+    newer = _agent_id(
+        "newer", ["github"], "shared", namespace="ns-b", creation="2024-02-01T00:00:00Z"
+    )
+    state = project([newer, older])
+
+    assert [a.external_id for a in state.agents] == ["kaos://agent/shared"]
+    assert [(a.namespace, a.name) for a in state.agents] == [("ns-a", "older")]
+    assert len(state.conflicts) == 1
+    conflict = state.conflicts[0]
+    assert conflict.kind == "agent"
+    assert conflict.security_id == "shared"
+    assert (conflict.namespace, conflict.name) == ("ns-b", "newer")
+    assert (conflict.holder_namespace, conflict.holder_name) == ("ns-a", "older")
+
+
+def test_default_resources_unchanged_with_no_security_id():
+    without = project([_mcpserver("github"), _agent("researcher", ["github"])])
+    assert without.conflicts == []
+    assert any(s.client_id == "kaos-mcpserver-demo-github" for s in without.services)
+    assert [a.external_id for a in without.agents] == ["kaos://agent/demo/researcher"]

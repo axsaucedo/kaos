@@ -17,7 +17,7 @@ from kaos_sync.projection import (
     is_kaos_agent_display_name,
     is_kaos_permission_set_name,
     is_kaos_service_client_id,
-    parse_agent_external_id,
+    is_valid_agent_external_id,
 )
 
 
@@ -227,7 +227,7 @@ def _prune(
             continue
         if display_name in desired_external_ids:
             continue
-        if parse_agent_external_id(display_name) is None:
+        if not is_valid_agent_external_id(display_name):
             problems.append(
                 Problem(
                     ProblemCategory.STALE_EXTERNAL_ID,
