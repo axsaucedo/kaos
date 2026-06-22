@@ -15,6 +15,12 @@ func newAgent(namespace, name string) *kaosv1alpha1.Agent {
 	}
 }
 
+func newAgentWithSecurityID(namespace, name, securityID string) *kaosv1alpha1.Agent {
+	a := newAgent(namespace, name)
+	a.Spec.Security = &kaosv1alpha1.SecuritySpec{ID: securityID}
+	return a
+}
+
 func envByName(env []corev1.EnvVar, name string) (corev1.EnvVar, bool) {
 	for _, e := range env {
 		if e.Name == name {
@@ -91,5 +97,18 @@ func TestBuildAgentAuthEnvVarsWithoutIssuer(t *testing.T) {
 	}
 	if _, ok := envByName(env, "AGENT_AUTH_CLIENT_ID"); !ok {
 		t.Errorf("credentials must still be mounted without an issuer")
+	}
+}
+
+func TestBuildAgentAuthEnvVarsExplicitSecurityID(t *testing.T) {
+	t.Setenv("SECURITY_AGENT_AUTH_EXT_AUTHZ_URL", "aib-ext-authz.aib-system:9002")
+	t.Setenv("SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX", "kaos-aib")
+	t.Setenv("SECURITY_AGENT_AUTH_ISSUER", "http://aib-enduser.aib-system.svc.cluster.local:8000")
+
+	env := buildAgentAuthEnvVars(newAgentWithSecurityID("demo", "researcher", "shared-id"))
+
+	actor, ok := envByName(env, "AGENT_AUTH_IDENTITY")
+	if !ok || actor.Value != "kaos://agent/shared-id" {
+		t.Errorf("AGENT_AUTH_IDENTITY = %q (found=%v), want kaos://agent/shared-id", actor.Value, ok)
 	}
 }

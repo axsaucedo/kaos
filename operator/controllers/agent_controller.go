@@ -25,6 +25,7 @@ import (
 
 	kaosv1alpha1 "github.com/axsaucedo/kaos/operator/api/v1alpha1"
 	"github.com/axsaucedo/kaos/operator/pkg/gateway"
+	"github.com/axsaucedo/kaos/operator/pkg/identity"
 	"github.com/axsaucedo/kaos/operator/pkg/security"
 	"github.com/axsaucedo/kaos/operator/pkg/util"
 )
@@ -727,7 +728,7 @@ func buildAgentAuthEnvVars(agent *kaosv1alpha1.Agent) []corev1.EnvVar {
 	env := []corev1.EnvVar{
 		{
 			Name:  "AGENT_AUTH_IDENTITY",
-			Value: fmt.Sprintf("kaos://agent/%s/%s", agent.Namespace, agent.Name),
+			Value: identity.Resolve(identity.KindAgent, agent.Namespace, agent.Name, agent.Spec.Security.GetID()),
 		},
 		{
 			Name: "AGENT_AUTH_CLIENT_ID",
