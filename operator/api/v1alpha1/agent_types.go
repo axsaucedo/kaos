@@ -207,6 +207,10 @@ type AgentSpec struct {
 	// +kubebuilder:validation:Optional
 	AgentNetwork *AgentNetworkConfig `json:"agentNetwork,omitempty"`
 
+	// Security configures the per-resource security identity
+	// +kubebuilder:validation:Optional
+	Security *SecuritySpec `json:"security,omitempty"`
+
 	// Config contains agent-specific configuration
 	// +kubebuilder:validation:Optional
 	Config *AgentConfig `json:"config,omitempty"`

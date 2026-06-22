@@ -37,6 +37,10 @@ type MCPServerSpec struct {
 	// +kubebuilder:validation:Optional
 	Container *ContainerOverride `json:"container,omitempty"`
 
+	// Security configures the per-resource security identity
+	// +kubebuilder:validation:Optional
+	Security *SecuritySpec `json:"security,omitempty"`
+
 	// PodSpec allows overriding the generated pod spec using strategic merge patch
 	// +kubebuilder:validation:Optional
 	PodSpec *corev1.PodSpec `json:"podSpec,omitempty"`

@@ -8916,6 +8916,22 @@ spec:
                 required:
                 - containers
                 type: object
+              security:
+                description: Security configures the per-resource security identity
+                properties:
+                  id:
+                    description: |-
+                      ID overrides the logical security identity of the resource. When set, the
+                      resolved identity becomes kaos://{kind}/{id} (namespace-independent),
+                      letting the resource keep a stable identity across a namespace move or a
+                      rename so delegated grants survive. When omitted, the identity defaults to
+                      kaos://{kind}/{namespace}/{name}. An explicit id is a shared logical
+                      identity and must be unique per kind among active resources. The value is
+                      embedded directly after kaos://{kind}/, so it is restricted to a safe path
+                      segment (lowercase alphanumerics, '-', '_', '.').
+                    pattern: ^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$
+                    type: string
+                type: object
               waitForDependencies:
                 default: true
                 description: |-
