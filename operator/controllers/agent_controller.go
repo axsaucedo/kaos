@@ -324,15 +324,19 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			log.Error(err, "failed to reconcile HTTPRoute")
 		}
 
-		if secCfg := security.GetConfig(); secCfg.IsOperational() {
+		if secCfg := security.GetConfig(); secCfg.IsOperational() || secCfg.ExtProcEnabled() {
 			routeName := gateway.HTTPRouteName(gateway.ResourceTypeAgent, agent.Name)
-			if err := security.ReconcileSecurityPolicy(ctx, r.Client, r.Scheme, agent, security.PolicyParams{
+			policyParams := security.PolicyParams{
 				Name:      routeName,
 				Namespace: agent.Namespace,
 				RouteName: routeName,
 				Labels:    map[string]string{"app": "agent", "agent": agent.Name},
-			}, secCfg, log); err != nil {
+			}
+			if err := security.ReconcileSecurityPolicy(ctx, r.Client, r.Scheme, agent, policyParams, secCfg, log); err != nil {
 				log.Error(err, "failed to reconcile SecurityPolicy")
+			}
+			if err := security.ReconcileEnvoyExtensionPolicy(ctx, r.Client, r.Scheme, agent, policyParams, secCfg, log); err != nil {
+				log.Error(err, "failed to reconcile EnvoyExtensionPolicy")
 			}
 		}
 	}

@@ -291,15 +291,19 @@ func (r *ModelAPIReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		log.Error(err, "failed to reconcile HTTPRoute")
 	}
 
-	if secCfg := security.GetConfig(); secCfg.IsOperational() {
+	if secCfg := security.GetConfig(); secCfg.IsOperational() || secCfg.ExtProcEnabled() {
 		routeName := gateway.HTTPRouteName(gateway.ResourceTypeModelAPI, modelapi.Name)
-		if err := security.ReconcileSecurityPolicy(ctx, r.Client, r.Scheme, modelapi, security.PolicyParams{
+		policyParams := security.PolicyParams{
 			Name:      routeName,
 			Namespace: modelapi.Namespace,
 			RouteName: routeName,
 			Labels:    map[string]string{"app": "modelapi", "modelapi": modelapi.Name},
-		}, secCfg, log); err != nil {
+		}
+		if err := security.ReconcileSecurityPolicy(ctx, r.Client, r.Scheme, modelapi, policyParams, secCfg, log); err != nil {
 			log.Error(err, "failed to reconcile SecurityPolicy")
+		}
+		if err := security.ReconcileEnvoyExtensionPolicy(ctx, r.Client, r.Scheme, modelapi, policyParams, secCfg, log); err != nil {
+			log.Error(err, "failed to reconcile EnvoyExtensionPolicy")
 		}
 	}
 
