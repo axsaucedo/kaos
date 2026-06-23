@@ -212,6 +212,11 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 	}
 
+	// When gateway routing is enabled, repoint internal endpoints at the gateway so
+	// agent->ModelAPI/MCP/peer traffic traverses jwt_authn/ext_authz/ext_proc rather
+	// than reaching the workload Service directly (which NetworkPolicy denies).
+	r.applyGatewayRouting(ctx, agent, modelapi, mcpServers, peerAgents, log)
+
 	// Create or update Deployment
 	deployment := &appsv1.Deployment{}
 	deploymentName := fmt.Sprintf("agent-%s", agent.Name)
@@ -377,6 +382,50 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	return ctrl.Result{}, nil
+}
+
+// applyGatewayRouting rewrites the resolved ModelAPI, MCP, and peer endpoints to
+// gateway-routed URLs when gateway routing is enabled. All referenced resources
+// live in the agent's namespace, so each URL becomes
+// http://<gatewayHost>/<namespace>/<type>/<name>, which the per-resource
+// HTTPRoute matches and rewrites back to the workload. The gateway host is taken
+// from explicit config or, failing that, the Gateway resource's status address;
+// when neither is available the direct Service URLs are left untouched so
+// connectivity is never silently broken.
+func (r *AgentReconciler) applyGatewayRouting(
+	ctx context.Context,
+	agent *kaosv1alpha1.Agent,
+	modelapi *kaosv1alpha1.ModelAPI,
+	mcpServers map[string]string,
+	peerAgents map[string]string,
+	log logr.Logger,
+) {
+	secCfg := security.GetConfig()
+	if !secCfg.GatewayRoutingEnabled() {
+		return
+	}
+
+	host := strings.TrimSpace(secCfg.GatewayHost)
+	if host == "" {
+		resolved, err := gateway.StatusAddress(ctx, r.Client)
+		if err != nil {
+			log.Error(err, "failed to resolve gateway address for routing; using direct endpoints")
+			return
+		}
+		host = resolved
+	}
+	if host == "" {
+		log.Info("gateway routing enabled but no gateway host resolved; using direct endpoints")
+		return
+	}
+
+	modelapi.Status.Endpoint = gateway.GatewayEndpoint(host, agent.Namespace, gateway.ResourceTypeModelAPI, modelapi.Name)
+	for name := range mcpServers {
+		mcpServers[name] = gateway.GatewayEndpoint(host, agent.Namespace, gateway.ResourceTypeMCP, name)
+	}
+	for name := range peerAgents {
+		peerAgents[name] = gateway.GatewayEndpoint(host, agent.Namespace, gateway.ResourceTypeAgent, name)
+	}
 }
 
 // constructDeployment creates a Deployment for the Agent

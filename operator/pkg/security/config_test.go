@@ -348,3 +348,25 @@ func TestGetConfigNetworkPolicyDisabledParsing(t *testing.T) {
 		t.Errorf("expected NetworkPolicyDisabled=false when unset")
 	}
 }
+
+func TestGatewayRoutingEnabled(t *testing.T) {
+	if (Config{}).GatewayRoutingEnabled() {
+		t.Errorf("expected routing disabled by default")
+	}
+	if !(Config{GatewayRouting: true}).GatewayRoutingEnabled() {
+		t.Errorf("expected routing enabled when flag set")
+	}
+}
+
+func TestGetConfigReadsGatewayRoutingFields(t *testing.T) {
+	t.Setenv(envExtAuthzURL, "svc:9191")
+	t.Setenv(envGatewayHost, "172.18.0.4:80")
+	t.Setenv(envGatewayRouting, "true")
+	cfg := GetConfig()
+	if cfg.GatewayHost != "172.18.0.4:80" {
+		t.Errorf("GatewayHost = %q, want 172.18.0.4:80", cfg.GatewayHost)
+	}
+	if !cfg.GatewayRoutingEnabled() {
+		t.Errorf("expected GatewayRoutingEnabled true")
+	}
+}

@@ -79,6 +79,31 @@ func GatewayEndpoint(gatewayHost string, namespace string, resourceType Resource
 	return fmt.Sprintf("http://%s/%s/%s/%s", gatewayHost, namespace, resourceType, resourceName)
 }
 
+// StatusAddress returns the first status address reported by the configured
+// Gateway resource, or an empty string when the Gateway is not found or has no
+// address yet. It lets the operator discover the in-cluster gateway host
+// (e.g. the LoadBalancer/MetalLB address) without it being configured explicitly.
+func StatusAddress(ctx context.Context, c client.Client) (string, error) {
+	config := GetConfig()
+	if config.GatewayName == "" {
+		return "", nil
+	}
+	gw := &gatewayv1.Gateway{}
+	err := c.Get(ctx, types.NamespacedName{Name: config.GatewayName, Namespace: config.GatewayNamespace}, gw)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	for _, addr := range gw.Status.Addresses {
+		if addr.Value != "" {
+			return addr.Value, nil
+		}
+	}
+	return "", nil
+}
+
 // HTTPRouteParams holds parameters for creating an HTTPRoute
 type HTTPRouteParams struct {
 	ResourceType ResourceType

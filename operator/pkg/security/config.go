@@ -71,6 +71,21 @@ type Config struct {
 	// that suppresses NetworkPolicy generation even when security is operational, for
 	// CNIs that misbehave or clusters that manage isolation externally.
 	NetworkPolicyDisabled bool
+
+	// GatewayHost is the host[:port] of the Envoy Gateway as reachable from inside
+	// the cluster (security.gatewayHost). When gateway routing is enabled and this
+	// is set, the operator injects gateway-routed URLs into agents so internal
+	// agent->MCP/ModelAPI/peer traffic flows through the gateway (where jwt_authn,
+	// ext_authz and ext_proc apply) instead of directly to the workload Service. An
+	// empty value lets the controller resolve the host from the Gateway resource's
+	// status address.
+	GatewayHost string
+
+	// GatewayRouting enables injecting gateway-routed endpoint URLs into agents
+	// (security.gatewayRouting.enabled). Default off so existing installs keep using
+	// direct Service URLs; it is enabled together with NetworkPolicy to force the
+	// gateway to be the only application path between workloads.
+	GatewayRouting bool
 }
 
 const (
@@ -85,6 +100,8 @@ const (
 	envOperatorNamespace      = "SECURITY_OPERATOR_NAMESPACE"
 	envPodNamespace           = "POD_NAMESPACE"
 	envNetworkPolicyDisabled  = "SECURITY_NETWORK_POLICY_DISABLED"
+	envGatewayHost            = "SECURITY_GATEWAY_HOST"
+	envGatewayRouting         = "SECURITY_GATEWAY_ROUTING_ENABLED"
 )
 
 // Default namespaces used by NetworkPolicy ingress rules when not configured.
@@ -110,6 +127,8 @@ func GetConfig() Config {
 		GatewayNamespace:       os.Getenv(envGatewayNamespace),
 		OperatorNamespace:      operatorNamespace,
 		NetworkPolicyDisabled:  parseBoolEnv(envNetworkPolicyDisabled),
+		GatewayHost:            os.Getenv(envGatewayHost),
+		GatewayRouting:         parseBoolEnv(envGatewayRouting),
 	}
 }
 
@@ -248,6 +267,16 @@ func (c Config) OperatorNamespaceOrDefault() string {
 		return ns
 	}
 	return defaultOperatorNamespace
+}
+
+// GatewayRoutingEnabled reports whether the operator should inject gateway-routed
+// endpoint URLs into agents so internal agent->MCP/ModelAPI/peer traffic flows
+// through the gateway. It is off unless explicitly enabled. The actual gateway
+// host is resolved separately (explicit GatewayHost or the Gateway status
+// address); when no host can be resolved the controller falls back to direct
+// Service URLs so connectivity is never silently broken.
+func (c Config) GatewayRoutingEnabled() bool {
+	return c.GatewayRouting
 }
 
 // ExtAuthzBackendRef parses the configured ext_authz host:port URL into the
