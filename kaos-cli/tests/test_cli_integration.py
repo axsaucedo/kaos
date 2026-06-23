@@ -1022,6 +1022,107 @@ class TestAuthWiring:
         )
         assert "security.agentAuth.extProcUrl=" not in " ".join(args)
 
+    def test_build_auth_operator_args_network_policy_default_on(self):
+        from kaos_cli.install import _build_auth_operator_args
+
+        args = _build_auth_operator_args(
+            "aib-access-check-grpc.aib-system:9191",
+            "http://aib.aib-system:8000",
+            "kaos-aib",
+        )
+        # NetworkPolicy is enabled by default in the chart, so no override is emitted.
+        assert "security.networkPolicy.enabled=false" not in " ".join(args)
+
+    def test_build_auth_operator_args_disable_network_policy(self):
+        from kaos_cli.install import _build_auth_operator_args
+
+        args = _build_auth_operator_args(
+            "aib-access-check-grpc.aib-system:9191",
+            "http://aib.aib-system:8000",
+            "kaos-aib",
+            network_policy=False,
+        )
+        assert "security.networkPolicy.enabled=false" in " ".join(args)
+
+    def test_build_auth_operator_args_gateway_routing_and_host(self):
+        from kaos_cli.install import _build_auth_operator_args
+
+        args = _build_auth_operator_args(
+            "aib-access-check-grpc.aib-system:9191",
+            "http://aib.aib-system:8000",
+            "kaos-aib",
+            gateway_routing=True,
+            gateway_host="172.18.0.200",
+        )
+        joined = " ".join(args)
+        assert "security.gatewayRouting.enabled=true" in joined
+        assert "security.gatewayHost=172.18.0.200" in joined
+
+    def test_build_auth_operator_args_omits_routing_when_default(self):
+        from kaos_cli.install import _build_auth_operator_args
+
+        args = _build_auth_operator_args(
+            "aib-access-check-grpc.aib-system:9191",
+            "http://aib.aib-system:8000",
+            "kaos-aib",
+        )
+        joined = " ".join(args)
+        assert "security.gatewayRouting.enabled=true" not in joined
+        assert "security.gatewayHost=" not in joined
+
+    def test_build_auth_operator_args_tls_self_signed(self):
+        from kaos_cli.install import _build_auth_operator_args
+
+        args = _build_auth_operator_args(
+            "aib-access-check-grpc.aib-system:9191",
+            "http://aib.aib-system:8000",
+            "kaos-aib",
+            tls_mode="selfSigned",
+        )
+        joined = " ".join(args)
+        assert "security.tls.mode=selfSigned" in joined
+        assert "security.tls.certManager.issuerRef.name=" not in joined
+
+    def test_build_auth_operator_args_tls_cert_manager(self):
+        from kaos_cli.install import _build_auth_operator_args
+
+        args = _build_auth_operator_args(
+            "aib-access-check-grpc.aib-system:9191",
+            "http://aib.aib-system:8000",
+            "kaos-aib",
+            tls_mode="certManager",
+            tls_issuer_name="letsencrypt-prod",
+            tls_issuer_kind="ClusterIssuer",
+        )
+        joined = " ".join(args)
+        assert "security.tls.mode=certManager" in joined
+        assert "security.tls.certManager.issuerRef.name=letsencrypt-prod" in joined
+        assert "security.tls.certManager.issuerRef.kind=ClusterIssuer" in joined
+
+    def test_build_auth_operator_args_tls_provided(self):
+        from kaos_cli.install import _build_auth_operator_args
+
+        args = _build_auth_operator_args(
+            "aib-access-check-grpc.aib-system:9191",
+            "http://aib.aib-system:8000",
+            "kaos-aib",
+            tls_mode="provided",
+            tls_secret_name="my-gateway-tls",
+        )
+        joined = " ".join(args)
+        assert "security.tls.mode=provided" in joined
+        assert "security.tls.secretName=my-gateway-tls" in joined
+
+    def test_build_auth_operator_args_omits_tls_when_unset(self):
+        from kaos_cli.install import _build_auth_operator_args
+
+        args = _build_auth_operator_args(
+            "aib-access-check-grpc.aib-system:9191",
+            "http://aib.aib-system:8000",
+            "kaos-aib",
+        )
+        assert "security.tls.mode=" not in " ".join(args)
+
     def test_default_ext_proc_url(self):
         from kaos_cli.install import _default_ext_proc_url
 
