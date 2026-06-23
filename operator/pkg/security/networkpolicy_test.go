@@ -99,6 +99,105 @@ func TestConstructNetworkPolicyDefaultNamespaces(t *testing.T) {
 	}
 }
 
+func TestConstructNetworkPolicyEgressRules(t *testing.T) {
+	cfg := Config{
+		ExtAuthzURL:         "aib-ext-authz.aib-system.svc.cluster.local:9191",
+		ExtProcURL:          "aib-extproc.aib-system.svc.cluster.local:50051",
+		Issuer:              "http://aib-enduser.aib-system.svc.cluster.local:8000",
+		GatewayNamespace:    "envoy-gateway-system",
+		OperatorNamespace:   "kaos-system",
+		NetworkPolicyEgress: true,
+	}
+	np := constructNetworkPolicy(NetworkPolicyParams{
+		Name: "mcp-github", Namespace: "default", PodSelector: mcpPodSelector(),
+	}, cfg)
+
+	if !hasPolicyType(np, networkingv1.PolicyTypeIngress) || !hasPolicyType(np, networkingv1.PolicyTypeEgress) {
+		t.Fatalf("expected ingress+egress PolicyTypes, got %#v", np.Spec.PolicyTypes)
+	}
+	if !hasDNSRule(np) {
+		t.Fatalf("expected DNS egress rule with UDP+TCP 53, got %#v", np.Spec.Egress)
+	}
+	if !hasNamespaceEgress(np, "envoy-gateway-system") {
+		t.Errorf("expected gateway namespace egress")
+	}
+	if !hasNamespaceEgress(np, "aib-system") {
+		t.Errorf("expected AIB broker namespace egress")
+	}
+	if hasExternalEgress(np) {
+		t.Errorf("non-ModelAPI policy should not allow external egress")
+	}
+}
+
+func TestConstructNetworkPolicyModelAPIExternalEgress(t *testing.T) {
+	cfg := Config{ExtAuthzURL: "svc:9191", NetworkPolicyEgress: true}
+	np := constructNetworkPolicy(NetworkPolicyParams{
+		Name: "modelapi-openai", Namespace: "default", PodSelector: map[string]string{"app": "modelapi"}, AllowExternalEgress: true,
+	}, cfg)
+
+	if !hasExternalEgress(np) {
+		t.Fatalf("expected ModelAPI external egress allowance, got %#v", np.Spec.Egress)
+	}
+}
+
+func hasPolicyType(np *networkingv1.NetworkPolicy, want networkingv1.PolicyType) bool {
+	for _, got := range np.Spec.PolicyTypes {
+		if got == want {
+			return true
+		}
+	}
+	return false
+}
+
+func hasNamespaceEgress(np *networkingv1.NetworkPolicy, namespace string) bool {
+	for _, rule := range np.Spec.Egress {
+		for _, peer := range rule.To {
+			if peer.NamespaceSelector != nil && peer.NamespaceSelector.MatchLabels[namespaceNameLabel] == namespace {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func hasDNSRule(np *networkingv1.NetworkPolicy) bool {
+	for _, rule := range np.Spec.Egress {
+		hasKubeSystem := false
+		hasUDP := false
+		hasTCP := false
+		for _, peer := range rule.To {
+			if peer.NamespaceSelector != nil && peer.NamespaceSelector.MatchLabels[namespaceNameLabel] == kubeSystemNamespace {
+				hasKubeSystem = true
+			}
+		}
+		for _, port := range rule.Ports {
+			if port.Port != nil && port.Port.IntVal == 53 && port.Protocol != nil {
+				switch *port.Protocol {
+				case corev1.ProtocolUDP:
+					hasUDP = true
+				case corev1.ProtocolTCP:
+					hasTCP = true
+				}
+			}
+		}
+		if hasKubeSystem && hasUDP && hasTCP {
+			return true
+		}
+	}
+	return false
+}
+
+func hasExternalEgress(np *networkingv1.NetworkPolicy) bool {
+	for _, rule := range np.Spec.Egress {
+		for _, peer := range rule.To {
+			if peer.IPBlock != nil && peer.IPBlock.CIDR == "0.0.0.0/0" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func reconcileScheme(t *testing.T) *runtime.Scheme {
 	t.Helper()
 	s := runtime.NewScheme()

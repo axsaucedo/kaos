@@ -1044,6 +1044,27 @@ class TestAuthWiring:
         )
         assert "security.networkPolicy.enabled=false" in " ".join(args)
 
+    def test_build_auth_operator_args_enable_network_policy_egress(self):
+        from kaos_cli.install import _build_auth_operator_args
+
+        args = _build_auth_operator_args(
+            "aib-access-check-grpc.aib-system:9191",
+            "http://aib.aib-system:8000",
+            "kaos-aib",
+            network_policy_egress=True,
+        )
+        assert "security.networkPolicy.egress.enabled=true" in " ".join(args)
+
+    def test_build_auth_operator_args_omits_network_policy_egress_by_default(self):
+        from kaos_cli.install import _build_auth_operator_args
+
+        args = _build_auth_operator_args(
+            "aib-access-check-grpc.aib-system:9191",
+            "http://aib.aib-system:8000",
+            "kaos-aib",
+        )
+        assert "security.networkPolicy.egress.enabled=true" not in " ".join(args)
+
     def test_build_auth_operator_args_gateway_routing_and_host(self):
         from kaos_cli.install import _build_auth_operator_args
 

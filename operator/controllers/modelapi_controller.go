@@ -306,10 +306,11 @@ func (r *ModelAPIReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 			log.Error(err, "failed to reconcile EnvoyExtensionPolicy")
 		}
 		if err := security.ReconcileNetworkPolicy(ctx, r.Client, r.Scheme, modelapi, security.NetworkPolicyParams{
-			Name:        routeName,
-			Namespace:   modelapi.Namespace,
-			PodSelector: map[string]string{"app": "modelapi", "modelapi": modelapi.Name},
-			Labels:      map[string]string{"app": "modelapi", "modelapi": modelapi.Name},
+			Name:                routeName,
+			Namespace:           modelapi.Namespace,
+			PodSelector:         map[string]string{"app": "modelapi", "modelapi": modelapi.Name},
+			Labels:              map[string]string{"app": "modelapi", "modelapi": modelapi.Name},
+			AllowExternalEgress: true,
 		}, secCfg, log); err != nil {
 			log.Error(err, "failed to reconcile NetworkPolicy")
 		}
