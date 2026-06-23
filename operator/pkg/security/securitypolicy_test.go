@@ -213,3 +213,53 @@ func TestConstructSecurityPolicyNoJWTBlockWhenDisabled(t *testing.T) {
 		t.Errorf("expected extAuth to be present")
 	}
 }
+
+// TestConstructSecurityPolicyBackendRefIsConfigDriven proves the ext_authz
+// backend is backend-neutral: swapping the default AIB access-check for an
+// alternative gRPC ext_authz backend (e.g. opa-envoy) is a pure configuration
+// change via ExtAuthzURL, with no change to the operator's policy generation.
+func TestConstructSecurityPolicyBackendRefIsConfigDriven(t *testing.T) {
+	params := PolicyParams{Name: "mcp-github", Namespace: "default", RouteName: "mcp-github"}
+
+	cases := []struct {
+		name     string
+		url      string
+		wantName string
+		wantNS   string
+		wantPort int64
+	}{
+		{
+			name:     "default aib backend",
+			url:      "aib-access-check.kaos-system.svc.cluster.local:9191",
+			wantName: "aib-access-check",
+			wantNS:   "kaos-system",
+			wantPort: 9191,
+		},
+		{
+			name:     "opa-envoy drop-in backend",
+			url:      "opa-envoy.opa-system.svc.cluster.local:9191",
+			wantName: "opa-envoy",
+			wantNS:   "opa-system",
+			wantPort: 9191,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			policy, err := constructSecurityPolicy(params, Config{ExtAuthzURL: tc.url})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			backendRef, found, err := unstructured.NestedMap(policy.Object, "spec", "extAuth", "grpc", "backendRef")
+			if err != nil || !found {
+				t.Fatalf("expected grpc backendRef, found=%v err=%v", found, err)
+			}
+			if backendRef["kind"] != "Service" || backendRef["name"] != tc.wantName || backendRef["namespace"] != tc.wantNS {
+				t.Errorf("backendRef did not follow ExtAuthzURL config: %#v", backendRef)
+			}
+			if port, ok := backendRef["port"].(int64); !ok || port != tc.wantPort {
+				t.Errorf("expected port int64(%d), got %#v", tc.wantPort, backendRef["port"])
+			}
+		})
+	}
+}
