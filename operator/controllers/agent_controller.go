@@ -433,6 +433,13 @@ func (r *AgentReconciler) constructDeployment(agent *kaosv1alpha1.Agent, modelap
 		Containers: []corev1.Container{container},
 	}
 
+	// Mount the per-agent credential Secret as a file so the runtime can re-read the
+	// client_secret on rotation (when credential mounting is enabled).
+	if volume, mount := buildAgentAuthVolume(agent); volume != nil {
+		basePodSpec.Volumes = append(basePodSpec.Volumes, *volume)
+		basePodSpec.Containers[0].VolumeMounts = append(basePodSpec.Containers[0].VolumeMounts, *mount)
+	}
+
 	// Apply spec.container override using strategic merge patch
 	if agent.Spec.Container != nil {
 		containerPatch := containerOverrideToPodSpecPatch(*agent.Spec.Container)
@@ -753,7 +760,41 @@ func buildAgentAuthEnvVars(agent *kaosv1alpha1.Agent) []corev1.EnvVar {
 	if endpoint := cfg.TokenEndpoint(); endpoint != "" {
 		env = append(env, corev1.EnvVar{Name: "AGENT_AUTH_TOKEN_ENDPOINT", Value: endpoint})
 	}
+	// Point the runtime at the mounted client_secret file so it can re-read the
+	// credential on rotation. The SecretKeyRef env above stays as a startup fallback.
+	env = append(env, corev1.EnvVar{
+		Name:  "AGENT_AUTH_CLIENT_SECRET_FILE",
+		Value: cfg.CredentialSecretFilePath(),
+	})
 	return env
+}
+
+// buildAgentAuthVolume returns the projected credential volume and its read-only mount
+// for the agent container when credential mounting is enabled, or nil otherwise. The
+// per-agent credential Secret is mounted at the configured directory so the runtime can
+// re-read the client_secret on rotation. The Secret reference is optional so the pod can
+// start before the sync service has written it.
+func buildAgentAuthVolume(agent *kaosv1alpha1.Agent) (*corev1.Volume, *corev1.VolumeMount) {
+	cfg := security.GetConfig()
+	if !cfg.CredentialMountingEnabled() {
+		return nil, nil
+	}
+	optional := true
+	volume := &corev1.Volume{
+		Name: "agent-auth-credentials",
+		VolumeSource: corev1.VolumeSource{
+			Secret: &corev1.SecretVolumeSource{
+				SecretName: cfg.CredentialSecretName(agent.Name),
+				Optional:   &optional,
+			},
+		},
+	}
+	mount := &corev1.VolumeMount{
+		Name:      "agent-auth-credentials",
+		MountPath: cfg.CredentialMountDir(),
+		ReadOnly:  true,
+	}
+	return volume, mount
 }
 
 // constructService creates a Service for A2A communication

@@ -77,6 +77,42 @@ func TestBuildAgentAuthEnvVarsEnabled(t *testing.T) {
 	if !ok || endpoint.Value != "http://aib-enduser.aib-system.svc.cluster.local:8000/oauth2/token" {
 		t.Errorf("AGENT_AUTH_TOKEN_ENDPOINT = %q, want the issuer token endpoint", endpoint.Value)
 	}
+
+	secretFile, ok := envByName(env, "AGENT_AUTH_CLIENT_SECRET_FILE")
+	if !ok || secretFile.Value != "/var/run/aib/client_secret" {
+		t.Errorf("AGENT_AUTH_CLIENT_SECRET_FILE = %q, want /var/run/aib/client_secret", secretFile.Value)
+	}
+}
+
+func TestBuildAgentAuthVolumeDisabled(t *testing.T) {
+	t.Setenv("SECURITY_AGENT_AUTH_EXT_AUTHZ_URL", "")
+	t.Setenv("SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX", "")
+
+	if volume, mount := buildAgentAuthVolume(newAgent("demo", "researcher")); volume != nil || mount != nil {
+		t.Errorf("expected no credential volume when mounting is disabled, got %v / %v", volume, mount)
+	}
+}
+
+func TestBuildAgentAuthVolumeEnabled(t *testing.T) {
+	t.Setenv("SECURITY_AGENT_AUTH_EXT_AUTHZ_URL", "aib-ext-authz.aib-system:9002")
+	t.Setenv("SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX", "kaos-aib")
+
+	volume, mount := buildAgentAuthVolume(newAgent("demo", "researcher"))
+	if volume == nil || mount == nil {
+		t.Fatalf("expected a credential volume and mount when mounting is enabled")
+	}
+	if volume.Secret == nil || volume.Secret.SecretName != "kaos-aib-researcher" {
+		t.Errorf("volume secret name = %v, want kaos-aib-researcher", volume.Secret)
+	}
+	if volume.Secret.Optional == nil || !*volume.Secret.Optional {
+		t.Errorf("credential volume secret must be optional so the pod can start before the Secret exists")
+	}
+	if mount.MountPath != "/var/run/aib" || !mount.ReadOnly {
+		t.Errorf("mount = %s (readOnly=%v), want /var/run/aib read-only", mount.MountPath, mount.ReadOnly)
+	}
+	if mount.Name != volume.Name {
+		t.Errorf("mount name %q must match volume name %q", mount.Name, volume.Name)
+	}
 }
 
 func TestBuildAgentAuthEnvVarsWithoutIssuer(t *testing.T) {

@@ -109,6 +109,30 @@ func (c Config) TokenEndpoint() string {
 	return issuer + "/oauth2/token"
 }
 
+// credentialMountDir is the directory into which the per-agent credential Secret is
+// projected in agent pods. The client_secret is exposed as a file under this directory
+// so the runtime can re-read it on rotation rather than relying on a static env value.
+const credentialMountDir = "/var/run/aib"
+
+// credentialSecretKey is the Secret data key holding the agent's client secret.
+const credentialSecretKey = "client_secret"
+
+// CredentialMountDir returns the directory under which the credential Secret is mounted.
+func (c Config) CredentialMountDir() string {
+	return credentialMountDir
+}
+
+// CredentialSecretKey returns the Secret data key holding the agent's client secret.
+func (c Config) CredentialSecretKey() string {
+	return credentialSecretKey
+}
+
+// CredentialSecretFilePath returns the absolute path of the mounted client_secret file
+// that the runtime reads (and re-reads on rotation) to mint actor tokens.
+func (c Config) CredentialSecretFilePath() string {
+	return credentialMountDir + "/" + credentialSecretKey
+}
+
 // JWTEnabled reports whether the operator should emit jwt_authn providers on
 // protected routes. It is true when either the agent issuer or the user issuer
 // is configured. This is independent of IsOperational (which gates ext_authz):
