@@ -29,6 +29,14 @@ HEADER_SCOPES = "x-aib-scopes"
 HEADER_SUBJECT_TOKEN = "authorization"
 HEADER_ACTOR_TOKEN = "x-agent-authorization"
 
+# Response headers the KAOS gateway stamps on an enforcement decision so a downstream
+# runtime can interpret the outcome from headers alone (never the body). The ext_authz
+# denied path sets ``x-kaos-access-reason`` (``platform_grant_missing`` /
+# ``user_grant_required``); the ext_proc token-exchange re-auth path sets it to
+# ``third_party_reauth_required`` and adds ``x-kaos-reauth-url``.
+HEADER_ACCESS_REASON = "x-kaos-access-reason"
+HEADER_REAUTH_URL = "x-kaos-reauth-url"
+
 # Context keys carrying a raw bearer token; serialized as ``Bearer <value>`` and never logged.
 _TOKEN_FIELDS = {"subject_token": HEADER_SUBJECT_TOKEN, "actor_token": HEADER_ACTOR_TOKEN}
 
@@ -377,6 +385,25 @@ async def _refresh_actor_header_async(request: Any) -> bool:
     return True
 
 
+def _raise_for_gateway_outcome(request: Any, response: Any) -> None:
+    """Raise a typed AIB outcome when a response carries a KAOS-gateway denial.
+
+    Header-gated (``x-kaos-access-reason``) so it imports the outcome machinery only
+    for genuine gateway enforcement responses; ordinary traffic and non-KAOS 4xx/5xx
+    responses are untouched. Reads only headers — never the body — so streaming
+    responses are unaffected.
+    """
+    if HEADER_ACCESS_REASON not in response.headers:
+        return
+    from .client import raise_for_gateway_outcome
+
+    raise_for_gateway_outcome(
+        response,
+        resource=getattr(getattr(request, "url", None), "host", "") or "",
+        action=(getattr(request, "method", "") or "").lower(),
+    )
+
+
 def instrument_httpx() -> None:
     """Patch ``httpx`` so outbound requests carry the propagation headers.
 
@@ -391,6 +418,12 @@ def instrument_httpx() -> None:
     case where the cached token expired or the credential rotated mid-flight. Requests with
     no managed identity, no actor-token header, or a non-401 response behave exactly as
     before (no retry).
+
+    When a response carries the KAOS-gateway enforcement header (``x-kaos-access-reason``),
+    the outcome is raised as a typed :class:`aib.AccessDenied` /
+    :class:`aib.ReauthenticationRequired` so the runtime can surface the reason (and any
+    re-auth URL) instead of an opaque transport error. Responses without that header are
+    returned unchanged.
 
     Injection is additive and reads from :data:`ctx`; in internet-facing deployments,
     callers are responsible for not placing sensitive tokens in :data:`ctx` for requests
@@ -411,6 +444,7 @@ def instrument_httpx() -> None:
         response = sync_send(self, request, *args, **kwargs)
         if response.status_code == 401 and had_actor and _refresh_actor_header_sync(request):
             response = sync_send(self, request, *args, **kwargs)
+        _raise_for_gateway_outcome(request, response)
         return response
 
     async def _patched_async_send(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
@@ -419,6 +453,7 @@ def instrument_httpx() -> None:
         response = await async_send(self, request, *args, **kwargs)
         if response.status_code == 401 and had_actor and await _refresh_actor_header_async(request):
             response = await async_send(self, request, *args, **kwargs)
+        _raise_for_gateway_outcome(request, response)
         return response
 
     httpx.Client.send = _patched_sync_send  # ty: ignore[invalid-assignment]
