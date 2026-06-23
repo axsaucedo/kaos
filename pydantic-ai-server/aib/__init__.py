@@ -18,6 +18,15 @@ The SDK is *not* the enforcement boundary; it only propagates.
 
 from __future__ import annotations
 
+from .client import (
+    AccessDecision,
+    AccessDenied,
+    AccessRequest,
+    AsyncClient,
+    Client,
+    ReauthenticationRequired,
+    TokenResult,
+)
 from .identity import (
     AIBUnavailable,
     ActorTokenManager,
@@ -57,6 +66,13 @@ __all__ = [
     "reset_manager",
     "ActorTokenManager",
     "AIBUnavailable",
+    "Client",
+    "AsyncClient",
+    "AccessRequest",
+    "AccessDecision",
+    "AccessDenied",
+    "ReauthenticationRequired",
+    "TokenResult",
     "HEADER_REQUEST_ID",
     "HEADER_SESSION_ID",
     "HEADER_PRINCIPAL",
