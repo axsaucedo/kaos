@@ -1,22 +1,29 @@
-.PHONY: help install lint format test
+IMG ?= axsauze/kaos-sync:dev
+
+.PHONY: help build test vet lint docker-build clean
 
 help:
 	@echo "KAOS sync service targets:"
-	@echo "  install - Create venv and install the package with dev extras"
-	@echo "  lint    - Run black --check and ty type checking"
-	@echo "  format  - Format code with black"
-	@echo "  test    - Run unit tests"
+	@echo "  build        - Compile the kaos-sync binary into bin/"
+	@echo "  test         - Run unit tests"
+	@echo "  vet          - Run go vet"
+	@echo "  lint         - Run gofmt check and go vet"
+	@echo "  docker-build - Build the container image (IMG=$(IMG))"
 
-install:
-	python -m venv .venv
-	. .venv/bin/activate && pip install -e '.[dev]'
-
-lint:
-	black --check .
-	uvx ty check
-
-format:
-	black .
+build:
+	go build -o bin/kaos-sync ./cmd
 
 test:
-	python -m pytest tests/ -v
+	go test ./... -v
+
+vet:
+	go vet ./...
+
+lint: vet
+	@test -z "$$(gofmt -l cmd internal)" || (echo "gofmt needed on:" && gofmt -l cmd internal && exit 1)
+
+docker-build:
+	docker build -t $(IMG) .
+
+clean:
+	rm -rf bin

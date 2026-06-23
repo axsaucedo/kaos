@@ -43,27 +43,27 @@ spec:
               value: {{ join "," .Values.sync.namespaces | quote }}
             - name: KAOS_SYNC_CREDENTIAL_SECRET_PREFIX
               value: {{ .Values.sync.credentialSecretPrefix | quote }}
-            - name: KAOS_SYNC_RECONCILE_INTERVAL_SECONDS
-              value: {{ .Values.sync.reconcileIntervalSeconds | quote }}
-            - name: KAOS_SYNC_REQUEST_TIMEOUT_SECONDS
-              value: {{ .Values.sync.requestTimeoutSeconds | quote }}
+            - name: KAOS_SYNC_RECONCILE_INTERVAL
+              value: {{ .Values.sync.reconcileInterval | quote }}
+            - name: KAOS_SYNC_REQUEST_TIMEOUT
+              value: {{ .Values.sync.requestTimeout | quote }}
             - name: KAOS_SYNC_PRUNE_ENABLED
               value: {{ .Values.sync.pruneEnabled | quote }}
-            - name: KAOS_SYNC_RETRY_MAX_ATTEMPTS
-              value: {{ .Values.sync.retryMaxAttempts | quote }}
-            - name: KAOS_SYNC_RETRY_BASE_DELAY_SECONDS
-              value: {{ .Values.sync.retryBaseDelaySeconds | quote }}
-            - name: KAOS_SYNC_HEALTH_PORT
-              value: {{ .Values.observability.healthPort | quote }}
-            {{- if .Values.observability.otel.endpoint }}
-            - name: OTEL_SERVICE_NAME
-              value: {{ .Values.observability.otel.serviceName | quote }}
-            - name: OTEL_EXPORTER_OTLP_ENDPOINT
-              value: {{ .Values.observability.otel.endpoint | quote }}
-            {{- end }}
+            - name: KAOS_SYNC_LEADER_ELECTION_ENABLED
+              value: {{ .Values.sync.leaderElection | quote }}
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: KAOS_SYNC_HEALTH_PROBE_ADDRESS
+              value: {{ printf ":%v" .Values.ports.health | quote }}
+            - name: KAOS_SYNC_METRICS_ADDRESS
+              value: {{ printf ":%v" .Values.ports.metrics | quote }}
           ports:
             - name: health
-              containerPort: {{ .Values.observability.healthPort }}
+              containerPort: {{ .Values.ports.health }}
+            - name: metrics
+              containerPort: {{ .Values.ports.metrics }}
           livenessProbe:
             httpGet:
               path: /healthz

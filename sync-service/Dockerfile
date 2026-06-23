@@ -1,12 +1,20 @@
-FROM python:3.12-slim
+FROM golang:1.26-alpine AS builder
+WORKDIR /workspace
 
-WORKDIR /app
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
-COPY pyproject.toml README.md ./
-COPY kaos_sync ./kaos_sync
+COPY cmd/ cmd/
+COPY internal/ internal/
 
-RUN pip install --no-cache-dir .
+ARG TARGETARCH
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build -a -ldflags "-s -w" -o kaos-sync ./cmd
 
-USER 1000:1000
-
-ENTRYPOINT ["kaos-sync"]
+FROM gcr.io/distroless/static:nonroot
+WORKDIR /
+COPY --from=builder /workspace/kaos-sync .
+USER 65532:65532
+ENTRYPOINT ["/kaos-sync"]

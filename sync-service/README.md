@@ -1,38 +1,70 @@
-# KAOS sync service
+# kaos-sync
 
-A lightweight external service that synchronizes KAOS custom resources into the Agentic Identity Broker (AIB), giving each agent an AIB-issued identity and the permission grants implied by its declared MCP server usage.
+The KAOS↔AIB sync service. It is a standalone `controller-runtime` manager that
+projects KAOS `Agent` / `MCPServer` / `ModelAPI` resources into the Agentic
+Identity Broker (AIB) admin model and provisions the per-agent credential
+`Secret`s that the operator mounts into agent pods.
+
+The framework supplies the watch, informer cache, leader election, periodic
+resync and requeue/backoff; the service code is just the projection, the AIB
+admin calls and the Secret provisioning.
 
 ## What it does
 
-The service watches KAOS `Agent`, `MCPServer` and `ModelAPI` resources and projects them into AIB using a stable bootstrap encoding:
+1. **Project** KAOS resources into the AIB admin model — each external dependency
+   an agent declares (`spec.mcpServers`, `spec.modelAPI`) becomes a synthetic AIB
+   service exposing a single `call` scope, each requested edge becomes a
+   permission set, and each Agent becomes a local AIB agent bound to those
+   permission sets. Logical identity is always `kaos://<kind>/<namespace>/<name>`,
+   unique by construction.
+2. **Provision** a per-agent credential `Secret` (`client_id` / `client_secret`)
+   by minting against the broker. The Secret name is `<prefix>-<agent>` (default
+   prefix `kaos-aib`), matching the operator's
+   `security.agentAuth.credentialSecretPrefix`.
+3. **Fail closed** — an agent whose permission sets could not all be created is
+   skipped (no credentials minted), and the reconcile requeues with backoff.
+4. **Prune** orphaned broker records and credential Secrets that are no longer in
+   the desired state, in dependency-safe order.
 
-- Each `MCPServer` `<ns>/<name>` becomes a synthetic AIB service with `client_id` `kaos-mcpserver-<ns>-<name>` exposing a single `call` scope.
-- Each `ModelAPI` `<ns>/<name>` becomes a synthetic AIB service with `client_id` `kaos-modelapi-<ns>-<name>` exposing a single `call` scope.
-- Each requested `Agent -> MCPServer` or `Agent -> ModelAPI` edge becomes an AIB permission set `kaos:<kind>:<ns>:<target>:call`.
-- Each `Agent` becomes an AIB *local* agent (no `client_id`, so AIB mints the actor token locally) bound to the permission sets for its edges.
-
-For every projected agent, the service obtains AIB client credentials and writes them into a Kubernetes Secret named `kaos-aib-<agent-id>` for the operator to mount into the agent pod.
-
-The reconcile loop is resilient: every service, permission set and agent is reconciled in isolation, so a single broker or resource failure is recorded as a categorized problem without aborting the pass. KAOS-owned broker records and credential Secrets that no longer correspond to a live KAOS resource are pruned (controllable via `KAOS_SYNC_PRUNE_ENABLED`). Broker admin requests use bounded exponential-backoff retries.
-
-## Observability
-
-- Metrics are pushed via OTLP to the endpoint in `OTEL_EXPORTER_OTLP_ENDPOINT` (using `OTEL_SERVICE_NAME`, default `kaos-sync`), including reconcile pass counts, minted credentials, projected resource counts and problems by category. Export is enabled only when both env vars are set.
-- Liveness probe at `/healthz` and readiness probe at `/readyz` on `KAOS_SYNC_HEALTH_PORT` (default `8080`); readiness flips to ready after the first reconcile pass completes.
+The projection is a pure, whole-world function (identity-collision resolution
+needs every resource of a kind), so every watched change funnels to a single
+sentinel reconcile request that the workqueue coalesces into one full pass.
 
 ## Layout
 
-- `kaos_sync/projection.py` — pure projection of KAOS resources into desired AIB records (no I/O).
-- `kaos_sync/aib_client.py` — AIB admin API client with bounded retries.
-- `kaos_sync/reconcile.py` — reconcile loop, pruning and credential Secret writing.
-- `kaos_sync/observability.py` — OTLP metric export and health/readiness endpoints.
-- `kaos_sync/config.py` — settings.
-- `kaos_sync/main.py` — entrypoint.
+```
+cmd/main.go            Entrypoint: env-only config + controller-runtime manager
+internal/projection    Pure KAOS -> AIB projection (no I/O, unit tested)
+internal/aib           Thin idempotent AIB admin REST client (retryablehttp)
+internal/sync          The sentinel-request reconciler (SSA Secret upsert, prune)
+chart/                 Helm chart (Deployment, RBAC, ServiceAccount)
+Dockerfile             Multi-stage distroless build -> axsauze/kaos-sync
+```
+
+## Configuration
+
+Environment-only (see `Settings` in `cmd/main.go`):
+
+| Env var | Default | Purpose |
+|---------|---------|---------|
+| `AIB_ADMIN_URL` | `http://localhost:14000/api` | Broker admin API base URL |
+| `AIB_PRINCIPAL` | `kaos-sync` | Pre-authenticated principal |
+| `AIB_PRINCIPAL_HEADER` | `X-Remote-User` | Header carrying the principal |
+| `KAOS_SYNC_NAMESPACES` | _(empty = cluster-wide)_ | CSV of namespaces to reconcile |
+| `KAOS_SYNC_CREDENTIAL_SECRET_PREFIX` | `kaos-aib` | Per-agent Secret name prefix |
+| `KAOS_SYNC_RECONCILE_INTERVAL` | `30s` | Safety-net resync period |
+| `KAOS_SYNC_REQUEST_TIMEOUT` | `10s` | Per-request timeout to the broker |
+| `KAOS_SYNC_PRUNE_ENABLED` | `true` | Delete orphaned broker records/Secrets |
+| `KAOS_SYNC_LEADER_ELECTION_ENABLED` | `true` | Lease-based HA leader election |
+| `POD_NAMESPACE` | `kaos-system` | Leader-election lease namespace |
+| `KAOS_SYNC_HEALTH_PROBE_ADDRESS` | `:8081` | `/healthz` and `/readyz` |
+| `KAOS_SYNC_METRICS_ADDRESS` | `:8080` | Prometheus metrics endpoint |
 
 ## Development
 
 ```bash
-make install
-make lint
-make test
+make build          # compile bin/kaos-sync
+make test           # go test ./...
+make lint           # gofmt check + go vet
+make docker-build   # build axsauze/kaos-sync:dev
 ```
