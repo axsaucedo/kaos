@@ -78,8 +78,10 @@ class _Context(MutableMapping[str, Any]):
     def __iter__(self) -> Iterator[str]:
         return iter(self._data())
 
-    def get(self, key: str, default: Any = None) -> Any:
-        return self._data().get(key, default)
+    def get(self, key: object, default: Any = None) -> Any:
+        if isinstance(key, str):
+            return self._data().get(key, default)
+        return default
 
     def __len__(self) -> int:
         return len(self._data())
