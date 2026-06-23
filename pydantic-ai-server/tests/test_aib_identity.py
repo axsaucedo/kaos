@@ -23,8 +23,10 @@ def _reset(monkeypatch):
     ):
         monkeypatch.delenv(var, raising=False)
     identity.reset_manager()
+    aib.ctx.replace({})
     yield
     identity.reset_manager()
+    aib.ctx.replace({})
 
 
 class _Recorder:
@@ -287,3 +289,130 @@ def test_async_token_mints(monkeypatch):
     assert first == "atok"
     assert second == "atok"
     assert captured["calls"] == 1
+
+
+# --- reactive 401 retry in outbound httpx instrumentation ---------------------
+
+
+def _configured_manager(monkeypatch, mint_token="fresh-token"):
+    """Configure a managed identity whose force_refresh mints ``mint_token``."""
+
+    def _post(url, data=None, timeout=None):
+        return _resp(200, {"access_token": mint_token, "expires_in": 300})
+
+    monkeypatch.setattr(httpx, "post", _post)
+    monkeypatch.setenv("AGENT_AUTH_TOKEN_ENDPOINT", "http://broker/oauth2/token")
+    monkeypatch.setenv("AGENT_AUTH_CLIENT_ID", "cid")
+    monkeypatch.setenv("AGENT_AUTH_CLIENT_SECRET", "sec")
+    return identity.instrument_agent_identity()
+
+
+def test_outbound_401_refreshes_and_replays_once(monkeypatch):
+    _configured_manager(monkeypatch, mint_token="fresh-token")
+    aib.instrument_httpx()
+
+    seen = []
+
+    def _handler(request):
+        seen.append(request.headers.get("x-agent-authorization"))
+        if len(seen) == 1:
+            return httpx.Response(401)
+        return httpx.Response(200)
+
+    client = httpx.Client(transport=httpx.MockTransport(_handler))
+    request = client.build_request("GET", "http://upstream/api")
+    request.headers["x-agent-authorization"] = "Bearer stale-token"
+    response = client.send(request)
+
+    assert response.status_code == 200
+    assert len(seen) == 2  # one retry only
+    assert seen[0] == "Bearer stale-token"
+    assert seen[1] == "Bearer fresh-token"  # replayed with the refreshed token
+
+
+def test_outbound_401_no_manager_does_not_retry(monkeypatch):
+    identity.reset_manager()
+    aib.instrument_httpx()
+
+    seen = []
+
+    def _handler(request):
+        seen.append(request)
+        return httpx.Response(401)
+
+    client = httpx.Client(transport=httpx.MockTransport(_handler))
+    request = client.build_request("GET", "http://upstream/api")
+    request.headers["x-agent-authorization"] = "Bearer stale-token"
+    response = client.send(request)
+
+    assert response.status_code == 401
+    assert len(seen) == 1  # no retry without a managed identity
+
+
+def test_outbound_non_401_does_not_retry(monkeypatch):
+    _configured_manager(monkeypatch)
+    aib.instrument_httpx()
+
+    seen = []
+
+    def _handler(request):
+        seen.append(request)
+        return httpx.Response(500)
+
+    client = httpx.Client(transport=httpx.MockTransport(_handler))
+    request = client.build_request("GET", "http://upstream/api")
+    request.headers["x-agent-authorization"] = "Bearer stale-token"
+    response = client.send(request)
+
+    assert response.status_code == 500
+    assert len(seen) == 1  # only 401 triggers a retry
+
+
+def test_outbound_401_without_actor_header_does_not_retry(monkeypatch):
+    _configured_manager(monkeypatch)
+    aib.instrument_httpx()
+
+    seen = []
+
+    def _handler(request):
+        seen.append(request)
+        return httpx.Response(401)
+
+    client = httpx.Client(transport=httpx.MockTransport(_handler))
+    request = client.build_request("GET", "http://upstream/api")
+    response = client.send(request)
+
+    assert response.status_code == 401
+    assert len(seen) == 1  # no actor token was carried, so no refresh/replay
+
+
+def test_outbound_async_401_refreshes_and_replays_once(monkeypatch):
+    monkeypatch.setenv("AGENT_AUTH_TOKEN_ENDPOINT", "http://broker/oauth2/token")
+    monkeypatch.setenv("AGENT_AUTH_CLIENT_ID", "cid")
+    monkeypatch.setenv("AGENT_AUTH_CLIENT_SECRET", "sec")
+    mgr = identity.instrument_agent_identity()
+    assert mgr is not None
+
+    async def _fake_refresh():
+        return "fresh-async"
+
+    monkeypatch.setattr(mgr, "force_refresh_async", _fake_refresh)
+    aib.instrument_httpx()
+
+    seen = []
+
+    def _handler(request):
+        seen.append(request.headers.get("x-agent-authorization"))
+        if len(seen) == 1:
+            return httpx.Response(401)
+        return httpx.Response(200)
+
+    async def _run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(_handler)) as client:
+            request = client.build_request("GET", "http://upstream/api")
+            request.headers["x-agent-authorization"] = "Bearer stale-token"
+            return await client.send(request)
+
+    resp = asyncio.run(_run())
+    assert resp.status_code == 200
+    assert seen == ["Bearer stale-token", "Bearer fresh-async"]
