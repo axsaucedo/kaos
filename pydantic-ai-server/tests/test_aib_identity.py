@@ -369,7 +369,9 @@ def test_outbound_non_401_does_not_retry(monkeypatch):
 
 
 def test_outbound_401_without_actor_header_does_not_retry(monkeypatch):
-    _configured_manager(monkeypatch)
+    mgr = _configured_manager(monkeypatch)
+    assert mgr is not None
+    monkeypatch.setattr(mgr, "token", lambda: None)  # no token to inject
     aib.instrument_httpx()
 
     seen = []
@@ -416,3 +418,77 @@ def test_outbound_async_401_refreshes_and_replays_once(monkeypatch):
     resp = asyncio.run(_run())
     assert resp.status_code == 200
     assert seen == ["Bearer stale-token", "Bearer fresh-async"]
+
+
+def test_outbound_injects_managed_actor_token_when_none_present(monkeypatch):
+    _configured_manager(monkeypatch, mint_token="minted-actor")
+    aib.instrument_httpx()
+
+    seen = []
+
+    def _handler(request):
+        seen.append(request.headers.get("x-agent-authorization"))
+        return httpx.Response(200)
+
+    client = httpx.Client(transport=httpx.MockTransport(_handler))
+    request = client.build_request("GET", "http://upstream/api")
+    response = client.send(request)
+
+    assert response.status_code == 200
+    assert seen == ["Bearer minted-actor"]
+
+
+def test_outbound_does_not_override_existing_actor_token(monkeypatch):
+    _configured_manager(monkeypatch, mint_token="minted-actor")
+    aib.instrument_httpx()
+
+    seen = []
+
+    def _handler(request):
+        seen.append(request.headers.get("x-agent-authorization"))
+        return httpx.Response(200)
+
+    client = httpx.Client(transport=httpx.MockTransport(_handler))
+    request = client.build_request("GET", "http://upstream/api")
+    request.headers["x-agent-authorization"] = "Bearer caller-supplied"
+    client.send(request)
+
+    assert seen == ["Bearer caller-supplied"]
+
+
+def test_outbound_no_manager_injects_nothing(monkeypatch):
+    aib.instrument_httpx()
+
+    seen = []
+
+    def _handler(request):
+        seen.append(request.headers.get("x-agent-authorization"))
+        return httpx.Response(200)
+
+    client = httpx.Client(transport=httpx.MockTransport(_handler))
+    request = client.build_request("GET", "http://upstream/api")
+    client.send(request)
+
+    assert seen == [None]
+
+
+def test_outbound_async_injects_managed_actor_token(monkeypatch):
+    mgr = _configured_manager(monkeypatch, mint_token="minted-async")
+    assert mgr is not None
+    mgr.token()  # prime the cache via the mocked sync grant so no async network call is made
+    aib.instrument_httpx()
+
+    seen = []
+
+    def _handler(request):
+        seen.append(request.headers.get("x-agent-authorization"))
+        return httpx.Response(200)
+
+    async def _run():
+        async with httpx.AsyncClient(transport=httpx.MockTransport(_handler)) as client:
+            request = client.build_request("GET", "http://upstream/api")
+            return await client.send(request)
+
+    resp = asyncio.run(_run())
+    assert resp.status_code == 200
+    assert seen == ["Bearer minted-async"]

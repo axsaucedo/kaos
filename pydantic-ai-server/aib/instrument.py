@@ -301,11 +301,46 @@ def _inject_request_headers(request: Any) -> None:
     """Merge the current context's propagation headers into an outbound request.
 
     Strictly **additive**: a header already present on the request (for example the
-    ModelAPI/LLM provider's own ``Authorization`` API key) is never overwritten.
+    ModelAPI/LLM provider's own ``Authorization`` API key) is never overwritten. When the
+    request-local context carries no actor token but a managed actor-token lifecycle is
+    active (see :func:`aib.instrument_agent_identity`), this agent's minted actor token is
+    injected so each hop authenticates as itself even without a static token.
     """
     for header, value in ctx.to_headers().items():
         if header not in request.headers:
             request.headers[header] = value
+    if HEADER_ACTOR_TOKEN not in request.headers:
+        token = _managed_actor_token()
+        if token:
+            request.headers[HEADER_ACTOR_TOKEN] = _as_bearer(token)
+
+
+def _managed_actor_token() -> Optional[str]:
+    """Return the managed actor token, or ``None`` when no managed identity is active."""
+    from . import identity
+
+    manager = identity.get_manager()
+    if manager is None:
+        return None
+    return manager.token()
+
+
+async def _inject_request_headers_async(request: Any) -> None:
+    """Async variant of :func:`_inject_request_headers`.
+
+    Acquires the managed actor token without blocking the event loop on a refresh.
+    """
+    for header, value in ctx.to_headers().items():
+        if header not in request.headers:
+            request.headers[header] = value
+    if HEADER_ACTOR_TOKEN not in request.headers:
+        from . import identity
+
+        manager = identity.get_manager()
+        if manager is not None:
+            token = await manager.token_async()
+            if token:
+                request.headers[HEADER_ACTOR_TOKEN] = _as_bearer(token)
 
 
 def _refresh_actor_header_sync(request: Any) -> bool:
@@ -377,7 +412,7 @@ def instrument_httpx() -> None:
         return response
 
     async def _patched_async_send(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
-        _inject_request_headers(request)
+        await _inject_request_headers_async(request)
         had_actor = HEADER_ACTOR_TOKEN in request.headers
         response = await async_send(self, request, *args, **kwargs)
         if response.status_code == 401 and had_actor and await _refresh_actor_header_async(request):
