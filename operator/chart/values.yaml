@@ -113,6 +113,26 @@ security:
     # it is derived from the issuer using the standard OIDC realm path
     # (<issuer>/protocol/openid-connect/certs).
     jwksUri: ""
+  # gatewayNamespace is the namespace of the Envoy Gateway data plane. It is the
+  # ingress source allowed by generated NetworkPolicies so the gateway can reach
+  # protected workloads.
+  gatewayNamespace: "envoy-gateway-system"
+  # gatewayHost is the in-cluster host[:port] of the Envoy Gateway used when
+  # gatewayRouting is enabled. When empty, the operator resolves it from the
+  # Gateway resource's status address.
+  gatewayHost: ""
+  # networkPolicy denies direct workload-to-workload traffic so the gateway
+  # cannot be bypassed. It only takes effect when security is operational
+  # (agentAuth.extAuthzUrl set) and the cluster CNI enforces NetworkPolicy.
+  networkPolicy:
+    enabled: true
+  # gatewayRouting injects gateway-routed endpoint URLs into agents so internal
+  # agent->ModelAPI/MCP/peer traffic flows through the gateway (where jwt_authn,
+  # ext_authz and ext_proc apply) rather than directly to the workload Service.
+  # Off by default; enable together with networkPolicy to make the gateway the
+  # only application path between workloads.
+  gatewayRouting:
+    enabled: false
 serviceAccount:
   annotations: {}
   automount: true

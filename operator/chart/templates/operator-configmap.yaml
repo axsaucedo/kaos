@@ -55,6 +55,21 @@ data:
   SECURITY_USER_AUTH_JWKS_URI: {{ .jwksUri | quote }}
   {{- end }}
   {{- end }}
+  # Bypass-prevention and gateway-routing configuration. These only take effect
+  # when security is operational (agentAuth.extAuthzUrl set).
+  SECURITY_OPERATOR_NAMESPACE: {{ $.Release.Namespace | quote }}
+  {{- if .gatewayNamespace }}
+  SECURITY_GATEWAY_NAMESPACE: {{ .gatewayNamespace | quote }}
+  {{- end }}
+  {{- if .gatewayHost }}
+  SECURITY_GATEWAY_HOST: {{ .gatewayHost | quote }}
+  {{- end }}
+  {{- if and .networkPolicy (not .networkPolicy.enabled) }}
+  SECURITY_NETWORK_POLICY_DISABLED: "true"
+  {{- end }}
+  {{- if and .gatewayRouting .gatewayRouting.enabled }}
+  SECURITY_GATEWAY_ROUTING_ENABLED: "true"
+  {{- end }}
   {{- end }}
   # Global telemetry configuration (defaults for all components)
   {{- if .Values.telemetry.enabled }}
