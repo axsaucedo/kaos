@@ -268,3 +268,64 @@ class TestStartupAutonomous:
                 "TASK_MAX_TOOL_CALLS",
             ]:
                 os.environ.pop(key, None)
+
+
+class TestAutonomousAccessOutcome:
+    """A gateway access denial during an iteration records a user_action_required event."""
+
+    @pytest.mark.asyncio
+    async def test_reauth_outcome_records_event_and_completes(self):
+        from aib import AccessDecision, ReauthenticationRequired
+        from pais.a2a import LocalTaskManager, EVENT_USER_ACTION_REQUIRED
+
+        calls = {"n": 0}
+
+        async def process_fn(message, session_id):
+            calls["n"] += 1
+            decision = AccessDecision(
+                allowed=False,
+                reason="third_party_reauth_required",
+                resource="github",
+                reauth_url="https://idp.example/reauth",
+            )
+            raise ReauthenticationRequired(decision)
+
+        tm = LocalTaskManager(process_fn)
+        try:
+            task = await tm.submit_autonomous("do it", budgets=TaskBudgets(max_iterations=5))
+            completed = await tm.wait_for_completion(task.id, timeout=5.0)
+            assert completed is not None
+            events = [e for e in completed.events if e.type == EVENT_USER_ACTION_REQUIRED]
+            assert len(events) == 1  # exactly one — no retry storm
+            assert events[0].data["reason"] == "third_party_reauth_required"
+            assert events[0].data["resource"] == "github"
+            assert events[0].data["reauth_url"] == "https://idp.example/reauth"
+            assert completed.metadata.get("user_action_required") is not None
+            assert completed.status.state.value == "completed"
+            assert calls["n"] == 1  # stopped after the first denial, did not loop
+        finally:
+            await tm.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_platform_denial_records_event_without_url(self):
+        from aib import AccessDecision, AccessDenied
+        from pais.a2a import LocalTaskManager, EVENT_USER_ACTION_REQUIRED
+
+        async def process_fn(message, session_id):
+            decision = AccessDecision(
+                allowed=False, reason="platform_grant_missing", resource="mcp.payments"
+            )
+            raise AccessDenied(decision)
+
+        tm = LocalTaskManager(process_fn)
+        try:
+            task = await tm.submit_autonomous("do it", budgets=TaskBudgets(max_iterations=5))
+            completed = await tm.wait_for_completion(task.id, timeout=5.0)
+            assert completed is not None
+            events = [e for e in completed.events if e.type == EVENT_USER_ACTION_REQUIRED]
+            assert len(events) == 1
+            assert events[0].data["reason"] == "platform_grant_missing"
+            assert "reauth_url" not in events[0].data
+            assert completed.status.state.value == "completed"
+        finally:
+            await tm.shutdown()

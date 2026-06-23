@@ -31,6 +31,7 @@ from pais.telemetry import (
 )
 from opentelemetry.propagate import extract
 from pais.tools import format_progress_event, DELEGATION_TOOL_PREFIX, DelegationToolset
+from pais.outcomes import find_access_outcome, format_access_outcome
 from pais.serverutils import (
     AgentDeps,
     AgentCard,
@@ -53,45 +54,6 @@ from pais.a2a import (
 
 if TYPE_CHECKING:
     from pais.memory import Memory
-
-
-def _find_access_outcome(exc: BaseException) -> Optional[aib.AccessDenied]:
-    """Walk an exception's cause/context chain for a gateway access outcome.
-
-    A gateway denial raised on the instrumented outbound path (an
-    :class:`aib.AccessDenied` / :class:`aib.ReauthenticationRequired`) may be wrapped
-    by the agent framework before it surfaces here, so the whole chain is inspected.
-    Returns the outcome when present, else ``None``.
-    """
-    seen: set[int] = set()
-    cur: Optional[BaseException] = exc
-    while cur is not None and id(cur) not in seen:
-        if isinstance(cur, aib.AccessDenied):
-            return cur
-        seen.add(id(cur))
-        cur = cur.__cause__ or cur.__context__
-    return None
-
-
-def _format_access_outcome(outcome: aib.AccessDenied) -> str:
-    """Render a gateway access outcome as a non-blocking, user-facing message.
-
-    Surfaces the denied resource and machine reason; when the denial is recoverable
-    by user re-authentication it includes the re-auth URL. It never blocks, retries,
-    or grants access — it only reports what human action (if any) is required.
-    """
-    decision = outcome.decision
-    resource = decision.resource or "the requested resource"
-    reason = decision.reason or "access denied"
-    if isinstance(outcome, aib.ReauthenticationRequired) and outcome.reauth_url:
-        return (
-            f"Access to {resource} requires re-authentication ({reason}). "
-            f"Please reconnect at {outcome.reauth_url} and try again."
-        )
-    return (
-        f"Access to {resource} was denied ({reason}). An administrator must approve "
-        "this access grant before the action can proceed."
-    )
 
 
 def configure_logging(level: str = "INFO", otel_correlation: bool = False) -> None:
@@ -530,9 +492,9 @@ class AgentServer:
                 yield content
 
         except Exception as e:
-            outcome = _find_access_outcome(e)
+            outcome = find_access_outcome(e)
             if outcome is not None:
-                message_text = _format_access_outcome(outcome)
+                message_text = format_access_outcome(outcome)
                 logger.info(f"Access outcome surfaced for session {session_id}: {outcome}")
                 await self.memory.add_event(session_id, "access_outcome", message_text)
                 yield message_text
