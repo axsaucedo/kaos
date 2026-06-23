@@ -8,15 +8,26 @@ this module, so tests need no cluster.
 
 from __future__ import annotations
 
-from typing import List
+import logging
+import threading
+from dataclasses import dataclass
+from typing import Callable, Iterator, List
 
-from kubernetes import client, config
+from kubernetes import client, config, watch
+
+logger = logging.getLogger("kaos_sync")
 
 KAOS_GROUP = "kaos.tools"
 KAOS_VERSION = "v1alpha1"
 AGENT_PLURAL = "agents"
 MCPSERVER_PLURAL = "mcpservers"
 MODELAPI_PLURAL = "modelapis"
+
+_WATCHED_PLURALS = (
+    (MCPSERVER_PLURAL, "MCPServer"),
+    (MODELAPI_PLURAL, "ModelAPI"),
+    (AGENT_PLURAL, "Agent"),
+)
 
 
 def load_kube_config() -> None:
@@ -119,3 +130,120 @@ class KaosResourceLister:
             + self._list(MODELAPI_PLURAL, "ModelAPI", namespaces)
             + self._list(AGENT_PLURAL, "Agent", namespaces)
         )
+
+
+@dataclass(frozen=True)
+class WatchEvent:
+    """A single KAOS resource change observed by the watch layer."""
+
+    type: str
+    kind: str
+    namespace: str
+    name: str
+    resource_version: str
+
+
+def _stream_plural(
+    api: "client.CustomObjectsApi",
+    plural: str,
+    kind: str,
+    namespaces: tuple[str, ...],
+    *,
+    timeout_seconds: int,
+) -> Iterator[WatchEvent]:
+    """Yield change events for a single CRD plural until the watch stream ends.
+
+    Watches each configured namespace (or cluster-wide when none are set). A 410 Gone /
+    expired resourceVersion surfaces as the stream simply ending, so the caller restarts
+    it with a fresh list — the watch never carries a stale resourceVersion forward.
+    """
+    w = watch.Watch()
+    targets = namespaces or ("",)
+    for namespace in targets:
+        if namespace:
+            stream = w.stream(
+                api.list_namespaced_custom_object,
+                KAOS_GROUP,
+                KAOS_VERSION,
+                namespace,
+                plural,
+                timeout_seconds=timeout_seconds,
+            )
+        else:
+            stream = w.stream(
+                api.list_cluster_custom_object,
+                KAOS_GROUP,
+                KAOS_VERSION,
+                plural,
+                timeout_seconds=timeout_seconds,
+            )
+        for event in stream:
+            obj = event.get("object", {}) or {}
+            meta = obj.get("metadata", {}) if isinstance(obj, dict) else {}
+            yield WatchEvent(
+                type=str(event.get("type", "")),
+                kind=kind,
+                namespace=str(meta.get("namespace", "") or ""),
+                name=str(meta.get("name", "") or ""),
+                resource_version=str(meta.get("resourceVersion", "") or ""),
+            )
+
+
+class KubeWatchSource:
+    """Background watch over the three KAOS CRDs that signals a callback on any change.
+
+    One daemon thread per plural streams change events and invokes ``on_event`` for each.
+    A stream that ends or errors (disconnect, 410 expired resourceVersion, transient API
+    failure) is simply re-established after a short delay — the watch is a *liveness hint*
+    that feeds a debounced full-resync worker, so it never needs to carry resourceVersion
+    state across reconnects and never crashes the process.
+    """
+
+    def __init__(
+        self,
+        namespaces: tuple[str, ...],
+        on_event: Callable[[WatchEvent], None],
+        *,
+        custom_api: "client.CustomObjectsApi | None" = None,
+        timeout_seconds: int = 300,
+        reconnect_delay_seconds: float = 1.0,
+    ) -> None:
+        self._namespaces = namespaces
+        self._on_event = on_event
+        self._api = custom_api or client.CustomObjectsApi()
+        self._timeout_seconds = timeout_seconds
+        self._reconnect_delay_seconds = reconnect_delay_seconds
+        self._stop = threading.Event()
+        self._threads: list[threading.Thread] = []
+
+    def start(self) -> None:
+        for plural, kind in _WATCHED_PLURALS:
+            thread = threading.Thread(
+                target=self._run_plural,
+                args=(plural, kind),
+                name=f"watch-{plural}",
+                daemon=True,
+            )
+            thread.start()
+            self._threads.append(thread)
+
+    def stop(self) -> None:
+        self._stop.set()
+
+    def _run_plural(self, plural: str, kind: str) -> None:
+        while not self._stop.is_set():
+            try:
+                for event in _stream_plural(
+                    self._api,
+                    plural,
+                    kind,
+                    self._namespaces,
+                    timeout_seconds=self._timeout_seconds,
+                ):
+                    if self._stop.is_set():
+                        return
+                    self._on_event(event)
+            except Exception:  # noqa: BLE001 - a watch error must never kill the process
+                logger.debug("watch stream for %s ended; re-establishing", plural, exc_info=True)
+            if self._stop.wait(self._reconnect_delay_seconds):
+                return

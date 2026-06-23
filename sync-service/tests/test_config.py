@@ -38,3 +38,16 @@ def test_prune_enabled_truthy_values():
     assert Settings.from_env({"KAOS_SYNC_PRUNE_ENABLED": "yes"}).prune_enabled is True
     assert Settings.from_env({"KAOS_SYNC_PRUNE_ENABLED": "off"}).prune_enabled is False
     assert Settings.from_env({"KAOS_SYNC_PRUNE_ENABLED": "0"}).prune_enabled is False
+
+
+def test_watch_defaults_and_overrides():
+    assert Settings.from_env({}).watch_enabled is True
+    assert Settings.from_env({}).watch_debounce_seconds == 1.0
+    settings = Settings.from_env(
+        {
+            "KAOS_SYNC_WATCH_ENABLED": "false",
+            "KAOS_SYNC_WATCH_DEBOUNCE_SECONDS": "2.5",
+        }
+    )
+    assert settings.watch_enabled is False
+    assert settings.watch_debounce_seconds == 2.5

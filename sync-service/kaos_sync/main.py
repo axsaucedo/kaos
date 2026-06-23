@@ -1,9 +1,11 @@
-"""Entrypoint: periodic reconcile loop projecting KAOS resources into AIB."""
+"""Entrypoint: event-driven reconcile loop projecting KAOS resources into AIB."""
 
 from __future__ import annotations
 
 import logging
+import threading
 import time
+from typing import Callable
 
 from kaos_sync.aib_client import AIBAdmin
 from kaos_sync.config import Settings
@@ -58,12 +60,63 @@ def run_once(settings: Settings, lister, aib, secrets) -> ReconcileSummary:
     return summary
 
 
+class DirtyTracker:
+    """Thread-safe change signal set by watch events, consumed by the reconcile worker.
+
+    Any number of watch threads call :meth:`mark_dirty`; the worker blocks in
+    :meth:`wait_dirty` until a change arrives or the safety-net interval elapses. The
+    flag is level-triggered and auto-clears on consumption, so a burst of events between
+    two reconciles collapses into a single pass.
+    """
+
+    def __init__(self) -> None:
+        self._event = threading.Event()
+
+    def mark_dirty(self) -> None:
+        self._event.set()
+
+    def wait_dirty(self, timeout: float) -> bool:
+        """Block up to ``timeout`` seconds; return True if a change occurred, then clear."""
+        flagged = self._event.wait(timeout)
+        self._event.clear()
+        return flagged
+
+
+def reconcile_loop(
+    settings: Settings,
+    run_pass: Callable[[], None],
+    dirty: DirtyTracker,
+    *,
+    should_continue: Callable[[], bool] = lambda: True,
+    sleep: Callable[[float], None] = time.sleep,
+) -> None:
+    """Run an initial reconcile, then reconcile on change (debounced) and on a safety-net.
+
+    The worker reconciles when the watch marks the state dirty — after a short debounce to
+    coalesce a burst of related changes — and at least every ``reconcile_interval_seconds``
+    as a safety net even with no events. ``run_pass`` is expected to swallow its own
+    transient errors so the loop stays alive.
+    """
+    run_pass()
+    while should_continue():
+        became_dirty = dirty.wait_dirty(settings.reconcile_interval_seconds)
+        if became_dirty and settings.watch_debounce_seconds > 0:
+            sleep(settings.watch_debounce_seconds)
+            dirty.wait_dirty(0)  # consume events that arrived during the debounce window
+        run_pass()
+
+
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     settings = Settings.from_env()
     setup_telemetry()
 
-    from kaos_sync.k8s import KaosResourceLister, KubeSecretStore, load_kube_config
+    from kaos_sync.k8s import (
+        KaosResourceLister,
+        KubeSecretStore,
+        KubeWatchSource,
+        load_kube_config,
+    )
 
     load_kube_config()
     lister = KaosResourceLister()
@@ -81,14 +134,26 @@ def main() -> int:
     start_health_server(settings.health_port, health)
 
     logger.info(
-        "starting reconcile loop admin=%s interval=%ds namespaces=%s prune=%s health_port=%d",
+        "starting reconcile loop admin=%s interval=%ds namespaces=%s prune=%s health_port=%d "
+        "watch=%s",
         settings.aib_admin_url,
         settings.reconcile_interval_seconds,
         ",".join(settings.namespaces) or "<all>",
         settings.prune_enabled,
         settings.health_port,
+        settings.watch_enabled,
     )
-    while True:
+
+    dirty = DirtyTracker()
+    watch_source: "KubeWatchSource | None" = None
+    if settings.watch_enabled:
+        watch_source = KubeWatchSource(
+            settings.namespaces,
+            lambda event: dirty.mark_dirty(),
+        )
+        watch_source.start()
+
+    def run_pass() -> None:
         try:
             summary = run_once(settings, lister, aib, secrets)
             record_summary(summary)
@@ -96,7 +161,9 @@ def main() -> int:
             logger.exception("reconcile pass failed")
         finally:
             health.mark_ready()
-        time.sleep(settings.reconcile_interval_seconds)
+
+    reconcile_loop(settings, run_pass, dirty)
+    return 0
 
 
 if __name__ == "__main__":

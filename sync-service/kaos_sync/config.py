@@ -21,6 +21,9 @@ class Settings:
     health_port: port exposing ``/healthz`` and ``/readyz`` for the Kubernetes probes.
     retry_max_attempts: max attempts per AIB admin request before giving up.
     retry_base_delay_seconds: base delay for exponential backoff between retries.
+    watch_enabled: react to KAOS resource changes via a watch (default on); when off the
+        service runs a pure fixed-interval poll loop.
+    watch_debounce_seconds: window to coalesce a burst of watch events into one reconcile.
 
     Metrics are exported via OTLP using the standard ``OTEL_*`` environment variables
     (e.g. ``OTEL_SERVICE_NAME``, ``OTEL_EXPORTER_OTLP_ENDPOINT``), read by the SDK
@@ -38,6 +41,8 @@ class Settings:
     health_port: int = 8080
     retry_max_attempts: int = 4
     retry_base_delay_seconds: float = 0.5
+    watch_enabled: bool = True
+    watch_debounce_seconds: float = 1.0
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "Settings":
@@ -64,6 +69,10 @@ class Settings:
             retry_max_attempts=int(env.get("KAOS_SYNC_RETRY_MAX_ATTEMPTS", cls.retry_max_attempts)),
             retry_base_delay_seconds=float(
                 env.get("KAOS_SYNC_RETRY_BASE_DELAY_SECONDS", cls.retry_base_delay_seconds)
+            ),
+            watch_enabled=_env_bool(env, "KAOS_SYNC_WATCH_ENABLED", cls.watch_enabled),
+            watch_debounce_seconds=float(
+                env.get("KAOS_SYNC_WATCH_DEBOUNCE_SECONDS", cls.watch_debounce_seconds)
             ),
         )
 
