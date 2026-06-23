@@ -68,6 +68,11 @@ class SyncMetrics:
             unit="1",
             description="Credential mints performed.",
         )
+        self._rotated = meter.create_counter(
+            _PREFIX + "credentials.rotated",
+            unit="1",
+            description="Credential rotations performed.",
+        )
         self._pruned = meter.create_counter(
             _PREFIX + "pruned",
             unit="1",
@@ -105,6 +110,10 @@ class SyncMetrics:
         minted = sum(1 for agent in summary.agents if agent.credentials_minted)
         if minted:
             self._minted.add(minted)
+
+        rotated = sum(1 for agent in summary.agents if agent.credentials_rotated)
+        if rotated:
+            self._rotated.add(rotated)
 
         for problem in summary.problems:
             self._problems.add(1, {"category": problem.category.value})

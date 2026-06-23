@@ -33,17 +33,20 @@ def run_once(settings: Settings, lister, aib, secrets) -> ReconcileSummary:
         settings.credential_secret_prefix,
         prune=settings.prune_enabled,
         namespaces=settings.namespaces,
+        credential_rotation_seconds=settings.credential_rotation_seconds,
     )
     minted = sum(1 for a in summary.agents if a.credentials_minted)
+    rotated = sum(1 for a in summary.agents if a.credentials_rotated)
     failed = sum(1 for a in summary.agents if not a.ok)
     logger.info(
         "reconciled services=%d permission_sets=%d agents=%d credentials_minted=%d "
-        "failed=%d pruned_agents=%d pruned_permission_sets=%d pruned_services=%d "
-        "pruned_secrets=%d problems=%d",
+        "credentials_rotated=%d failed=%d pruned_agents=%d pruned_permission_sets=%d "
+        "pruned_services=%d pruned_secrets=%d problems=%d",
         summary.services,
         summary.permission_sets,
         len(summary.agents),
         minted,
+        rotated,
         failed,
         summary.pruned.agents,
         summary.pruned.permission_sets,

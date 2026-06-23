@@ -59,12 +59,18 @@ class FakeAIB:
 class FakeSecrets:
     def __init__(self):
         self.store: dict[tuple[str, str], dict[str, str]] = {}
+        self.annotations: dict[tuple[str, str], dict[str, str]] = {}
 
     def get(self, namespace, name):
         return self.store.get((namespace, name))
 
-    def upsert(self, namespace, name, string_data):
+    def upsert(self, namespace, name, string_data, annotations=None):
         self.store[(namespace, name)] = dict(string_data)
+        if annotations is not None:
+            self.annotations[(namespace, name)] = dict(annotations)
+
+    def get_annotation(self, namespace, name, key):
+        return self.annotations.get((namespace, name), {}).get(key)
 
     def list(self, namespaces):
         if not namespaces:
@@ -72,6 +78,7 @@ class FakeSecrets:
         return [(ns, name) for (ns, name) in self.store if ns in namespaces]
 
     def delete(self, namespace, name):
+        self.annotations.pop((namespace, name), None)
         return self.store.pop((namespace, name), None) is not None
 
 
@@ -158,6 +165,67 @@ def test_reconcile_remints_when_secret_missing_credentials():
     summary = reconcile(desired, aib, secrets)
     assert summary.agents[0].credentials_minted is True
     assert secrets.get("demo", "kaos-aib-researcher")["client_id"]
+
+
+def test_mint_stamps_rotation_annotation():
+    desired = project([_agent("researcher", ["github"])])
+    aib, secrets = FakeAIB(), FakeSecrets()
+
+    reconcile(desired, aib, secrets)
+
+    from kaos_sync.reconcile import CREDENTIAL_ROTATED_AT_ANNOTATION
+
+    stamp = secrets.get_annotation("demo", "kaos-aib-researcher", CREDENTIAL_ROTATED_AT_ANNOTATION)
+    assert stamp  # mint records when the credential was issued
+
+
+def test_reconcile_rotates_a_stale_credential():
+    from kaos_sync.reconcile import CREDENTIAL_ROTATED_AT_ANNOTATION
+
+    desired = project([_agent("researcher", ["github"])])
+    aib, secrets = FakeAIB(), FakeSecrets()
+    reconcile(desired, aib, secrets)
+    assert len(aib.mint_calls) == 1
+
+    # Backdate the rotation stamp so the credential is past its rotation interval.
+    secrets.annotations[("demo", "kaos-aib-researcher")][
+        CREDENTIAL_ROTATED_AT_ANNOTATION
+    ] = "2000-01-01T00:00:00+00:00"
+
+    summary = reconcile(desired, aib, secrets, credential_rotation_seconds=1)
+    agent = summary.agents[0]
+    assert agent.credentials_rotated is True
+    assert agent.credentials_minted is False
+    assert len(aib.mint_calls) == 2  # re-minted for rotation
+    refreshed = secrets.get_annotation(
+        "demo", "kaos-aib-researcher", CREDENTIAL_ROTATED_AT_ANNOTATION
+    )
+    assert refreshed != "2000-01-01T00:00:00+00:00"
+
+
+def test_reconcile_does_not_rotate_a_fresh_credential():
+    desired = project([_agent("researcher", ["github"])])
+    aib, secrets = FakeAIB(), FakeSecrets()
+    reconcile(desired, aib, secrets)
+
+    summary = reconcile(desired, aib, secrets, credential_rotation_seconds=3600)
+    assert summary.agents[0].credentials_rotated is False
+    assert len(aib.mint_calls) == 1  # still fresh, no re-mint
+
+
+def test_rotation_disabled_by_default_ignores_stale_credentials():
+    from kaos_sync.reconcile import CREDENTIAL_ROTATED_AT_ANNOTATION
+
+    desired = project([_agent("researcher", ["github"])])
+    aib, secrets = FakeAIB(), FakeSecrets()
+    reconcile(desired, aib, secrets)
+    secrets.annotations[("demo", "kaos-aib-researcher")][
+        CREDENTIAL_ROTATED_AT_ANNOTATION
+    ] = "2000-01-01T00:00:00+00:00"
+
+    summary = reconcile(desired, aib, secrets)  # credential_rotation_seconds defaults to 0
+    assert summary.agents[0].credentials_rotated is False
+    assert len(aib.mint_calls) == 1
 
 
 def test_run_once_projects_and_reconciles():

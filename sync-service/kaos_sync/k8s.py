@@ -60,11 +60,18 @@ class KubeSecretStore:
                 data.setdefault(key, base64.b64decode(value).decode("utf-8"))
         return data
 
-    def upsert(self, namespace: str, name: str, string_data: dict[str, str]) -> None:
+    def upsert(
+        self,
+        namespace: str,
+        name: str,
+        string_data: dict[str, str],
+        annotations: dict[str, str] | None = None,
+    ) -> None:
         body = client.V1Secret(
             metadata=client.V1ObjectMeta(
                 name=name,
                 labels={"app.kubernetes.io/managed-by": "kaos-sync"},
+                annotations=annotations or None,
             ),
             string_data=string_data,
             type="Opaque",
@@ -75,6 +82,17 @@ class KubeSecretStore:
             if exc.status != 409:
                 raise
             self._api.replace_namespaced_secret(name, namespace, body)
+
+    def get_annotation(self, namespace: str, name: str, key: str) -> str | None:
+        """Read a single annotation off a Secret, returning ``None`` if absent or missing."""
+        try:
+            secret = self._api.read_namespaced_secret(name, namespace)
+        except client.ApiException as exc:  # type: ignore[attr-defined]
+            if exc.status == 404:
+                return None
+            raise
+        annotations = (secret.metadata.annotations if secret.metadata else None) or {}
+        return annotations.get(key)
 
     def list(self, namespaces: tuple[str, ...]) -> List[tuple[str, str]]:
         """List ``(namespace, name)`` of sync-managed credential Secrets.

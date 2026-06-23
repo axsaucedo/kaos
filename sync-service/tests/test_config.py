@@ -9,9 +9,15 @@ def test_defaults():
     settings = Settings.from_env({})
     assert settings.namespaces == ()
     assert settings.prune_enabled is True
+    assert settings.credential_rotation_seconds == 0
     assert settings.health_port == 8080
     assert settings.retry_max_attempts == 4
     assert settings.retry_base_delay_seconds == 0.5
+
+
+def test_credential_rotation_seconds_override():
+    settings = Settings.from_env({"KAOS_SYNC_CREDENTIAL_ROTATION_SECONDS": "86400"})
+    assert settings.credential_rotation_seconds == 86400
 
 
 def test_overrides_from_env():

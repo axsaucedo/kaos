@@ -8,6 +8,7 @@ implementations live in :mod:`kaos_sync.aib_client` and :mod:`kaos_sync.secrets`
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from enum import Enum
 from typing import List, Protocol
 
@@ -19,6 +20,8 @@ from kaos_sync.projection import (
     is_kaos_service_client_id,
     parse_agent_external_id,
 )
+
+CREDENTIAL_ROTATED_AT_ANNOTATION = "kaos.dev/aib-credential-rotated-at"
 
 
 def credential_secret_name(prefix: str, agent_name: str) -> str:
@@ -45,7 +48,15 @@ class AIBAdminClient(Protocol):
 class SecretStore(Protocol):
     def get(self, namespace: str, name: str) -> dict[str, str] | None: ...
 
-    def upsert(self, namespace: str, name: str, string_data: dict[str, str]) -> None: ...
+    def upsert(
+        self,
+        namespace: str,
+        name: str,
+        string_data: dict[str, str],
+        annotations: dict[str, str] | None = None,
+    ) -> None: ...
+
+    def get_annotation(self, namespace: str, name: str, key: str) -> str | None: ...
 
     def list(self, namespaces: tuple[str, ...]) -> List[tuple[str, str]]: ...
 
@@ -80,6 +91,7 @@ class AgentSync:
     secret_namespace: str
     secret_name: str
     credentials_minted: bool
+    credentials_rotated: bool = False
     ok: bool = True
     error: str | None = None
 
@@ -115,6 +127,7 @@ def reconcile(
     secret_prefix: str = "kaos-aib",
     prune: bool = False,
     namespaces: tuple[str, ...] = (),
+    credential_rotation_seconds: int = 0,
 ) -> ReconcileSummary:
     """Apply the desired AIB state and provision per-agent credential Secrets.
 
@@ -180,7 +193,13 @@ def reconcile(
     for agent in desired.agents:
         summary.agents.append(
             _reconcile_agent(
-                agent, aib, secrets, secret_prefix, permission_set_ids, summary.problems
+                agent,
+                aib,
+                secrets,
+                secret_prefix,
+                permission_set_ids,
+                summary.problems,
+                credential_rotation_seconds,
             )
         )
 
@@ -310,6 +329,7 @@ def _reconcile_agent(
     secret_prefix: str,
     permission_set_ids: dict[str, str],
     problems: list[Problem],
+    credential_rotation_seconds: int = 0,
 ) -> AgentSync:
     secret_name = credential_secret_name(secret_prefix, agent.name)
     resource = f"agent {agent.namespace}/{agent.name}"
@@ -318,7 +338,9 @@ def _reconcile_agent(
     if missing:
         detail = f"permission sets unavailable: {', '.join(missing)}"
         problems.append(Problem(ProblemCategory.UNSUPPORTED_EDGE, resource, detail))
-        return AgentSync(agent.external_id, "", agent.namespace, secret_name, False, False, detail)
+        return AgentSync(
+            agent.external_id, "", agent.namespace, secret_name, False, ok=False, error=detail
+        )
 
     bound = [permission_set_ids[name] for name in agent.permission_set_names]
     try:
@@ -328,12 +350,13 @@ def _reconcile_agent(
     except Exception as exc:  # noqa: BLE001 - isolate per-resource failures
         problems.append(Problem(ProblemCategory.AIB_UNREACHABLE, resource, str(exc)))
         return AgentSync(
-            agent.external_id, "", agent.namespace, secret_name, False, False, str(exc)
+            agent.external_id, "", agent.namespace, secret_name, False, ok=False, error=str(exc)
         )
 
     try:
         existing = secrets.get(agent.namespace, secret_name)
         minted = False
+        rotated = False
         if not existing or not existing.get("client_id"):
             cred = aib.mint_credentials(agent_id)
             if not cred.get("client_id") or not cred.get("client_secret"):
@@ -342,12 +365,36 @@ def _reconcile_agent(
                 agent.namespace,
                 secret_name,
                 {"client_id": cred["client_id"], "client_secret": cred["client_secret"]},
+                annotations={CREDENTIAL_ROTATED_AT_ANNOTATION: _now_iso()},
             )
             minted = True
+        elif credential_rotation_seconds > 0 and _rotation_due(
+            secrets, agent.namespace, secret_name, credential_rotation_seconds
+        ):
+            # Re-mint to issue a fresh client secret for the existing agent. The broker
+            # honours a grace window on the previous secret, so writing the new secret in
+            # place lets running pods reload it before the old one is retired -- the Secret
+            # is never emptied first, keeping the rotation non-disruptive.
+            cred = aib.mint_credentials(agent_id)
+            if not cred.get("client_id") or not cred.get("client_secret"):
+                raise RuntimeError("broker returned incomplete credentials")
+            secrets.upsert(
+                agent.namespace,
+                secret_name,
+                {"client_id": cred["client_id"], "client_secret": cred["client_secret"]},
+                annotations={CREDENTIAL_ROTATED_AT_ANNOTATION: _now_iso()},
+            )
+            rotated = True
     except Exception as exc:  # noqa: BLE001 - isolate per-resource failures
         problems.append(Problem(ProblemCategory.MISSING_CREDENTIALS, resource, str(exc)))
         return AgentSync(
-            agent.external_id, agent_id, agent.namespace, secret_name, False, False, str(exc)
+            agent.external_id,
+            agent_id,
+            agent.namespace,
+            secret_name,
+            False,
+            ok=False,
+            error=str(exc),
         )
 
     return AgentSync(
@@ -356,4 +403,31 @@ def _reconcile_agent(
         secret_namespace=agent.namespace,
         secret_name=secret_name,
         credentials_minted=minted,
+        credentials_rotated=rotated,
     )
+
+
+def _now_iso() -> str:
+    """Current UTC time as an RFC 3339 / ISO 8601 string for the rotation annotation."""
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _rotation_due(secrets: SecretStore, namespace: str, name: str, rotation_seconds: int) -> bool:
+    """True when a credential Secret is older than the configured rotation interval.
+
+    The age is read from the ``kaos.dev/aib-credential-rotated-at`` annotation written on
+    each mint/rotation. A Secret minted before rotation was enabled carries no annotation;
+    it is treated as due so the first pass establishes a fresh secret and a baseline
+    timestamp. An unparseable timestamp is likewise treated as due, never crashing the pass.
+    """
+    stamp = secrets.get_annotation(namespace, name, CREDENTIAL_ROTATED_AT_ANNOTATION)
+    if not stamp:
+        return True
+    try:
+        rotated_at = datetime.fromisoformat(stamp)
+    except ValueError:
+        return True
+    if rotated_at.tzinfo is None:
+        rotated_at = rotated_at.replace(tzinfo=timezone.utc)
+    age = (datetime.now(timezone.utc) - rotated_at).total_seconds()
+    return age >= rotation_seconds
