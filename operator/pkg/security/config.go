@@ -54,6 +54,23 @@ type Config struct {
 	// An empty value means token-exchange is disabled and existing routing is
 	// unchanged. It is independent of ExtAuthzURL.
 	ExtProcURL string
+
+	// GatewayNamespace is the namespace of the Envoy Gateway data plane
+	// (security.gatewayNamespace). It is the ingress source allowed by the
+	// generated NetworkPolicy so the Gateway can reach protected workloads. An
+	// empty value defaults to "envoy-gateway-system".
+	GatewayNamespace string
+
+	// OperatorNamespace is the namespace the operator runs in. It is the ingress
+	// source allowed by the generated NetworkPolicy so the operator can still poll
+	// workload ClusterIP status endpoints. It is read from SECURITY_OPERATOR_NAMESPACE,
+	// falling back to POD_NAMESPACE; an empty value defaults to "kaos-system".
+	OperatorNamespace string
+
+	// NetworkPolicyDisabled is an escape hatch (security.networkPolicy.enabled=false)
+	// that suppresses NetworkPolicy generation even when security is operational, for
+	// CNIs that misbehave or clusters that manage isolation externally.
+	NetworkPolicyDisabled bool
 }
 
 const (
@@ -64,10 +81,24 @@ const (
 	envUserIssuer             = "SECURITY_USER_AUTH_ISSUER"
 	envUserAudience           = "SECURITY_USER_AUTH_AUDIENCE"
 	envUserJWKSURI            = "SECURITY_USER_AUTH_JWKS_URI"
+	envGatewayNamespace       = "SECURITY_GATEWAY_NAMESPACE"
+	envOperatorNamespace      = "SECURITY_OPERATOR_NAMESPACE"
+	envPodNamespace           = "POD_NAMESPACE"
+	envNetworkPolicyDisabled  = "SECURITY_NETWORK_POLICY_DISABLED"
+)
+
+// Default namespaces used by NetworkPolicy ingress rules when not configured.
+const (
+	defaultGatewayNamespace  = "envoy-gateway-system"
+	defaultOperatorNamespace = "kaos-system"
 )
 
 // GetConfig reads security configuration from environment variables.
 func GetConfig() Config {
+	operatorNamespace := os.Getenv(envOperatorNamespace)
+	if strings.TrimSpace(operatorNamespace) == "" {
+		operatorNamespace = os.Getenv(envPodNamespace)
+	}
 	return Config{
 		ExtAuthzURL:            os.Getenv(envExtAuthzURL),
 		Issuer:                 os.Getenv(envIssuer),
@@ -76,7 +107,20 @@ func GetConfig() Config {
 		UserAudience:           os.Getenv(envUserAudience),
 		UserJWKSURIOverride:    os.Getenv(envUserJWKSURI),
 		ExtProcURL:             os.Getenv(envExtProcURL),
+		GatewayNamespace:       os.Getenv(envGatewayNamespace),
+		OperatorNamespace:      operatorNamespace,
+		NetworkPolicyDisabled:  parseBoolEnv(envNetworkPolicyDisabled),
 	}
+}
+
+// parseBoolEnv reads a boolean environment variable, returning false when the
+// variable is unset or not a recognizable truthy value.
+func parseBoolEnv(key string) bool {
+	v, err := strconv.ParseBool(strings.TrimSpace(os.Getenv(key)))
+	if err != nil {
+		return false
+	}
+	return v
 }
 
 // IsOperational reports whether gateway authorization enforcement is configured.
@@ -174,6 +218,36 @@ func (c Config) UserJWKSURI() string {
 // deployment may enable token exchange without changing the ext_authz wiring.
 func (c Config) ExtProcEnabled() bool {
 	return strings.TrimSpace(c.ExtProcURL) != ""
+}
+
+// NetworkPolicyEnabled reports whether the operator should generate a
+// NetworkPolicy for each protected workload. It requires security to be
+// operational and the escape hatch not to be set. When true, direct
+// workload-to-workload application traffic is denied so the Gateway cannot be
+// bypassed.
+func (c Config) NetworkPolicyEnabled() bool {
+	return c.IsOperational() && !c.NetworkPolicyDisabled
+}
+
+// GatewayNamespaceOrDefault returns the configured Envoy Gateway data-plane
+// namespace, defaulting to "envoy-gateway-system" when unset. It is the ingress
+// source allowed by generated NetworkPolicies.
+func (c Config) GatewayNamespaceOrDefault() string {
+	if ns := strings.TrimSpace(c.GatewayNamespace); ns != "" {
+		return ns
+	}
+	return defaultGatewayNamespace
+}
+
+// OperatorNamespaceOrDefault returns the namespace the operator runs in,
+// defaulting to "kaos-system" when neither SECURITY_OPERATOR_NAMESPACE nor
+// POD_NAMESPACE is set. It is the ingress source allowed by generated
+// NetworkPolicies so the operator can poll workload status endpoints.
+func (c Config) OperatorNamespaceOrDefault() string {
+	if ns := strings.TrimSpace(c.OperatorNamespace); ns != "" {
+		return ns
+	}
+	return defaultOperatorNamespace
 }
 
 // ExtAuthzBackendRef parses the configured ext_authz host:port URL into the
