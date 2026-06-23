@@ -15,13 +15,18 @@ from typing import List, Protocol
 from kaos_sync.projection import (
     DesiredAgent,
     DesiredState,
+    IdentityConflict,
     is_kaos_agent_display_name,
     is_kaos_permission_set_name,
     is_kaos_service_client_id,
-    parse_agent_external_id,
+    is_valid_agent_external_id,
 )
 
 CREDENTIAL_ROTATED_AT_ANNOTATION = "kaos.dev/aib-credential-rotated-at"
+AIB_SYNCED_AT_ANNOTATION = "kaos.dev/aib-synced-at"
+AIB_EXTERNAL_ID_ANNOTATION = "kaos.dev/aib-external-id"
+AIB_SYNC_STATUS_ANNOTATION = "kaos.dev/aib-sync-status"
+AIB_SYNC_MESSAGE_ANNOTATION = "kaos.dev/aib-sync-message"
 
 
 def credential_secret_name(prefix: str, agent_name: str) -> str:
@@ -97,6 +102,18 @@ class AgentSync:
 
 
 @dataclass
+class ResourceSync:
+    """Per-KAOS-object sync state, for write-back as annotations onto the source object."""
+
+    kind: str  # KAOS resource kind: "Agent" / "MCPServer" / "ModelAPI"
+    namespace: str
+    name: str
+    external_id: str
+    status: str  # "ok" / "drift" / "error"
+    message: str = ""
+
+
+@dataclass
 class PruneSummary:
     """Counts of orphaned broker records and Secrets removed during a prune pass."""
 
@@ -113,6 +130,8 @@ class ReconcileSummary:
     agents: list[AgentSync] = field(default_factory=list)
     pruned: PruneSummary = field(default_factory=PruneSummary)
     problems: list[Problem] = field(default_factory=list)
+    conflicts: list[IdentityConflict] = field(default_factory=list)
+    resources: list[ResourceSync] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
@@ -148,6 +167,7 @@ def reconcile(
     configured ``namespaces`` for Secret discovery.
     """
     summary = ReconcileSummary()
+    summary.conflicts = list(desired.conflicts)
 
     service_ids: dict[str, str] = {}
     for service in desired.services:
@@ -155,9 +175,28 @@ def reconcile(
             service_ids[service.client_id] = aib.create_or_get(
                 "services", "client_id", service.client_id, service.admin_body()
             )
+            summary.resources.append(
+                ResourceSync(
+                    service.kind.resource_kind,
+                    service.namespace,
+                    service.name,
+                    service.client_id,
+                    "ok",
+                )
+            )
         except Exception as exc:  # noqa: BLE001 - isolate per-resource failures
             summary.problems.append(
                 Problem(ProblemCategory.AIB_UNREACHABLE, f"service {service.client_id}", str(exc))
+            )
+            summary.resources.append(
+                ResourceSync(
+                    service.kind.resource_kind,
+                    service.namespace,
+                    service.name,
+                    service.client_id,
+                    "error",
+                    str(exc),
+                )
             )
     summary.services = len(service_ids)
 
@@ -191,15 +230,40 @@ def reconcile(
     summary.permission_sets = len(permission_set_ids)
 
     for agent in desired.agents:
-        summary.agents.append(
-            _reconcile_agent(
-                agent,
-                aib,
-                secrets,
-                secret_prefix,
-                permission_set_ids,
-                summary.problems,
-                credential_rotation_seconds,
+        sync = _reconcile_agent(
+            agent,
+            aib,
+            secrets,
+            secret_prefix,
+            permission_set_ids,
+            summary.problems,
+            credential_rotation_seconds,
+        )
+        summary.agents.append(sync)
+        summary.resources.append(
+            ResourceSync(
+                "Agent",
+                agent.namespace,
+                agent.name,
+                sync.external_id,
+                "ok" if sync.ok else "error",
+                sync.error or "",
+            )
+        )
+
+    _CONFLICT_KIND = {"agent": "Agent", "mcpserver": "MCPServer", "modelapi": "ModelAPI"}
+    for conflict in desired.conflicts:
+        summary.resources.append(
+            ResourceSync(
+                _CONFLICT_KIND.get(conflict.kind, conflict.kind),
+                conflict.namespace,
+                conflict.name,
+                "",
+                "drift",
+                (
+                    f"explicit security.id '{conflict.security_id}' already held by "
+                    f"{conflict.holder_namespace}/{conflict.holder_name}"
+                ),
             )
         )
 
@@ -246,7 +310,7 @@ def _prune(
             continue
         if display_name in desired_external_ids:
             continue
-        if parse_agent_external_id(display_name) is None:
+        if not is_valid_agent_external_id(display_name):
             problems.append(
                 Problem(
                     ProblemCategory.STALE_EXTERNAL_ID,
@@ -410,6 +474,24 @@ def _reconcile_agent(
 def _now_iso() -> str:
     """Current UTC time as an RFC 3339 / ISO 8601 string for the rotation annotation."""
     return datetime.now(timezone.utc).isoformat()
+
+
+def status_annotations(resource: ResourceSync, synced_at: str | None = None) -> dict[str, str]:
+    """Build the additive ``kaos.dev/aib-*`` annotations for a reconciled KAOS object.
+
+    Only annotation keys are produced (never ``spec``), so the result can be applied as a
+    strategic/merge patch that leaves the rest of the object untouched. The message key is
+    only present when there is a reason to surface, keeping a clean ``ok`` object minimal.
+    """
+    annotations = {
+        AIB_SYNCED_AT_ANNOTATION: synced_at or _now_iso(),
+        AIB_SYNC_STATUS_ANNOTATION: resource.status,
+    }
+    if resource.external_id:
+        annotations[AIB_EXTERNAL_ID_ANNOTATION] = resource.external_id
+    if resource.message:
+        annotations[AIB_SYNC_MESSAGE_ANNOTATION] = resource.message
+    return annotations
 
 
 def _rotation_due(secrets: SecretStore, namespace: str, name: str, rotation_seconds: int) -> bool:

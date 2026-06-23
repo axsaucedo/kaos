@@ -17,12 +17,12 @@ from kaos_sync.observability import (
     start_health_server,
 )
 from kaos_sync.projection import project
-from kaos_sync.reconcile import ReconcileSummary, reconcile
+from kaos_sync.reconcile import ReconcileSummary, _now_iso, reconcile, status_annotations
 
 logger = logging.getLogger("kaos_sync")
 
 
-def run_once(settings: Settings, lister, aib, secrets) -> ReconcileSummary:
+def run_once(settings: Settings, lister, aib, secrets, status_writer=None) -> ReconcileSummary:
     """Run a single reconcile pass and return its summary."""
     resources = lister.list_resources(settings.namespaces)
     desired = project(resources)
@@ -41,7 +41,7 @@ def run_once(settings: Settings, lister, aib, secrets) -> ReconcileSummary:
     logger.info(
         "reconciled services=%d permission_sets=%d agents=%d credentials_minted=%d "
         "credentials_rotated=%d failed=%d pruned_agents=%d pruned_permission_sets=%d "
-        "pruned_services=%d pruned_secrets=%d problems=%d",
+        "pruned_services=%d pruned_secrets=%d problems=%d conflicts=%d",
         summary.services,
         summary.permission_sets,
         len(summary.agents),
@@ -53,6 +53,7 @@ def run_once(settings: Settings, lister, aib, secrets) -> ReconcileSummary:
         summary.pruned.services,
         summary.pruned.secrets,
         len(summary.problems),
+        len(summary.conflicts),
     )
     for problem in summary.problems:
         logger.warning(
@@ -61,6 +62,35 @@ def run_once(settings: Settings, lister, aib, secrets) -> ReconcileSummary:
             problem.resource,
             problem.detail,
         )
+    for conflict in summary.conflicts:
+        logger.warning(
+            "identity conflict kind=%s security_id=%s resource=%s/%s held_by=%s/%s "
+            "(skipped, not projected)",
+            conflict.kind,
+            conflict.security_id,
+            conflict.namespace,
+            conflict.name,
+            conflict.holder_namespace,
+            conflict.holder_name,
+        )
+    if settings.status_annotations_enabled and status_writer is not None:
+        synced_at = _now_iso()
+        for resource in summary.resources:
+            try:
+                status_writer.patch_annotations(
+                    resource.kind,
+                    resource.namespace,
+                    resource.name,
+                    status_annotations(resource, synced_at),
+                )
+            except Exception as exc:  # noqa: BLE001 - write-back is best-effort, never fatal
+                logger.warning(
+                    "status write-back failed kind=%s resource=%s/%s detail=%s",
+                    resource.kind,
+                    resource.namespace,
+                    resource.name,
+                    exc,
+                )
     return summary
 
 
@@ -214,6 +244,7 @@ def main() -> int:
     from kaos_sync.k8s import (
         KaosResourceLister,
         KubeSecretStore,
+        KubeStatusWriter,
         KubeWatchSource,
         load_kube_config,
     )
@@ -221,6 +252,7 @@ def main() -> int:
     load_kube_config()
     lister = KaosResourceLister()
     secrets = KubeSecretStore()
+    status_writer = KubeStatusWriter() if settings.status_annotations_enabled else None
     aib = AIBAdmin(
         base_url=settings.aib_admin_url,
         principal=settings.aib_principal,
@@ -248,7 +280,7 @@ def main() -> int:
 
     def run_pass() -> None:
         try:
-            summary = run_once(settings, lister, aib, secrets)
+            summary = run_once(settings, lister, aib, secrets, status_writer)
             record_summary(summary)
         except Exception:  # noqa: BLE001 - keep the loop alive across transient failures
             logger.exception("reconcile pass failed")

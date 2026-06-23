@@ -151,6 +151,42 @@ class KaosResourceLister:
         )
 
 
+_KIND_PLURAL = {
+    "Agent": AGENT_PLURAL,
+    "MCPServer": MCPSERVER_PLURAL,
+    "ModelAPI": MODELAPI_PLURAL,
+}
+
+
+class KubeStatusWriter:
+    """Patches sync-state annotations back onto KAOS Agent/MCPServer/ModelAPI objects.
+
+    The patch is a JSON merge patch touching only ``metadata.annotations`` -- it never
+    writes ``spec`` or ``status``, so it cannot clobber user intent or fight an operator
+    that owns the resource. A patch against a since-deleted object (404) is ignored.
+    """
+
+    def __init__(self, custom_api: client.CustomObjectsApi | None = None) -> None:
+        self._api = custom_api or client.CustomObjectsApi()
+
+    def patch_annotations(
+        self, kind: str, namespace: str, name: str, annotations: dict[str, str]
+    ) -> bool:
+        plural = _KIND_PLURAL.get(kind)
+        if not plural or not annotations:
+            return False
+        body = {"metadata": {"annotations": annotations}}
+        try:
+            self._api.patch_namespaced_custom_object(
+                KAOS_GROUP, KAOS_VERSION, namespace, plural, name, body
+            )
+        except client.ApiException as exc:  # type: ignore[attr-defined]
+            if exc.status == 404:
+                return False
+            raise
+        return True
+
+
 @dataclass(frozen=True)
 class WatchEvent:
     """A single KAOS resource change observed by the watch layer."""

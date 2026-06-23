@@ -20,6 +20,16 @@ def test_credential_rotation_seconds_override():
     assert settings.credential_rotation_seconds == 86400
 
 
+def test_status_annotations_flag():
+    assert Settings.from_env({}).status_annotations_enabled is True
+    assert (
+        Settings.from_env(
+            {"KAOS_SYNC_STATUS_ANNOTATIONS_ENABLED": "false"}
+        ).status_annotations_enabled
+        is False
+    )
+
+
 def test_overrides_from_env():
     settings = Settings.from_env(
         {

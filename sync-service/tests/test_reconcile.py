@@ -239,6 +239,61 @@ def test_run_once_projects_and_reconciles():
     assert summary.agents[0].secret_name == "kaos-aib-researcher"
 
 
+class FakeStatusWriter:
+    def __init__(self):
+        self.patches: list[tuple[str, str, str, dict]] = []
+
+    def patch_annotations(self, kind, namespace, name, annotations):
+        self.patches.append((kind, namespace, name, dict(annotations)))
+        return True
+
+
+def test_run_once_writes_back_sync_annotations():
+    from kaos_sync.reconcile import (
+        AIB_EXTERNAL_ID_ANNOTATION,
+        AIB_SYNC_STATUS_ANNOTATION,
+        AIB_SYNCED_AT_ANNOTATION,
+    )
+
+    resources = [_mcpserver("github"), _agent("researcher", ["github"])]
+    aib, secrets, writer = FakeAIB(), FakeSecrets(), FakeStatusWriter()
+
+    run_once(Settings(), FakeLister(resources), aib, secrets, writer)
+
+    patched = {(kind, name): ann for kind, _ns, name, ann in writer.patches}
+    assert ("MCPServer", "github") in patched
+    assert ("Agent", "researcher") in patched
+    agent_ann = patched[("Agent", "researcher")]
+    assert agent_ann[AIB_SYNC_STATUS_ANNOTATION] == "ok"
+    assert agent_ann[AIB_EXTERNAL_ID_ANNOTATION] == "kaos://agent/demo/researcher"
+    assert agent_ann[AIB_SYNCED_AT_ANNOTATION]
+    # Write-back is additive: only annotation keys, never spec.
+    assert all(key.startswith("kaos.dev/aib-") for key in agent_ann)
+
+
+def test_run_once_skips_write_back_when_disabled():
+    resources = [_mcpserver("github"), _agent("researcher", ["github"])]
+    aib, secrets, writer = FakeAIB(), FakeSecrets(), FakeStatusWriter()
+    settings = Settings(status_annotations_enabled=False)
+
+    run_once(settings, FakeLister(resources), aib, secrets, writer)
+    assert writer.patches == []
+
+
+def test_run_once_writes_error_status_for_failed_agent():
+    from kaos_sync.reconcile import AIB_SYNC_MESSAGE_ANNOTATION, AIB_SYNC_STATUS_ANNOTATION
+
+    # The broker fails to create the agent -> its write-back carries an error status.
+    resources = [_mcpserver("github"), _agent("researcher", ["github"])]
+    aib = _AgentCreateFailsAIB("kaos://agent/demo/researcher")
+    secrets, writer = FakeSecrets(), FakeStatusWriter()
+
+    run_once(Settings(), FakeLister(resources), aib, secrets, writer)
+    agent_patch = next(ann for kind, _ns, name, ann in writer.patches if kind == "Agent")
+    assert agent_patch[AIB_SYNC_STATUS_ANNOTATION] == "error"
+    assert agent_patch[AIB_SYNC_MESSAGE_ANNOTATION]
+
+
 def test_reconcile_does_not_prune_by_default():
     aib, secrets = FakeAIB(), FakeSecrets()
     reconcile(project([_agent("a", ["github"]), _agent("b", ["slack"])]), aib, secrets, "kaos-aib")

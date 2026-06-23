@@ -5,10 +5,10 @@ metadata:
   labels:
     {{- include "kaos-sync.labels" . | nindent 4 }}
 rules:
-  # Read KAOS resources to project them into the broker.
+  # Read KAOS resources to project them into the broker, and patch sync-state annotations back.
   - apiGroups: ["kaos.tools"]
     resources: ["agents", "mcpservers", "modelapis"]
-    verbs: ["get", "list", "watch"]
+    verbs: ["get", "list", "watch", "patch"]
   # Provision, refresh and prune per-agent credential Secrets.
   - apiGroups: [""]
     resources: ["secrets"]
