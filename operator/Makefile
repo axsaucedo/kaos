@@ -1,4 +1,4 @@
-.PHONY: help build docker-build deploy generate manifests test test-unit clean envtest helm kind-create kind-delete kind-load-images kind-e2e-install-kaos kind-e2e-run-tests e2e-test e2e-test-seq e2e-clean
+.PHONY: help build docker-build deploy generate manifests test test-unit clean envtest helm kind-create kind-delete kind-load-images kind-e2e-install-kaos kind-e2e-run-tests e2e-test e2e-test-seq e2e-clean kind-load-aib-images kind-e2e-install-aib e2e-test-aib kind-e2e-aib
 
 # Configuration
 IMG ?= axsauze/kaos-operator:latest
@@ -156,3 +156,50 @@ e2e-clean:
 	-kubectl delete namespace kaos-system --wait=false 2>/dev/null || true
 	-kubectl get ns -o name | grep e2e | xargs -I{} kubectl delete {} --wait=false 2>/dev/null || true
 	@sleep 3
+
+# --- Agent-auth E2E (identity broker + Go sync service) ----------------------
+# Opt-in, local-only suite that stands up the identity broker and the sync
+# service alongside the operator and verifies per-agent credential Secrets are
+# minted and mounted into agent pods. Requires the (gitignored) identity-broker
+# clone checked out next to this repository and its images built locally.
+AIB_CHART_PATH ?= $(PWD)/../agentic-identity-broker/charts/agentic-identity-broker
+AIB_VALUES_PATH ?= $(AIB_CHART_PATH)/values-dev.yaml
+AIB_IMAGE ?= agentic-identity-broker:0.1.0
+SYNC_IMAGE ?= axsauze/kaos-sync:dev
+AIB_OPERATOR_TAG ?= aib-e2e
+AIB_AGENT_IMAGE ?= axsauze/kaos-agent:0.4.8-dev
+
+# Load the operator, agent, sync, broker, and LiteLLM images into KIND.
+kind-load-aib-images:
+	@kind load docker-image \
+		$(REGISTRY)/kaos-operator:$(AIB_OPERATOR_TAG) \
+		$(AIB_AGENT_IMAGE) \
+		$(SYNC_IMAGE) \
+		$(AIB_IMAGE) \
+		$(LITELLM_IMAGE) \
+		--name $(KIND_CLUSTER_NAME)
+
+# Install KAOS with agent auth, the identity broker, and the Go sync service.
+kind-e2e-install-aib:
+	@pip install -e ../kaos-cli -q 2>/dev/null || true
+	@kaos system install \
+		--namespace kaos-system \
+		--auth-enabled --no-user-auth --no-token-exchange \
+		--gateway-enabled --metallb-enabled \
+		--chart-path chart/ \
+		--set controllerManager.manager.image.repository=$(REGISTRY)/kaos-operator \
+		--set controllerManager.manager.image.tag=$(AIB_OPERATOR_TAG) \
+		--set defaultImages.agentRuntime=$(AIB_AGENT_IMAGE) \
+		--aib-chart-path $(AIB_CHART_PATH) \
+		--aib-values $(AIB_VALUES_PATH) \
+		--sync-chart-path ../sync-service/chart \
+		--sync-image-repository $(REGISTRY)/kaos-sync \
+		--sync-image-tag $(word 2,$(subst :, ,$(SYNC_IMAGE))) \
+		--wait
+
+# Run only the agent-auth credential test against an installed cluster.
+e2e-test-aib:
+	@cd tests && KAOS_AIB_E2E=1 uv run pytest e2e/test_aib_sync_e2e.py -v -s
+
+# Full local agent-auth E2E: load images, install, run the test.
+kind-e2e-aib: kind-load-aib-images kind-e2e-install-aib e2e-test-aib

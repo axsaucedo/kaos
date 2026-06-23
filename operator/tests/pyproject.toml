@@ -28,3 +28,6 @@ asyncio_mode = "auto"
 # Parallel execution: use -n 4 --dist loadscope for ~3min runtime
 # Sequential execution (default): ~6min runtime
 # Example: pytest e2e/ -n 4 --dist loadscope
+markers = [
+    "aib: agent-auth end-to-end tests that require the identity broker and sync service installed (opt-in, set KAOS_AIB_E2E=1)",
+]
