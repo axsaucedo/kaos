@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 
 import httpx
 import pytest
@@ -162,6 +163,96 @@ def test_force_refresh_reacquires(monkeypatch):
     assert mgr.token() == "tok-1"
     assert mgr.force_refresh() == "tok-2"
     assert len(rec.calls) == 2
+
+
+def test_credential_uses_file_secret(monkeypatch, tmp_path):
+    secret_file = tmp_path / "client_secret"
+    secret_file.write_text("file-secret")
+    rec = _Recorder([_resp(200, {"access_token": "tok", "expires_in": 300})])
+    monkeypatch.setattr(httpx, "post", rec)
+    monkeypatch.setenv("AGENT_AUTH_TOKEN_ENDPOINT", "http://broker/oauth2/token")
+    monkeypatch.setenv("AGENT_AUTH_CLIENT_ID", "cid")
+    monkeypatch.setenv("AGENT_AUTH_CLIENT_SECRET", "env-secret")
+    mgr = identity.instrument_agent_identity(client_secret_file=str(secret_file))
+    assert mgr is not None
+    assert mgr.token() == "tok"
+    assert rec.calls[0]["client_secret"] == "file-secret"
+
+
+def test_credential_reloads_on_mtime_change(monkeypatch, tmp_path):
+    secret_file = tmp_path / "client_secret"
+    secret_file.write_text("secret-v1")
+    os.utime(secret_file, (1000, 1000))
+    rec = _Recorder(
+        [
+            _resp(200, {"access_token": "tok-1", "expires_in": 100}),
+            _resp(200, {"access_token": "tok-2", "expires_in": 100}),
+        ]
+    )
+    monkeypatch.setattr(httpx, "post", rec)
+    monkeypatch.setenv("AGENT_AUTH_TOKEN_ENDPOINT", "http://broker/oauth2/token")
+    monkeypatch.setenv("AGENT_AUTH_CLIENT_ID", "cid")
+    mgr = identity.instrument_agent_identity(
+        client_secret_file=str(secret_file), refresh_fraction=0.2
+    )
+    assert mgr is not None
+    assert mgr.token() == "tok-1"
+    assert rec.calls[0]["client_secret"] == "secret-v1"
+
+    secret_file.write_text("secret-v2")
+    os.utime(secret_file, (2000, 2000))
+    mgr._refresh_at = 0.0
+    assert mgr.token() == "tok-2"
+    assert rec.calls[1]["client_secret"] == "secret-v2"
+
+
+def test_credential_env_fallback_when_no_file(monkeypatch):
+    rec = _Recorder([_resp(200, {"access_token": "tok", "expires_in": 300})])
+    monkeypatch.setattr(httpx, "post", rec)
+    monkeypatch.setenv("AGENT_AUTH_TOKEN_ENDPOINT", "http://broker/oauth2/token")
+    monkeypatch.setenv("AGENT_AUTH_CLIENT_ID", "cid")
+    monkeypatch.setenv("AGENT_AUTH_CLIENT_SECRET", "env-secret")
+    mgr = identity.instrument_agent_identity()
+    assert mgr is not None
+    assert mgr.token() == "tok"
+    assert rec.calls[0]["client_secret"] == "env-secret"
+
+
+def test_credential_missing_file_falls_back_to_env(monkeypatch, tmp_path):
+    rec = _Recorder([_resp(200, {"access_token": "tok", "expires_in": 300})])
+    monkeypatch.setattr(httpx, "post", rec)
+    monkeypatch.setenv("AGENT_AUTH_TOKEN_ENDPOINT", "http://broker/oauth2/token")
+    monkeypatch.setenv("AGENT_AUTH_CLIENT_ID", "cid")
+    monkeypatch.setenv("AGENT_AUTH_CLIENT_SECRET", "env-secret")
+    missing = tmp_path / "does-not-exist"
+    mgr = identity.instrument_agent_identity(client_secret_file=str(missing))
+    assert mgr is not None
+    assert mgr.token() == "tok"
+    assert rec.calls[0]["client_secret"] == "env-secret"
+
+
+def test_401_reloads_credential_and_retries(monkeypatch, tmp_path):
+    secret_file = tmp_path / "client_secret"
+    secret_file.write_text("stale-secret")
+    os.utime(secret_file, (1000, 1000))
+
+    state = {"n": 0}
+
+    def _post(url, data=None, timeout=None):
+        state["n"] += 1
+        if state["n"] == 1:
+            secret_file.write_text("fresh-secret")
+            os.utime(secret_file, (2000, 2000))
+            return _resp(401, {"error": "invalid_client"})
+        return _resp(200, {"access_token": "tok", "expires_in": 300})
+
+    monkeypatch.setattr(httpx, "post", _post)
+    monkeypatch.setenv("AGENT_AUTH_TOKEN_ENDPOINT", "http://broker/oauth2/token")
+    monkeypatch.setenv("AGENT_AUTH_CLIENT_ID", "cid")
+    mgr = identity.instrument_agent_identity(client_secret_file=str(secret_file))
+    assert mgr is not None
+    assert mgr.token() == "tok"
+    assert state["n"] == 2
 
 
 def test_async_token_mints(monkeypatch):

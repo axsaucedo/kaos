@@ -55,17 +55,49 @@ def _derive_token_endpoint(token_endpoint: str, issuer: str) -> str:
 
 
 class _Credential:
-    """Source of the client secret. Env-backed; a file source is layered on later."""
+    """Source of the client secret: a projected-volume file when configured, else env.
 
-    def __init__(self, *, secret_env: str = "AGENT_AUTH_CLIENT_SECRET") -> None:
+    When a ``secret_file`` is set the contents are cached and re-read only when the file's
+    mtime changes, so a rotated Kubernetes Secret is picked up on the next acquire without
+    a process restart and without a background watcher. A missing/unreadable file falls
+    back to the env secret (covers the pod-starts-before-Secret race).
+    """
+
+    def __init__(
+        self,
+        *,
+        secret_env: str = "AGENT_AUTH_CLIENT_SECRET",
+        secret_file: Optional[str] = None,
+    ) -> None:
         self._secret_env = secret_env
+        self._secret_file = secret_file
+        self._cached_secret: Optional[str] = None
+        self._cached_mtime: Optional[float] = None
 
-    def secret(self) -> str:
-        """Current client secret (empty when unset)."""
+    def _env_secret(self) -> str:
         return os.environ.get(self._secret_env, "") or ""
 
+    def secret(self) -> str:
+        """Current client secret (file-first, env fallback; empty when unset)."""
+        if not self._secret_file:
+            return self._env_secret()
+        try:
+            mtime = os.path.getmtime(self._secret_file)
+        except OSError:
+            return self._env_secret()
+        if self._cached_secret is None or mtime != self._cached_mtime:
+            try:
+                with open(self._secret_file, "r", encoding="utf-8") as fh:
+                    self._cached_secret = fh.read().strip()
+                self._cached_mtime = mtime
+            except OSError:
+                return self._env_secret()
+        return self._cached_secret or ""
+
     def reload(self) -> None:
-        """Force the next :meth:`secret` to re-read its source (no-op for env)."""
+        """Force the next :meth:`secret` to re-read the file (e.g. after a rotation 401)."""
+        self._cached_secret = None
+        self._cached_mtime = None
 
 
 class ActorTokenManager:
@@ -242,21 +274,27 @@ def instrument_agent_identity(
     issuer_env: str = "AGENT_AUTH_ISSUER",
     client_id_env: str = "AGENT_AUTH_CLIENT_ID",
     client_secret_env: str = "AGENT_AUTH_CLIENT_SECRET",
+    client_secret_file_env: str = "AGENT_AUTH_CLIENT_SECRET_FILE",
+    client_secret_file: Optional[str] = None,
     scope: str = "",
     refresh_fraction: float = _DEFAULT_REFRESH_FRACTION,
 ) -> Optional[ActorTokenManager]:
     """Configure the process-global managed actor-token lifecycle.
 
     Reads the broker coordinates from the provider-agnostic ``AGENT_AUTH_*`` environment
-    the operator injects. Returns the manager, or ``None`` when no credentials are present
-    (the static-token / simulation path then remains in effect). Safe to call repeatedly.
+    the operator injects. The client secret is sourced file-first from
+    ``client_secret_file`` (or the ``AGENT_AUTH_CLIENT_SECRET_FILE`` env when not passed
+    explicitly), falling back to ``AGENT_AUTH_CLIENT_SECRET``; a rotated file is reloaded
+    on its next use. Returns the manager, or ``None`` when no credentials are present (the
+    static-token / simulation path then remains in effect). Safe to call repeatedly.
     """
     global _manager
     token_endpoint = _derive_token_endpoint(
         os.environ.get(token_endpoint_env, ""), os.environ.get(issuer_env, "")
     )
     client_id = os.environ.get(client_id_env, "")
-    credential = _Credential(secret_env=client_secret_env)
+    secret_file = client_secret_file or os.environ.get(client_secret_file_env, "") or None
+    credential = _Credential(secret_env=client_secret_env, secret_file=secret_file)
     manager = ActorTokenManager(
         token_endpoint=token_endpoint,
         client_id=client_id,
