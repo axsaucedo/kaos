@@ -15,4 +15,19 @@ spec:
     allowedRoutes:
       namespaces:
         from: All
+{{- with .Values.security.tls }}
+{{- if .mode }}
+  - name: https
+    port: 443
+    protocol: HTTPS
+    tls:
+      mode: Terminate
+      certificateRefs:
+      - kind: Secret
+        name: {{ if eq .mode "provided" }}{{ required "security.tls.secretName is required when security.tls.mode is provided" .secretName }}{{ else }}{{ $.Values.gatewayAPI.gatewayName | default "kaos-gateway" }}-tls{{ end }}
+    allowedRoutes:
+      namespaces:
+        from: All
+{{- end }}
+{{- end }}
 {{- end }}

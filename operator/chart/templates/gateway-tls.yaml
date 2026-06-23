@@ -1,0 +1,45 @@
+{{- if and .Values.gatewayAPI.enabled .Values.gatewayAPI.createGateway }}
+{{- with .Values.security.tls }}
+{{- $gatewayName := $.Values.gatewayAPI.gatewayName | default "kaos-gateway" }}
+{{- $secretName := printf "%s-tls" $gatewayName }}
+{{- $host := $.Values.security.gatewayHost | default $gatewayName }}
+{{- $cn := splitList ":" $host | first }}
+{{- if eq .mode "selfSigned" }}
+{{- $existing := lookup "v1" "Secret" $.Release.Namespace $secretName }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $secretName }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "chart.labels" $ | nindent 4 }}
+type: kubernetes.io/tls
+data:
+{{- if and $existing $existing.data }}
+  # Reuse the existing certificate so helm upgrade does not churn the cert.
+  tls.crt: {{ index $existing.data "tls.crt" }}
+  tls.key: {{ index $existing.data "tls.key" }}
+{{- else }}
+{{- $cert := genSelfSignedCert $cn nil (list $cn) 3650 }}
+  tls.crt: {{ $cert.Cert | b64enc }}
+  tls.key: {{ $cert.Key | b64enc }}
+{{- end }}
+{{- else if eq .mode "certManager" }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ $secretName }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "chart.labels" $ | nindent 4 }}
+spec:
+  secretName: {{ $secretName }}
+  dnsNames:
+  - {{ $cn | quote }}
+  issuerRef:
+    name: {{ required "security.tls.certManager.issuerRef.name is required when security.tls.mode is certManager" .certManager.issuerRef.name }}
+    kind: {{ .certManager.issuerRef.kind | default "ClusterIssuer" }}
+    group: cert-manager.io
+{{- end }}
+{{- end }}
+{{- end }}
