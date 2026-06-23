@@ -365,7 +365,6 @@ jobs:
           # Update Python versions (PEP 440 compliant)
           sed -i "s/^version = .*/version = \"$PYTHON_DEV\"/" pydantic-ai-server/pyproject.toml
           sed -i "s/^version = .*/version = \"$PYTHON_DEV\"/" kaos-cli/pyproject.toml
-          sed -i "s/^version = .*/version = \"$PYTHON_DEV\"/" sync-service/pyproject.toml
 
           # Update CLI __init__.py fallback version
           sed -i "s/__version__ = \"[^\"]*\"/__version__ = \"$PYTHON_DEV\"/" kaos-cli/kaos_cli/__init__.py
