@@ -24,6 +24,14 @@ class Settings:
     watch_enabled: react to KAOS resource changes via a watch (default on); when off the
         service runs a pure fixed-interval poll loop.
     watch_debounce_seconds: window to coalesce a burst of watch events into one reconcile.
+    leader_election_enabled: contend for a Lease so only one replica reconciles (default
+        on); a single replica simply always wins. Disable for the simplest single-pod dev.
+    leader_lease_name: name of the coordination.k8s.io Lease used for election.
+    leader_namespace: namespace holding the Lease (defaults to the service namespace).
+    leader_identity: holder identity recorded on the Lease; defaults to POD_NAME/hostname.
+    leader_lease_duration_seconds: duration a leader holds the Lease before it can be stolen.
+    leader_renew_deadline_seconds: deadline within which the leader must renew or step down.
+    leader_retry_period_seconds: interval between acquire/renew attempts.
 
     Metrics are exported via OTLP using the standard ``OTEL_*`` environment variables
     (e.g. ``OTEL_SERVICE_NAME``, ``OTEL_EXPORTER_OTLP_ENDPOINT``), read by the SDK
@@ -43,6 +51,13 @@ class Settings:
     retry_base_delay_seconds: float = 0.5
     watch_enabled: bool = True
     watch_debounce_seconds: float = 1.0
+    leader_election_enabled: bool = True
+    leader_lease_name: str = "kaos-sync-leader"
+    leader_namespace: str = "kaos-system"
+    leader_identity: str = ""
+    leader_lease_duration_seconds: float = 15.0
+    leader_renew_deadline_seconds: float = 10.0
+    leader_retry_period_seconds: float = 2.0
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "Settings":
@@ -73,6 +88,36 @@ class Settings:
             watch_enabled=_env_bool(env, "KAOS_SYNC_WATCH_ENABLED", cls.watch_enabled),
             watch_debounce_seconds=float(
                 env.get("KAOS_SYNC_WATCH_DEBOUNCE_SECONDS", cls.watch_debounce_seconds)
+            ),
+            leader_election_enabled=_env_bool(
+                env, "KAOS_SYNC_LEADER_ELECTION_ENABLED", cls.leader_election_enabled
+            ),
+            leader_lease_name=env.get("KAOS_SYNC_LEADER_LEASE_NAME", cls.leader_lease_name),
+            leader_namespace=env.get(
+                "KAOS_SYNC_LEADER_NAMESPACE",
+                env.get("POD_NAMESPACE", cls.leader_namespace),
+            ),
+            leader_identity=env.get(
+                "KAOS_SYNC_LEADER_IDENTITY",
+                env.get("POD_NAME", ""),
+            ),
+            leader_lease_duration_seconds=float(
+                env.get(
+                    "KAOS_SYNC_LEADER_LEASE_DURATION_SECONDS",
+                    cls.leader_lease_duration_seconds,
+                )
+            ),
+            leader_renew_deadline_seconds=float(
+                env.get(
+                    "KAOS_SYNC_LEADER_RENEW_DEADLINE_SECONDS",
+                    cls.leader_renew_deadline_seconds,
+                )
+            ),
+            leader_retry_period_seconds=float(
+                env.get(
+                    "KAOS_SYNC_LEADER_RETRY_PERIOD_SECONDS",
+                    cls.leader_retry_period_seconds,
+                )
             ),
         )
 

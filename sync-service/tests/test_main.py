@@ -116,3 +116,62 @@ def test_dirty_tracker_auto_clears():
     dirty.mark_dirty()
     assert dirty.wait_dirty(0) is True
     assert dirty.wait_dirty(0) is False
+
+
+class _ScriptedBackend:
+    """A fake Lease backend returning a scripted acquire/renew sequence."""
+
+    def __init__(self, results):
+        self._results = list(results)
+        self.calls = 0
+
+    def try_acquire_or_renew(self) -> bool:
+        self.calls += 1
+        if not self._results:
+            return False
+        value = self._results.pop(0)
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+
+def _run_elector(results, max_iters):
+    from kaos_sync.main import LeaderElector
+
+    events: list[str] = []
+    iters = {"n": 0}
+
+    def should_continue() -> bool:
+        iters["n"] += 1
+        return iters["n"] <= max_iters
+
+    elector = LeaderElector(
+        _ScriptedBackend(results),
+        on_started_leading=lambda: events.append("start"),
+        on_stopped_leading=lambda: events.append("stop"),
+        retry_period_seconds=0,
+        should_continue=should_continue,
+        sleep=lambda _s: None,
+    )
+    elector.run()
+    return events
+
+
+def test_election_acquires_and_starts_leading_once():
+    # Stays leader across renewals: start fires once, no stop.
+    assert _run_elector([True, True, True], max_iters=3) == ["start"]
+
+
+def test_election_relinquishes_on_renewal_failure():
+    # Becomes leader then a renewal returns False: start then stop.
+    assert _run_elector([True, False], max_iters=2) == ["start", "stop"]
+
+
+def test_election_backend_error_is_treated_as_not_leading():
+    # An exception while leading relinquishes leadership rather than crashing.
+    assert _run_elector([True, RuntimeError("boom")], max_iters=2) == ["start", "stop"]
+
+
+def test_election_standby_never_leads():
+    # Never acquires: no callbacks fire.
+    assert _run_elector([False, False], max_iters=2) == []

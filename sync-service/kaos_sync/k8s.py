@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import threading
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Callable, Iterator, List
 
 from kubernetes import client, config, watch
@@ -247,3 +248,83 @@ class KubeWatchSource:
                 logger.debug("watch stream for %s ended; re-establishing", plural, exc_info=True)
             if self._stop.wait(self._reconnect_delay_seconds):
                 return
+
+
+class KubeLeaseBackend:
+    """A ``coordination.k8s.io/v1`` Lease used to elect a single active reconciler.
+
+    ``try_acquire_or_renew`` returns True when this identity holds (or just took) the
+    Lease and False when another identity holds an unexpired Lease. Acquisition is
+    optimistic: a lost update (HTTP 409) or a creation race is reported as not-acquired
+    rather than raising, so a losing replica simply stands by and retries.
+    """
+
+    def __init__(
+        self,
+        *,
+        name: str,
+        namespace: str,
+        identity: str,
+        lease_duration_seconds: float,
+        coordination_api: "client.CoordinationV1Api | None" = None,
+    ) -> None:
+        self._name = name
+        self._namespace = namespace
+        self._identity = identity
+        self._lease_duration = int(lease_duration_seconds)
+        self._api = coordination_api or client.CoordinationV1Api()
+
+    def try_acquire_or_renew(self) -> bool:
+        now = datetime.now(timezone.utc)
+        try:
+            lease = self._api.read_namespaced_lease(self._name, self._namespace)
+        except client.ApiException as exc:  # type: ignore[attr-defined]
+            if exc.status == 404:
+                return self._create(now)
+            raise
+        spec = lease.spec
+        holder = spec.holder_identity
+        if holder == self._identity:
+            spec.renew_time = now
+            return self._update(lease)
+        if holder is None or self._is_expired(spec, now):
+            spec.holder_identity = self._identity
+            spec.acquire_time = now
+            spec.renew_time = now
+            spec.lease_duration_seconds = self._lease_duration
+            return self._update(lease)
+        return False
+
+    def _is_expired(self, spec, now: datetime) -> bool:
+        renew = spec.renew_time
+        if renew is None:
+            return True
+        ttl = spec.lease_duration_seconds or self._lease_duration
+        return (now - renew).total_seconds() > ttl
+
+    def _create(self, now: datetime) -> bool:
+        body = client.V1Lease(
+            metadata=client.V1ObjectMeta(name=self._name, namespace=self._namespace),
+            spec=client.V1LeaseSpec(
+                holder_identity=self._identity,
+                acquire_time=now,
+                renew_time=now,
+                lease_duration_seconds=self._lease_duration,
+            ),
+        )
+        try:
+            self._api.create_namespaced_lease(self._namespace, body)
+            return True
+        except client.ApiException as exc:  # type: ignore[attr-defined]
+            if exc.status == 409:
+                return False
+            raise
+
+    def _update(self, lease) -> bool:
+        try:
+            self._api.replace_namespaced_lease(self._name, self._namespace, lease)
+            return True
+        except client.ApiException as exc:  # type: ignore[attr-defined]
+            if exc.status == 409:
+                return False
+            raise
