@@ -338,6 +338,14 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			if err := security.ReconcileEnvoyExtensionPolicy(ctx, r.Client, r.Scheme, agent, policyParams, secCfg, log); err != nil {
 				log.Error(err, "failed to reconcile EnvoyExtensionPolicy")
 			}
+			if err := security.ReconcileNetworkPolicy(ctx, r.Client, r.Scheme, agent, security.NetworkPolicyParams{
+				Name:        routeName,
+				Namespace:   agent.Namespace,
+				PodSelector: map[string]string{"app": "agent", "agent": agent.Name},
+				Labels:      map[string]string{"app": "agent", "agent": agent.Name},
+			}, secCfg, log); err != nil {
+				log.Error(err, "failed to reconcile NetworkPolicy")
+			}
 		}
 	}
 

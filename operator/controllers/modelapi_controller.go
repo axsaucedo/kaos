@@ -305,6 +305,14 @@ func (r *ModelAPIReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		if err := security.ReconcileEnvoyExtensionPolicy(ctx, r.Client, r.Scheme, modelapi, policyParams, secCfg, log); err != nil {
 			log.Error(err, "failed to reconcile EnvoyExtensionPolicy")
 		}
+		if err := security.ReconcileNetworkPolicy(ctx, r.Client, r.Scheme, modelapi, security.NetworkPolicyParams{
+			Name:        routeName,
+			Namespace:   modelapi.Namespace,
+			PodSelector: map[string]string{"app": "modelapi", "modelapi": modelapi.Name},
+			Labels:      map[string]string{"app": "modelapi", "modelapi": modelapi.Name},
+		}, secCfg, log); err != nil {
+			log.Error(err, "failed to reconcile NetworkPolicy")
+		}
 	}
 
 	// Copy deployment status for rolling update visibility
