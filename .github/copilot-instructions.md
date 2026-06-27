@@ -116,3 +116,5 @@ Detailed instructions are in `.github/instructions/`:
 ### Skills
 - `/release-kaos`: Invoke with a version (e.g., "Use /release-kaos to release v0.5.0") — executes full release pipeline
 - `/planned-implementation`: Use for complex staged KAOS work that needs backend/UI context gathering, a written plan, task-scoped commits, PR/CI validation, and an uncommitted REPORT.md PR comment
+- `/dependabot-fix`: Invoke with a PR number (e.g., "Use /dependabot-fix 142") — diagnoses and fixes a single failing Dependabot PR autonomously, commits on the PR branch, posts a REPORT.md comment, and emits a machine-readable `RESULT:` line
+- `/dependabot-fix-all`: Invoke with no arguments — orchestrator that fixes every open Dependabot PR end-to-end on autopilot, spawning one isolated non-interactive `copilot -p` child per PR (serial), verifying each via `gh`, and recording state in the SQLite ledger
