@@ -5,7 +5,8 @@ metadata:
   labels:
     {{- include "kaos-sync.labels" . | nindent 4 }}
 rules:
-  # Read KAOS resources to project them into the broker.
+  # Watch KAOS resources to project them into the broker. The Go reconciler does
+  # not write status back, so read verbs suffice.
   - apiGroups: ["kaos.tools"]
     resources: ["agents", "mcpservers", "modelapis"]
     verbs: ["get", "list", "watch"]
@@ -13,6 +14,14 @@ rules:
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Lease-based leader election so the service can run as an HA Deployment.
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # controller-runtime records leader-election transitions as Events.
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

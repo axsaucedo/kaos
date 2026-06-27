@@ -33,33 +33,28 @@ sync:
   # Prefix for the per-agent credential Secret names. Must match the operator's
   # security.agentAuth.credentialSecretPrefix so mounted credentials resolve.
   credentialSecretPrefix: "kaos-aib"
-  # Delay between reconcile passes, in seconds.
-  reconcileIntervalSeconds: 30
-  # Per-request timeout to the broker admin API, in seconds.
-  requestTimeoutSeconds: 10
+  # Safety-net resync interval (Go duration). A full reconcile also runs on every
+  # KAOS resource change; this bounds drift when no events occur.
+  reconcileInterval: "30s"
+  # Per-request timeout to the broker admin API (Go duration).
+  requestTimeout: "10s"
   # Delete orphaned broker records and credential Secrets no longer in the desired state.
   pruneEnabled: true
-  # Max attempts per broker admin request before giving up.
-  retryMaxAttempts: 4
-  # Base delay for exponential backoff between broker admin retries, in seconds.
-  retryBaseDelaySeconds: 0.5
+  # Lease-based leader election so the service can run as an HA Deployment.
+  leaderElection: true
 
-# Health endpoint and telemetry configuration. The health server backs the
-# /healthz and /readyz probes; metrics are pushed via OTLP when an endpoint is set.
-observability:
-  healthPort: 8080
-  otel:
-    serviceName: kaos-sync
-    # OTLP endpoint for metric export (e.g. http://otel-collector:4317). Metrics
-    # are only emitted when this is set; leave empty to disable telemetry export.
-    endpoint: ""
+# Container ports. Health backs the /healthz and /readyz probes; metrics serves
+# the controller-runtime Prometheus endpoint.
+ports:
+  health: 8081
+  metrics: 8080
 
 resources: {}
 
 podAnnotations: {}
 podSecurityContext:
   runAsNonRoot: true
-  runAsUser: 1000
+  runAsUser: 65532
 securityContext:
   allowPrivilegeEscalation: false
   readOnlyRootFilesystem: true
