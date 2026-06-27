@@ -115,11 +115,11 @@ Before planning a fix, check whether the PR is **in-scope** for fixing at all. A
 - A major bump on: `react`, `react-dom`, `react-router-dom`, `vite`, `vitest`, `@tanstack/react-query`, `tailwindcss`, `typescript`, `eslint`, `zod`, `zustand` (npm); `controller-runtime`, `k8s.io/*`, `pydantic`, `pydantic-ai`, `litellm` (other ecosystems) when bundled with unrelated updates
 - The PR touches > ~40 packages and the majority are routine but a minority are migrations
 
-When triggered, **do not attempt a fix**. Instead:
+When triggered, **do not attempt a fix** and **do not close the PR yourself** — leave it open for the host to close. Instead:
 1. Update `.github/dependabot.yml` to split the offending group (typically add `update-types: ["minor", "patch"]` to the `all` group so majors get individual PRs).
-2. Open that config change as a separate small PR, merge it.
-3. Close the original Dependabot PR(s) as superseded with a comment explaining that smaller PRs will replace them next cycle.
-4. Skip Phase E's "commit on Dependabot branch" flow — the PR is closed, not fixed. Post REPORT.md as a comment on each closed PR.
+2. Open that config change as a separate small PR (leave it for the host to review/merge).
+3. **Verbalise the scope-reject decision as a comment** on the original Dependabot PR(s): explain why it cannot be fixed in one pass, link the config PR, and recommend the host close it once smaller PRs replace it next cycle. Leave the PR **open** — do not pause for a decision, do not close it.
+4. Skip Phase E's "commit on Dependabot branch" flow — there is no fix. The REPORT.md content can be folded into that comment.
 
 Security-update groups (`all-security`) are usually left bundled because security majors are rare and time-sensitive — only split them if a concrete blocker (e.g. a framework major) forces it.
 
@@ -189,7 +189,7 @@ gh pr checks $PR_NUM --repo $REPO
 gh run rerun <run-id> --failed --repo $REPO  # only for known flakes
 ```
 
-Merge when green — **but** for kaos-ui framework majors, gate the merge on a host smoke confirmation (see Step 9.5):
+Merge when green — **but** for kaos-ui framework **major** bumps, leave the PR open for human review instead of merging (see Step 9.5):
 
 ```bash
 gh pr merge $PR_NUM --repo $REPO --merge
@@ -197,25 +197,24 @@ gh pr merge $PR_NUM --repo $REPO --merge
 
 **Caveats:**
 - Do not use `@dependabot rebase` after pushing fix commits — it will discard them. Let the PR merge as-is.
-- If the merge gate (Step 9.5) is unresolved, **do not merge**. Leave the PR open with the report posted; the host will merge after their visual review.
+- If Step 9.5 says leave-open (kaos-ui framework major), **do not merge**. Post the report and leave the PR open; the host merges after their own visual review.
 
-### Step 9.5 · Host smoke gate (kaos-ui framework majors only)
+### Step 9.5 · kaos-ui review gate (framework majors only)
 
-When the PR is a kaos-ui major bump on a framework package (`react`, `react-dom`, `react-router-dom`, `vite`, `vitest`, `@tanstack/react-query`, `tailwindcss`, `typescript`, `eslint`, `zod`, `zustand`), CI alone is insufficient evidence — visual regressions are invisible to Playwright assertions.
+The visual/E2E suite for kaos-ui is stringent, so **minor and patch** bumps — including framework packages — can be **merged directly** once CI is green. No human gate is needed for them.
 
-Use the **`ask_user` tool** (the built-in Copilot CLI prompt — no other mechanism) with a concrete click-through script. Example:
+For a kaos-ui **major** bump on a framework package (`react`, `react-dom`, `react-router-dom`, `vite`, `vitest`, `@tanstack/react-query`, `tailwindcss`, `typescript`, `eslint`, `zod`, `zustand`), CI alone is insufficient evidence — major-version visual regressions can slip past Playwright assertions. **Do not merge.** Instead:
 
-> Agents list → detail drawer (Overview / Logs / YAML / Events tabs) → Create dialog Dry Run → Visual Map pan/zoom/node click → MCP list + drawer → ModelAPI list + drawer → Chat drawer streaming → theme toggle. Watch DevTools console for red errors and React `Warning:` messages.
+1. Push the fix commits so CI is green.
+2. Post REPORT.md as a PR comment (Step 10), explicitly noting it is a framework **major** held for human visual review.
+3. Leave the PR open. The host reviews and merges manually.
 
-Decision matrix on the `ask_user` response:
-
-| Response | Action |
+| Bump type (kaos-ui) | Action |
 |---|---|
-| Host confirms all checks pass | Merge (Step 9 `gh pr merge`) |
-| Host reports issues | Diagnose and push more commits; re-prompt |
-| Host unavailable (autonomous-mode fallback) | **Do NOT merge.** Post the report (Step 10) and stop. |
+| Minor / patch (any package) | Merge directly when green (Step 9 `gh pr merge`) |
+| Major on framework package | **Do NOT merge.** Post report, leave open for human review |
 
-`ask_user` is the **only** sanctioned host-prompt mechanism for this skill. Do not substitute plain-text questions in the chat output, comments on the PR, or any other channel — those do not block execution and the prompt will be missed.
+Do not use the `ask_user` tool or any in-chat prompt as a merge gate — it does not reliably block execution. The gate is simply "leave the major PR open"; the human review happens on the PR itself.
 
 ### Step 10 · REPORT.md as PR comment — never commit
 
@@ -224,6 +223,23 @@ Write `REPORT.md` at the repo root (gitignored) covering: PR context, symptoms, 
 ```bash
 gh pr comment $PR_NUM --repo $REPO --body-file REPORT.md
 ```
+
+### Step 10.6 · Emit a machine-readable result line
+
+As the **final line of output**, print exactly one status line so an orchestrator (e.g. `/dependabot-fix-all`) can
+classify the outcome without parsing prose:
+
+```
+RESULT: <merged|left-open|superseded|blocked> pr=<PR_NUM> reason="<short phrase>"
+```
+
+- `merged` — fix pushed, CI green, PR merged.
+- `left-open` — CI green but intentionally not merged (kaos-ui framework major held for human review).
+- `superseded` — scope-rejected; `dependabot.yml` split PR opened + comment posted, original left open for host to close.
+- `blocked` — could not be fixed this run (record why in `reason`).
+
+This skill runs **fully non-interactive / autopilot**: never call `ask_user` or ask questions in any mode — resolve
+every decision autonomously per the policies above and emit the RESULT line.
 
 ### Step 11 · Evaluate skill currency
 
@@ -244,6 +260,7 @@ If yes — and only if the learning is non-obvious — open a small follow-up PR
 - Scratch files under `./tmp/` (never `/tmp/`); suppress output with `2>./tmp/null`
 - Conventional-commit style with Copilot co-author trailer
 - REPORT.md is **posted as a PR comment**, never committed
+- Runs fully non-interactive (autopilot); the **final output line** is the `RESULT:` status line (Step 10.6)
 
 ---
 
@@ -272,11 +289,11 @@ Common failure modes observed on bundled Dependabot PRs in this repo. Treat thes
 - For E2E deps (`operator/tests/`): `cd operator/tests && source .venv/bin/activate && make e2e-test` (requires KIND)
 
 ### `npm` in `kaos-ui/` (e.g. PR #143, #146)
-- **Scope-reject first** (see Step 6.5). React / React Router / Vite / Vitest / Zod / Zustand / Tailwind majors bundled with routine bumps = close and reconfigure, don't fix.
+- **Scope-reject first** (see Step 6.5). React / React Router / Vite / Vitest / Zod / Zustand / Tailwind majors bundled with routine bumps = reconfigure `dependabot.yml` and leave the PR open with a comment for the host to close, don't fix.
 - Risk is automatically **high** for any kaos-ui PR with a major bump on a framework package — visual regressions do not show up in CI.
 - Local reproduction: `cd kaos-ui && npm ci && npm run build && npm run lint && npm run test:unit`
 - **Playwright required**, not optional: `npm run test:e2e` against a running dev server + `kaos ui --no-browser` proxy + KIND cluster (per `kaos-ui-testing.instructions.md`). CI's E2E alone is not sufficient evidence.
-- **Host smoke before merge**: gated by Step 9.5 using the `ask_user` tool. If the host is unavailable, do not merge — leave the PR open with the report posted.
+- **Merge policy** (Step 9.5): kaos-ui **minor/patch** bumps merge directly when CI is green; framework **major** bumps are **left open for human review**, never auto-merged. No `ask_user` gate.
 - Common breakage: `vitest` majors change config shape and matcher behaviour; `react-router` majors change route definitions; `@tanstack/react-query` majors change `useQuery` signature; ESLint 9 flat-config drift when `eslint-*` plugins bump.
 - **Lockfile desync** is the dominant failure mode on routine grouped PRs — every UI check fails at `npm ci` with `Missing: <pkg> from lock file`. Fix: delete **both** `node_modules` **and** `package-lock.json`, then `npm install`. Deleting only `node_modules` can trigger a secondary `Cannot find native binding` error from `rolldown`/vitest 4.x optional deps.
 
