@@ -187,6 +187,12 @@ def install(
         help="Generate NetworkPolicies that deny direct workload-to-workload traffic "
         "so the Envoy Gateway cannot be bypassed. Effective only with --auth-enabled.",
     ),
+    network_policy_egress: bool = typer.Option(
+        False,
+        "--network-policy-egress/--no-network-policy-egress",
+        help="Add egress default-deny rules to generated NetworkPolicies. Effective "
+        "only with --auth-enabled and --network-policy.",
+    ),
     gateway_routing: bool = typer.Option(
         False,
         "--gateway-routing/--no-gateway-routing",
@@ -259,6 +265,7 @@ def install(
         user_auth_issuer=user_auth_issuer,
         user_auth_audience=user_auth_audience,
         network_policy=network_policy,
+        network_policy_egress=network_policy_egress,
         gateway_routing=gateway_routing,
         gateway_host=gateway_host,
         tls_mode=tls_mode,

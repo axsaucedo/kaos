@@ -31,6 +31,7 @@ from pais.telemetry import (
 )
 from opentelemetry.propagate import extract
 from pais.tools import format_progress_event, DELEGATION_TOOL_PREFIX, DelegationToolset
+from pais.outcomes import find_access_outcome, format_access_outcome
 from pais.serverutils import (
     AgentDeps,
     AgentCard,
@@ -491,6 +492,13 @@ class AgentServer:
                 yield content
 
         except Exception as e:
+            outcome = find_access_outcome(e)
+            if outcome is not None:
+                message_text = format_access_outcome(outcome)
+                logger.info(f"Access outcome surfaced for session {session_id}: {outcome}")
+                await self.memory.add_event(session_id, "access_outcome", message_text)
+                yield message_text
+                return
             logger.error(f"Error processing message: {str(e)}")
             await self.memory.add_event(session_id, "error", str(e))
             yield f"Sorry, I encountered an error: {str(e)}"

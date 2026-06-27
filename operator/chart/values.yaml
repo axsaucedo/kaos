@@ -126,6 +126,10 @@ security:
   # (agentAuth.extAuthzUrl set) and the cluster CNI enforces NetworkPolicy.
   networkPolicy:
     enabled: true
+    # egress adds default-deny egress rules to generated NetworkPolicies. It is
+    # off by default because provider-facing egress must be enabled deliberately.
+    egress:
+      enabled: false
   # gatewayRouting injects gateway-routed endpoint URLs into agents so internal
   # agent->ModelAPI/MCP/peer traffic flows through the gateway (where jwt_authn,
   # ext_authz and ext_proc apply) rather than directly to the workload Service.
@@ -142,6 +146,9 @@ security:
     #   certManager  - the chart creates a cert-manager Certificate (issuerRef below)
     #   provided     - reference an existing kubernetes.io/tls Secret (secretName below)
     mode: ""
+    # minVersion is enforced through an Envoy Gateway ClientTrafficPolicy when
+    # HTTPS termination is enabled.
+    minVersion: "1.2"
     certManager:
       issuerRef:
         # name of the cert-manager Issuer/ClusterIssuer (mode=certManager).

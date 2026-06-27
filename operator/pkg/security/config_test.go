@@ -302,6 +302,26 @@ func TestNetworkPolicyEnabled(t *testing.T) {
 	}
 }
 
+func TestNetworkPolicyEgressEnabled(t *testing.T) {
+	cases := []struct {
+		name     string
+		cfg      Config
+		expected bool
+	}{
+		{"default off", Config{ExtAuthzURL: "svc:9191"}, false},
+		{"enabled with base policy", Config{ExtAuthzURL: "svc:9191", NetworkPolicyEgress: true}, true},
+		{"disabled when base policy disabled", Config{ExtAuthzURL: "svc:9191", NetworkPolicyDisabled: true, NetworkPolicyEgress: true}, false},
+		{"disabled when not operational", Config{NetworkPolicyEgress: true}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.cfg.NetworkPolicyEgressEnabled(); got != tc.expected {
+				t.Errorf("NetworkPolicyEgressEnabled() = %v, want %v", got, tc.expected)
+			}
+		})
+	}
+}
+
 func TestGatewayNamespaceOrDefault(t *testing.T) {
 	if got := (Config{}).GatewayNamespaceOrDefault(); got != defaultGatewayNamespace {
 		t.Errorf("default = %q, want %q", got, defaultGatewayNamespace)
@@ -346,6 +366,23 @@ func TestGetConfigNetworkPolicyDisabledParsing(t *testing.T) {
 	t.Setenv(envNetworkPolicyDisabled, "")
 	if GetConfig().NetworkPolicyDisabled {
 		t.Errorf("expected NetworkPolicyDisabled=false when unset")
+	}
+}
+
+func TestGetConfigNetworkPolicyEgressParsing(t *testing.T) {
+	t.Setenv(envExtAuthzURL, "svc:9191")
+	t.Setenv(envNetworkPolicyEgress, "true")
+	cfg := GetConfig()
+	if !cfg.NetworkPolicyEgress {
+		t.Errorf("expected NetworkPolicyEgress=true")
+	}
+	if !cfg.NetworkPolicyEgressEnabled() {
+		t.Errorf("expected NetworkPolicyEgressEnabled=true when base NetworkPolicy is on")
+	}
+
+	t.Setenv(envNetworkPolicyDisabled, "true")
+	if GetConfig().NetworkPolicyEgressEnabled() {
+		t.Errorf("expected egress disabled when base NetworkPolicy is disabled")
 	}
 }
 

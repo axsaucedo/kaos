@@ -20,7 +20,7 @@ from typing import Any, Dict, Optional
 import httpx
 
 from .identity import AIBUnavailable, actor_token, actor_token_async
-from .instrument import ctx
+from .instrument import HEADER_ACCESS_REASON, HEADER_REAUTH_URL, ctx
 
 _TOKEN_EXCHANGE_GRANT = "urn:ietf:params:oauth:grant-type:token-exchange"
 _ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token"
@@ -162,6 +162,48 @@ def _raise_for_decision(decision: AccessDecision) -> None:
     if decision.requires_reauth:
         raise ReauthenticationRequired(decision)
     raise AccessDenied(decision)
+
+
+def outcome_from_response(
+    response: Any, *, resource: str = "", action: str = ""
+) -> Optional[AccessDecision]:
+    """Map a KAOS-gateway enforcement response to a structured :class:`AccessDecision`.
+
+    Reads only response *headers* — never the body — so it is safe to call on any
+    instrumented outbound response, including streaming ones. Returns ``None`` for
+    any response without the gateway enforcement header (``x-kaos-access-reason``),
+    so ordinary traffic and non-KAOS 4xx/5xx responses are unaffected. When the
+    header is present the decision is always a denial: an ext_authz denial carries
+    the platform/user reason with no URL, while an ext_proc re-auth response carries
+    ``third_party_reauth_required`` plus a ``x-kaos-reauth-url``.
+    """
+    headers = getattr(response, "headers", None)
+    if not headers:
+        return None
+    reason = headers.get(HEADER_ACCESS_REASON)
+    if not reason:
+        return None
+    return AccessDecision(
+        allowed=False,
+        reason=str(reason),
+        resource=resource,
+        action=action,
+        reauth_url=headers.get(HEADER_REAUTH_URL) or None,
+    )
+
+
+def raise_for_gateway_outcome(response: Any, *, resource: str = "", action: str = "") -> None:
+    """Raise a typed outcome when ``response`` carries a KAOS-gateway denial.
+
+    A no-op for any response that does not carry the gateway enforcement header,
+    so it is safe to call unconditionally on every instrumented outbound response.
+    A ``user_grant_required`` / ``platform_grant_missing`` ext_authz denial raises
+    :class:`AccessDenied`; an ext_proc ``third_party_reauth_required`` (which carries
+    a re-auth URL) raises :class:`ReauthenticationRequired`.
+    """
+    decision = outcome_from_response(response, resource=resource, action=action)
+    if decision is not None:
+        _raise_for_decision(decision)
 
 
 class Client:

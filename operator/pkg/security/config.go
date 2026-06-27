@@ -72,6 +72,11 @@ type Config struct {
 	// CNIs that misbehave or clusters that manage isolation externally.
 	NetworkPolicyDisabled bool
 
+	// NetworkPolicyEgress opts generated NetworkPolicies into egress
+	// isolation. It is intentionally separate from NetworkPolicyDisabled because
+	// egress enforcement can break provider calls on CNIs that enforce it.
+	NetworkPolicyEgress bool
+
 	// GatewayHost is the host[:port] of the Envoy Gateway as reachable from inside
 	// the cluster (security.gatewayHost). When gateway routing is enabled and this
 	// is set, the operator injects gateway-routed URLs into agents so internal
@@ -100,6 +105,7 @@ const (
 	envOperatorNamespace      = "SECURITY_OPERATOR_NAMESPACE"
 	envPodNamespace           = "POD_NAMESPACE"
 	envNetworkPolicyDisabled  = "SECURITY_NETWORK_POLICY_DISABLED"
+	envNetworkPolicyEgress    = "SECURITY_NETWORK_POLICY_EGRESS_ENABLED"
 	envGatewayHost            = "SECURITY_GATEWAY_HOST"
 	envGatewayRouting         = "SECURITY_GATEWAY_ROUTING_ENABLED"
 )
@@ -127,6 +133,7 @@ func GetConfig() Config {
 		GatewayNamespace:       os.Getenv(envGatewayNamespace),
 		OperatorNamespace:      operatorNamespace,
 		NetworkPolicyDisabled:  parseBoolEnv(envNetworkPolicyDisabled),
+		NetworkPolicyEgress:    parseBoolEnv(envNetworkPolicyEgress),
 		GatewayHost:            os.Getenv(envGatewayHost),
 		GatewayRouting:         parseBoolEnv(envGatewayRouting),
 	}
@@ -246,6 +253,14 @@ func (c Config) ExtProcEnabled() bool {
 // bypassed.
 func (c Config) NetworkPolicyEnabled() bool {
 	return c.IsOperational() && !c.NetworkPolicyDisabled
+}
+
+// NetworkPolicyEgressEnabled reports whether generated NetworkPolicies should
+// also isolate egress. It requires base NetworkPolicy generation to be enabled
+// and the explicit egress gate to be set, keeping existing ingress-only behavior
+// as the default.
+func (c Config) NetworkPolicyEgressEnabled() bool {
+	return c.NetworkPolicyEnabled() && c.NetworkPolicyEgress
 }
 
 // GatewayNamespaceOrDefault returns the configured Envoy Gateway data-plane

@@ -276,6 +276,84 @@ class TestMockModel:
             del os.environ["DEBUG_MOCK_RESPONSES"]
 
 
+class TestAccessOutcomeSurfacing:
+    """A gateway access denial raised on the outbound path surfaces as a message."""
+
+    def _model_raising(self, exc: Exception) -> FunctionModel:
+        def mock_fn(messages, info: AgentInfo) -> PydanticModelResponse:
+            raise exc
+
+        return FunctionModel(mock_fn)
+
+    @pytest.mark.asyncio
+    async def test_ext_authz_denial_surfaces_reason(self):
+        from aib import AccessDecision, AccessDenied
+
+        decision = AccessDecision(
+            allowed=False, reason="platform_grant_missing", resource="mcp.payments"
+        )
+        server = make_test_server(
+            name="denied-agent", model=self._model_raising(AccessDenied(decision))
+        )
+
+        response = ""
+        async for chunk in server._process_message("call it", session_id="t"):
+            response += chunk
+
+        assert "mcp.payments" in response
+        assert "platform_grant_missing" in response
+        assert "administrator must approve" in response
+        assert "Sorry, I encountered an error" not in response
+
+    @pytest.mark.asyncio
+    async def test_reauth_required_surfaces_url(self):
+        from aib import AccessDecision, ReauthenticationRequired
+
+        decision = AccessDecision(
+            allowed=False,
+            reason="third_party_reauth_required",
+            resource="github",
+            reauth_url="https://idp.example/reauth",
+        )
+        server = make_test_server(
+            name="reauth-agent",
+            model=self._model_raising(ReauthenticationRequired(decision)),
+        )
+
+        response = ""
+        async for chunk in server._process_message("call it", session_id="t"):
+            response += chunk
+
+        assert "https://idp.example/reauth" in response
+        assert "re-authentication" in response
+
+    @pytest.mark.asyncio
+    async def test_wrapped_outcome_is_unwrapped(self):
+        from aib import AccessDecision, AccessDenied
+
+        decision = AccessDecision(allowed=False, reason="user_grant_required", resource="db")
+        inner = AccessDenied(decision)
+        wrapped = RuntimeError("tool failed")
+        wrapped.__cause__ = inner
+        server = make_test_server(name="wrap-agent", model=self._model_raising(wrapped))
+
+        response = ""
+        async for chunk in server._process_message("call it", session_id="t"):
+            response += chunk
+
+        assert "user_grant_required" in response
+
+    @pytest.mark.asyncio
+    async def test_non_access_error_unchanged(self):
+        server = make_test_server(name="err-agent", model=self._model_raising(RuntimeError("boom")))
+
+        response = ""
+        async for chunk in server._process_message("call it", session_id="t"):
+            response += chunk
+
+        assert "Sorry, I encountered an error" in response
+
+
 class TestAgentCard:
     """Tests for AgentCard dataclass."""
 

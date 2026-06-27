@@ -67,6 +67,9 @@ data:
   {{- if and .networkPolicy (not .networkPolicy.enabled) }}
   SECURITY_NETWORK_POLICY_DISABLED: "true"
   {{- end }}
+  {{- if and .networkPolicy .networkPolicy.egress .networkPolicy.egress.enabled }}
+  SECURITY_NETWORK_POLICY_EGRESS_ENABLED: "true"
+  {{- end }}
   {{- if and .gatewayRouting .gatewayRouting.enabled }}
   SECURITY_GATEWAY_ROUTING_ENABLED: "true"
   {{- end }}

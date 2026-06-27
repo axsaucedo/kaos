@@ -34,6 +34,7 @@ from pydantic import BaseModel
 from opentelemetry import trace as trace_api, metrics
 
 from pais.telemetry import SERVICE_NAME, is_otel_enabled
+from pais.outcomes import access_event_data, find_access_outcome
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +124,7 @@ EVENT_TASK_COMPLETED = "task.completed"
 EVENT_TASK_FAILED = "task.failed"
 EVENT_TASK_CANCELED = "task.canceled"
 EVENT_AUTONOMOUS_BUDGET_EXHAUSTED = "autonomous.budget.exhausted"
+EVENT_USER_ACTION_REQUIRED = "user_action_required"
 
 
 @dataclass
@@ -662,6 +664,18 @@ class LocalTaskManager(TaskManager):
                                     message, session_id
                                 )
                         except Exception as iter_err:
+                            access_outcome = find_access_outcome(iter_err)
+                            if access_outcome is not None:
+                                event_data = access_event_data(access_outcome)
+                                task.add_event(EVENT_USER_ACTION_REQUIRED, event_data)
+                                task.metadata["user_action_required"] = event_data
+                                last_response = event_data["message"]
+                                logger.info(
+                                    f"Autonomous run {task_id}: user action required "
+                                    f"({event_data['reason']} on {event_data['resource']}), "
+                                    "skipping protected action and ending run"
+                                )
+                                break
                             if is_autonomous:
                                 err_type = type(iter_err).__name__
                                 logger.warning(

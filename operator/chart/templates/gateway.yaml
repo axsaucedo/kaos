@@ -30,4 +30,23 @@ spec:
         from: All
 {{- end }}
 {{- end }}
+{{- with .Values.security.tls }}
+{{- if and .mode .minVersion }}
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: ClientTrafficPolicy
+metadata:
+  name: {{ $.Values.gatewayAPI.gatewayName | default "kaos-gateway" }}-tls
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    {{- include "chart.labels" $ | nindent 4 }}
+spec:
+  targetRef:
+    group: gateway.networking.k8s.io
+    kind: Gateway
+    name: {{ $.Values.gatewayAPI.gatewayName | default "kaos-gateway" }}
+  tls:
+    minVersion: {{ .minVersion | quote }}
+{{- end }}
+{{- end }}
 {{- end }}

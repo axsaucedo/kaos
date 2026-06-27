@@ -581,6 +581,7 @@ def _build_auth_operator_args(
     user_jwks_uri: str = "",
     ext_proc_url: str = "",
     network_policy: bool = True,
+    network_policy_egress: bool = False,
     gateway_routing: bool = False,
     gateway_host: str = "",
     tls_mode: str = "",
@@ -597,9 +598,9 @@ def _build_auth_operator_args(
     (``security.agentAuth.extProcUrl``) is appended only when supplied.
 
     Bypass-prevention and transport-security arguments are appended too:
-    NetworkPolicy is on unless explicitly disabled, gateway routing and host are
-    set when requested, and ``security.tls.*`` is configured when a TLS mode is
-    supplied.
+    NetworkPolicy is on unless explicitly disabled, egress isolation is opt-in,
+    gateway routing and host are set when requested, and ``security.tls.*`` is
+    configured when a TLS mode is supplied.
     """
     args: list[str] = []
     args.extend(["--set", f"security.agentAuth.extAuthzUrl={ext_authz_url}"])
@@ -620,6 +621,8 @@ def _build_auth_operator_args(
         args.extend(["--set", f"security.userAuth.jwksUri={user_jwks_uri}"])
     if not network_policy:
         args.extend(["--set", "security.networkPolicy.enabled=false"])
+    if network_policy_egress:
+        args.extend(["--set", "security.networkPolicy.egress.enabled=true"])
     if gateway_routing:
         args.extend(["--set", "security.gatewayRouting.enabled=true"])
     if gateway_host:
@@ -1119,6 +1122,7 @@ def install_command(
     user_auth_issuer: str | None = None,
     user_auth_audience: str = DEFAULT_USER_AUTH_AUDIENCE,
     network_policy: bool = True,
+    network_policy_egress: bool = False,
     gateway_routing: bool = False,
     gateway_host: str | None = None,
     tls_mode: str | None = None,
@@ -1360,6 +1364,7 @@ def install_command(
                     else ""
                 ),
                 network_policy=network_policy,
+                network_policy_egress=network_policy_egress,
                 gateway_routing=gateway_routing,
                 gateway_host=gateway_host or "",
                 tls_mode=tls_mode or "",

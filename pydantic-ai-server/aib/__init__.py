@@ -26,6 +26,8 @@ from .client import (
     Client,
     ReauthenticationRequired,
     TokenResult,
+    outcome_from_response,
+    raise_for_gateway_outcome,
 )
 from .identity import (
     AIBUnavailable,
@@ -37,9 +39,11 @@ from .identity import (
     reset_manager,
 )
 from .instrument import (
+    HEADER_ACCESS_REASON,
     HEADER_ACTOR,
     HEADER_ACTOR_TOKEN,
     HEADER_PRINCIPAL,
+    HEADER_REAUTH_URL,
     HEADER_REQUEST_ID,
     HEADER_SCOPES,
     HEADER_SESSION_ID,
@@ -73,6 +77,8 @@ __all__ = [
     "AccessDenied",
     "ReauthenticationRequired",
     "TokenResult",
+    "outcome_from_response",
+    "raise_for_gateway_outcome",
     "HEADER_REQUEST_ID",
     "HEADER_SESSION_ID",
     "HEADER_PRINCIPAL",
@@ -80,4 +86,6 @@ __all__ = [
     "HEADER_SCOPES",
     "HEADER_SUBJECT_TOKEN",
     "HEADER_ACTOR_TOKEN",
+    "HEADER_ACCESS_REASON",
+    "HEADER_REAUTH_URL",
 ]
