@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kaos-sync.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kaos-sync.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "kaos-sync.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "kaos-sync.selectorLabels" . | nindent 8 }}
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "kaos-sync.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: sync
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          env:
+            - name: AIB_ADMIN_URL
+              value: {{ .Values.broker.adminUrl | quote }}
+            - name: AIB_PRINCIPAL
+              value: {{ .Values.broker.principal | quote }}
+            - name: AIB_PRINCIPAL_HEADER
+              value: {{ .Values.broker.principalHeader | quote }}
+            - name: KAOS_SYNC_NAMESPACES
+              value: {{ join "," .Values.sync.namespaces | quote }}
+            - name: KAOS_SYNC_CREDENTIAL_SECRET_PREFIX
+              value: {{ .Values.sync.credentialSecretPrefix | quote }}
+            - name: KAOS_SYNC_RECONCILE_INTERVAL_SECONDS
+              value: {{ .Values.sync.reconcileIntervalSeconds | quote }}
+            - name: KAOS_SYNC_REQUEST_TIMEOUT_SECONDS
+              value: {{ .Values.sync.requestTimeoutSeconds | quote }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

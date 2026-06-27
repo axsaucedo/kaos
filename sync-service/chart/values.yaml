@@ -1,0 +1,56 @@
+# Default values for the KAOS sync service.
+
+# Number of sync service replicas. A single replica is sufficient: reconcile is
+# idempotent and ordering across replicas is not required.
+replicaCount: 1
+
+image:
+  repository: axsauze/kaos-sync
+  tag: ""  # defaults to chart appVersion when empty
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# Broker admin API configuration.
+broker:
+  # adminUrl is the base URL of the broker admin API (including the /api suffix).
+  adminUrl: "http://aib-admin.aib-system.svc.cluster.local:14000/api"
+  # principal is the pre-authenticated principal sent to the admin API.
+  principal: "kaos-sync"
+  # principalHeader carries the pre-authenticated principal.
+  principalHeader: "X-Remote-User"
+
+sync:
+  # Namespaces to reconcile. Empty means cluster-wide.
+  namespaces: []
+  # Prefix for the per-agent credential Secret names. Must match the operator's
+  # security.agentAuth.credentialSecretPrefix so mounted credentials resolve.
+  credentialSecretPrefix: "kaos-aib"
+  # Delay between reconcile passes, in seconds.
+  reconcileIntervalSeconds: 30
+  # Per-request timeout to the broker admin API, in seconds.
+  requestTimeoutSeconds: 10
+
+resources: {}
+
+podAnnotations: {}
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

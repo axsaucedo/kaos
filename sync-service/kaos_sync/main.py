@@ -1,0 +1,63 @@
+"""Entrypoint: periodic reconcile loop projecting KAOS resources into AIB."""
+
+from __future__ import annotations
+
+import logging
+import time
+
+from kaos_sync.aib_client import AIBAdmin
+from kaos_sync.config import Settings
+from kaos_sync.projection import project
+from kaos_sync.reconcile import ReconcileSummary, reconcile
+
+logger = logging.getLogger("kaos_sync")
+
+
+def run_once(settings: Settings, lister, aib, secrets) -> ReconcileSummary:
+    """Run a single reconcile pass and return its summary."""
+    resources = lister.list_resources(settings.namespaces)
+    desired = project(resources)
+    summary = reconcile(desired, aib, secrets, settings.credential_secret_prefix)
+    minted = sum(1 for a in summary.agents if a.credentials_minted)
+    logger.info(
+        "reconciled services=%d permission_sets=%d agents=%d credentials_minted=%d",
+        summary.services,
+        summary.permission_sets,
+        len(summary.agents),
+        minted,
+    )
+    return summary
+
+
+def main() -> int:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    settings = Settings.from_env()
+
+    from kaos_sync.k8s import KaosResourceLister, KubeSecretStore, load_kube_config
+
+    load_kube_config()
+    lister = KaosResourceLister()
+    secrets = KubeSecretStore()
+    aib = AIBAdmin(
+        base_url=settings.aib_admin_url,
+        principal=settings.aib_principal,
+        principal_header=settings.aib_principal_header,
+        timeout=settings.request_timeout_seconds,
+    )
+
+    logger.info(
+        "starting reconcile loop admin=%s interval=%ds namespaces=%s",
+        settings.aib_admin_url,
+        settings.reconcile_interval_seconds,
+        ",".join(settings.namespaces) or "<all>",
+    )
+    while True:
+        try:
+            run_once(settings, lister, aib, secrets)
+        except Exception:  # noqa: BLE001 - keep the loop alive across transient failures
+            logger.exception("reconcile pass failed")
+        time.sleep(settings.reconcile_interval_seconds)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

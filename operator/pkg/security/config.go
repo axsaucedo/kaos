@@ -21,14 +21,30 @@ type Config struct {
 	// access-check gRPC backend (agentAuth.extAuthzUrl). An empty value means
 	// gateway authorization enforcement is disabled.
 	ExtAuthzURL string
+
+	// Issuer is the agent-auth OIDC issuer URL (agentAuth.issuer): the broker
+	// that mints agent actor tokens. It is propagated to agent pods so they can
+	// obtain an actor token from their mounted credentials.
+	Issuer string
+
+	// CredentialSecretPrefix is the name prefix of the per-agent credential
+	// Secret provisioned by the sync service (agentAuth.credentialSecretPrefix).
+	// An empty value disables credential mounting into agent pods.
+	CredentialSecretPrefix string
 }
 
-const envExtAuthzURL = "SECURITY_AGENT_AUTH_EXT_AUTHZ_URL"
+const (
+	envExtAuthzURL            = "SECURITY_AGENT_AUTH_EXT_AUTHZ_URL"
+	envIssuer                 = "SECURITY_AGENT_AUTH_ISSUER"
+	envCredentialSecretPrefix = "SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX"
+)
 
 // GetConfig reads security configuration from environment variables.
 func GetConfig() Config {
 	return Config{
-		ExtAuthzURL: os.Getenv(envExtAuthzURL),
+		ExtAuthzURL:            os.Getenv(envExtAuthzURL),
+		Issuer:                 os.Getenv(envIssuer),
+		CredentialSecretPrefix: os.Getenv(envCredentialSecretPrefix),
 	}
 }
 
@@ -36,6 +52,30 @@ func GetConfig() Config {
 // The operator only generates authorization policies when this returns true.
 func (c Config) IsOperational() bool {
 	return strings.TrimSpace(c.ExtAuthzURL) != ""
+}
+
+// CredentialMountingEnabled reports whether the operator should mount per-agent
+// AIB credentials into agent pods. This requires security to be operational and a
+// credential Secret prefix to be configured.
+func (c Config) CredentialMountingEnabled() bool {
+	return c.IsOperational() && strings.TrimSpace(c.CredentialSecretPrefix) != ""
+}
+
+// CredentialSecretName returns the name of the per-agent credential Secret for the
+// given agent, using the configured prefix. It matches the name the sync service
+// writes, so the operator can mount it without coordination.
+func (c Config) CredentialSecretName(agentName string) string {
+	return fmt.Sprintf("%s-%s", strings.TrimSpace(c.CredentialSecretPrefix), agentName)
+}
+
+// TokenEndpoint returns the agent-auth token endpoint derived from the issuer, or an
+// empty string when no issuer is configured.
+func (c Config) TokenEndpoint() string {
+	issuer := strings.TrimRight(strings.TrimSpace(c.Issuer), "/")
+	if issuer == "" {
+		return ""
+	}
+	return issuer + "/oauth2/token"
 }
 
 // ExtAuthzBackendRef parses the configured ext_authz host:port URL into the

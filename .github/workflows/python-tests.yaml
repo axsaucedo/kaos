@@ -6,6 +6,7 @@ on:
     paths:
       - 'pydantic-ai-server/**'
       - 'kaos-cli/**'
+      - 'sync-service/**'
       - 'operator/config/samples/**'
       - '.github/workflows/python-tests.yaml'
   push:
@@ -13,6 +14,7 @@ on:
     paths:
       - 'pydantic-ai-server/**'
       - 'kaos-cli/**'
+      - 'sync-service/**'
       - 'operator/config/samples/**'
       - '.github/workflows/python-tests.yaml'
   workflow_dispatch:
@@ -102,4 +104,29 @@ jobs:
           source .venv/bin/activate
           uv pip install -e .
           uv pip install pytest pyyaml
+          python -m pytest tests/ -v
+
+  sync-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Run sync service tests
+        working-directory: sync-service
+        run: |
+          uv venv
+          source .venv/bin/activate
+          uv pip install -e .
+          uv pip install pytest black
+          black --check kaos_sync tests
           python -m pytest tests/ -v

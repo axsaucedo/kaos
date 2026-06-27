@@ -1,0 +1,30 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "kaos-sync.fullname" . }}
+  labels:
+    {{- include "kaos-sync.labels" . | nindent 4 }}
+rules:
+  # Read KAOS resources to project them into the broker.
+  - apiGroups: ["kaos.tools"]
+    resources: ["agents", "mcpservers", "modelapis"]
+    verbs: ["get", "list", "watch"]
+  # Provision and refresh per-agent credential Secrets.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "kaos-sync.fullname" . }}
+  labels:
+    {{- include "kaos-sync.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "kaos-sync.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "kaos-sync.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}

@@ -92,6 +92,54 @@ def install(
         "--chart-path",
         help="Path to local Helm chart directory (for development). Uses published chart if not set.",
     ),
+    auth_enabled: bool = typer.Option(
+        False,
+        "--auth-enabled",
+        help="Enable agent authentication: wire the operator to the identity broker, "
+        "mount per-agent credentials, and optionally install the broker and sync service.",
+    ),
+    auth_namespace: str = typer.Option(
+        "aib-system",
+        "--auth-namespace",
+        help="Namespace for the identity broker and sync service.",
+    ),
+    ext_authz_url: str | None = typer.Option(
+        None,
+        "--ext-authz-url",
+        help="Override the access-check gRPC backend host:port. Defaults to the "
+        "conventional service in the auth namespace.",
+    ),
+    auth_issuer: str | None = typer.Option(
+        None,
+        "--auth-issuer",
+        help="Override the broker issuer URL propagated to agent pods. Defaults to the "
+        "broker enduser service in the auth namespace.",
+    ),
+    aib_chart_path: str | None = typer.Option(
+        None,
+        "--aib-chart-path",
+        help="Path to a local identity broker Helm chart to install (unpublished/dev path).",
+    ),
+    aib_values_path: str | None = typer.Option(
+        None,
+        "--aib-values",
+        help="Values file for the identity broker chart (e.g. the dev preset).",
+    ),
+    sync_chart_path: str | None = typer.Option(
+        None,
+        "--sync-chart-path",
+        help="Path to the sync service Helm chart to deploy.",
+    ),
+    sync_image_repository: str | None = typer.Option(
+        None,
+        "--sync-image-repository",
+        help="Override the sync service image repository (for local/dev images).",
+    ),
+    sync_image_tag: str | None = typer.Option(
+        None,
+        "--sync-image-tag",
+        help="Override the sync service image tag (for local/dev images).",
+    ),
 ) -> None:
     """Install the KAOS operator using Helm."""
     # Default to signoz if flag provided without value
@@ -112,6 +160,15 @@ def install(
         metallb_enabled=metallb_enabled,
         redis_enabled=redis_enabled,
         chart_path=chart_path,
+        auth_enabled=auth_enabled,
+        auth_namespace=auth_namespace,
+        ext_authz_url=ext_authz_url,
+        auth_issuer=auth_issuer,
+        aib_chart_path=aib_chart_path,
+        aib_values_path=aib_values_path,
+        sync_chart_path=sync_chart_path,
+        sync_image_repository=sync_image_repository,
+        sync_image_tag=sync_image_tag,
     )
 
 
@@ -127,7 +184,8 @@ def uninstall(
         DEFAULT_RELEASE_NAME,
         "--release-name",
         help="Helm release name.",
-    ),    monitoring_enabled: str | None = typer.Option(
+    ),
+    monitoring_enabled: str | None = typer.Option(
         None,
         "--monitoring-enabled",
         help=f"Also uninstall monitoring stack. Options: {', '.join(MONITORING_BACKENDS)}.",

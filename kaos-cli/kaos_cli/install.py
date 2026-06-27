@@ -22,6 +22,15 @@ GATEWAY_CLASS_NAME = "envoy-gateway"
 # MetalLB defaults
 METALLB_VERSION = "v0.14.9"
 
+# Agent-auth (identity broker) defaults
+DEFAULT_AUTH_NAMESPACE = "aib-system"
+DEFAULT_AUTH_RELEASE = "aib"
+DEFAULT_CREDENTIAL_SECRET_PREFIX = "kaos-aib"
+# Conventional in-cluster service names exposed by the broker stack.
+AUTH_EXT_AUTHZ_PORT = 9191
+AUTH_ENDUSER_PORT = 8000
+AUTH_ADMIN_PORT = 14000
+DEFAULT_SYNC_RELEASE = "kaos-sync"
 # KAOS CRD names (for explicit install/uninstall)
 KAOS_CRDS = [
     "agents.kaos.tools",
@@ -56,7 +65,9 @@ def run_helm_command(
 MONITORING_BACKENDS = ("signoz", "jaeger")
 
 
-def _run_kubectl(args: list[str], check: bool = True, **kwargs) -> subprocess.CompletedProcess:
+def _run_kubectl(
+    args: list[str], check: bool = True, **kwargs
+) -> subprocess.CompletedProcess:
     """Run a kubectl command and return the result."""
     cmd = ["kubectl"] + args
     return subprocess.run(cmd, capture_output=True, text=True, check=check, **kwargs)
@@ -68,15 +79,21 @@ def _install_gateway_api() -> bool:
 
     # Pre-apply CRDs from the chart to handle field manager conflicts on re-installs
     crds_result = run_helm_command(
-        ["show", "crds", "oci://docker.io/envoyproxy/gateway-helm",
-         "--version", ENVOY_GATEWAY_VERSION],
+        [
+            "show",
+            "crds",
+            "oci://docker.io/envoyproxy/gateway-helm",
+            "--version",
+            ENVOY_GATEWAY_VERSION,
+        ],
         check=False,
     )
     crd_pre_applied = False
     if crds_result.returncode == 0 and crds_result.stdout.strip():
         result = _run_kubectl(
             ["apply", "--server-side", "--force-conflicts", "-f", "-"],
-            check=False, input=crds_result.stdout,
+            check=False,
+            input=crds_result.stdout,
         )
         if result.returncode == 0:
             crd_pre_applied = True
@@ -84,29 +101,45 @@ def _install_gateway_api() -> bool:
             # Stale CRDs with incompatible storedVersions — delete and let helm recreate
             typer.echo("  Cleaning up stale Gateway API CRDs...")
             _run_kubectl(
-                ["delete", "crd", "--ignore-not-found",
-                 "-l", "gateway.networking.k8s.io/policy"],
+                [
+                    "delete",
+                    "crd",
+                    "--ignore-not-found",
+                    "-l",
+                    "gateway.networking.k8s.io/policy",
+                ],
                 check=False,
             )
             _run_kubectl(
-                ["delete", "crd", "--ignore-not-found",
-                 "gatewayclasses.gateway.networking.k8s.io",
-                 "gateways.gateway.networking.k8s.io",
-                 "httproutes.gateway.networking.k8s.io",
-                 "grpcroutes.gateway.networking.k8s.io",
-                 "referencegrants.gateway.networking.k8s.io",
-                 "tcproutes.gateway.networking.k8s.io",
-                 "tlsroutes.gateway.networking.k8s.io",
-                 "udproutes.gateway.networking.k8s.io",
-                 "backendtlspolicies.gateway.networking.k8s.io"],
+                [
+                    "delete",
+                    "crd",
+                    "--ignore-not-found",
+                    "gatewayclasses.gateway.networking.k8s.io",
+                    "gateways.gateway.networking.k8s.io",
+                    "httproutes.gateway.networking.k8s.io",
+                    "grpcroutes.gateway.networking.k8s.io",
+                    "referencegrants.gateway.networking.k8s.io",
+                    "tcproutes.gateway.networking.k8s.io",
+                    "tlsroutes.gateway.networking.k8s.io",
+                    "udproutes.gateway.networking.k8s.io",
+                    "backendtlspolicies.gateway.networking.k8s.io",
+                ],
                 check=False,
             )
 
     result = run_helm_command(
-        ["upgrade", "--install", "envoy-gateway",
-         "oci://docker.io/envoyproxy/gateway-helm",
-         "--version", ENVOY_GATEWAY_VERSION,
-         "--namespace", "envoy-gateway-system", "--create-namespace"]
+        [
+            "upgrade",
+            "--install",
+            "envoy-gateway",
+            "oci://docker.io/envoyproxy/gateway-helm",
+            "--version",
+            ENVOY_GATEWAY_VERSION,
+            "--namespace",
+            "envoy-gateway-system",
+            "--create-namespace",
+        ]
         + (["--skip-crds"] if crd_pre_applied else []),
         check=False,
     )
@@ -137,8 +170,13 @@ def _wait_for_gateway_class() -> bool:
     typer.echo("Waiting for GatewayClass to be accepted...")
     for i in range(30):
         result = _run_kubectl(
-            ["get", "gatewayclass", GATEWAY_CLASS_NAME,
-             "-o", "jsonpath={.status.conditions[?(@.type==\"Accepted\")].status}"],
+            [
+                "get",
+                "gatewayclass",
+                GATEWAY_CLASS_NAME,
+                "-o",
+                'jsonpath={.status.conditions[?(@.type=="Accepted")].status}',
+            ],
             check=False,
         )
         if result.stdout.strip() == "True":
@@ -162,8 +200,14 @@ def _uninstall_gateway_api() -> bool:
     if result.returncode != 0 and "not found" not in result.stderr.lower():
         typer.echo(f"Warning: {result.stderr}", err=True)
 
-    _run_kubectl(["delete", "gatewayclass", GATEWAY_CLASS_NAME, "--ignore-not-found"], check=False)
-    _run_kubectl(["delete", "namespace", "envoy-gateway-system", "--ignore-not-found"], check=False)
+    _run_kubectl(
+        ["delete", "gatewayclass", GATEWAY_CLASS_NAME, "--ignore-not-found"],
+        check=False,
+    )
+    _run_kubectl(
+        ["delete", "namespace", "envoy-gateway-system", "--ignore-not-found"],
+        check=False,
+    )
     typer.echo("✅ Gateway API uninstalled")
     return True
 
@@ -172,8 +216,11 @@ def _install_metallb() -> bool:
     """Install MetalLB for LoadBalancer support (KIND/bare-metal clusters)."""
     typer.echo(f"Installing MetalLB ({METALLB_VERSION})...")
     result = _run_kubectl(
-        ["apply", "-f",
-         f"https://raw.githubusercontent.com/metallb/metallb/{METALLB_VERSION}/config/manifests/metallb-native.yaml"],
+        [
+            "apply",
+            "-f",
+            f"https://raw.githubusercontent.com/metallb/metallb/{METALLB_VERSION}/config/manifests/metallb-native.yaml",
+        ],
         check=False,
     )
     if result.returncode != 0:
@@ -188,9 +235,15 @@ def _configure_metallb() -> bool:
     """Wait for MetalLB to be ready and configure IP address pool."""
     typer.echo("Waiting for MetalLB pods...")
     result = _run_kubectl(
-        ["wait", "--namespace", "metallb-system",
-         "--for=condition=ready", "pod", "--selector=app=metallb",
-         "--timeout=120s"],
+        [
+            "wait",
+            "--namespace",
+            "metallb-system",
+            "--for=condition=ready",
+            "pod",
+            "--selector=app=metallb",
+            "--timeout=120s",
+        ],
         check=False,
     )
     if result.returncode != 0:
@@ -200,9 +253,17 @@ def _configure_metallb() -> bool:
     try:
         # Get all IPAM subnets and find the IPv4 one
         net_result = subprocess.run(
-            ["docker", "network", "inspect", "kind", "--format",
-             "{{range .IPAM.Config}}{{.Subnet}} {{end}}"],
-            capture_output=True, text=True, check=False,
+            [
+                "docker",
+                "network",
+                "inspect",
+                "kind",
+                "--format",
+                "{{range .IPAM.Config}}{{.Subnet}} {{end}}",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
         )
         ip_start = "172.18.255.200"
         ip_end = "172.18.255.250"
@@ -236,11 +297,16 @@ def _configure_metallb() -> bool:
         )
         result = _run_kubectl(["apply", "-f", "-"], check=False, input=pool_yaml)
         if result.returncode != 0:
-            typer.echo(f"Warning: Could not configure MetalLB pool: {result.stderr}", err=True)
+            typer.echo(
+                f"Warning: Could not configure MetalLB pool: {result.stderr}", err=True
+            )
         else:
             typer.echo(f"  IP range: {ip_start}-{ip_end}")
     except FileNotFoundError:
-        typer.echo("Warning: docker not found, skipping MetalLB IP pool configuration", err=True)
+        typer.echo(
+            "Warning: docker not found, skipping MetalLB IP pool configuration",
+            err=True,
+        )
 
     return True
 
@@ -249,12 +315,17 @@ def _uninstall_metallb() -> bool:
     """Uninstall MetalLB."""
     typer.echo("Uninstalling MetalLB...")
     _run_kubectl(
-        ["delete", "-f",
-         f"https://raw.githubusercontent.com/metallb/metallb/{METALLB_VERSION}/config/manifests/metallb-native.yaml",
-         "--ignore-not-found"],
+        [
+            "delete",
+            "-f",
+            f"https://raw.githubusercontent.com/metallb/metallb/{METALLB_VERSION}/config/manifests/metallb-native.yaml",
+            "--ignore-not-found",
+        ],
         check=False,
     )
-    _run_kubectl(["delete", "namespace", "metallb-system", "--ignore-not-found"], check=False)
+    _run_kubectl(
+        ["delete", "namespace", "metallb-system", "--ignore-not-found"], check=False
+    )
     typer.echo("✅ MetalLB uninstalled")
     return True
 
@@ -274,7 +345,9 @@ def _create_jaeger_ui_config(namespace: str) -> None:
         text=True,
     )
     if result.returncode != 0:
-        typer.echo(f"Warning: Could not create Jaeger UI config: {result.stderr}", err=True)
+        typer.echo(
+            f"Warning: Could not create Jaeger UI config: {result.stderr}", err=True
+        )
 
 
 def _install_signoz(namespace: str) -> bool:
@@ -383,7 +456,13 @@ def _install_redis(namespace: str) -> bool:
     typer.echo("Installing Redis...")
 
     result = run_helm_command(
-        ["repo", "add", "bitnami", "https://charts.bitnami.com/bitnami", "--force-update"],
+        [
+            "repo",
+            "add",
+            "bitnami",
+            "https://charts.bitnami.com/bitnami",
+            "--force-update",
+        ],
         check=False,
     )
     if result.returncode != 0 and "already exists" not in result.stderr:
@@ -435,6 +514,120 @@ def _uninstall_redis(namespace: str) -> bool:
         return False
 
 
+def _auth_broker_fullname(auth_release: str) -> str:
+    """Return the broker Service/Deployment name produced by the broker chart."""
+    return f"{auth_release}-agentic-identity-broker"
+
+
+def _default_ext_authz_url(auth_namespace: str) -> str:
+    """Default host:port of the broker access-check gRPC backend."""
+    return f"aib-access-check-grpc.{auth_namespace}.svc.cluster.local:{AUTH_EXT_AUTHZ_PORT}"
+
+
+def _default_auth_issuer(auth_namespace: str, auth_release: str) -> str:
+    """Default issuer (broker enduser endpoint) propagated to agent pods."""
+    host = f"{_auth_broker_fullname(auth_release)}.{auth_namespace}.svc.cluster.local"
+    return f"http://{host}:{AUTH_ENDUSER_PORT}"
+
+
+def _default_auth_admin_url(auth_namespace: str, auth_release: str) -> str:
+    """Default broker admin API base URL used by the sync service."""
+    host = f"{_auth_broker_fullname(auth_release)}.{auth_namespace}.svc.cluster.local"
+    return f"http://{host}:{AUTH_ADMIN_PORT}/api"
+
+
+def _build_auth_operator_args(
+    ext_authz_url: str,
+    issuer: str,
+    credential_secret_prefix: str,
+) -> list[str]:
+    """Build the operator Helm --set arguments that enable agent-auth wiring.
+
+    Returns the flat ``--set key=value`` argument list so it can be unit-tested
+    independently of running Helm.
+    """
+    args: list[str] = []
+    args.extend(["--set", f"security.agentAuth.extAuthzUrl={ext_authz_url}"])
+    args.extend(["--set", f"security.agentAuth.issuer={issuer}"])
+    args.extend(
+        [
+            "--set",
+            f"security.agentAuth.credentialSecretPrefix={credential_secret_prefix}",
+        ]
+    )
+    return args
+
+
+def _deploy_sync_service(
+    namespace: str,
+    release: str,
+    chart_path: str,
+    admin_url: str,
+    credential_secret_prefix: str,
+    image_repository: str | None,
+    image_tag: str | None,
+) -> bool:
+    """Deploy the KAOS sync service that projects resources into the broker."""
+    typer.echo("Deploying sync service...")
+    helm_args = [
+        "upgrade",
+        "--install",
+        release,
+        chart_path,
+        "--namespace",
+        namespace,
+        "--create-namespace",
+        "--set",
+        f"broker.adminUrl={admin_url}",
+        "--set",
+        f"sync.credentialSecretPrefix={credential_secret_prefix}",
+    ]
+    if image_repository:
+        helm_args.extend(["--set", f"image.repository={image_repository}"])
+    if image_tag:
+        helm_args.extend(["--set", f"image.tag={image_tag}"])
+
+    result = run_helm_command(helm_args, check=False)
+    if result.returncode != 0:
+        typer.echo(f"Error deploying sync service: {result.stderr}", err=True)
+        return False
+
+    typer.echo(f"✅ Sync service deployed in '{namespace}' namespace")
+    return True
+
+
+def _install_aib(
+    namespace: str,
+    release: str,
+    chart_path: str,
+    values_path: str | None,
+    wait: bool,
+) -> bool:
+    """Install the identity broker from a local chart (unpublished/dev path)."""
+    typer.echo("Installing identity broker...")
+    helm_args = [
+        "upgrade",
+        "--install",
+        release,
+        chart_path,
+        "--namespace",
+        namespace,
+        "--create-namespace",
+    ]
+    if values_path:
+        helm_args.extend(["--values", values_path])
+    if wait:
+        helm_args.append("--wait")
+
+    result = run_helm_command(helm_args, check=False)
+    if result.returncode != 0:
+        typer.echo(f"Error installing identity broker: {result.stderr}", err=True)
+        return False
+
+    typer.echo(f"✅ Identity broker installed in '{namespace}' namespace")
+    return True
+
+
 def _uninstall_monitoring(backend: str, namespace: str) -> bool:
     """Uninstall monitoring stack for the given backend."""
     release = "jaeger" if backend == "jaeger" else "signoz"
@@ -449,15 +642,24 @@ def _uninstall_monitoring(backend: str, namespace: str) -> bool:
         # Clean up Jaeger UI ConfigMap if applicable
         if backend == "jaeger":
             subprocess.run(
-                ["kubectl", "delete", "configmap", "jaeger-ui-config",
-                 "-n", namespace, "--ignore-not-found"],
+                [
+                    "kubectl",
+                    "delete",
+                    "configmap",
+                    "jaeger-ui-config",
+                    "-n",
+                    namespace,
+                    "--ignore-not-found",
+                ],
                 capture_output=True,
                 text=True,
             )
         typer.echo(f"✅ {backend.capitalize()} uninstalled from '{namespace}'")
         return True
     elif "not found" in result.stderr.lower():
-        typer.echo(f"{backend.capitalize()} release not found in namespace '{namespace}'.")
+        typer.echo(
+            f"{backend.capitalize()} release not found in namespace '{namespace}'."
+        )
         return True
     else:
         typer.echo(f"Error uninstalling {backend}: {result.stderr}", err=True)
@@ -482,6 +684,17 @@ def install_command(
     metallb_enabled: bool = False,
     redis_enabled: bool = False,
     chart_path: str | None = None,
+    auth_enabled: bool = False,
+    auth_namespace: str = DEFAULT_AUTH_NAMESPACE,
+    auth_release: str = DEFAULT_AUTH_RELEASE,
+    ext_authz_url: str | None = None,
+    auth_issuer: str | None = None,
+    credential_secret_prefix: str = DEFAULT_CREDENTIAL_SECRET_PREFIX,
+    aib_chart_path: str | None = None,
+    aib_values_path: str | None = None,
+    sync_chart_path: str | None = None,
+    sync_image_repository: str | None = None,
+    sync_image_tag: str | None = None,
 ) -> None:
     """Install the KAOS operator using Helm."""
     if not check_helm_installed():
@@ -496,15 +709,60 @@ def install_command(
 
     if gateway_enabled:
         if not _install_gateway_api():
-            typer.echo("Warning: Gateway API installation failed, continuing...", err=True)
+            typer.echo(
+                "Warning: Gateway API installation failed, continuing...", err=True
+            )
 
     if monitoring_enabled:
         if not _install_monitoring(monitoring_enabled, namespace):
-            typer.echo("Warning: Monitoring installation failed, continuing...", err=True)
+            typer.echo(
+                "Warning: Monitoring installation failed, continuing...", err=True
+            )
 
     if redis_enabled:
         if not _install_redis(namespace):
             typer.echo("Warning: Redis installation failed, continuing...", err=True)
+
+    # Resolve agent-auth endpoints (used for both component installs and operator wiring)
+    if auth_enabled:
+        ext_authz_url = ext_authz_url or _default_ext_authz_url(auth_namespace)
+        auth_issuer = auth_issuer or _default_auth_issuer(auth_namespace, auth_release)
+        auth_admin_url = _default_auth_admin_url(auth_namespace, auth_release)
+
+        # Install the identity broker from a local chart when provided (it is
+        # unpublished, so a chart path is required to install it here).
+        if aib_chart_path:
+            if not _install_aib(
+                auth_namespace, auth_release, aib_chart_path, aib_values_path, wait
+            ):
+                typer.echo(
+                    "Warning: identity broker installation failed, continuing...",
+                    err=True,
+                )
+        else:
+            typer.echo(
+                "Note: --aib-chart-path not provided; assuming the identity broker "
+                f"is already installed in namespace '{auth_namespace}'.",
+            )
+
+        # Deploy the sync service when a chart path is provided.
+        if sync_chart_path:
+            if not _deploy_sync_service(
+                auth_namespace,
+                DEFAULT_SYNC_RELEASE,
+                sync_chart_path,
+                auth_admin_url,
+                credential_secret_prefix,
+                sync_image_repository,
+                sync_image_tag,
+            ):
+                typer.echo(
+                    "Warning: sync service deployment failed, continuing...", err=True
+                )
+        else:
+            typer.echo(
+                "Note: --sync-chart-path not provided; skipping sync service deployment.",
+            )
 
     # Phase 2: Wait for infra that the operator depends on
     if gateway_enabled:
@@ -558,7 +816,8 @@ def install_command(
         if crds_result.returncode == 0 and crds_result.stdout.strip():
             result = _run_kubectl(
                 ["apply", "--server-side", "--force-conflicts", "-f", "-"],
-                check=False, input=crds_result.stdout,
+                check=False,
+                input=crds_result.stdout,
             )
             if result.returncode != 0:
                 typer.echo(f"Warning: CRD apply failed: {result.stderr}", err=True)
@@ -606,6 +865,15 @@ def install_command(
         helm_args.extend(["--set", "agentDefaults.memory.type=redis"])
         redis_url = f"redis://redis-master.{namespace}:6379"
         helm_args.extend(["--set", f"agentDefaults.memory.redisUrl={redis_url}"])
+
+    if auth_enabled:
+        helm_args.extend(
+            _build_auth_operator_args(
+                ext_authz_url or _default_ext_authz_url(auth_namespace),
+                auth_issuer or _default_auth_issuer(auth_namespace, auth_release),
+                credential_secret_prefix,
+            )
+        )
 
     typer.echo(f"Installing chart {HELM_CHART_NAME}...")
     result = run_helm_command(helm_args)

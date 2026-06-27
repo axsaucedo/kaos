@@ -81,6 +81,16 @@ security:
     # backend (AIB by default; OPA is a drop-in via the standard contract).
     # Example: aib-ext-authz.aib-system.svc.cluster.local:9002
     extAuthzUrl: ""
+    # issuer is the agent-auth OIDC issuer (the broker that mints agent actor
+    # tokens). It is propagated to agent pods, which derive the token endpoint
+    # from it. Example: http://aib-enduser.aib-system.svc.cluster.local:8000
+    issuer: ""
+    # credentialSecretPrefix is the name prefix of the per-agent credential
+    # Secret provisioned by the sync service. When set (and extAuthzUrl is set),
+    # the operator mounts the matching Secret into each agent pod as the
+    # AGENT_AUTH_CLIENT_ID/AGENT_AUTH_CLIENT_SECRET environment variables. Empty disables
+    # credential mounting. Example: kaos-aib
+    credentialSecretPrefix: ""
 
 serviceAccount:
   annotations: {}
