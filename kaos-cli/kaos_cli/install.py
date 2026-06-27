@@ -31,6 +31,22 @@ AUTH_EXT_AUTHZ_PORT = 9191
 AUTH_ENDUSER_PORT = 8000
 AUTH_ADMIN_PORT = 14000
 DEFAULT_SYNC_RELEASE = "kaos-sync"
+
+# User-auth (human identity provider, Keycloak by default) defaults
+DEFAULT_KEYCLOAK_NAMESPACE = "keycloak"
+DEFAULT_KEYCLOAK_RELEASE = "keycloak"
+DEFAULT_KEYCLOAK_IMAGE = "quay.io/keycloak/keycloak:26.0"
+KEYCLOAK_HTTP_PORT = 8080
+DEFAULT_USER_AUTH_REALM = "kaos"
+DEFAULT_USER_AUTH_AUDIENCE = "kaos"
+DEFAULT_USER_AUTH_CLIENT_ID = "kaos"
+# Dev-only fixtures used to bootstrap a non-interactive test identity. These are
+# intended exclusively for local/e2e validation, never for production installs.
+DEFAULT_USER_AUTH_CLIENT_SECRET = "kaos-dev-secret"
+DEFAULT_USER_AUTH_TEST_USER = "kaos-user"
+DEFAULT_USER_AUTH_TEST_PASSWORD = "kaos-password"
+DEFAULT_KEYCLOAK_ADMIN_USER = "admin"
+DEFAULT_KEYCLOAK_ADMIN_PASSWORD = "admin"
 # KAOS CRD names (for explicit install/uninstall)
 KAOS_CRDS = [
     "agents.kaos.tools",
@@ -536,15 +552,26 @@ def _default_auth_admin_url(auth_namespace: str, auth_release: str) -> str:
     return f"http://{host}:{AUTH_ADMIN_PORT}/api"
 
 
+def _default_user_auth_issuer(keycloak_namespace: str, keycloak_release: str) -> str:
+    """Default user-auth OIDC issuer (Keycloak realm URL) for the gateway provider."""
+    host = f"{keycloak_release}.{keycloak_namespace}.svc.cluster.local"
+    return f"http://{host}:{KEYCLOAK_HTTP_PORT}/realms/{DEFAULT_USER_AUTH_REALM}"
+
+
 def _build_auth_operator_args(
     ext_authz_url: str,
     issuer: str,
     credential_secret_prefix: str,
+    user_issuer: str = "",
+    user_audience: str = "",
+    user_jwks_uri: str = "",
 ) -> list[str]:
     """Build the operator Helm --set arguments that enable agent-auth wiring.
 
     Returns the flat ``--set key=value`` argument list so it can be unit-tested
-    independently of running Helm.
+    independently of running Helm. User-auth (``security.userAuth.*``) arguments
+    are appended only when a user issuer is supplied, keeping agent-only and
+    autonomous-only installs unchanged.
     """
     args: list[str] = []
     args.extend(["--set", f"security.agentAuth.extAuthzUrl={ext_authz_url}"])
@@ -555,6 +582,12 @@ def _build_auth_operator_args(
             f"security.agentAuth.credentialSecretPrefix={credential_secret_prefix}",
         ]
     )
+    if user_issuer:
+        args.extend(["--set", f"security.userAuth.issuer={user_issuer}"])
+    if user_audience:
+        args.extend(["--set", f"security.userAuth.audience={user_audience}"])
+    if user_jwks_uri:
+        args.extend(["--set", f"security.userAuth.jwksUri={user_jwks_uri}"])
     return args
 
 
@@ -628,6 +661,246 @@ def _install_aib(
     return True
 
 
+def _keycloak_realm_json(
+    realm: str,
+    client_id: str,
+    client_secret: str,
+    audience: str,
+    username: str,
+    password: str,
+) -> dict:
+    """Build a minimal Keycloak realm definition for non-interactive validation.
+
+    The realm exposes a confidential client with the direct-access-grant flow so a
+    user access token can be minted programmatically (password grant), and an
+    audience mapper so the issued token carries the audience the gateway verifies.
+    """
+    return {
+        "realm": realm,
+        "enabled": True,
+        "clients": [
+            {
+                "clientId": client_id,
+                "enabled": True,
+                "publicClient": False,
+                "secret": client_secret,
+                "directAccessGrantsEnabled": True,
+                "standardFlowEnabled": True,
+                "serviceAccountsEnabled": True,
+                "redirectUris": ["*"],
+                "protocolMappers": [
+                    {
+                        "name": "kaos-audience",
+                        "protocol": "openid-connect",
+                        "protocolMapper": "oidc-audience-mapper",
+                        "config": {
+                            "included.client.audience": audience,
+                            "id.token.claim": "false",
+                            "access.token.claim": "true",
+                        },
+                    }
+                ],
+            }
+        ],
+        "users": [
+            {
+                "username": username,
+                "enabled": True,
+                "emailVerified": True,
+                "email": f"{username}@example.com",
+                "firstName": "KAOS",
+                "lastName": "User",
+                "requiredActions": [],
+                "credentials": [
+                    {"type": "password", "value": password, "temporary": False}
+                ],
+            }
+        ],
+    }
+
+
+def _keycloak_realm_configmap_name(release: str) -> str:
+    """Name of the ConfigMap holding the imported realm definition."""
+    return f"{release}-realm-import"
+
+
+def _bootstrap_keycloak_realm(
+    namespace: str,
+    release: str,
+    realm: str,
+    audience: str,
+) -> bool:
+    """Create the realm-import ConfigMap consumed by Keycloak's --import-realm.
+
+    This is the non-interactive realm bootstrap: it provisions the realm, a
+    confidential client and a test user so a user token can be obtained without a
+    browser login. Applied via kubectl so it is independent of the Keycloak chart.
+    """
+    realm_json = json.dumps(
+        _keycloak_realm_json(
+            realm,
+            DEFAULT_USER_AUTH_CLIENT_ID,
+            DEFAULT_USER_AUTH_CLIENT_SECRET,
+            audience,
+            DEFAULT_USER_AUTH_TEST_USER,
+            DEFAULT_USER_AUTH_TEST_PASSWORD,
+        ),
+        indent=2,
+    )
+    configmap = {
+        "apiVersion": "v1",
+        "kind": "ConfigMap",
+        "metadata": {
+            "name": _keycloak_realm_configmap_name(release),
+            "namespace": namespace,
+        },
+        "data": {f"{realm}-realm.json": realm_json},
+    }
+
+    apply_ns = _run_kubectl(
+        ["create", "namespace", namespace],
+        check=False,
+    )
+    if (
+        apply_ns.returncode != 0
+        and "already exists" not in (apply_ns.stderr or "").lower()
+    ):
+        typer.echo(
+            f"Warning: could not create namespace '{namespace}': {apply_ns.stderr}",
+            err=True,
+        )
+
+    result = _run_kubectl(
+        ["apply", "-f", "-"], check=False, input=json.dumps(configmap)
+    )
+    if result.returncode != 0:
+        typer.echo(f"Error bootstrapping Keycloak realm: {result.stderr}", err=True)
+        return False
+    typer.echo(f"✅ Keycloak realm '{realm}' bootstrap manifest applied")
+    return True
+
+
+def _keycloak_dev_manifests(namespace: str, release: str) -> list[dict]:
+    """Self-contained Keycloak dev deployment (start-dev, H2 in-memory, no DB).
+
+    Mounts the realm-import ConfigMap and runs with --import-realm so the
+    bootstrapped realm/client/user are available on startup. Intended for local
+    and e2e validation only.
+    """
+    labels = {"app": release}
+    configmap_name = _keycloak_realm_configmap_name(release)
+    deployment = {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": {"name": release, "namespace": namespace, "labels": labels},
+        "spec": {
+            "replicas": 1,
+            "selector": {"matchLabels": labels},
+            "template": {
+                "metadata": {"labels": labels},
+                "spec": {
+                    "containers": [
+                        {
+                            "name": "keycloak",
+                            "image": DEFAULT_KEYCLOAK_IMAGE,
+                            "args": ["start-dev", "--import-realm"],
+                            "env": [
+                                {
+                                    "name": "KEYCLOAK_ADMIN",
+                                    "value": DEFAULT_KEYCLOAK_ADMIN_USER,
+                                },
+                                {
+                                    "name": "KEYCLOAK_ADMIN_PASSWORD",
+                                    "value": DEFAULT_KEYCLOAK_ADMIN_PASSWORD,
+                                },
+                            ],
+                            "ports": [{"containerPort": KEYCLOAK_HTTP_PORT}],
+                            "volumeMounts": [
+                                {
+                                    "name": "realm-import",
+                                    "mountPath": "/opt/keycloak/data/import",
+                                    "readOnly": True,
+                                }
+                            ],
+                        }
+                    ],
+                    "volumes": [
+                        {
+                            "name": "realm-import",
+                            "configMap": {"name": configmap_name},
+                        }
+                    ],
+                },
+            },
+        },
+    }
+    service = {
+        "apiVersion": "v1",
+        "kind": "Service",
+        "metadata": {"name": release, "namespace": namespace, "labels": labels},
+        "spec": {
+            "selector": labels,
+            "ports": [
+                {
+                    "port": KEYCLOAK_HTTP_PORT,
+                    "targetPort": KEYCLOAK_HTTP_PORT,
+                    "name": "http",
+                }
+            ],
+        },
+    }
+    return [deployment, service]
+
+
+def _install_keycloak(
+    namespace: str,
+    release: str,
+    realm: str,
+    audience: str,
+    chart_path: str | None,
+    wait: bool,
+) -> bool:
+    """Install Keycloak as the human user identity provider.
+
+    The realm/client/test-user are bootstrapped first (non-interactive). When a
+    chart path is supplied Keycloak is installed via Helm (mirrors the broker
+    dev path); otherwise a self-contained dev deployment is applied via kubectl.
+    """
+    typer.echo("Installing user identity provider (Keycloak)...")
+    if not _bootstrap_keycloak_realm(namespace, release, realm, audience):
+        return False
+
+    if chart_path:
+        helm_args = [
+            "upgrade",
+            "--install",
+            release,
+            chart_path,
+            "--namespace",
+            namespace,
+            "--create-namespace",
+            "--set",
+            f"realmImport.configMapName={_keycloak_realm_configmap_name(release)}",
+        ]
+        if wait:
+            helm_args.append("--wait")
+        result = run_helm_command(helm_args, check=False)
+        if result.returncode != 0:
+            typer.echo(f"Error installing Keycloak: {result.stderr}", err=True)
+            return False
+    else:
+        for manifest in _keycloak_dev_manifests(namespace, release):
+            result = _run_kubectl(
+                ["apply", "-f", "-"], check=False, input=json.dumps(manifest)
+            )
+            if result.returncode != 0:
+                typer.echo(f"Error installing Keycloak: {result.stderr}", err=True)
+                return False
+
+    typer.echo(f"✅ Keycloak installed in '{namespace}' namespace")
+    return True
+
+
 def _uninstall_monitoring(backend: str, namespace: str) -> bool:
     """Uninstall monitoring stack for the given backend."""
     release = "jaeger" if backend == "jaeger" else "signoz"
@@ -695,6 +968,12 @@ def install_command(
     sync_chart_path: str | None = None,
     sync_image_repository: str | None = None,
     sync_image_tag: str | None = None,
+    user_auth: bool = True,
+    keycloak_namespace: str = DEFAULT_KEYCLOAK_NAMESPACE,
+    keycloak_release: str = DEFAULT_KEYCLOAK_RELEASE,
+    keycloak_chart_path: str | None = None,
+    user_auth_issuer: str | None = None,
+    user_auth_audience: str = DEFAULT_USER_AUTH_AUDIENCE,
 ) -> None:
     """Install the KAOS operator using Helm."""
     if not check_helm_installed():
@@ -728,6 +1007,10 @@ def install_command(
         ext_authz_url = ext_authz_url or _default_ext_authz_url(auth_namespace)
         auth_issuer = auth_issuer or _default_auth_issuer(auth_namespace, auth_release)
         auth_admin_url = _default_auth_admin_url(auth_namespace, auth_release)
+        if user_auth:
+            user_auth_issuer = user_auth_issuer or _default_user_auth_issuer(
+                keycloak_namespace, keycloak_release
+            )
 
         # Install the identity broker from a local chart when provided (it is
         # unpublished, so a chart path is required to install it here).
@@ -763,6 +1046,22 @@ def install_command(
             typer.echo(
                 "Note: --sync-chart-path not provided; skipping sync service deployment.",
             )
+
+        # Install Keycloak as the human user identity provider and bootstrap its
+        # realm so the gateway can verify user subject tokens alongside agent
+        # actor tokens. Skipped when user-auth is disabled.
+        if user_auth:
+            if not _install_keycloak(
+                keycloak_namespace,
+                keycloak_release,
+                DEFAULT_USER_AUTH_REALM,
+                user_auth_audience,
+                keycloak_chart_path,
+                wait,
+            ):
+                typer.echo(
+                    "Warning: Keycloak installation failed, continuing...", err=True
+                )
 
     # Phase 2: Wait for infra that the operator depends on
     if gateway_enabled:
@@ -867,11 +1166,19 @@ def install_command(
         helm_args.extend(["--set", f"agentDefaults.memory.redisUrl={redis_url}"])
 
     if auth_enabled:
+        resolved_user_issuer = (
+            user_auth_issuer
+            or _default_user_auth_issuer(keycloak_namespace, keycloak_release)
+            if user_auth
+            else ""
+        )
         helm_args.extend(
             _build_auth_operator_args(
                 ext_authz_url or _default_ext_authz_url(auth_namespace),
                 auth_issuer or _default_auth_issuer(auth_namespace, auth_release),
                 credential_secret_prefix,
+                user_issuer=resolved_user_issuer,
+                user_audience=user_auth_audience if user_auth else "",
             )
         )
 

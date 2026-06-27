@@ -884,6 +884,8 @@ class TestSystemInstallFlags:
         assert "--auth-enabled" in output
         assert "--auth-namespace" in output
         assert "--sync-chart-path" in output
+        assert "--user-auth" in output
+        assert "--keycloak-namespace" in output
 
 
 class TestAuthWiring:
@@ -961,6 +963,190 @@ class TestAuthWiring:
         joined = " ".join(captured.get("args", []))
         assert "security.agentAuth.extAuthzUrl=" in joined
         assert "security.agentAuth.credentialSecretPrefix=kaos-aib" in joined
+
+    def test_build_auth_operator_args_includes_user_auth(self):
+        from kaos_cli.install import _build_auth_operator_args
+
+        args = _build_auth_operator_args(
+            "aib-access-check-grpc.aib-system:9191",
+            "http://aib.aib-system:8000",
+            "kaos-aib",
+            user_issuer="http://keycloak.keycloak:8080/realms/kaos",
+            user_audience="kaos",
+            user_jwks_uri="http://keycloak.keycloak:8080/custom/certs",
+        )
+        joined = " ".join(args)
+        assert (
+            "security.userAuth.issuer=http://keycloak.keycloak:8080/realms/kaos"
+            in joined
+        )
+        assert "security.userAuth.audience=kaos" in joined
+        assert (
+            "security.userAuth.jwksUri=http://keycloak.keycloak:8080/custom/certs"
+            in joined
+        )
+
+    def test_build_auth_operator_args_omits_user_auth_when_unset(self):
+        from kaos_cli.install import _build_auth_operator_args
+
+        args = _build_auth_operator_args(
+            "aib-access-check-grpc.aib-system:9191",
+            "http://aib.aib-system:8000",
+            "kaos-aib",
+        )
+        joined = " ".join(args)
+        assert "security.userAuth" not in joined
+
+    def test_default_user_auth_issuer(self):
+        from kaos_cli.install import _default_user_auth_issuer
+
+        issuer = _default_user_auth_issuer("kc-ns", "keycloak")
+        assert issuer == "http://keycloak.kc-ns.svc.cluster.local:8080/realms/kaos"
+
+    def test_auth_enabled_wires_user_auth_values(self):
+        """--auth-enabled (user-auth on by default) adds security.userAuth.* args."""
+        from unittest.mock import patch
+        from types import SimpleNamespace
+
+        captured = {}
+
+        def fake_helm(args, check=True, **kwargs):
+            if "upgrade" in args and any(
+                "kaos-operator" in a or a.endswith("/chart") for a in args
+            ):
+                captured["args"] = args
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with patch("kaos_cli.install.check_helm_installed", return_value=True), patch(
+            "kaos_cli.install.run_helm_command", side_effect=fake_helm
+        ), patch("kaos_cli.install._run_kubectl") as mock_kubectl:
+            mock_kubectl.return_value = SimpleNamespace(
+                returncode=0, stdout="", stderr=""
+            )
+            result = runner.invoke(
+                app,
+                [
+                    "system",
+                    "install",
+                    "--auth-enabled",
+                    "--chart-path",
+                    "operator/chart",
+                ],
+            )
+
+        assert result.exit_code == 0, result.output
+        joined = " ".join(captured.get("args", []))
+        assert "security.userAuth.issuer=" in joined
+        assert "security.userAuth.audience=kaos" in joined
+
+    def test_no_user_auth_omits_user_auth_values(self):
+        """--no-user-auth installs neither Keycloak nor the userAuth wiring."""
+        from unittest.mock import patch
+        from types import SimpleNamespace
+
+        captured = {}
+
+        def fake_helm(args, check=True, **kwargs):
+            if "upgrade" in args and any(
+                "kaos-operator" in a or a.endswith("/chart") for a in args
+            ):
+                captured["args"] = args
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with patch("kaos_cli.install.check_helm_installed", return_value=True), patch(
+            "kaos_cli.install.run_helm_command", side_effect=fake_helm
+        ), patch("kaos_cli.install._install_keycloak") as mock_kc, patch(
+            "kaos_cli.install._run_kubectl"
+        ) as mock_kubectl:
+            mock_kubectl.return_value = SimpleNamespace(
+                returncode=0, stdout="", stderr=""
+            )
+            result = runner.invoke(
+                app,
+                [
+                    "system",
+                    "install",
+                    "--auth-enabled",
+                    "--no-user-auth",
+                    "--chart-path",
+                    "operator/chart",
+                ],
+            )
+
+        assert result.exit_code == 0, result.output
+        mock_kc.assert_not_called()
+        joined = " ".join(captured.get("args", []))
+        assert "security.userAuth" not in joined
+        # Agent-auth wiring is unaffected.
+        assert "security.agentAuth.extAuthzUrl=" in joined
+
+    def test_keycloak_install_applies_realm_and_deployment(self):
+        """--auth-enabled applies the realm ConfigMap and Keycloak dev deployment."""
+        from unittest.mock import patch
+        from types import SimpleNamespace
+
+        kubectl_inputs = []
+
+        def fake_kubectl(args, check=True, **kwargs):
+            if "input" in kwargs and kwargs["input"]:
+                kubectl_inputs.append(kwargs["input"])
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with patch("kaos_cli.install.check_helm_installed", return_value=True), patch(
+            "kaos_cli.install.run_helm_command",
+            return_value=SimpleNamespace(returncode=0, stdout="", stderr=""),
+        ), patch("kaos_cli.install._run_kubectl", side_effect=fake_kubectl):
+            result = runner.invoke(
+                app,
+                [
+                    "system",
+                    "install",
+                    "--auth-enabled",
+                    "--chart-path",
+                    "operator/chart",
+                ],
+            )
+
+        assert result.exit_code == 0, result.output
+        blob = "\n".join(kubectl_inputs)
+        assert "ConfigMap" in blob
+        assert "kaos-realm.json" in blob
+        assert "quay.io/keycloak/keycloak" in blob
+
+    def test_keycloak_chart_path_uses_helm(self):
+        """--keycloak-chart-path installs Keycloak via Helm with the realm ConfigMap."""
+        from unittest.mock import patch
+        from types import SimpleNamespace
+
+        helm_calls = []
+
+        def fake_helm(args, check=True, **kwargs):
+            helm_calls.append(args)
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with patch("kaos_cli.install.check_helm_installed", return_value=True), patch(
+            "kaos_cli.install.run_helm_command", side_effect=fake_helm
+        ), patch("kaos_cli.install._run_kubectl") as mock_kubectl:
+            mock_kubectl.return_value = SimpleNamespace(
+                returncode=0, stdout="", stderr=""
+            )
+            result = runner.invoke(
+                app,
+                [
+                    "system",
+                    "install",
+                    "--auth-enabled",
+                    "--keycloak-chart-path",
+                    "charts/keycloak",
+                    "--chart-path",
+                    "operator/chart",
+                ],
+            )
+
+        assert result.exit_code == 0, result.output
+        joined = " ".join(" ".join(c) for c in helm_calls)
+        assert "charts/keycloak" in joined
+        assert "realmImport.configMapName=keycloak-realm-import" in joined
 
     def test_install_monitoring_enabled_without_value(self):
         """--monitoring-enabled without value defaults to signoz (not an invalid backend error)."""

@@ -91,7 +91,21 @@ security:
     # AGENT_AUTH_CLIENT_ID/AGENT_AUTH_CLIENT_SECRET environment variables. Empty disables
     # credential mounting. Example: kaos-aib
     credentialSecretPrefix: ""
-
+  # userAuth configures the human user identity provider (e.g. Keycloak) whose
+  # subject tokens are verified at the gateway alongside agent actor tokens. When
+  # issuer is unset, no user jwt provider is generated (agent-only/autonomous
+  # installs); the block is independent of agentAuth.
+  userAuth:
+    # issuer is the user-auth OIDC issuer URL. Example:
+    # http://keycloak.kaos-system.svc.cluster.local:8080/realms/kaos
+    issuer: ""
+    # audience is the expected audience claim for user subject tokens.
+    # Example: kaos
+    audience: ""
+    # jwksUri optionally overrides the user provider's JWKS endpoint. When empty
+    # it is derived from the issuer using the standard OIDC realm path
+    # (<issuer>/protocol/openid-connect/certs).
+    jwksUri: ""
 serviceAccount:
   annotations: {}
   automount: true

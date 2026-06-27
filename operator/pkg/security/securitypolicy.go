@@ -3,6 +3,7 @@ package security
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/go-logr/logr"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -91,7 +92,65 @@ func constructSecurityPolicy(params PolicyParams, cfg Config) (*unstructured.Uns
 		},
 	}, "spec", "extAuth")
 
+	if cfg.JWTEnabled() {
+		if providers := constructJWTProviders(cfg); len(providers) > 0 {
+			_ = unstructured.SetNestedSlice(policy.Object, providers, "spec", "jwt", "providers")
+		}
+	}
+
 	return policy, nil
+}
+
+// constructJWTProviders builds the Envoy Gateway SecurityPolicy spec.jwt.providers
+// list. The agent (actor) provider verifies the broker-issued token carried on the
+// x-agent-authorization header and is emitted whenever an agent issuer is set. The
+// user (subject) provider verifies the human token on the standard Authorization
+// header and is emitted only when a user issuer is configured; autonomous, actor-only
+// requests carry no user token, so the user provider must tolerate its absence. Each
+// provider maps identity claims to trusted headers for downstream ext_authz and audit.
+func constructJWTProviders(cfg Config) []interface{} {
+	providers := make([]interface{}, 0, 2)
+
+	if agentJWKS := cfg.AgentJWKSURI(); agentJWKS != "" {
+		providers = append(providers, map[string]interface{}{
+			"name":   "agent",
+			"issuer": strings.TrimSpace(cfg.Issuer),
+			"remoteJWKS": map[string]interface{}{
+				"uri": agentJWKS,
+			},
+			"extractFrom": map[string]interface{}{
+				"headers": []interface{}{
+					map[string]interface{}{
+						"name":        "x-agent-authorization",
+						"valuePrefix": "Bearer ",
+					},
+				},
+			},
+			"claimToHeaders": []interface{}{
+				map[string]interface{}{"claim": "sub", "header": "x-agent-claim-sub"},
+			},
+		})
+	}
+
+	if userJWKS := cfg.UserJWKSURI(); userJWKS != "" {
+		userProvider := map[string]interface{}{
+			"name":   "user",
+			"issuer": strings.TrimSpace(cfg.UserIssuer),
+			"remoteJWKS": map[string]interface{}{
+				"uri": userJWKS,
+			},
+			"claimToHeaders": []interface{}{
+				map[string]interface{}{"claim": "sub", "header": "x-user-claim-sub"},
+				map[string]interface{}{"claim": "preferred_username", "header": "x-user-claim-username"},
+			},
+		}
+		if audience := strings.TrimSpace(cfg.UserAudience); audience != "" {
+			userProvider["audiences"] = []interface{}{audience}
+		}
+		providers = append(providers, userProvider)
+	}
+
+	return providers
 }
 
 // ReconcileSecurityPolicy creates or updates the SecurityPolicy that guards a

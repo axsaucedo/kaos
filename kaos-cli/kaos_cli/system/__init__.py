@@ -140,6 +140,34 @@ def install(
         "--sync-image-tag",
         help="Override the sync service image tag (for local/dev images).",
     ),
+    user_auth: bool = typer.Option(
+        True,
+        "--user-auth/--no-user-auth",
+        help="Install the human user identity provider (Keycloak) and wire user "
+        "subject-token validation at the gateway. Effective only with --auth-enabled.",
+    ),
+    keycloak_namespace: str = typer.Option(
+        "keycloak",
+        "--keycloak-namespace",
+        help="Namespace for the user identity provider (Keycloak).",
+    ),
+    keycloak_chart_path: str | None = typer.Option(
+        None,
+        "--keycloak-chart-path",
+        help="Path to a local Keycloak Helm chart to install. When omitted, a "
+        "self-contained dev deployment is applied instead.",
+    ),
+    user_auth_issuer: str | None = typer.Option(
+        None,
+        "--user-auth-issuer",
+        help="Override the user-auth OIDC issuer URL. Defaults to the bootstrapped "
+        "Keycloak realm in the keycloak namespace.",
+    ),
+    user_auth_audience: str = typer.Option(
+        "kaos",
+        "--user-auth-audience",
+        help="Expected audience claim for user subject tokens.",
+    ),
 ) -> None:
     """Install the KAOS operator using Helm."""
     # Default to signoz if flag provided without value
@@ -169,6 +197,12 @@ def install(
         sync_chart_path=sync_chart_path,
         sync_image_repository=sync_image_repository,
         sync_image_tag=sync_image_tag,
+        user_auth=user_auth,
+        keycloak_namespace=keycloak_namespace,
+        keycloak_release="keycloak",
+        keycloak_chart_path=keycloak_chart_path,
+        user_auth_issuer=user_auth_issuer,
+        user_auth_audience=user_auth_audience,
     )
 
 

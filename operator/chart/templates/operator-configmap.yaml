@@ -41,6 +41,17 @@ data:
   SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX: {{ .credentialSecretPrefix | quote }}
   {{- end }}
   {{- end }}
+  {{- with .userAuth }}
+  {{- if .issuer }}
+  SECURITY_USER_AUTH_ISSUER: {{ .issuer | quote }}
+  {{- end }}
+  {{- if .audience }}
+  SECURITY_USER_AUTH_AUDIENCE: {{ .audience | quote }}
+  {{- end }}
+  {{- if .jwksUri }}
+  SECURITY_USER_AUTH_JWKS_URI: {{ .jwksUri | quote }}
+  {{- end }}
+  {{- end }}
   {{- end }}
   # Global telemetry configuration (defaults for all components)
   {{- if .Values.telemetry.enabled }}
