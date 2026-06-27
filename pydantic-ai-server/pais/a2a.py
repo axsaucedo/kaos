@@ -671,6 +671,11 @@ class LocalTaskManager(TaskManager):
                                 iteration += 1
                                 if interval_seconds > 0:
                                     await asyncio.sleep(interval_seconds)
+                                else:
+                                    # Always yield so a cancellation (e.g. shutdown)
+                                    # can be delivered; a zero interval must not turn
+                                    # the retry path into an event-loop-starving spin.
+                                    await asyncio.sleep(0)
                                 continue
                             else:
                                 raise
@@ -690,6 +695,11 @@ class LocalTaskManager(TaskManager):
                     # Inter-iteration interval
                     if interval_seconds > 0:
                         await asyncio.sleep(interval_seconds)
+                    else:
+                        # Always yield so a cancellation (e.g. shutdown) can be
+                        # delivered; a zero interval must not turn the loop into an
+                        # event-loop-starving spin.
+                        await asyncio.sleep(0)
 
                 task.output = last_response
                 task.history.append(TaskMessage(role="agent", text=last_response))
