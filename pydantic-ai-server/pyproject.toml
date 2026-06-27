@@ -50,3 +50,8 @@ packages = ["pais", "aib"]
 [tool.black]
 line-length = 100
 target-version = ["py312"]
+
+# Deprecation notices from upstream libraries are informational and must not
+# fail type checking; library migrations are handled as deliberate changes.
+[tool.ty.rules]
+deprecated = "ignore"
