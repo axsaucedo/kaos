@@ -48,7 +48,7 @@ jobs:
 
       - name: Run type checking
         working-directory: pydantic-ai-server
-        run: uvx ty check
+        run: uvx ty@0.0.55 check
 
   python-tests:
     runs-on: ubuntu-latest
