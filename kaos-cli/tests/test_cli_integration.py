@@ -997,6 +997,48 @@ class TestAuthWiring:
         joined = " ".join(args)
         assert "security.userAuth" not in joined
 
+    def test_build_auth_operator_args_includes_ext_proc_url(self):
+        from kaos_cli.install import _build_auth_operator_args
+
+        args = _build_auth_operator_args(
+            "aib-access-check-grpc.aib-system:9191",
+            "http://aib.aib-system:8000",
+            "kaos-aib",
+            ext_proc_url="aib-agentic-identity-broker-extproc.aib-system:50051",
+        )
+        joined = " ".join(args)
+        assert (
+            "security.agentAuth.extProcUrl="
+            "aib-agentic-identity-broker-extproc.aib-system:50051" in joined
+        )
+
+    def test_build_auth_operator_args_omits_ext_proc_url_when_unset(self):
+        from kaos_cli.install import _build_auth_operator_args
+
+        args = _build_auth_operator_args(
+            "aib-access-check-grpc.aib-system:9191",
+            "http://aib.aib-system:8000",
+            "kaos-aib",
+        )
+        assert "security.agentAuth.extProcUrl=" not in " ".join(args)
+
+    def test_default_ext_proc_url(self):
+        from kaos_cli.install import _default_ext_proc_url
+
+        url = _default_ext_proc_url("custom-ns", "aib")
+        assert url == (
+            "aib-agentic-identity-broker-extproc.custom-ns.svc.cluster.local:50051"
+        )
+
+    def test_build_aib_extproc_args(self):
+        from kaos_cli.install import _build_aib_extproc_args
+
+        args = _build_aib_extproc_args("extproc-gateway", "secret")
+        joined = " ".join(args)
+        assert "extProc.enabled=true" in joined
+        assert "extProc.oauth2.clientId=extproc-gateway" in joined
+        assert "extProc.oauth2.clientSecret=secret" in joined
+
     def test_default_user_auth_issuer(self):
         from kaos_cli.install import _default_user_auth_issuer
 

@@ -81,6 +81,13 @@ security:
     # backend (AIB by default; OPA is a drop-in via the standard contract).
     # Example: aib-ext-authz.aib-system.svc.cluster.local:9002
     extAuthzUrl: ""
+    # extProcUrl is the host:port of the Envoy ext_proc token-exchange gRPC
+    # backend (AIB ExtProc by default). When set, the operator generates an
+    # EnvoyExtensionPolicy on protected routes so the backend can exchange the
+    # inbound user subject token for a delegated upstream token. Leaving it empty
+    # disables token exchange and leaves routing behavior unchanged.
+    # Example: aib-ext-proc.aib-system.svc.cluster.local:50051
+    extProcUrl: ""
     # issuer is the agent-auth OIDC issuer (the broker that mints agent actor
     # tokens). It is propagated to agent pods, which derive the token endpoint
     # from it. Example: http://aib-enduser.aib-system.svc.cluster.local:8000

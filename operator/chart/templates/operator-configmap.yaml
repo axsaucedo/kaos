@@ -34,6 +34,9 @@ data:
   {{- if .extAuthzUrl }}
   SECURITY_AGENT_AUTH_EXT_AUTHZ_URL: {{ .extAuthzUrl | quote }}
   {{- end }}
+  {{- if .extProcUrl }}
+  SECURITY_AGENT_AUTH_EXT_PROC_URL: {{ .extProcUrl | quote }}
+  {{- end }}
   {{- if .issuer }}
   SECURITY_AGENT_AUTH_ISSUER: {{ .issuer | quote }}
   {{- end }}

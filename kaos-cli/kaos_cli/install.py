@@ -30,6 +30,10 @@ DEFAULT_CREDENTIAL_SECRET_PREFIX = "kaos-aib"
 AUTH_EXT_AUTHZ_PORT = 9191
 AUTH_ENDUSER_PORT = 8000
 AUTH_ADMIN_PORT = 14000
+AUTH_EXT_PROC_PORT = 50051
+AUTH_EXT_PROC_CLIENT_ID = "extproc-gateway"
+AUTH_EXT_PROC_CLIENT_SECRET = "extproc-gateway-secret"
+DEFAULT_THIRD_PARTY_SERVICE_ID = "dummy-third-party"
 DEFAULT_SYNC_RELEASE = "kaos-sync"
 
 # User-auth (human identity provider, Keycloak by default) defaults
@@ -540,6 +544,16 @@ def _default_ext_authz_url(auth_namespace: str) -> str:
     return f"aib-access-check-grpc.{auth_namespace}.svc.cluster.local:{AUTH_EXT_AUTHZ_PORT}"
 
 
+def _default_ext_proc_url(auth_namespace: str, auth_release: str) -> str:
+    """Default host:port of the broker ExtProc token-exchange gRPC backend.
+
+    Matches the Service rendered by the broker chart's optional ExtProc
+    component (``<release>-agentic-identity-broker-extproc``).
+    """
+    host = f"{_auth_broker_fullname(auth_release)}-extproc.{auth_namespace}.svc.cluster.local"
+    return f"{host}:{AUTH_EXT_PROC_PORT}"
+
+
 def _default_auth_issuer(auth_namespace: str, auth_release: str) -> str:
     """Default issuer (broker enduser endpoint) propagated to agent pods."""
     host = f"{_auth_broker_fullname(auth_release)}.{auth_namespace}.svc.cluster.local"
@@ -565,13 +579,15 @@ def _build_auth_operator_args(
     user_issuer: str = "",
     user_audience: str = "",
     user_jwks_uri: str = "",
+    ext_proc_url: str = "",
 ) -> list[str]:
     """Build the operator Helm --set arguments that enable agent-auth wiring.
 
     Returns the flat ``--set key=value`` argument list so it can be unit-tested
     independently of running Helm. User-auth (``security.userAuth.*``) arguments
     are appended only when a user issuer is supplied, keeping agent-only and
-    autonomous-only installs unchanged.
+    autonomous-only installs unchanged. The token-exchange ext_proc backend
+    (``security.agentAuth.extProcUrl``) is appended only when supplied.
     """
     args: list[str] = []
     args.extend(["--set", f"security.agentAuth.extAuthzUrl={ext_authz_url}"])
@@ -582,6 +598,8 @@ def _build_auth_operator_args(
             f"security.agentAuth.credentialSecretPrefix={credential_secret_prefix}",
         ]
     )
+    if ext_proc_url:
+        args.extend(["--set", f"security.agentAuth.extProcUrl={ext_proc_url}"])
     if user_issuer:
         args.extend(["--set", f"security.userAuth.issuer={user_issuer}"])
     if user_audience:
@@ -635,6 +653,7 @@ def _install_aib(
     chart_path: str,
     values_path: str | None,
     wait: bool,
+    extra_set: list[str] | None = None,
 ) -> bool:
     """Install the identity broker from a local chart (unpublished/dev path)."""
     typer.echo("Installing identity broker...")
@@ -649,6 +668,8 @@ def _install_aib(
     ]
     if values_path:
         helm_args.extend(["--values", values_path])
+    if extra_set:
+        helm_args.extend(extra_set)
     if wait:
         helm_args.append("--wait")
 
@@ -659,6 +680,97 @@ def _install_aib(
 
     typer.echo(f"✅ Identity broker installed in '{namespace}' namespace")
     return True
+
+
+def _build_aib_extproc_args(
+    ext_proc_client_id: str,
+    ext_proc_client_secret: str,
+    client_assertion_type: str = "access_token",
+) -> list[str]:
+    """Build the broker-chart Helm --set args enabling the ExtProc component.
+
+    Returns the flat ``--set key=value`` list so it can be unit-tested without
+    running Helm. The OAuth2 token endpoint and issuer are left to the chart
+    defaults (the in-cluster broker enduser service).
+    """
+    return [
+        "--set",
+        "extProc.enabled=true",
+        "--set",
+        f"extProc.oauth2.clientId={ext_proc_client_id}",
+        "--set",
+        f"extProc.oauth2.clientSecret={ext_proc_client_secret}",
+        "--set",
+        f"extProc.oauth2.clientAssertionType={client_assertion_type}",
+    ]
+
+
+def _provision_token_exchange(
+    admin_url: str,
+    ext_proc_client_id: str,
+    third_party_service_id: str,
+    third_party_issuer: str,
+) -> bool:
+    """Register the ExtProc OAuth client and a dummy third-party service.
+
+    Best-effort, dev/validation-only provisioning against the broker admin API so
+    that the token-exchange path has an OAuth client to assert as and a
+    third-party service to exchange for. Failures are non-fatal: the install
+    continues and the validation surface can register the grant interactively.
+    """
+    import json
+    import urllib.error
+    import urllib.request
+
+    def _post(path: str, payload: dict) -> bool:
+        data = json.dumps(payload).encode()
+        req = urllib.request.Request(
+            f"{admin_url.rstrip('/')}{path}",
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            urllib.request.urlopen(req, timeout=10)  # noqa: S310 (in-cluster URL)
+            return True
+        except urllib.error.HTTPError as exc:
+            # 409/422 (already exists) is acceptable for idempotent provisioning.
+            if exc.code in (409, 422):
+                return True
+            typer.echo(
+                f"Warning: token-exchange provisioning {path} -> HTTP {exc.code}",
+                err=True,
+            )
+            return False
+        except urllib.error.URLError as exc:
+            typer.echo(
+                f"Warning: token-exchange provisioning {path} unreachable: {exc}",
+                err=True,
+            )
+            return False
+
+    ok = _post(
+        "/agents",
+        {
+            "client_id": ext_proc_client_id,
+            "display_name": "ExtProc Gateway",
+            "description": "Gateway token-exchange client (auto-provisioned)",
+        },
+    )
+    ok = (
+        _post(
+            "/services",
+            {
+                "display_name": "Dummy Third Party",
+                "client_id": "dummy-third-party",
+                "client_secret": "dummy-third-party-secret",
+                "issuer_uri": third_party_issuer,
+                "service_id": third_party_service_id,
+            },
+        )
+        and ok
+    )
+    return ok
 
 
 def _keycloak_realm_json(
@@ -963,6 +1075,8 @@ def install_command(
     ext_authz_url: str | None = None,
     auth_issuer: str | None = None,
     credential_secret_prefix: str = DEFAULT_CREDENTIAL_SECRET_PREFIX,
+    token_exchange: bool = True,
+    ext_proc_url: str | None = None,
     aib_chart_path: str | None = None,
     aib_values_path: str | None = None,
     sync_chart_path: str | None = None,
@@ -1007,20 +1121,44 @@ def install_command(
         ext_authz_url = ext_authz_url or _default_ext_authz_url(auth_namespace)
         auth_issuer = auth_issuer or _default_auth_issuer(auth_namespace, auth_release)
         auth_admin_url = _default_auth_admin_url(auth_namespace, auth_release)
+        if token_exchange:
+            ext_proc_url = ext_proc_url or _default_ext_proc_url(
+                auth_namespace, auth_release
+            )
         if user_auth:
             user_auth_issuer = user_auth_issuer or _default_user_auth_issuer(
                 keycloak_namespace, keycloak_release
             )
 
         # Install the identity broker from a local chart when provided (it is
-        # unpublished, so a chart path is required to install it here).
+        # unpublished, so a chart path is required to install it here). The
+        # ExtProc token-exchange component is enabled when token exchange is on.
         if aib_chart_path:
+            aib_extra_set = (
+                _build_aib_extproc_args(
+                    AUTH_EXT_PROC_CLIENT_ID, AUTH_EXT_PROC_CLIENT_SECRET
+                )
+                if token_exchange
+                else None
+            )
             if not _install_aib(
-                auth_namespace, auth_release, aib_chart_path, aib_values_path, wait
+                auth_namespace,
+                auth_release,
+                aib_chart_path,
+                aib_values_path,
+                wait,
+                extra_set=aib_extra_set,
             ):
                 typer.echo(
                     "Warning: identity broker installation failed, continuing...",
                     err=True,
+                )
+            elif token_exchange:
+                _provision_token_exchange(
+                    auth_admin_url,
+                    AUTH_EXT_PROC_CLIENT_ID,
+                    DEFAULT_THIRD_PARTY_SERVICE_ID,
+                    auth_issuer,
                 )
         else:
             typer.echo(
@@ -1179,6 +1317,11 @@ def install_command(
                 credential_secret_prefix,
                 user_issuer=resolved_user_issuer,
                 user_audience=user_auth_audience if user_auth else "",
+                ext_proc_url=(
+                    ext_proc_url or _default_ext_proc_url(auth_namespace, auth_release)
+                    if token_exchange
+                    else ""
+                ),
             )
         )
 

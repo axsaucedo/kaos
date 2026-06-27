@@ -217,15 +217,19 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		log.Error(err, "failed to reconcile HTTPRoute")
 	}
 
-	if secCfg := security.GetConfig(); secCfg.IsOperational() {
+	if secCfg := security.GetConfig(); secCfg.IsOperational() || secCfg.ExtProcEnabled() {
 		routeName := gateway.HTTPRouteName(gateway.ResourceTypeMCP, mcpserver.Name)
-		if err := security.ReconcileSecurityPolicy(ctx, r.Client, r.Scheme, mcpserver, security.PolicyParams{
+		policyParams := security.PolicyParams{
 			Name:      routeName,
 			Namespace: mcpserver.Namespace,
 			RouteName: routeName,
 			Labels:    map[string]string{"app": "mcpserver", "mcpserver": mcpserver.Name},
-		}, secCfg, log); err != nil {
+		}
+		if err := security.ReconcileSecurityPolicy(ctx, r.Client, r.Scheme, mcpserver, policyParams, secCfg, log); err != nil {
 			log.Error(err, "failed to reconcile SecurityPolicy")
+		}
+		if err := security.ReconcileEnvoyExtensionPolicy(ctx, r.Client, r.Scheme, mcpserver, policyParams, secCfg, log); err != nil {
+			log.Error(err, "failed to reconcile EnvoyExtensionPolicy")
 		}
 	}
 

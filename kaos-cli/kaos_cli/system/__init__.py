@@ -115,6 +115,19 @@ def install(
         help="Override the broker issuer URL propagated to agent pods. Defaults to the "
         "broker enduser service in the auth namespace.",
     ),
+    token_exchange: bool = typer.Option(
+        True,
+        "--token-exchange/--no-token-exchange",
+        help="Enable the RFC 8693 token-exchange path: deploy the broker ExtProc "
+        "component and wire the gateway ext_proc backend. Effective only with "
+        "--auth-enabled.",
+    ),
+    ext_proc_url: str | None = typer.Option(
+        None,
+        "--ext-proc-url",
+        help="Override the token-exchange ext_proc gRPC backend host:port. Defaults "
+        "to the broker ExtProc service in the auth namespace.",
+    ),
     aib_chart_path: str | None = typer.Option(
         None,
         "--aib-chart-path",
@@ -192,6 +205,8 @@ def install(
         auth_namespace=auth_namespace,
         ext_authz_url=ext_authz_url,
         auth_issuer=auth_issuer,
+        token_exchange=token_exchange,
+        ext_proc_url=ext_proc_url,
         aib_chart_path=aib_chart_path,
         aib_values_path=aib_values_path,
         sync_chart_path=sync_chart_path,

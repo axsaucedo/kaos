@@ -46,10 +46,19 @@ type Config struct {
 	// (userAuth.jwksUri). When empty it is derived from UserIssuer using the
 	// standard OIDC realm path.
 	UserJWKSURIOverride string
+
+	// ExtProcURL is the host:port of the AIB external-processing (ext_proc)
+	// token-exchange gRPC backend (agentAuth.extProcUrl). When set, the operator
+	// emits an EnvoyExtensionPolicy on protected routes so the gateway can perform
+	// an RFC 8693 token exchange and replace the upstream Authorization header.
+	// An empty value means token-exchange is disabled and existing routing is
+	// unchanged. It is independent of ExtAuthzURL.
+	ExtProcURL string
 }
 
 const (
 	envExtAuthzURL            = "SECURITY_AGENT_AUTH_EXT_AUTHZ_URL"
+	envExtProcURL             = "SECURITY_AGENT_AUTH_EXT_PROC_URL"
 	envIssuer                 = "SECURITY_AGENT_AUTH_ISSUER"
 	envCredentialSecretPrefix = "SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX"
 	envUserIssuer             = "SECURITY_USER_AUTH_ISSUER"
@@ -66,6 +75,7 @@ func GetConfig() Config {
 		UserIssuer:             os.Getenv(envUserIssuer),
 		UserAudience:           os.Getenv(envUserAudience),
 		UserJWKSURIOverride:    os.Getenv(envUserJWKSURI),
+		ExtProcURL:             os.Getenv(envExtProcURL),
 	}
 }
 
@@ -134,23 +144,48 @@ func (c Config) UserJWKSURI() string {
 	return issuer + "/protocol/openid-connect/certs"
 }
 
+// ExtProcEnabled reports whether the operator should emit an EnvoyExtensionPolicy
+// (ext_proc token exchange) on protected routes. It is true when ExtProcURL is
+// configured. This is independent of IsOperational (which gates ext_authz): a
+// deployment may enable token exchange without changing the ext_authz wiring.
+func (c Config) ExtProcEnabled() bool {
+	return strings.TrimSpace(c.ExtProcURL) != ""
+}
+
 // ExtAuthzBackendRef parses the configured ext_authz host:port URL into the
 // Kubernetes Service name, namespace, and port used to build the SecurityPolicy
 // gRPC backendRef. The host is expected as a Service DNS name in the form
 // "name[.namespace[.svc.cluster.local]]"; the namespace is empty when not present.
 func (c Config) ExtAuthzBackendRef() (name, namespace string, port int, err error) {
-	url := strings.TrimSpace(c.ExtAuthzURL)
+	return parseServiceHostPort(c.ExtAuthzURL, "ext_authz")
+}
+
+// ExtProcBackendRef parses the configured ext_proc host:port URL into the
+// Kubernetes Service name, namespace, and port used to build the
+// EnvoyExtensionPolicy gRPC backendRef. The host is expected as a Service DNS
+// name in the form "name[.namespace[.svc.cluster.local]]"; the namespace is empty
+// when not present.
+func (c Config) ExtProcBackendRef() (name, namespace string, port int, err error) {
+	return parseServiceHostPort(c.ExtProcURL, "ext_proc")
+}
+
+// parseServiceHostPort parses a "host:port" Service DNS URL into name, namespace,
+// and port. The label argument names the field in error messages. The host is
+// expected as "name[.namespace[.svc.cluster.local]]"; namespace is empty when the
+// host is a bare service name.
+func parseServiceHostPort(rawURL, label string) (name, namespace string, port int, err error) {
+	url := strings.TrimSpace(rawURL)
 	if url == "" {
-		return "", "", 0, fmt.Errorf("ext_authz URL is empty")
+		return "", "", 0, fmt.Errorf("%s URL is empty", label)
 	}
 
 	host, portStr, found := strings.Cut(url, ":")
 	if !found || host == "" || portStr == "" {
-		return "", "", 0, fmt.Errorf("ext_authz URL %q must be in host:port form", url)
+		return "", "", 0, fmt.Errorf("%s URL %q must be in host:port form", label, url)
 	}
 	port, err = strconv.Atoi(portStr)
 	if err != nil || port <= 0 {
-		return "", "", 0, fmt.Errorf("ext_authz URL %q has an invalid port", url)
+		return "", "", 0, fmt.Errorf("%s URL %q has an invalid port", label, url)
 	}
 
 	labels := strings.Split(host, ".")
@@ -159,7 +194,7 @@ func (c Config) ExtAuthzBackendRef() (name, namespace string, port int, err erro
 		namespace = labels[1]
 	}
 	if name == "" {
-		return "", "", 0, fmt.Errorf("ext_authz URL %q has an empty service name", url)
+		return "", "", 0, fmt.Errorf("%s URL %q has an empty service name", label, url)
 	}
 	return name, namespace, port, nil
 }
