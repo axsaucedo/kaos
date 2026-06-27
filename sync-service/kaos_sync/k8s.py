@@ -8,12 +8,15 @@ this module, so tests need no cluster.
 
 from __future__ import annotations
 
+from typing import List
+
 from kubernetes import client, config
 
 KAOS_GROUP = "kaos.tools"
 KAOS_VERSION = "v1alpha1"
 AGENT_PLURAL = "agents"
 MCPSERVER_PLURAL = "mcpservers"
+MODELAPI_PLURAL = "modelapis"
 
 
 def load_kube_config() -> None:
@@ -61,9 +64,36 @@ class KubeSecretStore:
                 raise
             self._api.replace_namespaced_secret(name, namespace, body)
 
+    def list(self, namespaces: tuple[str, ...]) -> List[tuple[str, str]]:
+        """List ``(namespace, name)`` of sync-managed credential Secrets.
+
+        Only Secrets carrying the ``kaos-sync`` managed-by label are returned so pruning
+        never removes Secrets owned by anything other than this service.
+        """
+        selector = "app.kubernetes.io/managed-by=kaos-sync"
+        items: list[tuple[str, str]] = []
+        if namespaces:
+            for namespace in namespaces:
+                result = self._api.list_namespaced_secret(namespace, label_selector=selector)
+                items.extend((s.metadata.namespace, s.metadata.name) for s in result.items)
+        else:
+            result = self._api.list_secret_for_all_namespaces(label_selector=selector)
+            items.extend((s.metadata.namespace, s.metadata.name) for s in result.items)
+        return items
+
+    def delete(self, namespace: str, name: str) -> bool:
+        """Delete a Secret, treating a missing Secret (404) as already absent."""
+        try:
+            self._api.delete_namespaced_secret(name, namespace)
+        except client.ApiException as exc:  # type: ignore[attr-defined]
+            if exc.status == 404:
+                return False
+            raise
+        return True
+
 
 class KaosResourceLister:
-    """Lists KAOS Agent and MCPServer resources across the configured namespaces."""
+    """Lists KAOS Agent, MCPServer and ModelAPI resources across the configured namespaces."""
 
     def __init__(self, custom_api: client.CustomObjectsApi | None = None) -> None:
         self._api = custom_api or client.CustomObjectsApi()
@@ -84,6 +114,8 @@ class KaosResourceLister:
         return items
 
     def list_resources(self, namespaces: tuple[str, ...]) -> list[dict]:
-        return self._list(MCPSERVER_PLURAL, "MCPServer", namespaces) + self._list(
-            AGENT_PLURAL, "Agent", namespaces
+        return (
+            self._list(MCPSERVER_PLURAL, "MCPServer", namespaces)
+            + self._list(MODELAPI_PLURAL, "ModelAPI", namespaces)
+            + self._list(AGENT_PLURAL, "Agent", namespaces)
         )

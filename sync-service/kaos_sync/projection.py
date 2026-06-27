@@ -1,18 +1,21 @@
 """Pure projection of KAOS resources into desired AIB records.
 
-This module contains no I/O. It translates KAOS ``Agent`` and ``MCPServer`` resources
-into the desired Agentic Identity Broker (AIB) state using a stable bootstrap encoding:
+This module contains no I/O. It translates KAOS ``Agent``, ``MCPServer`` and ``ModelAPI``
+resources into the desired Agentic Identity Broker (AIB) state using a stable bootstrap
+encoding shared across the two edge kinds an agent can request (an MCP server it may call,
+and the model API it is bound to):
 
-* Each ``MCPServer`` ``<ns>/<name>`` becomes a synthetic AIB service whose ``client_id``
-  is ``kaos-mcpserver-<ns>-<name>`` and which exposes a single ``call`` scope.
-* Each requested edge ``Agent -> MCPServer`` becomes an AIB permission set named
-  ``kaos:mcpserver:<ns>:<mcp>:call`` that grants the ``call`` scope on that service.
+* Each edge target ``<ns>/<name>`` of kind ``<slug>`` becomes a synthetic AIB service whose
+  ``client_id`` is ``kaos-<slug>-<ns>-<name>`` and which exposes a single ``call`` scope.
+* Each requested edge ``Agent -> target`` becomes an AIB permission set named
+  ``kaos:<slug>:<ns>:<name>:call`` that grants the ``call`` scope on that service.
 * Each ``Agent`` ``<ns>/<name>`` becomes an AIB *local* agent (created without a
   ``client_id`` so AIB itself mints the actor token) bound to the permission sets for
   its requested edges.
 
-The resource identity an agent is authorized against is ``kaos://mcpserver/<ns>/<name>``,
-which the access-check maps back to the synthetic service ``client_id``.
+The resource identity an agent is authorized against is ``kaos://<slug>/<ns>/<name>``,
+which the access-check maps back to the synthetic service ``client_id``. ``<slug>`` is
+``mcpserver`` for MCP server edges and ``modelapi`` for the model API edge.
 """
 
 from __future__ import annotations
@@ -21,17 +24,57 @@ from dataclasses import dataclass, field
 
 CALL_SCOPE = "call"
 MCPSERVER_KIND = "MCPServer"
+MODELAPI_KIND = "ModelAPI"
 AGENT_KIND = "Agent"
 
 
+@dataclass(frozen=True)
+class EdgeKind:
+    """An edge target kind and the vocabulary used to encode it into AIB records."""
+
+    slug: str  # identifier segment, e.g. "mcpserver" / "modelapi"
+    resource_kind: str  # KAOS resource kind, e.g. "MCPServer" / "ModelAPI"
+    display_label: str  # human label used in display names, e.g. "MCPServer"
+    scope_description: str  # description attached to the synthetic ``call`` scope
+
+
+MCPSERVER = EdgeKind(
+    slug="mcpserver",
+    resource_kind=MCPSERVER_KIND,
+    display_label="MCPServer",
+    scope_description="Invoke the MCP server",
+)
+MODELAPI = EdgeKind(
+    slug="modelapi",
+    resource_kind=MODELAPI_KIND,
+    display_label="ModelAPI",
+    scope_description="Invoke the model API",
+)
+
+
+def edge_service_client_id(kind: EdgeKind, namespace: str, name: str) -> str:
+    """Synthetic AIB service ``client_id`` for an edge target."""
+    return f"kaos-{kind.slug}-{namespace}-{name}"
+
+
+def edge_permission_set_name(kind: EdgeKind, namespace: str, name: str) -> str:
+    """AIB permission-set name granting ``call`` on an edge target."""
+    return f"kaos:{kind.slug}:{namespace}:{name}:{CALL_SCOPE}"
+
+
+def edge_resource_uri(kind: EdgeKind, namespace: str, name: str) -> str:
+    """Resource URI an agent is authorized against for an edge target."""
+    return f"kaos://{kind.slug}/{namespace}/{name}"
+
+
 def service_client_id(namespace: str, name: str) -> str:
-    """Synthetic AIB service ``client_id`` for an MCPServer."""
-    return f"kaos-mcpserver-{namespace}-{name}"
+    """Synthetic AIB service ``client_id`` for an MCPServer (stable public helper)."""
+    return edge_service_client_id(MCPSERVER, namespace, name)
 
 
 def permission_set_name(namespace: str, mcp: str) -> str:
-    """AIB permission-set name granting ``call`` on an MCPServer."""
-    return f"kaos:mcpserver:{namespace}:{mcp}:{CALL_SCOPE}"
+    """AIB permission-set name granting ``call`` on an MCPServer (stable public helper)."""
+    return edge_permission_set_name(MCPSERVER, namespace, mcp)
 
 
 def agent_external_id(namespace: str, name: str) -> str:
@@ -41,32 +84,70 @@ def agent_external_id(namespace: str, name: str) -> str:
 
 def mcpserver_resource_uri(namespace: str, name: str) -> str:
     """Resource URI an agent is authorized against for an MCPServer edge."""
-    return f"kaos://mcpserver/{namespace}/{name}"
+    return edge_resource_uri(MCPSERVER, namespace, name)
+
+
+def modelapi_resource_uri(namespace: str, name: str) -> str:
+    """Resource URI an agent is authorized against for a ModelAPI edge."""
+    return edge_resource_uri(MODELAPI, namespace, name)
+
+
+_AGENT_DISPLAY_PREFIX = "kaos://agent/"
+_SERVICE_CLIENT_ID_PREFIXES = (f"kaos-{MCPSERVER.slug}-", f"kaos-{MODELAPI.slug}-")
+_PERMISSION_SET_PREFIX = "kaos:"
+
+
+def is_kaos_service_client_id(client_id: str) -> bool:
+    """True if a broker service ``client_id`` was projected by KAOS (safe to prune)."""
+    return client_id.startswith(_SERVICE_CLIENT_ID_PREFIXES)
+
+
+def is_kaos_permission_set_name(name: str) -> bool:
+    """True if a broker permission-set ``name`` was projected by KAOS (safe to prune)."""
+    return name.startswith(_PERMISSION_SET_PREFIX)
+
+
+def is_kaos_agent_display_name(display_name: str) -> bool:
+    """True if a broker agent ``display_name`` was projected by KAOS (safe to prune)."""
+    return display_name.startswith(_AGENT_DISPLAY_PREFIX)
+
+
+def parse_agent_external_id(external_id: str) -> tuple[str, str] | None:
+    """Parse ``kaos://agent/<ns>/<name>`` into ``(namespace, name)`` or ``None``."""
+    if not is_kaos_agent_display_name(external_id):
+        return None
+    rest = external_id[len(_AGENT_DISPLAY_PREFIX) :]
+    parts = rest.split("/")
+    if len(parts) != 2 or not parts[0] or not parts[1]:
+        return None
+    return parts[0], parts[1]
 
 
 @dataclass(frozen=True)
 class DesiredService:
-    """A synthetic AIB service projected from an MCPServer."""
+    """A synthetic AIB service projected from an edge target (MCPServer or ModelAPI)."""
 
     namespace: str
     name: str
+    kind: EdgeKind = MCPSERVER
 
     @property
     def client_id(self) -> str:
-        return service_client_id(self.namespace, self.name)
+        return edge_service_client_id(self.kind, self.namespace, self.name)
 
     def admin_body(self) -> dict:
+        label = self.kind.display_label
         return {
-            "display_name": f"KAOS MCPServer {self.namespace}/{self.name} (synthetic)",
+            "display_name": f"KAOS {label} {self.namespace}/{self.name} (synthetic)",
             "client_id": self.client_id,
             "client_secret": "synthetic",
-            "issuer_uri": f"https://kaos.local/mcpserver/{self.namespace}/{self.name}",
+            "issuer_uri": f"https://kaos.local/{self.kind.slug}/{self.namespace}/{self.name}",
             "discovery": {"enable_discovery": False},
             "endpoints": {
                 "token_endpoint": "https://kaos.local/t",
                 "authorize_endpoint": "https://kaos.local/a",
             },
-            "scopes": [{"scope_value": CALL_SCOPE, "description": "Invoke the MCP server"}],
+            "scopes": [{"scope_value": CALL_SCOPE, "description": self.kind.scope_description}],
         }
 
 
@@ -75,20 +156,21 @@ class DesiredPermissionSet:
     """An AIB permission set granting ``call`` on one synthetic service."""
 
     namespace: str
-    mcp: str
+    target: str
+    kind: EdgeKind = MCPSERVER
 
     @property
     def name(self) -> str:
-        return permission_set_name(self.namespace, self.mcp)
+        return edge_permission_set_name(self.kind, self.namespace, self.target)
 
     @property
     def service_client_id(self) -> str:
-        return service_client_id(self.namespace, self.mcp)
+        return edge_service_client_id(self.kind, self.namespace, self.target)
 
     def admin_body(self, service_id: str) -> dict:
         return {
             "name": self.name,
-            "description": f"call {self.namespace}/{self.mcp}",
+            "description": f"call {self.namespace}/{self.target}",
             "service_scopes": [
                 {
                     "service_id": service_id,
@@ -140,26 +222,37 @@ def _meta(resource: dict) -> tuple[str, str]:
 def project(resources: list[dict]) -> DesiredState:
     """Project a list of KAOS resources into the desired AIB state.
 
-    Only agents with at least one requested MCPServer edge are projected; an agent with
-    no edges has nothing to authorize and is skipped. Services and permission sets are
-    derived from the union of declared MCPServers and the edges agents request, so an
-    edge to an MCPServer that has no standalone resource still yields a service.
+    Both MCP server edges (``spec.mcpServers``) and the model API edge (``spec.modelAPI``)
+    are projected, so an agent is authorized against every external dependency it declares.
+    Only agents with at least one edge are projected; an agent with no edges has nothing to
+    authorize and is skipped. Services and permission sets are derived from the union of
+    declared MCPServer/ModelAPI resources and the edges agents request, so an edge to a
+    target that has no standalone resource still yields a service.
     """
     state = DesiredState()
 
-    services: dict[tuple[str, str], DesiredService] = {}
-    permission_sets: dict[tuple[str, str], DesiredPermissionSet] = {}
+    services: dict[tuple[str, str, str], DesiredService] = {}
+    permission_sets: dict[tuple[str, str, str], DesiredPermissionSet] = {}
 
-    def ensure_service(ns: str, name: str) -> None:
-        key = (ns, name)
+    def ensure_service(kind: EdgeKind, ns: str, name: str) -> None:
+        key = (kind.slug, ns, name)
         if key not in services:
-            services[key] = DesiredService(namespace=ns, name=name)
+            services[key] = DesiredService(namespace=ns, name=name, kind=kind)
 
+    def ensure_permission_set(kind: EdgeKind, ns: str, name: str) -> DesiredPermissionSet:
+        key = (kind.slug, ns, name)
+        if key not in permission_sets:
+            permission_sets[key] = DesiredPermissionSet(namespace=ns, target=name, kind=kind)
+        return permission_sets[key]
+
+    declared_kinds = {MCPSERVER.resource_kind: MCPSERVER, MODELAPI.resource_kind: MODELAPI}
     for resource in resources:
-        if resource.get("kind") == MCPSERVER_KIND:
-            ns, name = _meta(resource)
-            if name:
-                ensure_service(ns, name)
+        kind = declared_kinds.get(resource.get("kind", ""))
+        if kind is None:
+            continue
+        ns, name = _meta(resource)
+        if name:
+            ensure_service(kind, ns, name)
 
     for resource in resources:
         if resource.get("kind") != AGENT_KIND:
@@ -170,13 +263,19 @@ def project(resources: list[dict]) -> DesiredState:
         spec = resource.get("spec") or {}
         ps_names: list[str] = []
         granted: list[str] = []
+
+        def add_edge(kind: EdgeKind, target: str) -> None:
+            ensure_service(kind, ns, target)
+            ps = ensure_permission_set(kind, ns, target)
+            ps_names.append(ps.name)
+            granted.append(edge_resource_uri(kind, ns, target))
+
         for mcp in spec.get("mcpServers") or []:
-            ensure_service(ns, mcp)
-            key = (ns, mcp)
-            if key not in permission_sets:
-                permission_sets[key] = DesiredPermissionSet(namespace=ns, mcp=mcp)
-            ps_names.append(permission_sets[key].name)
-            granted.append(mcpserver_resource_uri(ns, mcp))
+            add_edge(MCPSERVER, mcp)
+        model_api = spec.get("modelAPI")
+        if model_api:
+            add_edge(MODELAPI, model_api)
+
         if not ps_names:
             continue
         state.agents.append(
