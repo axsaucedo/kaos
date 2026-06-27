@@ -21,6 +21,7 @@ import (
 
 	kaosv1alpha1 "github.com/axsaucedo/kaos/operator/api/v1alpha1"
 	"github.com/axsaucedo/kaos/operator/pkg/gateway"
+	"github.com/axsaucedo/kaos/operator/pkg/security"
 	"github.com/axsaucedo/kaos/operator/pkg/util"
 )
 
@@ -214,6 +215,18 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		Timeout:      timeout,
 	}, log); err != nil {
 		log.Error(err, "failed to reconcile HTTPRoute")
+	}
+
+	if secCfg := security.GetConfig(); secCfg.IsOperational() {
+		routeName := gateway.HTTPRouteName(gateway.ResourceTypeMCP, mcpserver.Name)
+		if err := security.ReconcileSecurityPolicy(ctx, r.Client, r.Scheme, mcpserver, security.PolicyParams{
+			Name:      routeName,
+			Namespace: mcpserver.Namespace,
+			RouteName: routeName,
+			Labels:    map[string]string{"app": "mcpserver", "mcpserver": mcpserver.Name},
+		}, secCfg, log); err != nil {
+			log.Error(err, "failed to reconcile SecurityPolicy")
+		}
 	}
 
 	// Copy deployment status for rolling update visibility

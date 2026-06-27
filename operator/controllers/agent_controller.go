@@ -25,6 +25,7 @@ import (
 
 	kaosv1alpha1 "github.com/axsaucedo/kaos/operator/api/v1alpha1"
 	"github.com/axsaucedo/kaos/operator/pkg/gateway"
+	"github.com/axsaucedo/kaos/operator/pkg/security"
 	"github.com/axsaucedo/kaos/operator/pkg/util"
 )
 
@@ -321,6 +322,18 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			Timeout:      timeout,
 		}, log); err != nil {
 			log.Error(err, "failed to reconcile HTTPRoute")
+		}
+
+		if secCfg := security.GetConfig(); secCfg.IsOperational() {
+			routeName := gateway.HTTPRouteName(gateway.ResourceTypeAgent, agent.Name)
+			if err := security.ReconcileSecurityPolicy(ctx, r.Client, r.Scheme, agent, security.PolicyParams{
+				Name:      routeName,
+				Namespace: agent.Namespace,
+				RouteName: routeName,
+				Labels:    map[string]string{"app": "agent", "agent": agent.Name},
+			}, secCfg, log); err != nil {
+				log.Error(err, "failed to reconcile SecurityPolicy")
+			}
 		}
 	}
 

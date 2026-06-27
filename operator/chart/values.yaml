@@ -68,6 +68,20 @@ gateway:
     modelAPI: "120s"
     mcp: "60s"
 
+# Resource-level authorization (access-check) enforcement at the gateway.
+# When enabled, the operator attaches an external authorization check to
+# protected routes so requests are allowed or denied based on the calling
+# agent's granted permissions. Disabled by default — routing is unchanged.
+security:
+  # Operator-wide security configuration. Security is enabled by the presence of
+  # an agent-auth ext_authz URL; when unset, the operator generates no
+  # authorization policies and routing behavior is unchanged.
+  agentAuth:
+    # extAuthzUrl is the host:port of the Envoy ext_authz access-check gRPC
+    # backend (AIB by default; OPA is a drop-in via the standard contract).
+    # Example: aib-ext-authz.aib-system.svc.cluster.local:9002
+    extAuthzUrl: ""
+
 serviceAccount:
   annotations: {}
   automount: true

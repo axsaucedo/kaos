@@ -25,6 +25,17 @@ data:
   GATEWAY_DEFAULT_AGENT_TIMEOUT: {{ .Values.gateway.defaultTimeouts.agent | quote }}
   GATEWAY_DEFAULT_MODELAPI_TIMEOUT: {{ .Values.gateway.defaultTimeouts.modelAPI | quote }}
   GATEWAY_DEFAULT_MCP_TIMEOUT: {{ .Values.gateway.defaultTimeouts.mcp | quote }}
+  # Operator-wide security configuration. The presence of an agent-auth
+  # ext_authz URL enables gateway authorization enforcement (Envoy ext_authz)
+  # on protected routes; leaving it empty disables enforcement and leaves
+  # existing routing behavior unchanged.
+  {{- with .Values.security }}
+  {{- with .agentAuth }}
+  {{- if .extAuthzUrl }}
+  SECURITY_AGENT_AUTH_EXT_AUTHZ_URL: {{ .extAuthzUrl | quote }}
+  {{- end }}
+  {{- end }}
+  {{- end }}
   # Global telemetry configuration (defaults for all components)
   {{- if .Values.telemetry.enabled }}
   DEFAULT_TELEMETRY_ENABLED: "true"
