@@ -580,6 +580,13 @@ def _build_auth_operator_args(
     user_audience: str = "",
     user_jwks_uri: str = "",
     ext_proc_url: str = "",
+    network_policy: bool = True,
+    gateway_routing: bool = False,
+    gateway_host: str = "",
+    tls_mode: str = "",
+    tls_issuer_name: str = "",
+    tls_issuer_kind: str = "ClusterIssuer",
+    tls_secret_name: str = "",
 ) -> list[str]:
     """Build the operator Helm --set arguments that enable agent-auth wiring.
 
@@ -588,6 +595,11 @@ def _build_auth_operator_args(
     are appended only when a user issuer is supplied, keeping agent-only and
     autonomous-only installs unchanged. The token-exchange ext_proc backend
     (``security.agentAuth.extProcUrl``) is appended only when supplied.
+
+    Bypass-prevention and transport-security arguments are appended too:
+    NetworkPolicy is on unless explicitly disabled, gateway routing and host are
+    set when requested, and ``security.tls.*`` is configured when a TLS mode is
+    supplied.
     """
     args: list[str] = []
     args.extend(["--set", f"security.agentAuth.extAuthzUrl={ext_authz_url}"])
@@ -606,6 +618,24 @@ def _build_auth_operator_args(
         args.extend(["--set", f"security.userAuth.audience={user_audience}"])
     if user_jwks_uri:
         args.extend(["--set", f"security.userAuth.jwksUri={user_jwks_uri}"])
+    if not network_policy:
+        args.extend(["--set", "security.networkPolicy.enabled=false"])
+    if gateway_routing:
+        args.extend(["--set", "security.gatewayRouting.enabled=true"])
+    if gateway_host:
+        args.extend(["--set", f"security.gatewayHost={gateway_host}"])
+    if tls_mode:
+        args.extend(["--set", f"security.tls.mode={tls_mode}"])
+        if tls_issuer_name:
+            args.extend(
+                ["--set", f"security.tls.certManager.issuerRef.name={tls_issuer_name}"]
+            )
+        if tls_issuer_kind:
+            args.extend(
+                ["--set", f"security.tls.certManager.issuerRef.kind={tls_issuer_kind}"]
+            )
+        if tls_secret_name:
+            args.extend(["--set", f"security.tls.secretName={tls_secret_name}"])
     return args
 
 
@@ -1088,6 +1118,13 @@ def install_command(
     keycloak_chart_path: str | None = None,
     user_auth_issuer: str | None = None,
     user_auth_audience: str = DEFAULT_USER_AUTH_AUDIENCE,
+    network_policy: bool = True,
+    gateway_routing: bool = False,
+    gateway_host: str | None = None,
+    tls_mode: str | None = None,
+    tls_issuer_name: str | None = None,
+    tls_issuer_kind: str = "ClusterIssuer",
+    tls_secret_name: str | None = None,
 ) -> None:
     """Install the KAOS operator using Helm."""
     if not check_helm_installed():
@@ -1322,6 +1359,13 @@ def install_command(
                     if token_exchange
                     else ""
                 ),
+                network_policy=network_policy,
+                gateway_routing=gateway_routing,
+                gateway_host=gateway_host or "",
+                tls_mode=tls_mode or "",
+                tls_issuer_name=tls_issuer_name or "",
+                tls_issuer_kind=tls_issuer_kind,
+                tls_secret_name=tls_secret_name or "",
             )
         )
 

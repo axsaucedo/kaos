@@ -181,6 +181,46 @@ def install(
         "--user-auth-audience",
         help="Expected audience claim for user subject tokens.",
     ),
+    network_policy: bool = typer.Option(
+        True,
+        "--network-policy/--no-network-policy",
+        help="Generate NetworkPolicies that deny direct workload-to-workload traffic "
+        "so the Envoy Gateway cannot be bypassed. Effective only with --auth-enabled.",
+    ),
+    gateway_routing: bool = typer.Option(
+        False,
+        "--gateway-routing/--no-gateway-routing",
+        help="Route internal agent->ModelAPI/MCP/peer traffic through the gateway so "
+        "gateway authentication and authorization apply to it. Effective only with "
+        "--auth-enabled.",
+    ),
+    gateway_host: str | None = typer.Option(
+        None,
+        "--gateway-host",
+        help="In-cluster host[:port] of the Envoy Gateway used for gateway routing. "
+        "Defaults to the Gateway resource's status address.",
+    ),
+    tls_mode: str | None = typer.Option(
+        None,
+        "--tls-mode",
+        help="Enable HTTPS termination on the gateway. One of: selfSigned, "
+        "certManager, provided.",
+    ),
+    tls_issuer_name: str | None = typer.Option(
+        None,
+        "--tls-issuer-name",
+        help="cert-manager Issuer/ClusterIssuer name (with --tls-mode certManager).",
+    ),
+    tls_issuer_kind: str = typer.Option(
+        "ClusterIssuer",
+        "--tls-issuer-kind",
+        help="cert-manager issuer kind: Issuer or ClusterIssuer.",
+    ),
+    tls_secret_name: str | None = typer.Option(
+        None,
+        "--tls-secret-name",
+        help="Existing kubernetes.io/tls Secret name (with --tls-mode provided).",
+    ),
 ) -> None:
     """Install the KAOS operator using Helm."""
     # Default to signoz if flag provided without value
@@ -218,6 +258,13 @@ def install(
         keycloak_chart_path=keycloak_chart_path,
         user_auth_issuer=user_auth_issuer,
         user_auth_audience=user_auth_audience,
+        network_policy=network_policy,
+        gateway_routing=gateway_routing,
+        gateway_host=gateway_host,
+        tls_mode=tls_mode,
+        tls_issuer_name=tls_issuer_name,
+        tls_issuer_kind=tls_issuer_kind,
+        tls_secret_name=tls_secret_name,
     )
 
 

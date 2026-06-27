@@ -279,3 +279,94 @@ func TestExtProcBackendRef(t *testing.T) {
 		})
 	}
 }
+
+func TestNetworkPolicyEnabled(t *testing.T) {
+	cases := []struct {
+		name       string
+		extAuthz   string
+		npDisabled bool
+		want       bool
+	}{
+		{"operational and not disabled", "svc:9191", false, true},
+		{"operational but disabled", "svc:9191", true, false},
+		{"not operational", "", false, false},
+		{"not operational and disabled", "", true, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := Config{ExtAuthzURL: tc.extAuthz, NetworkPolicyDisabled: tc.npDisabled}
+			if got := cfg.NetworkPolicyEnabled(); got != tc.want {
+				t.Errorf("NetworkPolicyEnabled() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestGatewayNamespaceOrDefault(t *testing.T) {
+	if got := (Config{}).GatewayNamespaceOrDefault(); got != defaultGatewayNamespace {
+		t.Errorf("default = %q, want %q", got, defaultGatewayNamespace)
+	}
+	if got := (Config{GatewayNamespace: "eg"}).GatewayNamespaceOrDefault(); got != "eg" {
+		t.Errorf("explicit = %q, want eg", got)
+	}
+	if got := (Config{GatewayNamespace: "  "}).GatewayNamespaceOrDefault(); got != defaultGatewayNamespace {
+		t.Errorf("whitespace = %q, want default", got)
+	}
+}
+
+func TestOperatorNamespaceOrDefault(t *testing.T) {
+	if got := (Config{}).OperatorNamespaceOrDefault(); got != defaultOperatorNamespace {
+		t.Errorf("default = %q, want %q", got, defaultOperatorNamespace)
+	}
+	if got := (Config{OperatorNamespace: "ops"}).OperatorNamespaceOrDefault(); got != "ops" {
+		t.Errorf("explicit = %q, want ops", got)
+	}
+}
+
+func TestGetConfigOperatorNamespaceFallsBackToPodNamespace(t *testing.T) {
+	t.Setenv(envExtAuthzURL, "svc:9191")
+	t.Setenv(envOperatorNamespace, "")
+	t.Setenv(envPodNamespace, "kaos-system")
+	if got := GetConfig().OperatorNamespace; got != "kaos-system" {
+		t.Errorf("OperatorNamespace = %q, want kaos-system (from POD_NAMESPACE)", got)
+	}
+
+	t.Setenv(envOperatorNamespace, "explicit-ns")
+	if got := GetConfig().OperatorNamespace; got != "explicit-ns" {
+		t.Errorf("OperatorNamespace = %q, want explicit-ns (SECURITY_OPERATOR_NAMESPACE wins)", got)
+	}
+}
+
+func TestGetConfigNetworkPolicyDisabledParsing(t *testing.T) {
+	t.Setenv(envExtAuthzURL, "svc:9191")
+	t.Setenv(envNetworkPolicyDisabled, "true")
+	if !GetConfig().NetworkPolicyDisabled {
+		t.Errorf("expected NetworkPolicyDisabled=true")
+	}
+	t.Setenv(envNetworkPolicyDisabled, "")
+	if GetConfig().NetworkPolicyDisabled {
+		t.Errorf("expected NetworkPolicyDisabled=false when unset")
+	}
+}
+
+func TestGatewayRoutingEnabled(t *testing.T) {
+	if (Config{}).GatewayRoutingEnabled() {
+		t.Errorf("expected routing disabled by default")
+	}
+	if !(Config{GatewayRouting: true}).GatewayRoutingEnabled() {
+		t.Errorf("expected routing enabled when flag set")
+	}
+}
+
+func TestGetConfigReadsGatewayRoutingFields(t *testing.T) {
+	t.Setenv(envExtAuthzURL, "svc:9191")
+	t.Setenv(envGatewayHost, "172.18.0.4:80")
+	t.Setenv(envGatewayRouting, "true")
+	cfg := GetConfig()
+	if cfg.GatewayHost != "172.18.0.4:80" {
+		t.Errorf("GatewayHost = %q, want 172.18.0.4:80", cfg.GatewayHost)
+	}
+	if !cfg.GatewayRoutingEnabled() {
+		t.Errorf("expected GatewayRoutingEnabled true")
+	}
+}

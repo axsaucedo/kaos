@@ -231,6 +231,14 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		if err := security.ReconcileEnvoyExtensionPolicy(ctx, r.Client, r.Scheme, mcpserver, policyParams, secCfg, log); err != nil {
 			log.Error(err, "failed to reconcile EnvoyExtensionPolicy")
 		}
+		if err := security.ReconcileNetworkPolicy(ctx, r.Client, r.Scheme, mcpserver, security.NetworkPolicyParams{
+			Name:        routeName,
+			Namespace:   mcpserver.Namespace,
+			PodSelector: map[string]string{"app": "mcpserver", "mcpserver": mcpserver.Name},
+			Labels:      map[string]string{"app": "mcpserver", "mcpserver": mcpserver.Name},
+		}, secCfg, log); err != nil {
+			log.Error(err, "failed to reconcile NetworkPolicy")
+		}
 	}
 
 	// Copy deployment status for rolling update visibility
