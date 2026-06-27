@@ -40,7 +40,7 @@ jobs:
           echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
 
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Read VERSION
         id: version
@@ -97,7 +97,7 @@ jobs:
     needs: build-and-push
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Read VERSION
         id: version
