@@ -18,6 +18,24 @@ The SDK is *not* the enforcement boundary; it only propagates.
 
 from __future__ import annotations
 
+from .client import (
+    AccessDecision,
+    AccessDenied,
+    AccessRequest,
+    AsyncClient,
+    Client,
+    ReauthenticationRequired,
+    TokenResult,
+)
+from .identity import (
+    AIBUnavailable,
+    ActorTokenManager,
+    actor_token,
+    actor_token_async,
+    get_manager,
+    instrument_agent_identity,
+    reset_manager,
+)
 from .instrument import (
     HEADER_ACTOR,
     HEADER_ACTOR_TOKEN,
@@ -41,6 +59,20 @@ __all__ = [
     "to_headers",
     "instrument_fastapi",
     "instrument_httpx",
+    "instrument_agent_identity",
+    "actor_token",
+    "actor_token_async",
+    "get_manager",
+    "reset_manager",
+    "ActorTokenManager",
+    "AIBUnavailable",
+    "Client",
+    "AsyncClient",
+    "AccessRequest",
+    "AccessDecision",
+    "AccessDenied",
+    "ReauthenticationRequired",
+    "TokenResult",
     "HEADER_REQUEST_ID",
     "HEADER_SESSION_ID",
     "HEADER_PRINCIPAL",

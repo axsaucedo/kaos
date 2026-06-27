@@ -145,6 +145,12 @@ class AgentServer:
             actor_token=self.settings.security_actor_token or None,
             principal=self.settings.security_principal or None,
         )
+        # When no static actor token is configured, set up the managed actor-token
+        # lifecycle: if broker credentials are mounted (AGENT_AUTH_CLIENT_ID/SECRET/
+        # TOKEN_ENDPOINT), the runtime mints and refreshes this agent's actor token and
+        # injects it on outbound calls. Inert when credentials are absent.
+        if not self.settings.security_actor_token:
+            aib.instrument_agent_identity()
         aib.instrument_httpx()
 
         self._setup_routes()

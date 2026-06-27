@@ -78,6 +78,11 @@ class _Context(MutableMapping[str, Any]):
     def __iter__(self) -> Iterator[str]:
         return iter(self._data())
 
+    def get(self, key: object, default: Any = None) -> Any:
+        if isinstance(key, str):
+            return self._data().get(key, default)
+        return default
+
     def __len__(self) -> int:
         return len(self._data())
 
@@ -298,11 +303,78 @@ def _inject_request_headers(request: Any) -> None:
     """Merge the current context's propagation headers into an outbound request.
 
     Strictly **additive**: a header already present on the request (for example the
-    ModelAPI/LLM provider's own ``Authorization`` API key) is never overwritten.
+    ModelAPI/LLM provider's own ``Authorization`` API key) is never overwritten. When the
+    request-local context carries no actor token but a managed actor-token lifecycle is
+    active (see :func:`aib.instrument_agent_identity`), this agent's minted actor token is
+    injected so each hop authenticates as itself even without a static token.
     """
     for header, value in ctx.to_headers().items():
         if header not in request.headers:
             request.headers[header] = value
+    if HEADER_ACTOR_TOKEN not in request.headers:
+        token = _managed_actor_token()
+        if token:
+            request.headers[HEADER_ACTOR_TOKEN] = _as_bearer(token)
+
+
+def _managed_actor_token() -> Optional[str]:
+    """Return the managed actor token, or ``None`` when no managed identity is active."""
+    from . import identity
+
+    manager = identity.get_manager()
+    if manager is None:
+        return None
+    return manager.token()
+
+
+async def _inject_request_headers_async(request: Any) -> None:
+    """Async variant of :func:`_inject_request_headers`.
+
+    Acquires the managed actor token without blocking the event loop on a refresh.
+    """
+    for header, value in ctx.to_headers().items():
+        if header not in request.headers:
+            request.headers[header] = value
+    if HEADER_ACTOR_TOKEN not in request.headers:
+        from . import identity
+
+        manager = identity.get_manager()
+        if manager is not None:
+            token = await manager.token_async()
+            if token:
+                request.headers[HEADER_ACTOR_TOKEN] = _as_bearer(token)
+
+
+def _refresh_actor_header_sync(request: Any) -> bool:
+    """Replace the request's actor-token header with a freshly minted token.
+
+    Returns ``True`` when a managed identity produced a new token and the header was
+    updated (so the caller may replay), ``False`` otherwise.
+    """
+    from . import identity
+
+    manager = identity.get_manager()
+    if manager is None:
+        return False
+    token = manager.force_refresh()
+    if not token:
+        return False
+    request.headers[HEADER_ACTOR_TOKEN] = _as_bearer(token)
+    return True
+
+
+async def _refresh_actor_header_async(request: Any) -> bool:
+    """Async variant of :func:`_refresh_actor_header_sync`."""
+    from . import identity
+
+    manager = identity.get_manager()
+    if manager is None:
+        return False
+    token = await manager.force_refresh_async()
+    if not token:
+        return False
+    request.headers[HEADER_ACTOR_TOKEN] = _as_bearer(token)
+    return True
 
 
 def instrument_httpx() -> None:
@@ -312,6 +384,13 @@ def instrument_httpx() -> None:
     through ``send``, so patching ``send`` covers every transport — A2A, MCP, and
     ModelAPI clients alike — and injection happens at request time, so clients built once
     at startup still propagate per-request context. Idempotent.
+
+    When a managed actor-token identity is active (see :func:`aib.instrument_agent_identity`)
+    and an instrumented request that carried ``x-agent-authorization`` receives a ``401``,
+    the actor token is refreshed once and the request replayed a single time — covering the
+    case where the cached token expired or the credential rotated mid-flight. Requests with
+    no managed identity, no actor-token header, or a non-401 response behave exactly as
+    before (no retry).
 
     Injection is additive and reads from :data:`ctx`; in internet-facing deployments,
     callers are responsible for not placing sensitive tokens in :data:`ctx` for requests
@@ -328,11 +407,19 @@ def instrument_httpx() -> None:
 
     def _patched_sync_send(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
         _inject_request_headers(request)
-        return sync_send(self, request, *args, **kwargs)
+        had_actor = HEADER_ACTOR_TOKEN in request.headers
+        response = sync_send(self, request, *args, **kwargs)
+        if response.status_code == 401 and had_actor and _refresh_actor_header_sync(request):
+            response = sync_send(self, request, *args, **kwargs)
+        return response
 
     async def _patched_async_send(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
-        _inject_request_headers(request)
-        return await async_send(self, request, *args, **kwargs)
+        await _inject_request_headers_async(request)
+        had_actor = HEADER_ACTOR_TOKEN in request.headers
+        response = await async_send(self, request, *args, **kwargs)
+        if response.status_code == 401 and had_actor and await _refresh_actor_header_async(request):
+            response = await async_send(self, request, *args, **kwargs)
+        return response
 
     httpx.Client.send = _patched_sync_send
     httpx.AsyncClient.send = _patched_async_send
