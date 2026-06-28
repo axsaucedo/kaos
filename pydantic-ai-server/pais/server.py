@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from opentelemetry import trace as trace_api
 import uvicorn
 
-from pydantic_ai.mcp import MCPServerStreamableHTTP
+from pydantic_ai.mcp import MCPToolset
 from pydantic_ai.agent import Agent as PydanticAgent
 from pydantic_ai.messages import ToolCallPart
 from pydantic_ai.usage import UsageLimits
@@ -187,7 +187,7 @@ class AgentServer:
         await self.task_manager.shutdown()
         for sub_agent in self._sub_agents.values():
             await sub_agent.close()
-        # TODO: Close MCP server connections (MCPServerStreamableHTTP) on shutdown
+        # TODO: Close MCP server connections (MCPToolset) on shutdown
         await self.memory.close()
 
     def _log_startup_config(self):
@@ -558,7 +558,7 @@ class AgentServer:
 
 
 def _parse_mcp_servers(settings: AgentServerSettings) -> list:
-    """Parse MCP server env vars into MCPServerStreamableHTTP instances."""
+    """Parse MCP server env vars into MCPToolset instances."""
     mcp_servers: list = []
     if not settings.mcp_servers:
         return mcp_servers
@@ -577,7 +577,7 @@ def _parse_mcp_servers(settings: AgentServerSettings) -> list:
             mcp_url = server_url.rstrip("/")
             if not mcp_url.endswith("/mcp"):
                 mcp_url = f"{mcp_url}/mcp"
-            mcp_servers.append(MCPServerStreamableHTTP(mcp_url))
+            mcp_servers.append(MCPToolset(mcp_url))
             logger.info(f"Configured MCP server: {server_name} -> {mcp_url}")
         else:
             logger.warning(f"No URL found for MCP server {server_name} (expected {env_name})")
@@ -648,14 +648,11 @@ def _setup_otel_instrumentation(settings: AgentServerSettings) -> None:
         from pydantic_ai.models.instrumented import InstrumentationSettings
         from opentelemetry.trace import get_tracer_provider
         from opentelemetry.metrics import get_meter_provider
-        from opentelemetry._logs import get_logger_provider
 
         instrumentation = InstrumentationSettings(
             tracer_provider=get_tracer_provider(),
             meter_provider=get_meter_provider(),
-            logger_provider=get_logger_provider(),
             version=settings.otel_instrumentation_version,  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
-            event_mode=settings.otel_event_mode,
         )
         PydanticAgent.instrument_all(instrumentation)
 
