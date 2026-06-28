@@ -4,7 +4,7 @@ import os
 import json
 import time
 import logging
-from typing import Dict, Any, List, Literal, Optional, Union, TYPE_CHECKING
+from typing import Dict, Any, List, Optional, Union, TYPE_CHECKING
 from dataclasses import dataclass
 
 from pydantic import BaseModel, ConfigDict
@@ -430,7 +430,6 @@ class AgentServerSettings(BaseSettings):
     security_principal: str = ""
 
     # Pydantic AI OTEL instrumentation settings
-    otel_instrumentation_version: int = 4
-    otel_event_mode: Literal["attributes", "logs"] = "attributes"
+    otel_instrumentation_version: int = 5
 
     model_config = {"env_file": ".env", "case_sensitive": False}
