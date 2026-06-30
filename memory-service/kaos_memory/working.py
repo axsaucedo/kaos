@@ -40,6 +40,7 @@ class _Backend:
 
     def __init__(self, storage_type: str, target: str):
         self.kind = storage_type
+        self._conn: Any
         if storage_type == "local":
             self._conn = sqlite3.connect(target)
             self.ph = "?"
