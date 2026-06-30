@@ -7,6 +7,7 @@ on:
       - 'operator/**'
       - 'pydantic-ai-server/**'
       - 'mcp-servers/**'
+      - 'memory-service/**'
       - 'VERSION'
       - '.github/workflows/dev-build.yaml'
       - '.github/workflows/reusable-build-images.yaml'
