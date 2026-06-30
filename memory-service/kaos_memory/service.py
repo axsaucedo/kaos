@@ -21,6 +21,8 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 from kaos_memory.api import (
+    ForgetRequest,
+    ForgetResponse,
     RecallRequest,
     RecallResponse,
     WorkingContext,
@@ -123,6 +125,20 @@ class MemoryService:
 
         return WriteResponse(accepted=True, scheduled=True, degraded=False)
 
+    def forget(self, req: ForgetRequest) -> ForgetResponse:
+        """Erase a scope across both tiers: clear the working tier (durable) and delete
+        the scope's long-term memories. Fail-soft: a long-term erasure error degrades
+        the response but the working tier is still cleared. The synchronous cross-tier
+        erasure guarantees are completed by the multi-tenancy work."""
+        self.working.clear(req.scope)
+        try:
+            self.longterm.delete_scope(req.scope)
+        except Exception:
+            if req.failure_mode == "strict":
+                raise
+            return ForgetResponse(forgotten=True, degraded=True)
+        return ForgetResponse(forgotten=True, degraded=False)
+
 
 def create_app(service: MemoryService) -> FastAPI:
     """Build the FastAPI app bound to a ``MemoryService``."""
@@ -165,6 +181,17 @@ def create_app(service: MemoryService) -> FastAPI:
                 {"accepted": False, "error": f"{type(exc).__name__}: {exc}"}, status_code=500
             )
         return JSONResponse(result.model_dump(), status_code=202 if result.scheduled else 200)
+
+    @app.post("/v1/forget", response_model=ForgetResponse)
+    def forget(req: ForgetRequest) -> JSONResponse:
+        """Erase a scope across both tiers."""
+        try:
+            result = app.state.memory.forget(req)
+        except Exception as exc:
+            return JSONResponse(
+                {"forgotten": False, "error": f"{type(exc).__name__}: {exc}"}, status_code=500
+            )
+        return JSONResponse(result.model_dump(), status_code=200)
 
     return app
 

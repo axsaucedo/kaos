@@ -52,6 +52,21 @@ class WriteResponse(BaseModel):
     degraded: bool = False
 
 
+class ForgetRequest(BaseModel):
+    """Erase a scope: clear its working tier and delete its long-term memories."""
+
+    scope: Scope
+    failure_mode: FailureMode = "soft"
+
+
+class ForgetResponse(BaseModel):
+    """Acknowledges a forget. ``degraded`` is set when the long-term erasure failed
+    under fail-soft (the working tier was still cleared)."""
+
+    forgotten: bool = True
+    degraded: bool = False
+
+
 class WorkingContext(BaseModel):
     """The working-tier slice of a recall response."""
 
