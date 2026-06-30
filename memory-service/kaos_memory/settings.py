@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from kaos_memory.background import BackgroundRunner
 from kaos_memory.config import (
     ExternalStorage,
     LocalStorage,
@@ -49,6 +50,9 @@ class MemorySettings(BaseSettings):
     token_budget: int = 4096
     rolling_summary: bool = True
     hard_event_cap: int = 2000
+
+    extraction_concurrency: int = 4
+    extraction_max_retries: int = 2
 
     host: str = "0.0.0.0"
     port: int = 8080
@@ -105,4 +109,8 @@ def build_service(settings: MemorySettings) -> MemoryService:
         settings.working_tier(),
         summarizer,
     )
-    return MemoryService(longterm=longterm, working=working)
+    runner = BackgroundRunner(
+        concurrency=settings.extraction_concurrency,
+        max_retries=settings.extraction_max_retries,
+    )
+    return MemoryService(longterm=longterm, working=working, scheduler=runner)

@@ -13,6 +13,7 @@ entrypoint builds the real stores from the environment.
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Callable, Optional
 
@@ -125,7 +126,16 @@ class MemoryService:
 
 def create_app(service: MemoryService) -> FastAPI:
     """Build the FastAPI app bound to a ``MemoryService``."""
-    app = FastAPI(title="KAOS Memory Service")
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        yield
+        # Drain pending background work if the scheduler is a drainable runner.
+        drain = getattr(app.state.memory.scheduler, "shutdown", None)
+        if callable(drain):
+            drain(wait=True)
+
+    app = FastAPI(title="KAOS Memory Service", lifespan=lifespan)
     app.state.memory = service
 
     @app.get("/healthz")
