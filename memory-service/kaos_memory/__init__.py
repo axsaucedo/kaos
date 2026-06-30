@@ -8,4 +8,24 @@ in either a ``local`` (embedded Chroma + SQLite) or ``external`` (pgvector +
 Postgres) storage mode.
 """
 
+from kaos_memory.config import (
+    ExternalStorage,
+    LocalStorage,
+    ModelConfig,
+    StorageConfig,
+    WorkingTierConfig,
+)
+from kaos_memory.scope import SHARED_OWNER, Scope, ScopeLevel
+
 __version__ = "0.4.8.dev0"
+
+__all__ = [
+    "ExternalStorage",
+    "LocalStorage",
+    "ModelConfig",
+    "StorageConfig",
+    "WorkingTierConfig",
+    "Scope",
+    "ScopeLevel",
+    "SHARED_OWNER",
+]
