@@ -109,3 +109,12 @@ class LongTermStore:
     def delete_scope(self, scope: Scope) -> None:
         """Erase every memory owned by ``scope`` (the scope-targeted erasure primitive)."""
         self._memory.delete_all(**scope.owner_kwargs())
+
+    def ping(self) -> None:
+        """Probe vector-store reachability without embedding (no model call).
+
+        Lists collections on the underlying vector store; raises if the store is
+        unreachable. Used by the service readiness check, which must reflect store
+        reachability rather than model reachability (models bind lazily on first use).
+        """
+        self._memory.vector_store.list_cols()
