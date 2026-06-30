@@ -5,6 +5,7 @@ import uuid
 import logging
 from abc import ABC, abstractmethod
 from collections import deque
+from enum import Enum
 from inspect import isawaitable
 from typing import Dict, Any, List, Optional, Union, Deque, Mapping
 from datetime import datetime, timedelta, timezone
@@ -65,8 +66,124 @@ class SessionMemory:
         }
 
 
+class ScopeLevel(str, Enum):
+    """The memory scope a recall/write/forget operation targets.
+
+    Mirrors the central memory service's scope levels. Each level binds to one
+    owner identity the service pre-filters on, so an operation only ever touches
+    the memory it is entitled to:
+
+    - ``PRIVATE``: only this agent (bound to the agent's stable client id).
+    - ``USER``: every agent acting for one principal (bound to the principal).
+    - ``SHARED``: every agent on the store (a reserved store-wide owner).
+    - ``SESSION``: a single run/conversation (bound to the session id).
+    """
+
+    PRIVATE = "private"
+    USER = "user"
+    SHARED = "shared"
+    SESSION = "session"
+
+
+@dataclass
+class MemoryScope:
+    """Identifies whose memory an operation touches.
+
+    The scope is always derived server-side from the authenticated request and
+    the agent's verifiable identity; it is never read from model- or tool-supplied
+    arguments. Only the field required by ``level`` must be present — the rest may
+    be unset. The translation to the service's owner identifiers lives in the
+    service client, not here.
+    """
+
+    level: ScopeLevel
+    principal: Optional[str] = None
+    agent_client_id: Optional[str] = None
+    session_id: Optional[str] = None
+
+    def to_payload(self) -> Dict[str, Any]:
+        """Serialize to the service's scope JSON shape."""
+        return {
+            "level": self.level.value,
+            "principal": self.principal,
+            "agent_client_id": self.agent_client_id,
+            "session_id": self.session_id,
+        }
+
+
+@dataclass
+class RecalledMemory:
+    """Assembled recall result from the memory tiers.
+
+    ``facts`` are the long-term engine's native result records (text, score, id,
+    metadata) passed through unmodified. ``summary`` and ``recent`` are the
+    working-tier slice (rolling summary plus recent verbatim turns). ``block`` is
+    the deterministic, ready-to-inject context block. ``degraded`` is set when the
+    long-term tier was unavailable and only working context is present — recall is
+    best-effort and never aborts a turn.
+    """
+
+    facts: List[Dict[str, Any]] = field(default_factory=list)
+    summary: str = ""
+    recent: List[tuple] = field(default_factory=list)
+    block: str = ""
+    degraded: bool = False
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.facts and not self.summary and not self.recent
+
+
 class Memory(ABC):
-    """Abstract interface for all memory implementations."""
+    """Abstract interface for all memory implementations.
+
+    The interface is tiered. The session/event methods below model the working
+    tier the message-history bridge replays. The ``recall``/``write``/``forget``
+    methods model the long-term tier served by the central memory service. A
+    working-only or disabled backend inherits the long-term methods as no-ops, so
+    only a service-backed implementation needs to override them.
+    """
+
+    async def recall(
+        self,
+        scope: "MemoryScope",
+        query: str,
+        *,
+        top_k: int = 10,
+        include_working: bool = True,
+        token_budget: Optional[int] = None,
+    ) -> "RecalledMemory":
+        """Assemble the context visible at ``scope`` for ``query``.
+
+        Best-effort: a long-term failure yields a degraded, working-only (or empty)
+        result rather than raising. The default implementation recalls nothing,
+        which is correct for working-only and disabled backends.
+        """
+        return RecalledMemory()
+
+    async def write(
+        self,
+        scope: "MemoryScope",
+        role: str,
+        content: str,
+        *,
+        infer: bool = True,
+        failure_mode: str = "soft",
+    ) -> bool:
+        """Record a turn into the memory tiers off the hot path.
+
+        Returns ``True`` when the write was accepted. The default implementation is
+        a no-op accept for backends without a long-term tier.
+        """
+        return True
+
+    async def forget(self, scope: "MemoryScope", *, failure_mode: str = "soft") -> bool:
+        """Erase a scope: clear its working tier and delete its long-term memories.
+
+        The default implementation is a no-op accept for backends without a
+        long-term tier.
+        """
+        return True
 
     @abstractmethod
     async def create_session(
