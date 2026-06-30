@@ -1,0 +1,11 @@
+"""KAOS memory service.
+
+The ``kaos_memory`` package houses the storage layer for KAOS production-grade
+memory: a long-term adapter wrapping Mem0 as a library and a relational
+working-tier store with token-budget eviction and a rolling summary. Both bind
+their models to a resolved OpenAI-compatible endpoint (a KAOS ModelAPI) and run
+in either a ``local`` (embedded Chroma + SQLite) or ``external`` (pgvector +
+Postgres) storage mode.
+"""
+
+__version__ = "0.4.8.dev0"
