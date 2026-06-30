@@ -139,6 +139,31 @@ class RecalledMemory:
         return not self.facts and not self.summary and not self.recent
 
 
+def scope_from_deps(
+    deps: Any,
+    *,
+    level: Union["ScopeLevel", str],
+    agent_identity: Optional[str] = None,
+) -> "MemoryScope":
+    """Build the request :class:`MemoryScope` from server-derived identity.
+
+    The scope is derived only from the authenticated request context (principal,
+    session) carried on ``deps`` and the agent's verifiable identity (its minted
+    actor identity, or the operator-provided ``agent_identity``). It deliberately
+    accepts no scope argument from the model or a tool, so a caller can never
+    widen or redirect the scope it is entitled to; the ``level`` is fixed by the
+    agent's configuration, not by request content.
+    """
+    resolved_level = level if isinstance(level, ScopeLevel) else ScopeLevel(str(level))
+    security_context = getattr(deps, "security_context", None) or {}
+    return MemoryScope(
+        level=resolved_level,
+        principal=security_context.get("principal") or None,
+        agent_client_id=agent_identity or security_context.get("actor") or None,
+        session_id=getattr(deps, "session_id", None) or None,
+    )
+
+
 class Memory(ABC):
     """Abstract interface for all memory implementations.
 
