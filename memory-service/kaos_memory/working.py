@@ -14,6 +14,7 @@ and summary. Eviction-by-summarization replaces the old turn-count eviction.
 from __future__ import annotations
 
 import sqlite3
+import threading
 import time
 from typing import Any, Callable, List, Optional, Tuple
 
@@ -42,7 +43,7 @@ class _Backend:
         self.kind = storage_type
         self._conn: Any
         if storage_type == "local":
-            self._conn = sqlite3.connect(target)
+            self._conn = sqlite3.connect(target, check_same_thread=False)
             self.ph = "?"
             serial = "INTEGER PRIMARY KEY AUTOINCREMENT"
         elif storage_type == "external":
@@ -105,17 +106,21 @@ class WorkingStore:
         self.cfg = config or WorkingTierConfig()
         self.summarizer = summarizer
         self.db = _Backend(storage_type, target)
+        # Serializes read-modify-write paths (append/clear) since the service runs
+        # handlers on a threadpool over a single shared connection.
+        self._lock = threading.RLock()
 
     def append(self, scope: Scope, role: str, content: str, metadata: Any = None) -> None:
         """Append a turn and re-enforce the budget and hard cap by summarizing overflow."""
         key = scope_key(scope)
-        self.db.execute(
-            "INSERT INTO working_turns (scope_key, role, content, created_at, folded) "
-            "VALUES (?, ?, ?, ?, 0)",
-            (key, role, content, time.time()),
-        )
-        self.db.commit()
-        self._enforce(key)
+        with self._lock:
+            self.db.execute(
+                "INSERT INTO working_turns (scope_key, role, content, created_at, folded) "
+                "VALUES (?, ?, ?, ?, 0)",
+                (key, role, content, time.time()),
+            )
+            self.db.commit()
+            self._enforce(key)
 
     def _active(self, key: str) -> List[Tuple[int, str, str]]:
         cur = self.db.execute(
@@ -181,9 +186,10 @@ class WorkingStore:
     def clear(self, scope: Scope) -> None:
         """Delete all turns and the summary for the scope."""
         key = scope_key(scope)
-        self.db.execute("DELETE FROM working_turns WHERE scope_key = ?", (key,))
-        self.db.execute("DELETE FROM working_summary WHERE scope_key = ?", (key,))
-        self.db.commit()
+        with self._lock:
+            self.db.execute("DELETE FROM working_turns WHERE scope_key = ?", (key,))
+            self.db.execute("DELETE FROM working_summary WHERE scope_key = ?", (key,))
+            self.db.commit()
 
     def close(self) -> None:
         self.db.close()

@@ -19,7 +19,9 @@ from typing import Optional
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
+from kaos_memory.api import RecallRequest, RecallResponse, WorkingContext
 from kaos_memory.longterm import LongTermStore
+from kaos_memory.presentation import assemble_block
 from kaos_memory.working import WorkingStore
 
 
@@ -48,6 +50,29 @@ class MemoryService:
                 ok = False
         return {"ready": ok, "stores": stores}
 
+    def recall(self, req: RecallRequest) -> RecallResponse:
+        """Assemble recall context for a scope. Fail-soft: long-term errors degrade
+        to working-only context rather than failing the request."""
+        facts: list = []
+        degraded = False
+        try:
+            facts = self.longterm.recall(req.scope, req.query, top_k=req.top_k)
+        except Exception:
+            degraded = True
+
+        summary, recent = "", []
+        if req.include_working:
+            summary = self.working.summary(req.scope)
+            recent = self.working.recent(req.scope, token_budget=req.working_token_budget)
+
+        block = assemble_block(facts, summary, recent)
+        return RecallResponse(
+            facts=facts,
+            working=WorkingContext(summary=summary, recent=recent),
+            block=block,
+            degraded=degraded,
+        )
+
 
 def create_app(service: MemoryService) -> FastAPI:
     """Build the FastAPI app bound to a ``MemoryService``."""
@@ -65,6 +90,11 @@ def create_app(service: MemoryService) -> FastAPI:
         result = app.state.memory.readiness()
         code = 200 if result["ready"] else 503
         return JSONResponse(result, status_code=code)
+
+    @app.post("/v1/recall", response_model=RecallResponse)
+    def recall(req: RecallRequest) -> RecallResponse:
+        """Synchronous recall: assemble long-term facts and working context for a scope."""
+        return app.state.memory.recall(req)
 
     return app
 
