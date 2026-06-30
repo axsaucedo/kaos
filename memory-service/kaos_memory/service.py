@@ -13,16 +13,33 @@ entrypoint builds the real stores from the environment.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import Callable, Optional
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
-from kaos_memory.api import RecallRequest, RecallResponse, WorkingContext
+from kaos_memory.api import (
+    RecallRequest,
+    RecallResponse,
+    WorkingContext,
+    WriteRequest,
+    WriteResponse,
+)
 from kaos_memory.longterm import LongTermStore
 from kaos_memory.presentation import assemble_block
 from kaos_memory.working import WorkingStore
+
+#: Schedules a fire-and-forget extraction thunk off the response path.
+Scheduler = Callable[[Callable[[], None]], None]
+
+
+def _thread_scheduler(thunk: Callable[[], None]) -> None:
+    """Default scheduler: run the thunk on a daemon thread (replaced by the bounded
+    background runner when one is supplied)."""
+    import threading
+
+    threading.Thread(target=thunk, daemon=True).start()
 
 
 @dataclass
@@ -31,6 +48,7 @@ class MemoryService:
 
     longterm: LongTermStore
     working: WorkingStore
+    scheduler: Scheduler = field(default=_thread_scheduler)
 
     def readiness(self) -> dict:
         """Probe both stores and report per-store reachability.
@@ -73,6 +91,37 @@ class MemoryService:
             degraded=degraded,
         )
 
+    def write(self, req: WriteRequest) -> WriteResponse:
+        """Append a turn to the working tier synchronously, then schedule long-term
+        extraction off the response path so the call returns immediately.
+
+        The synchronous working append is the cheap durable path. ``strict`` surfaces a
+        failure as an exception (the handler maps it to an error); ``soft`` returns a
+        degraded acknowledgement instead of failing the request.
+        """
+        strict = req.failure_mode == "strict"
+
+        try:
+            self.working.append(req.scope, req.role, req.content)
+        except Exception:
+            if strict:
+                raise
+            return WriteResponse(accepted=True, scheduled=False, degraded=True)
+
+        def _extract() -> None:
+            self.longterm.write(
+                req.scope, [{"role": req.role, "content": req.content}], infer=req.infer
+            )
+
+        try:
+            self.scheduler(_extract)
+        except Exception:
+            if strict:
+                raise
+            return WriteResponse(accepted=True, scheduled=False, degraded=True)
+
+        return WriteResponse(accepted=True, scheduled=True, degraded=False)
+
 
 def create_app(service: MemoryService) -> FastAPI:
     """Build the FastAPI app bound to a ``MemoryService``."""
@@ -95,6 +144,17 @@ def create_app(service: MemoryService) -> FastAPI:
     def recall(req: RecallRequest) -> RecallResponse:
         """Synchronous recall: assemble long-term facts and working context for a scope."""
         return app.state.memory.recall(req)
+
+    @app.post("/v1/write", response_model=WriteResponse)
+    def write(req: WriteRequest) -> JSONResponse:
+        """Record a turn: durable working append now, long-term extraction scheduled."""
+        try:
+            result = app.state.memory.write(req)
+        except Exception as exc:
+            return JSONResponse(
+                {"accepted": False, "error": f"{type(exc).__name__}: {exc}"}, status_code=500
+            )
+        return JSONResponse(result.model_dump(), status_code=202 if result.scheduled else 200)
 
     return app
 

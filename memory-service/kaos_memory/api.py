@@ -25,6 +25,33 @@ class RecallRequest(BaseModel):
     working_token_budget: Optional[int] = None
 
 
+FailureMode = str  # "soft" | "strict"
+
+
+class WriteRequest(BaseModel):
+    """Record a turn: append to the working tier synchronously, extract long-term async.
+
+    ``infer`` controls whether the engine extracts facts (vs storing raw). ``failure_mode``
+    selects fail-soft (swallow long-term scheduling errors, return degraded) or strict
+    (surface failures as an error).
+    """
+
+    scope: Scope
+    role: str
+    content: str
+    infer: bool = True
+    failure_mode: FailureMode = "soft"
+
+
+class WriteResponse(BaseModel):
+    """Acknowledges a write. ``scheduled`` indicates long-term extraction was queued;
+    ``degraded`` is set when a fail-soft request swallowed a scheduling error."""
+
+    accepted: bool = True
+    scheduled: bool = False
+    degraded: bool = False
+
+
 class WorkingContext(BaseModel):
     """The working-tier slice of a recall response."""
 
