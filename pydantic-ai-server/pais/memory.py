@@ -3,6 +3,7 @@
 import json
 import uuid
 import logging
+import httpx
 from abc import ABC, abstractmethod
 from collections import deque
 from enum import Enum
@@ -10,6 +11,10 @@ from inspect import isawaitable
 from typing import Dict, Any, List, Optional, Union, Deque, Mapping
 from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
+
+from opentelemetry import trace as trace_api
+
+from pais.telemetry import SERVICE_NAME
 
 logger = logging.getLogger(__name__)
 
@@ -497,6 +502,182 @@ class NullMemory(Memory):
         self, app_name: str = "", user_id: str = "", session_id: Optional[str] = None
     ) -> str:
         return session_id or "null-session"
+
+    async def get_session(self, session_id: str) -> Optional[SessionMemory]:
+        return None
+
+    async def get_or_create_session(
+        self, session_id: str, app_name: str = "agent", user_id: str = "user"
+    ) -> str:
+        return session_id
+
+    async def add_event(
+        self,
+        session_id: str,
+        event_or_type: Union[MemoryEvent, str] = "",
+        content: Any = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        return True
+
+    async def get_session_events(
+        self, session_id: str, event_types: Optional[List[str]] = None
+    ) -> List[MemoryEvent]:
+        return []
+
+    async def list_sessions(self, user_id: Optional[str] = None) -> List[str]:
+        return []
+
+    async def delete_session(self, session_id: str) -> bool:
+        return True
+
+
+class ServiceMemory(Memory):
+    """Memory backend that calls the central memory service over HTTP.
+
+    Implements the long-term tier — ``recall``/``write``/``forget`` — against the
+    service's HTTP surface, and treats every call as best-effort: transport
+    failures and degraded responses never raise into the agent turn (unless the
+    caller selects ``failure_mode="strict"`` for a write/forget). The working tier
+    lives in the service and is returned *inside* the recall response, so the
+    legacy session/event methods are thin no-ops here; the message-history bridge
+    reads the working slice from ``recall`` rather than from local event storage.
+    """
+
+    def __init__(
+        self,
+        endpoint: str,
+        *,
+        timeout: float = 10.0,
+        recall_timeout: float = 5.0,
+        client: Optional[httpx.AsyncClient] = None,
+    ):
+        if not endpoint:
+            raise ValueError("ServiceMemory requires a service endpoint")
+        self.endpoint = endpoint.rstrip("/")
+        self._timeout = timeout
+        self._recall_timeout = recall_timeout
+        self._client = client or httpx.AsyncClient(timeout=timeout)
+        logger.info(f"ServiceMemory initialized -> {self.endpoint}")
+
+    async def recall(
+        self,
+        scope: "MemoryScope",
+        query: str,
+        *,
+        top_k: int = 10,
+        include_working: bool = True,
+        token_budget: Optional[int] = None,
+    ) -> "RecalledMemory":
+        tracer = trace_api.get_tracer(SERVICE_NAME)
+        with tracer.start_as_current_span(
+            "kaos.memory.recall",
+            attributes={"kaos.memory.scope_level": scope.level.value},
+        ) as span:
+            payload: Dict[str, Any] = {
+                "scope": scope.to_payload(),
+                "query": query,
+                "top_k": top_k,
+                "include_working": include_working,
+            }
+            if token_budget is not None:
+                payload["working_token_budget"] = token_budget
+            try:
+                resp = await self._client.post(
+                    f"{self.endpoint}/v1/recall", json=payload, timeout=self._recall_timeout
+                )
+                resp.raise_for_status()
+                data = resp.json()
+            except Exception as e:
+                logger.warning(f"Memory recall failed, degrading to empty context: {e}")
+                span.set_attribute("kaos.memory.degraded", True)
+                return RecalledMemory(degraded=True)
+
+            working = data.get("working") or {}
+            recalled = RecalledMemory(
+                facts=data.get("facts", []),
+                summary=working.get("summary", ""),
+                recent=[tuple(r) for r in working.get("recent", [])],
+                block=data.get("block", ""),
+                degraded=bool(data.get("degraded", False)),
+            )
+            span.set_attribute("kaos.memory.degraded", recalled.degraded)
+            span.set_attribute("kaos.memory.fact_count", len(recalled.facts))
+            return recalled
+
+    async def write(
+        self,
+        scope: "MemoryScope",
+        role: str,
+        content: str,
+        *,
+        infer: bool = True,
+        failure_mode: str = "soft",
+    ) -> bool:
+        tracer = trace_api.get_tracer(SERVICE_NAME)
+        with tracer.start_as_current_span(
+            "kaos.memory.write",
+            attributes={"kaos.memory.scope_level": scope.level.value},
+        ) as span:
+            payload = {
+                "scope": scope.to_payload(),
+                "role": role,
+                "content": content,
+                "infer": infer,
+                "failure_mode": failure_mode,
+            }
+            try:
+                resp = await self._client.post(
+                    f"{self.endpoint}/v1/write", json=payload, timeout=self._timeout
+                )
+                resp.raise_for_status()
+                data = resp.json()
+            except Exception as e:
+                if failure_mode == "strict":
+                    raise
+                logger.warning(f"Memory write failed (fail-soft): {e}")
+                span.set_attribute("kaos.memory.degraded", True)
+                return False
+            span.set_attribute("kaos.memory.scheduled", bool(data.get("scheduled", False)))
+            span.set_attribute("kaos.memory.degraded", bool(data.get("degraded", False)))
+            return bool(data.get("accepted", True))
+
+    async def forget(self, scope: "MemoryScope", *, failure_mode: str = "soft") -> bool:
+        tracer = trace_api.get_tracer(SERVICE_NAME)
+        with tracer.start_as_current_span(
+            "kaos.memory.forget",
+            attributes={"kaos.memory.scope_level": scope.level.value},
+        ) as span:
+            payload = {"scope": scope.to_payload(), "failure_mode": failure_mode}
+            try:
+                resp = await self._client.post(
+                    f"{self.endpoint}/v1/forget", json=payload, timeout=self._timeout
+                )
+                resp.raise_for_status()
+                data = resp.json()
+            except Exception as e:
+                if failure_mode == "strict":
+                    raise
+                logger.warning(f"Memory forget failed (fail-soft): {e}")
+                span.set_attribute("kaos.memory.degraded", True)
+                return False
+            span.set_attribute("kaos.memory.degraded", bool(data.get("degraded", False)))
+            return bool(data.get("forgotten", True))
+
+    async def close(self) -> None:
+        try:
+            await self._client.aclose()
+        except Exception as e:
+            logger.debug(f"ServiceMemory client close failed: {e}")
+
+    # --- Legacy working-tier methods ---------------------------------------
+    # The working tier lives in the service and is returned inside recall, so
+    # these satisfy the interface without holding local session state.
+
+    async def create_session(
+        self, app_name: str = "agent", user_id: str = "user", session_id: Optional[str] = None
+    ) -> str:
+        return session_id or f"session_{uuid.uuid4().hex[:12]}"
 
     async def get_session(self, session_id: str) -> Optional[SessionMemory]:
         return None
