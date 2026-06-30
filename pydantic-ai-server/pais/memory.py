@@ -164,6 +164,98 @@ def scope_from_deps(
     )
 
 
+def pydantic_message_to_turns(msg: Any) -> List[tuple]:
+    """Render a Pydantic AI message into working-tier turns, preserving fidelity.
+
+    Returns a list of ``(role, content)`` turns capturing every replay-relevant
+    part — user prompts, assistant text, tool calls, tool returns, and delegation
+    requests/responses — as readable text. The working tier stores turns as text,
+    so a tool call is recorded as a faithful description (the model sees that it
+    already invoked the tool) rather than as a raw tool-call part that could be
+    replayed without its matching return. Returns an empty list for parts with no
+    replay value.
+    """
+    from pydantic_ai.messages import (
+        ModelRequest,
+        ModelResponse as PydanticModelResponse,
+        TextPart,
+        ToolCallPart,
+        ToolReturnPart,
+        UserPromptPart,
+    )
+
+    turns: List[tuple] = []
+
+    def _stringify(value: Any) -> str:
+        if isinstance(value, str):
+            return value
+        try:
+            return json.dumps(value, default=str)
+        except (TypeError, ValueError):
+            return str(value)
+
+    if isinstance(msg, PydanticModelResponse):
+        for part in msg.parts:
+            if isinstance(part, TextPart):
+                if part.content:
+                    turns.append(("assistant", part.content))
+            elif isinstance(part, ToolCallPart):
+                is_deleg = part.tool_name.startswith("delegate_to_")
+                verb = "delegated to" if is_deleg else "called tool"
+                turns.append(("assistant", f"[{verb} {part.tool_name}({_stringify(part.args)})]"))
+    elif isinstance(msg, ModelRequest):
+        for part in msg.parts:
+            if isinstance(part, UserPromptPart):
+                content = part.content
+                turns.append(("user", content if isinstance(content, str) else _stringify(content)))
+            elif isinstance(part, ToolReturnPart):
+                is_deleg = part.tool_name.startswith("delegate_to_")
+                label = "delegation result" if is_deleg else "tool result"
+                turns.append(("tool", f"[{label} {part.tool_name}: {_stringify(part.content)}]"))
+    return turns
+
+
+def reconstruct_message_history(
+    recent: List[tuple],
+    summary: str = "",
+    context_limit: Optional[int] = None,
+) -> Optional[list]:
+    """Rebuild Pydantic AI ``message_history`` from working-tier turns.
+
+    ``recent`` is the working tier's ``(role, content)`` turns, oldest first.
+    ``summary`` is the rolling summary of older turns that overflowed the budget;
+    it is prepended as a leading context note so overflow is represented by
+    summarization rather than truncation. ``context_limit`` bounds how many recent
+    turns are replayed verbatim (the summary still carries the rest). Returns
+    ``None`` when there is nothing to replay.
+    """
+    from pydantic_ai.messages import (
+        ModelRequest,
+        ModelResponse as PydanticModelResponse,
+        TextPart,
+        UserPromptPart,
+    )
+
+    turns = list(recent)
+    if context_limit and len(turns) > context_limit:
+        turns = turns[-context_limit:]
+
+    history: list = []
+    if summary:
+        history.append(
+            ModelRequest(
+                parts=[UserPromptPart(content=f"Summary of earlier conversation:\n{summary}")]
+            )
+        )
+    for role, content in turns:
+        text = content if isinstance(content, str) else str(content)
+        if role == "user":
+            history.append(ModelRequest(parts=[UserPromptPart(content=text)]))
+        else:
+            history.append(PydanticModelResponse(parts=[TextPart(content=text)]))
+    return history or None
+
+
 class Memory(ABC):
     """Abstract interface for all memory implementations.
 
