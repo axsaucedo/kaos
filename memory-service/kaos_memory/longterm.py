@@ -13,6 +13,7 @@ from a cluster.
 from __future__ import annotations
 
 import os
+import tempfile
 from typing import Any, Dict, List, Optional, Union
 
 # Disable Mem0's anonymous PostHog telemetry before importing it. setdefault keeps
@@ -23,6 +24,20 @@ from mem0 import Memory  # noqa: E402  (import after telemetry is disabled)
 
 from kaos_memory.config import ExternalStorage, LocalStorage, ModelConfig, StorageConfig
 from kaos_memory.scope import Scope
+
+
+def _history_db_path(block: Union[LocalStorage, ExternalStorage]) -> str:
+    """Resolve where Mem0 keeps its change-history SQLite log.
+
+    The history log is an audit trail, not load-bearing for recall. In ``local`` mode
+    it lives alongside the vector store on the PVC so it persists with the container.
+    In ``external`` (stateless, horizontally-scaled) mode it is kept on an ephemeral
+    per-replica path so the shared Postgres vector store - not a per-replica SQLite
+    file - is the only thing that must be shared, which is what allows scaling out.
+    """
+    if isinstance(block, LocalStorage):
+        return f"{block.path.rstrip('/')}/mem0_history.db"
+    return os.path.join(tempfile.gettempdir(), "kaos_mem0_history.db")
 
 
 def _embedder_config(embedding: ModelConfig, dims: Optional[int]) -> Dict[str, Any]:
@@ -84,6 +99,7 @@ class LongTermStore:
             "llm": {"provider": "openai", "config": _llm_config(summarization)},
             "embedder": {"provider": "openai", "config": _embedder_config(embedding, dims)},
             "vector_store": _vector_store_config(block),
+            "history_db_path": _history_db_path(block),
         }
         self._memory = Memory.from_config(config)
 

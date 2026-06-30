@@ -19,6 +19,7 @@ from typing import Callable, Optional
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
+from opentelemetry import trace
 
 from kaos_memory.api import (
     ForgetRequest,
@@ -32,6 +33,8 @@ from kaos_memory.api import (
 from kaos_memory.longterm import LongTermStore
 from kaos_memory.presentation import assemble_block
 from kaos_memory.working import WorkingStore
+
+tracer = trace.get_tracer("kaos.memory")
 
 #: Schedules a fire-and-forget extraction thunk off the response path.
 Scheduler = Callable[[Callable[[], None]], None]
@@ -74,25 +77,29 @@ class MemoryService:
     def recall(self, req: RecallRequest) -> RecallResponse:
         """Assemble recall context for a scope. Fail-soft: long-term errors degrade
         to working-only context rather than failing the request."""
-        facts: list = []
-        degraded = False
-        try:
-            facts = self.longterm.recall(req.scope, req.query, top_k=req.top_k)
-        except Exception:
-            degraded = True
+        with tracer.start_as_current_span("kaos.memory.recall") as span:
+            span.set_attribute("kaos.memory.scope_level", req.scope.level.value)
+            facts: list = []
+            degraded = False
+            try:
+                facts = self.longterm.recall(req.scope, req.query, top_k=req.top_k)
+            except Exception:
+                degraded = True
 
-        summary, recent = "", []
-        if req.include_working:
-            summary = self.working.summary(req.scope)
-            recent = self.working.recent(req.scope, token_budget=req.working_token_budget)
+            summary, recent = "", []
+            if req.include_working:
+                summary = self.working.summary(req.scope)
+                recent = self.working.recent(req.scope, token_budget=req.working_token_budget)
 
-        block = assemble_block(facts, summary, recent)
-        return RecallResponse(
-            facts=facts,
-            working=WorkingContext(summary=summary, recent=recent),
-            block=block,
-            degraded=degraded,
-        )
+            span.set_attribute("kaos.memory.degraded", degraded)
+            span.set_attribute("kaos.memory.fact_count", len(facts))
+            block = assemble_block(facts, summary, recent)
+            return RecallResponse(
+                facts=facts,
+                working=WorkingContext(summary=summary, recent=recent),
+                block=block,
+                degraded=degraded,
+            )
 
     def write(self, req: WriteRequest) -> WriteResponse:
         """Append a turn to the working tier synchronously, then schedule long-term
@@ -102,42 +109,51 @@ class MemoryService:
         failure as an exception (the handler maps it to an error); ``soft`` returns a
         degraded acknowledgement instead of failing the request.
         """
-        strict = req.failure_mode == "strict"
+        with tracer.start_as_current_span("kaos.memory.write") as span:
+            span.set_attribute("kaos.memory.scope_level", req.scope.level.value)
+            strict = req.failure_mode == "strict"
 
-        try:
-            self.working.append(req.scope, req.role, req.content)
-        except Exception:
-            if strict:
-                raise
-            return WriteResponse(accepted=True, scheduled=False, degraded=True)
+            try:
+                self.working.append(req.scope, req.role, req.content)
+            except Exception:
+                span.set_attribute("kaos.memory.degraded", True)
+                if strict:
+                    raise
+                return WriteResponse(accepted=True, scheduled=False, degraded=True)
 
-        def _extract() -> None:
-            self.longterm.write(
-                req.scope, [{"role": req.role, "content": req.content}], infer=req.infer
-            )
+            def _extract() -> None:
+                with tracer.start_as_current_span("kaos.memory.consolidate"):
+                    self.longterm.write(
+                        req.scope, [{"role": req.role, "content": req.content}], infer=req.infer
+                    )
 
-        try:
-            self.scheduler(_extract)
-        except Exception:
-            if strict:
-                raise
-            return WriteResponse(accepted=True, scheduled=False, degraded=True)
+            try:
+                self.scheduler(_extract)
+            except Exception:
+                span.set_attribute("kaos.memory.degraded", True)
+                if strict:
+                    raise
+                return WriteResponse(accepted=True, scheduled=False, degraded=True)
 
-        return WriteResponse(accepted=True, scheduled=True, degraded=False)
+            span.set_attribute("kaos.memory.scheduled", True)
+            return WriteResponse(accepted=True, scheduled=True, degraded=False)
 
     def forget(self, req: ForgetRequest) -> ForgetResponse:
         """Erase a scope across both tiers: clear the working tier (durable) and delete
         the scope's long-term memories. Fail-soft: a long-term erasure error degrades
         the response but the working tier is still cleared. The synchronous cross-tier
         erasure guarantees are completed by the multi-tenancy work."""
-        self.working.clear(req.scope)
-        try:
-            self.longterm.delete_scope(req.scope)
-        except Exception:
-            if req.failure_mode == "strict":
-                raise
-            return ForgetResponse(forgotten=True, degraded=True)
-        return ForgetResponse(forgotten=True, degraded=False)
+        with tracer.start_as_current_span("kaos.memory.forget") as span:
+            span.set_attribute("kaos.memory.scope_level", req.scope.level.value)
+            self.working.clear(req.scope)
+            try:
+                self.longterm.delete_scope(req.scope)
+            except Exception:
+                span.set_attribute("kaos.memory.degraded", True)
+                if req.failure_mode == "strict":
+                    raise
+                return ForgetResponse(forgotten=True, degraded=True)
+            return ForgetResponse(forgotten=True, degraded=False)
 
 
 def create_app(service: MemoryService) -> FastAPI:
