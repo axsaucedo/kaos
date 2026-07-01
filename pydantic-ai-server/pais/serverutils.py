@@ -24,7 +24,7 @@ from pydantic_ai.messages import (
 from opentelemetry.propagate import inject
 
 if TYPE_CHECKING:
-    from pais.memory import Memory
+    from pais.memory import Memory, MemoryScope
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +38,8 @@ class AgentDeps:
     # Non-secret request security context (request_id/session_id/principal/actor/scopes)
     # populated from the aib SDK for audit/correlation; never carries raw bearer tokens.
     security_context: Optional[Dict[str, Any]] = None
+    # Server-derived memory scope for this run (principal/agent/session owner).
+    memory_scope: Optional["MemoryScope"] = None
 
 
 class _MockResponseState:
@@ -406,6 +408,16 @@ class AgentServerSettings(BaseSettings):
     memory_max_sessions: int = 1000
     memory_max_session_events: int = 500
     memory_redis_url: str = ""
+    # Central memory service (long-term tier). When set, the runtime uses the
+    # service-client backend; otherwise it falls back to the working-only backend.
+    memory_store_endpoint: str = ""
+    memory_scope: str = "session"
+    memory_recall_presentation: str = "block"
+    memory_failure_mode: str = "soft"
+    memory_short_term_token_budget: int = 0
+    memory_rolling_summary: bool = True
+    # The agent's stable identity used as the owner of private/agent-scoped memory.
+    agent_identity: str = ""
 
     # Task store configuration
     task_store_type: str = "local"

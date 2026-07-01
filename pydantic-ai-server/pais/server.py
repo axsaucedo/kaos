@@ -17,7 +17,7 @@ import uvicorn
 
 from pydantic_ai.mcp import MCPToolset
 from pydantic_ai.agent import Agent as PydanticAgent
-from pydantic_ai.messages import ToolCallPart
+from pydantic_ai.messages import ToolCallPart, ModelRequest, SystemPromptPart
 from pydantic_ai.usage import UsageLimits
 from pydantic_ai._agent_graph import CallToolsNode
 from pydantic_graph import End
@@ -124,6 +124,10 @@ class AgentServer:
         self._mcp_servers = mcp_servers or []
         self._model = model
         self._custom_tools = custom_tools or []
+        from pais.memory_tools import RecallPresentation
+
+        self._recall_presentation = RecallPresentation(settings.memory_recall_presentation)
+        self._agent_identity = settings.agent_identity or settings.security_actor or ""
         if task_manager_type == "local":
             setup_fn = self._mock_state.reset if self._mock_state else None
             self.task_manager: TaskManager = LocalTaskManager(self._run_agent, setup_fn=setup_fn)
@@ -396,18 +400,71 @@ class AgentServer:
         session_id = await self.memory.get_or_create_session(session_id, "agent", "user")
 
         user_prompt = _extract_user_prompt(message)
-        await self.memory.add_event(session_id, "user_message", user_prompt)
 
-        message_history = await self.memory.build_message_history(
-            session_id, self.settings.memory_context_limit
-        )
         deps = AgentDeps(
             session_id=session_id,
             memory=self.memory,
             security_context=aib.security_context(),
         )
+
+        # Derive the server-side memory scope (owner) for the long-term tier.
+        from pais.memory import scope_from_deps, reconstruct_message_history
+        from pais.memory_tools import presentation_injects_block
+
+        scope = scope_from_deps(
+            deps,
+            level=self.settings.memory_scope,
+            agent_identity=self._agent_identity or None,
+        )
+        deps.memory_scope = scope
+
+        # Recall long-term facts and the service-hosted working tier (best-effort;
+        # working-only backends return an empty result and we fall back below).
+        token_budget = self.settings.memory_short_term_token_budget or None
+        recalled = await self.memory.recall(scope, user_prompt, token_budget=token_budget)
+
+        # Local working-tier log: keep recording the incoming turn for back-compat
+        # (no-op for the service backend, whose working tier is written post-run).
+        await self.memory.add_event(session_id, "user_message", user_prompt)
+
+        # Prefer the service working tier for history; else the local event log.
+        if recalled.recent or recalled.summary:
+            message_history = reconstruct_message_history(
+                recalled.recent, recalled.summary, self.settings.memory_context_limit
+            )
+        else:
+            message_history = await self.memory.build_message_history(
+                session_id, self.settings.memory_context_limit
+            )
+
+        # Inject the recalled long-term block as leading system context.
+        if recalled.block and presentation_injects_block(self._recall_presentation):
+            block_msg = ModelRequest(parts=[SystemPromptPart(content=recalled.block)])
+            message_history = [block_msg] + (message_history or [])
+
         usage_limits = UsageLimits(request_limit=self.settings.agentic_loop_max_steps)
         return user_prompt, message_history, deps, usage_limits
+
+    async def _write_turns(self, deps: AgentDeps, new_messages: list) -> None:
+        """Write all turns from a run to the long-term service working tier.
+
+        Iterates the run's new messages (user echo, assistant, tool/delegation) and
+        records each as a working-tier turn under the run scope. No-op for working-only
+        backends, whose ``write`` defaults to pass.
+        """
+        scope = deps.memory_scope
+        if scope is None:
+            return
+        from pais.memory import pydantic_message_to_turns
+
+        for msg in new_messages:
+            for role, text in pydantic_message_to_turns(msg):
+                await self.memory.write(
+                    scope,
+                    role,
+                    text,
+                    failure_mode=self.settings.memory_failure_mode,
+                )
 
     async def _run_agent(
         self,
@@ -434,6 +491,7 @@ class AgentServer:
         for msg in result.new_messages():
             await self.memory.store_pydantic_message(session_id, msg)
         await self.memory.add_event(session_id, "agent_response", content)
+        await self._write_turns(deps, result.new_messages())
         return content, tool_call_count
 
     async def _process_message(
@@ -487,6 +545,7 @@ class AgentServer:
                 for msg in new_msgs:
                     await self.memory.store_pydantic_message(session_id, msg)
                 await self.memory.add_event(session_id, "agent_response", full_response)
+                await self._write_turns(deps, new_msgs)
             else:
                 content, _ = await self._run_agent(message, session_id)
                 yield content
@@ -644,11 +703,20 @@ def _parse_sub_agents(settings: AgentServerSettings) -> List[RemoteAgent]:
 
 
 def _create_memory(settings: AgentServerSettings) -> "Memory":
-    """Create memory backend from settings."""
-    from pais.memory import LocalMemory, RedisMemory, NullMemory
+    """Create memory backend from settings.
+
+    When a central memory service endpoint is configured the runtime uses the
+    service-client backend (long-term tier plus the service-hosted working tier).
+    Otherwise it falls back to a working-only backend (Redis when configured, else
+    local) so single-agent runs work without the service deployed.
+    """
+    from pais.memory import LocalMemory, RedisMemory, NullMemory, ServiceMemory
 
     if not settings.memory_enabled:
         return NullMemory()
+
+    if settings.memory_store_endpoint:
+        return ServiceMemory(settings.memory_store_endpoint)
 
     if settings.memory_type == "redis" and settings.memory_redis_url:
         return RedisMemory(
@@ -723,6 +791,19 @@ def create_agent_server(
     toolsets: list = list(mcp_servers)
     if sub_agents_dict:
         toolsets.append(DelegationToolset(sub_agents_dict, settings.memory_context_limit))
+
+    # Opt-in memory tools (save_memory/search_memory) when the recall presentation
+    # exposes tools. Scope is derived server-side per run; the model only supplies text.
+    from pais.memory import ScopeLevel
+    from pais.memory_tools import RecallPresentation, build_memory_toolset
+
+    memory_toolset = build_memory_toolset(
+        RecallPresentation(settings.memory_recall_presentation),
+        ScopeLevel(settings.memory_scope),
+        agent_identity=settings.agent_identity or settings.security_actor or None,
+    )
+    if memory_toolset is not None:
+        toolsets.append(memory_toolset)
 
     # Create or augment Pydantic AI agent
     custom_tools = []
