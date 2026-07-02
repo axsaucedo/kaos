@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 StorageType = Literal["local", "external"]
 LocalProvider = Literal["chroma"]
@@ -77,8 +77,30 @@ class ShortTermTierConfig(BaseModel):
     """Short-term tier behaviour: a token budget bounding the verbatim window, an
     opt-in rolling summary that folds overflow (instead of dropping it), and a hard
     event cap ceiling. Summarization is disabled by default — a bounded recency
-    window suffices for most agents; enable ``rolling_summary`` to fold overflow."""
+    window suffices for most agents; enable ``rolling_summary`` to fold overflow.
+
+    Folding is governed by two water marks rather than a single budget so that eviction
+    is amortised instead of thrashing near the limit. ``high_water`` is the token level
+    at which folding is triggered; ``low_water`` is the token level folding evicts back
+    down to. When left at ``0`` they default to the budget (trigger) and half the budget
+    (target). Constraint: ``0 < low_water < high_water <= token_budget``."""
 
     token_budget: int = 4096
     rolling_summary: bool = False
     hard_event_cap: int = 2000
+    high_water: int = 0
+    low_water: int = 0
+
+    @model_validator(mode="after")
+    def _resolve_water_marks(self) -> "ShortTermTierConfig":
+        if self.high_water == 0:
+            self.high_water = self.token_budget
+        if self.low_water == 0:
+            self.low_water = max(1, self.token_budget // 2)
+        if self.hard_event_cap < 1:
+            raise ValueError("hard_event_cap must be >= 1")
+        if not 0 < self.low_water < self.high_water <= self.token_budget:
+            raise ValueError(
+                "short-term water marks must satisfy " "0 < low_water < high_water <= token_budget"
+            )
+        return self

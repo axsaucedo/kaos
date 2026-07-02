@@ -404,14 +404,22 @@ class ShortTermStore:
             self.fold_pending_into_summary(scope)
 
     def _ids_exceeding_budget(self, key: str) -> List[int]:
-        """Ids of the oldest active turns to evict to get back within limits (keep >=1)."""
+        """Ids of the oldest active turns to evict, amortised via water marks (keep >=1).
+
+        Folding is triggered when the window exceeds ``high_water`` tokens or the hard
+        event cap; once triggered, the oldest turns are evicted down to the ``low_water``
+        token target (and within the hard event cap). Evicting to a low-water target
+        rather than to just-under-budget amortises the fold frequency and avoids
+        thrashing a fold on nearly every turn once the window sits at the limit.
+        """
         active = self._load_active_window_rows(key)
-        ids: List[int] = []
         total = self._window_token_total(active)
+        n = len(active)
+        if not (total > self.cfg.high_water or n > self.cfg.hard_event_cap):
+            return []
+        ids: List[int] = []
         i = 0
-        while len(active) - i > 1 and (
-            len(active) - i > self.cfg.hard_event_cap or total > self.cfg.token_budget
-        ):
+        while n - i > 1 and (total > self.cfg.low_water or (n - i) > self.cfg.hard_event_cap):
             rid, _, content = active[i]
             ids.append(rid)
             total -= count_tokens(content)

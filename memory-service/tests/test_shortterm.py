@@ -141,6 +141,30 @@ def test_scheduler_defers_fold_off_the_write_path(tmp_path):
     assert store.summary(SCOPE) != ""
 
 
+def test_fold_evicts_down_to_low_water_target(tmp_path):
+    # Once the window crosses high_water, eviction drops it toward low_water rather than
+    # to just-under-budget, so folds fire far less often than once per add (amortised).
+    calls = {"n": 0}
+
+    def counting(prior, folded):
+        calls["n"] += 1
+        return "s"
+
+    store = ShortTermStore(
+        "local",
+        str(tmp_path / "lw.db"),
+        ShortTermTierConfig(token_budget=60, high_water=60, low_water=15, rolling_summary=True),
+        counting,
+    )
+    key = scope_key(SCOPE)
+    for i in range(30):
+        store.add(SCOPE, "user", f"message number {i} here")
+        # Invariant: the active window is always kept at or below high_water.
+        assert store._window_token_total(store._load_active_window_rows(key)) <= 60
+    # Amortisation: dropping to low_water means folds fire well under once per add.
+    assert calls["n"] < 15, calls["n"]
+
+
 def test_hard_event_cap_enforced(tmp_path):
     store = _sqlite_store(tmp_path, token_budget=10_000, hard_event_cap=2)
     for i in range(5):

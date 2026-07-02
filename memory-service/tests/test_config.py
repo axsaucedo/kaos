@@ -47,3 +47,31 @@ def test_short_term_tier_defaults():
     assert w.token_budget == 4096
     assert w.rolling_summary is False
     assert w.hard_event_cap == 2000
+
+
+def test_short_term_tier_water_marks_default_from_budget():
+    w = ShortTermTierConfig(token_budget=1000)
+    # high_water defaults to the budget (fold trigger); low_water to half (fold target).
+    assert w.high_water == 1000
+    assert w.low_water == 500
+
+
+def test_short_term_tier_explicit_water_marks_kept():
+    w = ShortTermTierConfig(token_budget=1000, high_water=900, low_water=300)
+    assert w.high_water == 900
+    assert w.low_water == 300
+
+
+def test_short_term_tier_rejects_inverted_water_marks():
+    with pytest.raises(ValueError):
+        ShortTermTierConfig(token_budget=1000, high_water=300, low_water=900)
+
+
+def test_short_term_tier_rejects_high_water_above_budget():
+    with pytest.raises(ValueError):
+        ShortTermTierConfig(token_budget=1000, high_water=1200, low_water=500)
+
+
+def test_short_term_tier_rejects_zero_hard_event_cap():
+    with pytest.raises(ValueError):
+        ShortTermTierConfig(hard_event_cap=0)
