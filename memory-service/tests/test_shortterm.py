@@ -165,6 +165,39 @@ def test_fold_evicts_down_to_low_water_target(tmp_path):
     assert calls["n"] < 15, calls["n"]
 
 
+def test_digest_is_versioned_and_pruned(tmp_path):
+    # Each fold appends a new digest version; the retention cap keeps only the last N.
+    store = ShortTermStore(
+        "local",
+        str(tmp_path / "v.db"),
+        ShortTermTierConfig(token_budget=8, rolling_summary=True, digest_retention=2),
+        lambda prior, folded: f"v-{len(prior)}",
+    )
+    key = scope_key(SCOPE)
+
+    def fold_once(marker):
+        store.db.execute(
+            "INSERT INTO short_term_memory_window "
+            "(scope_key, role, content, created_at, pending_summary) VALUES (?, ?, ?, ?, 1)",
+            (key, "user", marker, 0.0),
+        )
+        store.db.commit()
+        store.fold_pending_into_summary(SCOPE)
+
+    for i in range(4):
+        fold_once(f"m{i}")
+
+    rows = store.db.execute(
+        "SELECT version FROM medium_term_memory_summaries WHERE scope_key = ? ORDER BY version",
+        (key,),
+    ).fetchall()
+    versions = [r[0] for r in rows]
+    # Four folds create versions 1..4 but retention=2 keeps only the last two.
+    assert versions == [3, 4]
+    # Recall always returns the latest version's text.
+    assert store.summary(SCOPE) != ""
+
+
 def test_hard_event_cap_enforced(tmp_path):
     store = _sqlite_store(tmp_path, token_budget=10_000, hard_event_cap=2)
     for i in range(5):

@@ -250,9 +250,11 @@ class _Backend:
                 f"created_at REAL, pending_summary INTEGER DEFAULT 0)"
             )
         )
+        ts_type = "DOUBLE PRECISION" if self.kind == "external" else "REAL"
         self.execute(
-            "CREATE TABLE IF NOT EXISTS medium_term_memory_summaries "
-            "(scope_key TEXT PRIMARY KEY, text TEXT)"
+            "CREATE TABLE IF NOT EXISTS medium_term_memory_summaries ("
+            f"scope_key TEXT, version INTEGER, text TEXT, tokens INTEGER, "
+            f"created_at {ts_type}, PRIMARY KEY (scope_key, version))"
         )
         self.commit()
 
@@ -277,9 +279,10 @@ class ShortTermStore:
     keeping at least the most recent turn:
 
     - ``rolling_summary`` disabled (default): overflow is dropped (a recency window).
-    - ``rolling_summary`` enabled: overflow is marked pending and folded into a single
-      rolling summary in one summariser call, then deleted. When a ``scheduler`` is
-      injected the fold runs off the response hot path; otherwise it runs inline.
+    - ``rolling_summary`` enabled: overflow is marked pending and folded, in one
+      summariser call, into a new append-only version of the medium-term digest (prior
+      versions are retained up to a cap, never mutated), then deleted. When a
+      ``scheduler`` is injected the fold runs off the response hot path; otherwise inline.
     """
 
     def __init__(
@@ -351,12 +354,14 @@ class ShortTermStore:
             self.db.commit()
 
     def fold_pending_into_summary(self, scope: Scope) -> None:
-        """Fold all pending (marked) turns for the scope into the summary in one call.
+        """Fold all pending (marked) turns for the scope into a new digest version.
 
-        Reads every turn marked ``pending_summary=1``, folds them into the prior summary
-        with a single summariser call, upserts the summary, and deletes the folded rows so
-        the store does not grow unboundedly. Safe to call more than once (extra calls with
-        no pending rows are no-ops). Invoked inline or via the injected scheduler.
+        Reads every turn marked ``pending_summary=1``, folds them into the prior digest
+        with a single summariser call, appends the result as a new version (append-only,
+        never mutating prior versions), prunes versions beyond the retention cap, and
+        deletes the folded rows so the window does not grow unboundedly. Safe to call more
+        than once (extra calls with no pending rows are no-ops). Invoked inline or via the
+        injected scheduler.
         """
         if self.summarizer is None:
             raise ValueError("rolling_summary is enabled but no summarizer was provided")
@@ -367,11 +372,13 @@ class ShortTermStore:
                 return
             turns = [(role, content) for _, role, content in pending]
             new_summary = self.summarizer(self._load_summary(key), turns)
+            next_version = self._next_summary_version(key)
             self.db.execute(
-                "INSERT INTO medium_term_memory_summaries (scope_key, text) VALUES (?, ?) "
-                "ON CONFLICT(scope_key) DO UPDATE SET text = excluded.text",
-                (key, new_summary),
+                "INSERT INTO medium_term_memory_summaries "
+                "(scope_key, version, text, tokens, created_at) VALUES (?, ?, ?, ?, ?)",
+                (key, next_version, new_summary, count_tokens(new_summary), time.time()),
             )
+            self._prune_summary_versions(key, next_version)
             for fid, _, _ in pending:
                 self.db.execute("DELETE FROM short_term_memory_window WHERE id = ?", (fid,))
             self.db.commit()
@@ -447,10 +454,31 @@ class ShortTermStore:
 
     def _load_summary(self, key: str) -> str:
         cur = self.db.execute(
-            "SELECT text FROM medium_term_memory_summaries WHERE scope_key = ?", (key,)
+            "SELECT text FROM medium_term_memory_summaries WHERE scope_key = ? "
+            "ORDER BY version DESC LIMIT 1",
+            (key,),
         )
         row = cur.fetchone()
         return row[0] if row else ""
+
+    def _next_summary_version(self, key: str) -> int:
+        cur = self.db.execute(
+            "SELECT COALESCE(MAX(version), 0) FROM medium_term_memory_summaries "
+            "WHERE scope_key = ?",
+            (key,),
+        )
+        row = cur.fetchone()
+        return int(row[0]) + 1
+
+    def _prune_summary_versions(self, key: str, latest_version: int) -> None:
+        """Delete digest versions older than the retention window (keep the last N)."""
+        oldest_kept = latest_version - self.cfg.digest_retention
+        if oldest_kept < 1:
+            return
+        self.db.execute(
+            "DELETE FROM medium_term_memory_summaries WHERE scope_key = ? AND version <= ?",
+            (key, oldest_kept),
+        )
 
 
 # --------------------------------------------------------------------------- #

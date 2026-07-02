@@ -90,6 +90,7 @@ class ShortTermTierConfig(BaseModel):
     hard_event_cap: int = 2000
     high_water: int = 0
     low_water: int = 0
+    digest_retention: int = 20
 
     @model_validator(mode="after")
     def _resolve_water_marks(self) -> "ShortTermTierConfig":
@@ -99,6 +100,8 @@ class ShortTermTierConfig(BaseModel):
             self.low_water = max(1, self.token_budget // 2)
         if self.hard_event_cap < 1:
             raise ValueError("hard_event_cap must be >= 1")
+        if self.digest_retention < 1:
+            raise ValueError("digest_retention must be >= 1")
         if not 0 < self.low_water < self.high_water <= self.token_budget:
             raise ValueError(
                 "short-term water marks must satisfy " "0 < low_water < high_water <= token_budget"

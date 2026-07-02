@@ -75,3 +75,9 @@ def test_short_term_tier_rejects_high_water_above_budget():
 def test_short_term_tier_rejects_zero_hard_event_cap():
     with pytest.raises(ValueError):
         ShortTermTierConfig(hard_event_cap=0)
+
+
+def test_short_term_tier_digest_retention_default_and_bound():
+    assert ShortTermTierConfig().digest_retention == 20
+    with pytest.raises(ValueError):
+        ShortTermTierConfig(digest_retention=0)
