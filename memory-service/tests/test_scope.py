@@ -2,7 +2,7 @@
 
 import pytest
 
-from kaos_memory.scope import SHARED_OWNER, Scope, ScopeLevel
+from kaos_memory.stores import SHARED_OWNER, Scope, ScopeLevel
 
 
 def test_private_maps_to_agent_id():

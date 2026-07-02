@@ -45,5 +45,5 @@ def test_model_config_defaults_key():
 def test_short_term_tier_defaults():
     w = ShortTermTierConfig()
     assert w.token_budget == 4096
-    assert w.rolling_summary is True
+    assert w.rolling_summary is False
     assert w.hard_event_cap == 2000

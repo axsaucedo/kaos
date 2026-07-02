@@ -74,9 +74,11 @@ class ModelConfig(BaseModel):
 
 
 class ShortTermTierConfig(BaseModel):
-    """Short-term tier behaviour: a token budget bounding the verbatim window, a rolling
-    summary that folds overflow (instead of truncating), and a hard event cap ceiling."""
+    """Short-term tier behaviour: a token budget bounding the verbatim window, an
+    opt-in rolling summary that folds overflow (instead of dropping it), and a hard
+    event cap ceiling. Summarization is disabled by default — a bounded recency
+    window suffices for most agents; enable ``rolling_summary`` to fold overflow."""
 
     token_budget: int = 4096
-    rolling_summary: bool = True
+    rolling_summary: bool = False
     hard_event_cap: int = 2000
