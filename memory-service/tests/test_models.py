@@ -38,7 +38,7 @@ def test_summarize_honours_base_url_and_model():
     assert "older turn one" in user_msg and "older turn two" in user_msg
 
 
-def test_as_summarizer_returns_callable_usable_by_working_store():
+def test_as_summarizer_returns_callable_usable_by_short_term_store():
     captured = {}
     cfg = ModelConfig(base_url="http://modelapi:8000/v1/", model="m")
     client = ModelClient(cfg, client=_mock_client(captured))

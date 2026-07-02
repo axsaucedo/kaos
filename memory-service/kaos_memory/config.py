@@ -2,7 +2,7 @@
 
 These objects are plain data: the storage backend selection, the model bindings
 (a resolved OpenAI-compatible endpoint plus a model name, mirroring the Agent's
-``{modelAPI, model}`` shape), and the working-tier behaviour. Resolution from a
+``{modelAPI, model}`` shape), and the short-term tier behaviour. Resolution from a
 ``MemoryStore`` custom resource happens in the operator; the stores here take the
 already-resolved configuration.
 """
@@ -23,17 +23,17 @@ class LocalStorage(BaseModel):
 
     provider: LocalProvider = "chroma"
     path: str = Field(
-        description="Directory root holding the Chroma collection and SQLite working table."
+        description="Directory root holding the Chroma collection and SQLite short-term table."
     )
     collection_name: str = "kaos_memory"
 
 
 class ExternalStorage(BaseModel):
-    """Shared stateless storage: pgvector + a working table on one Postgres."""
+    """Shared stateless storage: pgvector + a short-term table on one Postgres."""
 
     provider: ExternalProvider = "pgvector"
     dsn: str = Field(
-        description="Postgres DSN/connection string for both the vector store and the working table."
+        description="Postgres DSN/connection string for both the vector store and the short-term table."
     )
     collection_name: str = "kaos_memory"
     embedding_dims: int = Field(
@@ -73,8 +73,8 @@ class ModelConfig(BaseModel):
     api_key: str = "kaos"
 
 
-class WorkingTierConfig(BaseModel):
-    """Working-tier behaviour: a token budget bounding the verbatim window, a rolling
+class ShortTermTierConfig(BaseModel):
+    """Short-term tier behaviour: a token budget bounding the verbatim window, a rolling
     summary that folds overflow (instead of truncating), and a hard event cap ceiling."""
 
     token_budget: int = 4096

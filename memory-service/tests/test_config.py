@@ -7,7 +7,7 @@ from kaos_memory.config import (
     LocalStorage,
     ModelConfig,
     StorageConfig,
-    WorkingTierConfig,
+    ShortTermTierConfig,
 )
 
 
@@ -42,8 +42,8 @@ def test_model_config_defaults_key():
     assert m.api_key == "kaos"
 
 
-def test_working_tier_defaults():
-    w = WorkingTierConfig()
+def test_short_term_tier_defaults():
+    w = ShortTermTierConfig()
     assert w.token_budget == 4096
     assert w.rolling_summary is True
     assert w.hard_event_cap == 2000

@@ -3,11 +3,11 @@
 The `kaos_memory` package is the storage layer for KAOS production-grade agent memory. It provides two atomic, independently-testable stores that later phases compose into a deployable service:
 
 - **`LongTermStore`** — wraps [Mem0](https://github.com/mem0ai/mem0) as a library and exposes scope-mapped `write` / `recall` / `delete` / `delete_scope`. It is the only importer of `mem0`. Owner scoping is applied inside the vector query so recall never crosses tenants.
-- **`WorkingStore`** — a scope-keyed relational short-term buffer with a token budget and a rolling summary. Overflow is folded into a summary rather than truncated, so nothing is silently lost and the summary is re-derivable from retained raw rows.
+- **`ShortTermStore`** — a scope-keyed relational short-term buffer with a token budget and a rolling summary. Overflow is folded into a summary rather than truncated, so nothing is silently lost and the summary is re-derivable from retained raw rows.
 
 Both bind their models to a resolved OpenAI-compatible endpoint (a KAOS `ModelAPI`) via a single `ModelConfig`, and run in one of two storage modes:
 
-| Mode | Vector store | Working table | Topology |
+| Mode | Vector store | Short-term table | Topology |
 | --- | --- | --- | --- |
 | `local` | embedded Chroma | SQLite | single container on one PVC |
 | `external` | pgvector | Postgres | stateless, shared Postgres |
@@ -53,11 +53,11 @@ Without the DSN set, the `pgvector`-marked tests are skipped and the local Chrom
 
 | Module | Purpose |
 | --- | --- |
-| `config.py` | typed storage, model and working-tier configuration |
+| `config.py` | typed storage, model and short-term tier configuration |
 | `scope.py` | the `Scope` value object and its Mem0 owner mapping |
 | `longterm.py` | the Mem0-backed long-term adapter |
-| `working.py` | the relational working-tier store |
-| `tokens.py` | token counting for the working budget |
+| `shortterm.py` | the relational short-term store |
+| `tokens.py` | token counting for the short-term budget |
 | `models.py` | the OpenAI-compatible model client (summarization) |
 
 The HTTP service, the agent-runtime client, and the operator wiring that resolves this configuration from a `MemoryStore` resource are built in subsequent phases.

@@ -1,6 +1,6 @@
-"""Working-tier store: a relational short-term conversation buffer.
+"""Short-term store: a relational short-term conversation buffer.
 
-The working tier is a plain relational table (SQLite for ``local`` mode, Postgres
+The short-term tier is a plain relational table (SQLite for ``local`` mode, Postgres
 for ``external`` mode) holding recent turns. A token budget bounds the verbatim
 window; when appending a turn pushes the active window past the budget (or a hard
 event-count ceiling), the oldest active turns are folded into a *rolling summary*
@@ -17,7 +17,7 @@ import sqlite3
 import time
 from typing import Any, Callable, List, Optional, Tuple
 
-from kaos_memory.config import WorkingTierConfig
+from kaos_memory.config import ShortTermTierConfig
 from kaos_memory.scope import Scope
 from kaos_memory.tokens import count_tokens
 
@@ -26,7 +26,7 @@ Summarizer = Callable[[str, List[Tuple[str, str]]], str]
 
 
 def scope_key(scope: Scope) -> str:
-    """Stable string key for a scope's working window (one owner key -> 'key:value')."""
+    """Stable string key for a scope's short-term window (one owner key -> 'key:value')."""
     ((key, value),) = scope.owner_kwargs().items()
     return f"{key}:{value}"
 
@@ -85,24 +85,24 @@ class _Backend:
         self._conn.close()
 
 
-class WorkingStore:
-    """Token-budgeted, scope-keyed working memory with a rolling summary."""
+class ShortTermStore:
+    """Token-budgeted, scope-keyed short-term memory with a rolling summary."""
 
     def __init__(
         self,
         storage_type: str,
         target: str,
-        config: Optional[WorkingTierConfig] = None,
+        config: Optional[ShortTermTierConfig] = None,
         summarizer: Optional[Summarizer] = None,
     ) -> None:
         """Args:
         storage_type: ``local`` (SQLite) or ``external`` (Postgres).
         target: SQLite file path or Postgres DSN.
-        config: working-tier behaviour (token budget, rolling summary, hard cap).
+        config: short-term tier behaviour (token budget, rolling summary, hard cap).
         summarizer: folds overflow into a rolling summary; required when
             ``config.rolling_summary`` is True.
         """
-        self.cfg = config or WorkingTierConfig()
+        self.cfg = config or ShortTermTierConfig()
         self.summarizer = summarizer
         self.db = _Backend(storage_type, target)
 
@@ -175,7 +175,7 @@ class WorkingStore:
         return self._summary(scope_key(scope))
 
     def context(self, scope: Scope) -> Tuple[str, List[Tuple[str, str]]]:
-        """Return (rolling_summary, active_window) — the full working context for a run."""
+        """Return (rolling_summary, active_window) — the full short-term context for a run."""
         return self.summary(scope), self.recent(scope)
 
     def clear(self, scope: Scope) -> None:
