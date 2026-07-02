@@ -418,16 +418,16 @@ class AgentServer:
         )
         deps.memory_scope = scope
 
-        # Recall long-term facts and the service-hosted working tier (best-effort;
-        # working-only backends return an empty result and we fall back below).
+        # Recall long-term facts and the service-hosted short-term tier (best-effort;
+        # short-term-only backends return an empty result and we fall back below).
         token_budget = self.settings.memory_short_term_token_budget or None
         recalled = await self.memory.recall(scope, user_prompt, token_budget=token_budget)
 
-        # Local working-tier log: keep recording the incoming turn for back-compat
-        # (no-op for the service backend, whose working tier is written post-run).
+        # Local short-term tier log: keep recording the incoming turn for back-compat
+        # (no-op for the service backend, whose short-term tier is written post-run).
         await self.memory.add_event(session_id, "user_message", user_prompt)
 
-        # Prefer the service working tier for history; else the local event log.
+        # Prefer the service short-term tier for history; else the local event log.
         if recalled.recent or recalled.summary:
             message_history = reconstruct_message_history(
                 recalled.recent, recalled.summary, self.settings.memory_context_limit
@@ -446,10 +446,10 @@ class AgentServer:
         return user_prompt, message_history, deps, usage_limits
 
     async def _write_turns(self, deps: AgentDeps, new_messages: list) -> None:
-        """Write all turns from a run to the long-term service working tier.
+        """Write all turns from a run to the service short-term tier.
 
         Iterates the run's new messages (user echo, assistant, tool/delegation) and
-        records each as a working-tier turn under the run scope. No-op for working-only
+        records each as a short-term tier turn under the run scope. No-op for short-term-only
         backends, whose ``write`` defaults to pass.
         """
         scope = deps.memory_scope
@@ -706,8 +706,8 @@ def _create_memory(settings: AgentServerSettings) -> "Memory":
     """Create memory backend from settings.
 
     When a central memory service endpoint is configured the runtime uses the
-    service-client backend (long-term tier plus the service-hosted working tier).
-    Otherwise it falls back to a working-only backend (Redis when configured, else
+    service-client backend (long-term tier plus the service-hosted short-term tier).
+    Otherwise it falls back to a short-term-only backend (Redis when configured, else
     local) so single-agent runs work without the service deployed.
     """
     from pais.memory import LocalMemory, RedisMemory, NullMemory, ServiceMemory

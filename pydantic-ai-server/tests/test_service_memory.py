@@ -42,7 +42,7 @@ class TestRecall:
                 200,
                 json={
                     "facts": [{"memory": "alice likes tea", "score": 0.9}],
-                    "working": {
+                    "short_term": {
                         "summary": "prior chat",
                         "recent": [["user", "hi"], ["assistant", "hello"]],
                     },
@@ -57,7 +57,7 @@ class TestRecall:
         assert seen["url"].endswith("/v1/recall")
         assert seen["payload"]["query"] == "tea"
         assert seen["payload"]["top_k"] == 5
-        assert seen["payload"]["working_token_budget"] == 512
+        assert seen["payload"]["short_term_token_budget"] == 512
         assert seen["payload"]["scope"]["level"] == "session"
         assert isinstance(recalled, RecalledMemory)
         assert recalled.facts[0]["memory"] == "alice likes tea"
@@ -95,7 +95,7 @@ class TestRecall:
                 200,
                 json={
                     "facts": [],
-                    "working": {"summary": "", "recent": [["user", "hi"]]},
+                    "short_term": {"summary": "", "recent": [["user", "hi"]]},
                     "block": "## Recent turns\nuser: hi",
                     "degraded": True,
                 },

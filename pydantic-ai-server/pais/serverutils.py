@@ -409,7 +409,7 @@ class AgentServerSettings(BaseSettings):
     memory_max_session_events: int = 500
     memory_redis_url: str = ""
     # Central memory service (long-term tier). When set, the runtime uses the
-    # service-client backend; otherwise it falls back to the working-only backend.
+    # service-client backend; otherwise it falls back to the short-term-only backend.
     memory_store_endpoint: str = ""
     memory_scope: str = "session"
     memory_recall_presentation: str = "block"

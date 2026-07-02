@@ -1,6 +1,6 @@
 """Tests for the message-history bridge.
 
-Cover the two pure helpers the runtime uses to round-trip working-tier turns
+Cover the two pure helpers the runtime uses to round-trip short-term tier turns
 through Pydantic AI ``message_history``: capturing all replay-relevant message
 parts as faithful turns, and reconstructing history with rolling-summary overflow
 instead of truncation.

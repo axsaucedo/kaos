@@ -122,9 +122,9 @@ class RecalledMemory:
 
     ``facts`` are the long-term engine's native result records (text, score, id,
     metadata) passed through unmodified. ``summary`` and ``recent`` are the
-    working-tier slice (rolling summary plus recent verbatim turns). ``block`` is
+    short-term tier slice (rolling summary plus recent verbatim turns). ``block`` is
     the deterministic, ready-to-inject context block. ``degraded`` is set when the
-    long-term tier was unavailable and only working context is present — recall is
+    long-term tier was unavailable and only short-term context is present — recall is
     best-effort and never aborts a turn.
     """
 
@@ -165,11 +165,11 @@ def scope_from_deps(
 
 
 def pydantic_message_to_turns(msg: Any) -> List[tuple]:
-    """Render a Pydantic AI message into working-tier turns, preserving fidelity.
+    """Render a Pydantic AI message into short-term tier turns, preserving fidelity.
 
     Returns a list of ``(role, content)`` turns capturing every replay-relevant
     part — user prompts, assistant text, tool calls, tool returns, and delegation
-    requests/responses — as readable text. The working tier stores turns as text,
+    requests/responses — as readable text. The short-term tier stores turns as text,
     so a tool call is recorded as a faithful description (the model sees that it
     already invoked the tool) rather than as a raw tool-call part that could be
     replayed without its matching return. Returns an empty list for parts with no
@@ -220,9 +220,9 @@ def reconstruct_message_history(
     summary: str = "",
     context_limit: Optional[int] = None,
 ) -> Optional[list]:
-    """Rebuild Pydantic AI ``message_history`` from working-tier turns.
+    """Rebuild Pydantic AI ``message_history`` from short-term tier turns.
 
-    ``recent`` is the working tier's ``(role, content)`` turns, oldest first.
+    ``recent`` is the short-term tier's ``(role, content)`` turns, oldest first.
     ``summary`` is the rolling summary of older turns that overflowed the budget;
     it is prepended as a leading context note so overflow is represented by
     summarization rather than truncation. ``context_limit`` bounds how many recent
@@ -259,10 +259,10 @@ def reconstruct_message_history(
 class Memory(ABC):
     """Abstract interface for all memory implementations.
 
-    The interface is tiered. The session/event methods below model the working
+    The interface is tiered. The session/event methods below model the short-term
     tier the message-history bridge replays. The ``recall``/``write``/``forget``
     methods model the long-term tier served by the central memory service. A
-    working-only or disabled backend inherits the long-term methods as no-ops, so
+    short-term-only or disabled backend inherits the long-term methods as no-ops, so
     only a service-backed implementation needs to override them.
     """
 
@@ -272,14 +272,14 @@ class Memory(ABC):
         query: str,
         *,
         top_k: int = 10,
-        include_working: bool = True,
+        include_short_term: bool = True,
         token_budget: Optional[int] = None,
     ) -> "RecalledMemory":
         """Assemble the context visible at ``scope`` for ``query``.
 
-        Best-effort: a long-term failure yields a degraded, working-only (or empty)
+        Best-effort: a long-term failure yields a degraded, short-term-only (or empty)
         result rather than raising. The default implementation recalls nothing,
-        which is correct for working-only and disabled backends.
+        which is correct for short-term-only and disabled backends.
         """
         return RecalledMemory()
 
@@ -300,7 +300,7 @@ class Memory(ABC):
         return True
 
     async def forget(self, scope: "MemoryScope", *, failure_mode: str = "soft") -> bool:
-        """Erase a scope: clear its working tier and delete its long-term memories.
+        """Erase a scope: clear its short-term tier and delete its long-term memories.
 
         The default implementation is a no-op accept for backends without a
         long-term tier.
@@ -655,10 +655,10 @@ class ServiceMemory(Memory):
     Implements the long-term tier — ``recall``/``write``/``forget`` — against the
     service's HTTP surface, and treats every call as best-effort: transport
     failures and degraded responses never raise into the agent turn (unless the
-    caller selects ``failure_mode="strict"`` for a write/forget). The working tier
+    caller selects ``failure_mode="strict"`` for a write/forget). The short-term tier
     lives in the service and is returned *inside* the recall response, so the
     legacy session/event methods are thin no-ops here; the message-history bridge
-    reads the working slice from ``recall`` rather than from local event storage.
+    reads the short-term slice from ``recall`` rather than from local event storage.
     """
 
     def __init__(
@@ -683,7 +683,7 @@ class ServiceMemory(Memory):
         query: str,
         *,
         top_k: int = 10,
-        include_working: bool = True,
+        include_short_term: bool = True,
         token_budget: Optional[int] = None,
     ) -> "RecalledMemory":
         tracer = trace_api.get_tracer(SERVICE_NAME)
@@ -695,10 +695,10 @@ class ServiceMemory(Memory):
                 "scope": scope.to_payload(),
                 "query": query,
                 "top_k": top_k,
-                "include_working": include_working,
+                "include_short_term": include_short_term,
             }
             if token_budget is not None:
-                payload["working_token_budget"] = token_budget
+                payload["short_term_token_budget"] = token_budget
             try:
                 resp = await self._client.post(
                     f"{self.endpoint}/v1/recall", json=payload, timeout=self._recall_timeout
@@ -710,11 +710,11 @@ class ServiceMemory(Memory):
                 span.set_attribute("kaos.memory.degraded", True)
                 return RecalledMemory(degraded=True)
 
-            working = data.get("working") or {}
+            short_term = data.get("short_term") or {}
             recalled = RecalledMemory(
                 facts=data.get("facts", []),
-                summary=working.get("summary", ""),
-                recent=[tuple(r) for r in working.get("recent", [])],
+                summary=short_term.get("summary", ""),
+                recent=[tuple(r) for r in short_term.get("recent", [])],
                 block=data.get("block", ""),
                 degraded=bool(data.get("degraded", False)),
             )
@@ -787,8 +787,8 @@ class ServiceMemory(Memory):
         except Exception as e:
             logger.debug(f"ServiceMemory client close failed: {e}")
 
-    # --- Legacy working-tier methods ---------------------------------------
-    # The working tier lives in the service and is returned inside recall, so
+    # --- Legacy short-term tier methods ---------------------------------------
+    # The short-term tier lives in the service and is returned inside recall, so
     # these satisfy the interface without holding local session state.
 
     async def create_session(

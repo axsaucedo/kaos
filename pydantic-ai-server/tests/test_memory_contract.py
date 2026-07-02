@@ -1,7 +1,7 @@
 """Tests for the tiered memory contract: scope value objects, recall/write/forget.
 
 These cover the long-term tier surface added to the ``Memory`` interface. The
-default implementations are no-ops appropriate for working-only and disabled
+default implementations are no-ops appropriate for short-term-only and disabled
 backends; the service-backed implementation that overrides them is covered
 separately.
 """
@@ -59,7 +59,7 @@ class TestRecalledMemory:
         recalled = RecalledMemory(facts=[{"memory": "x"}])
         assert not recalled.is_empty
 
-    def test_non_empty_when_working_present(self):
+    def test_non_empty_when_short_term_present(self):
         recalled = RecalledMemory(recent=[("user", "hi")])
         assert not recalled.is_empty
 
