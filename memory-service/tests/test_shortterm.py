@@ -198,6 +198,29 @@ def test_digest_is_versioned_and_pruned(tmp_path):
     assert store.summary(SCOPE) != ""
 
 
+def test_add_returns_evicted_turns_for_cascade(tmp_path):
+    # add() surfaces the batch that left the window so callers can cascade it to
+    # long-term extraction, independent of whether the digest fold is enabled.
+    store = _sqlite_store(tmp_path, token_budget=8, high_water=8, low_water=4)
+    evicted_total: list[tuple[str, str]] = []
+    turns = [
+        ("user", "hello there this is the first message about cluster setup"),
+        ("assistant", "acknowledged the cluster has three kubernetes nodes running"),
+        ("user", "tell me about the deployment on port 8080 please now"),
+    ]
+    for role, content in turns:
+        evicted_total.extend(store.add(SCOPE, role, content))
+    # The oldest turns were evicted and returned in order; the newest stays in the window.
+    assert evicted_total, "expected add() to return evicted turns after overflow"
+    assert evicted_total[0] == turns[0]
+    assert turns[-1] not in evicted_total
+
+
+def test_add_returns_empty_when_within_budget(tmp_path):
+    store = _sqlite_store(tmp_path, token_budget=10_000)
+    assert store.add(SCOPE, "user", "small") == []
+
+
 def test_hard_event_cap_enforced(tmp_path):
     store = _sqlite_store(tmp_path, token_budget=10_000, hard_event_cap=2)
     for i in range(5):

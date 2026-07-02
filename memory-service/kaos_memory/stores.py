@@ -307,8 +307,15 @@ class ShortTermStore:
         self._lock = threading.Lock()
         self.db = _Backend(storage_type, target)
 
-    def add(self, scope: Scope, role: str, content: str) -> None:
-        """Append a turn, then re-enforce the budget and hard cap."""
+    def add(self, scope: Scope, role: str, content: str) -> List[Tuple[str, str]]:
+        """Append a turn, enforce the budget/cap, and return the evicted turns (if any).
+
+        The returned ``(role, content)`` list is the batch that just left the verbatim
+        window. It is the cascade seam: callers forward it to long-term extraction so
+        facts are captured from evicted history (whether the medium-term digest is enabled
+        or not), while the digest fold consumes the same batch independently. Empty when
+        the append did not push the window over its limits.
+        """
         key = scope_key(scope)
         with self._lock:
             self.db.execute(
@@ -318,8 +325,9 @@ class ShortTermStore:
                 (key, role, content, time.time()),
             )
             self.db.commit()
-            overflow_ids = self._ids_exceeding_budget(key)
-        self._drop_stale_window(scope, key, overflow_ids)
+            overflow = self._overflow_window_rows(key)
+        self._drop_stale_window(scope, key, [rid for rid, _, _ in overflow])
+        return [(r, c) for _, r, c in overflow]
 
     def active_window(
         self, scope: Scope, token_budget: Optional[int] = None
@@ -410,28 +418,30 @@ class ShortTermStore:
         else:
             self.fold_pending_into_summary(scope)
 
-    def _ids_exceeding_budget(self, key: str) -> List[int]:
-        """Ids of the oldest active turns to evict, amortised via water marks (keep >=1).
+    def _overflow_window_rows(self, key: str) -> List[Tuple[int, str, str]]:
+        """Oldest active rows to evict, amortised via water marks (keep >=1).
 
         Folding is triggered when the window exceeds ``high_water`` tokens or the hard
         event cap; once triggered, the oldest turns are evicted down to the ``low_water``
         token target (and within the hard event cap). Evicting to a low-water target
         rather than to just-under-budget amortises the fold frequency and avoids
-        thrashing a fold on nearly every turn once the window sits at the limit.
+        thrashing a fold on nearly every turn once the window sits at the limit. Returns
+        full ``(id, role, content)`` rows so callers can both delete them and forward
+        their content to long-term extraction.
         """
         active = self._load_active_window_rows(key)
         total = self._window_token_total(active)
         n = len(active)
         if not (total > self.cfg.high_water or n > self.cfg.hard_event_cap):
             return []
-        ids: List[int] = []
+        rows: List[Tuple[int, str, str]] = []
         i = 0
         while n - i > 1 and (total > self.cfg.low_water or (n - i) > self.cfg.hard_event_cap):
-            rid, _, content = active[i]
-            ids.append(rid)
+            rid, role, content = active[i]
+            rows.append((rid, role, content))
             total -= count_tokens(content)
             i += 1
-        return ids
+        return rows
 
     def _load_active_window_rows(self, key: str) -> List[Tuple[int, str, str]]:
         cur = self.db.execute(
