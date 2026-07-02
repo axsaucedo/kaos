@@ -20,9 +20,9 @@ from kaos_memory.config import (
     StorageConfig,
     ShortTermTierConfig,
 )
-from kaos_memory.longterm import LongTermStore
-from kaos_memory.service import MemoryService, create_app
-from kaos_memory.shortterm import ShortTermStore
+from kaos_memory.stores import LongTermStore
+from kaos_memory.app import MemoryService, create_app
+from kaos_memory.stores import ShortTermStore
 from tests._fakes import DeterministicEmbedder
 
 OFFLINE = ModelConfig(base_url="http://127.0.0.1:0/v1", model="offline", api_key="t")

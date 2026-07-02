@@ -5,8 +5,8 @@ import uuid
 import pytest
 
 from kaos_memory.config import ExternalStorage, LocalStorage, StorageConfig
-from kaos_memory.longterm import LongTermStore
-from kaos_memory.scope import Scope, ScopeLevel
+from kaos_memory.stores import LongTermStore
+from kaos_memory.stores import Scope, ScopeLevel
 from tests._fakes import DeterministicEmbedder
 
 
@@ -37,9 +37,9 @@ def _assert_owner_isolation(store):
     alice = Scope(level=ScopeLevel.USER, principal="alice")
     bob = Scope(level=ScopeLevel.USER, principal="bob")
     # Identical text -> identical embedding -> exact nearest neighbours.
-    store.write(alice, "the deployment uses port 8080", infer=False)
-    store.write(bob, "the deployment uses port 8080", infer=False)
-    store.write(alice, "alice private api token", infer=False)
+    store.add(alice, "the deployment uses port 8080", infer=False)
+    store.add(bob, "the deployment uses port 8080", infer=False)
+    store.add(alice, "alice private api token", infer=False)
 
     a_hits = store.recall(alice, "what port does the deployment use", top_k=10)
     b_hits = store.recall(bob, "what port does the deployment use", top_k=10)
@@ -72,8 +72,8 @@ def test_agent_and_session_scopes_isolated(tmp_path, offline_models):
     store = _local_store(tmp_path, offline_models)
     agent = Scope(level=ScopeLevel.PRIVATE, agent_client_id="agent-a")
     session = Scope(level=ScopeLevel.SESSION, session_id="run-1")
-    store.write(agent, "agent private fact about ports", infer=False)
-    store.write(session, "session ephemeral fact about ports", infer=False)
+    store.add(agent, "agent private fact about ports", infer=False)
+    store.add(session, "session ephemeral fact about ports", infer=False)
 
     agent_hits = store.recall(agent, "ports", top_k=10)
     assert any("agent private" in h["memory"] for h in agent_hits)

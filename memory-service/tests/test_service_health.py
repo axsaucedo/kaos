@@ -2,7 +2,7 @@
 
 from fastapi.testclient import TestClient
 
-from kaos_memory.service import MemoryService, create_app
+from kaos_memory.app import MemoryService, create_app
 
 
 class _OkStore:

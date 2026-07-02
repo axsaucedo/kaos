@@ -3,9 +3,9 @@
 from fastapi.testclient import TestClient
 
 from kaos_memory.config import ShortTermTierConfig
-from kaos_memory.scope import Scope, ScopeLevel
-from kaos_memory.service import MemoryService, create_app
-from kaos_memory.shortterm import ShortTermStore
+from kaos_memory.stores import Scope, ScopeLevel
+from kaos_memory.app import MemoryService, create_app
+from kaos_memory.stores import ShortTermStore
 
 USER_SCOPE = {"level": "user", "principal": "carol"}
 
@@ -19,7 +19,7 @@ class _RecordingLongTerm:
     def recall(self, scope, query, top_k=10):
         return self.facts
 
-    def write(self, scope, messages, infer=True):
+    def add(self, scope, messages, infer=True):
         return []
 
     def delete_scope(self, scope):
@@ -46,11 +46,14 @@ def test_overflow_summarizes_server_side(tmp_path):
 
     # Tiny budget forces folding into the rolling summary on the server.
     short_term = ShortTermStore(
-        "local", str(tmp_path / "w.db"), ShortTermTierConfig(token_budget=4), summarizer
+        "local",
+        str(tmp_path / "w.db"),
+        ShortTermTierConfig(token_budget=4, rolling_summary=True),
+        summarizer,
     )
     scope = Scope(level=ScopeLevel.USER, principal="carol")
     for i in range(5):
-        short_term.append(scope, "user", f"message number {i} with several tokens here")
+        short_term.add(scope, "user", f"message number {i} with several tokens here")
 
     assert calls, "summarizer should have been invoked server-side on overflow"
     assert short_term.summary(scope) != ""
@@ -62,7 +65,7 @@ def test_forget_clears_both_tiers(tmp_path):
     )
     longterm = _RecordingLongTerm()
     scope = Scope(level=ScopeLevel.USER, principal="carol")
-    short_term.append(scope, "user", "something to remember")
+    short_term.add(scope, "user", "something to remember")
     assert short_term.recent(scope)
 
     resp = _client(longterm, short_term).post("/v1/forget", json={"scope": USER_SCOPE})
@@ -82,7 +85,7 @@ def test_forget_soft_degrades_on_longterm_failure(tmp_path):
         "local", str(tmp_path / "w.db"), ShortTermTierConfig(), lambda p, f: p
     )
     scope = Scope(level=ScopeLevel.USER, principal="carol")
-    short_term.append(scope, "user", "x")
+    short_term.add(scope, "user", "x")
 
     resp = _client(_BrokenDelete(), short_term).post(
         "/v1/forget", json={"scope": USER_SCOPE, "failure_mode": "soft"}

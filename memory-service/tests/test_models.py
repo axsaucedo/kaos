@@ -4,7 +4,7 @@ import httpx
 import pytest
 
 from kaos_memory.config import ModelConfig
-from kaos_memory.models import ModelClient
+from kaos_memory.stores import ModelClient
 
 
 def _mock_client(captured):

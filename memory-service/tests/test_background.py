@@ -3,7 +3,7 @@
 import threading
 import time
 
-from kaos_memory.background import BackgroundRunner
+from kaos_memory.app import BackgroundRunner
 
 
 def test_concurrency_is_bounded():
