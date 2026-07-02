@@ -24,8 +24,9 @@ import sqlite3
 import tempfile
 import threading
 import time
+from contextlib import contextmanager
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
 
 import httpx
 import tiktoken
@@ -214,6 +215,33 @@ class ModelClient:
 # --------------------------------------------------------------------------- #
 
 
+def _window_table_ddl(kind: str, serial: str) -> str:
+    """DDL for the verbatim short-term window.
+
+    On Postgres the window is an UNLOGGED table: it skips WAL/fsync for RAM-speed
+    writes and stays coherent across replicas (it is still a shared table), at the cost
+    of being truncated on crash recovery and unavailable on physical replicas — an
+    acceptable trade for an ephemeral recency window. SQLite has no such distinction.
+    """
+    ts_type = "DOUBLE PRECISION" if kind == "external" else "REAL"
+    unlogged = "UNLOGGED " if kind == "external" else ""
+    return (
+        f"CREATE {unlogged}TABLE IF NOT EXISTS short_term_memory_window ("
+        f"id {serial}, scope_key TEXT, role TEXT, content TEXT, "
+        f"created_at {ts_type}, pending_summary INTEGER DEFAULT 0)"
+    )
+
+
+def _summary_table_ddl(kind: str) -> str:
+    """DDL for the versioned medium-term digest, which stays durable (logged)."""
+    ts_type = "DOUBLE PRECISION" if kind == "external" else "REAL"
+    return (
+        "CREATE TABLE IF NOT EXISTS medium_term_memory_summaries ("
+        f"scope_key TEXT, version INTEGER, text TEXT, tokens INTEGER, "
+        f"created_at {ts_type}, PRIMARY KEY (scope_key, version))"
+    )
+
+
 class _Backend:
     """Thin DB abstraction over SQLite and Postgres with a single schema.
 
@@ -239,24 +267,29 @@ class _Backend:
         self._ensure_schema(serial)
 
     def _ensure_schema(self, serial: str) -> None:
-        self.execute(
-            f"CREATE TABLE IF NOT EXISTS short_term_memory_window ("
-            f"id {serial}, scope_key TEXT, role TEXT, content TEXT, "
-            f"created_at DOUBLE PRECISION, pending_summary INTEGER DEFAULT 0)"
-            if self.kind == "external"
-            else (
-                f"CREATE TABLE IF NOT EXISTS short_term_memory_window ("
-                f"id {serial}, scope_key TEXT, role TEXT, content TEXT, "
-                f"created_at REAL, pending_summary INTEGER DEFAULT 0)"
-            )
-        )
-        ts_type = "DOUBLE PRECISION" if self.kind == "external" else "REAL"
-        self.execute(
-            "CREATE TABLE IF NOT EXISTS medium_term_memory_summaries ("
-            f"scope_key TEXT, version INTEGER, text TEXT, tokens INTEGER, "
-            f"created_at {ts_type}, PRIMARY KEY (scope_key, version))"
-        )
+        self.execute(_window_table_ddl(self.kind, serial))
+        self.execute(_summary_table_ddl(self.kind))
         self.commit()
+
+    @contextmanager
+    def scope_lock(self, key: str) -> Iterator[None]:
+        """Serialise a per-scope critical section across processes.
+
+        On Postgres this takes a session-level advisory lock keyed on the scope so that
+        concurrent agent replicas (separate connections) cannot fold the same scope twice
+        or interleave a consolidation; it is released on exit. On SQLite it is a no-op —
+        a single-process embedded store is already serialised by the in-process lock.
+        """
+        if self.kind != "external":
+            yield
+            return
+        self.execute("SELECT pg_advisory_lock(hashtext(?)::bigint)", (key,))
+        self.commit()
+        try:
+            yield
+        finally:
+            self.execute("SELECT pg_advisory_unlock(hashtext(?)::bigint)", (key,))
+            self.commit()
 
     def execute(self, sql: str, params: Tuple[Any, ...] = ()) -> Any:
         sql = sql.replace("?", self.ph) if self.ph != "?" else sql
@@ -374,7 +407,7 @@ class ShortTermStore:
         if self.summarizer is None:
             raise ValueError("rolling_summary is enabled but no summarizer was provided")
         key = scope_key(scope)
-        with self._lock:
+        with self._lock, self.db.scope_lock(key):
             pending = self._load_pending_summary_rows(key)
             if not pending:
                 return

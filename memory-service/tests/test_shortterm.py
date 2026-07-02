@@ -8,6 +8,7 @@ import pytest
 from kaos_memory.config import ShortTermTierConfig
 from kaos_memory.stores import Scope, ScopeLevel
 from kaos_memory.stores import ShortTermStore, scope_key
+from kaos_memory.stores import _summary_table_ddl, _window_table_ddl
 
 SCOPE = Scope(level=ScopeLevel.SESSION, session_id="run-1")
 
@@ -219,6 +220,24 @@ def test_add_returns_evicted_turns_for_cascade(tmp_path):
 def test_add_returns_empty_when_within_budget(tmp_path):
     store = _sqlite_store(tmp_path, token_budget=10_000)
     assert store.add(SCOPE, "user", "small") == []
+
+
+def test_window_table_is_unlogged_on_postgres_only():
+    # The ephemeral window is UNLOGGED on Postgres for RAM-speed writes; SQLite has no
+    # such notion. The durable medium-term digest is never UNLOGGED on either backend.
+    assert "UNLOGGED" in _window_table_ddl("external", "BIGSERIAL PRIMARY KEY")
+    assert "UNLOGGED" not in _window_table_ddl("local", "INTEGER PRIMARY KEY AUTOINCREMENT")
+    assert "UNLOGGED" not in _summary_table_ddl("external")
+    assert "UNLOGGED" not in _summary_table_ddl("local")
+
+
+def test_scope_lock_is_noop_on_local(tmp_path):
+    # On the embedded SQLite backend the per-scope advisory lock is a no-op that still
+    # yields, so operations under it behave normally.
+    store = _sqlite_store(tmp_path, token_budget=10_000)
+    with store.db.scope_lock(scope_key(SCOPE)):
+        store.add(SCOPE, "user", "still works under the lock")
+    assert store.active_window(SCOPE) == [("user", "still works under the lock")]
 
 
 def test_hard_event_cap_enforced(tmp_path):
