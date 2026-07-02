@@ -1,13 +1,13 @@
-"""Unit tests for the working-tier store (token budget + rolling summary)."""
+"""Unit tests for the short-term store (token budget + rolling summary)."""
 
 import os
 import uuid
 
 import pytest
 
-from kaos_memory.config import WorkingTierConfig
+from kaos_memory.config import ShortTermTierConfig
 from kaos_memory.scope import Scope, ScopeLevel
-from kaos_memory.working import WorkingStore, scope_key
+from kaos_memory.shortterm import ShortTermStore, scope_key
 
 SCOPE = Scope(level=ScopeLevel.SESSION, session_id="run-1")
 
@@ -18,8 +18,8 @@ def _fake_summarizer(prior, folded):
 
 
 def _sqlite_store(tmp_path, **cfg):
-    path = str(tmp_path / "working.db")
-    return WorkingStore("local", path, WorkingTierConfig(**cfg), _fake_summarizer)
+    path = str(tmp_path / "shortterm.db")
+    return ShortTermStore("local", path, ShortTermTierConfig(**cfg), _fake_summarizer)
 
 
 def test_append_and_recent_ordering(tmp_path):
@@ -80,8 +80,8 @@ def test_recent_honours_explicit_smaller_budget(tmp_path):
 
 def test_rolling_summary_disabled_does_not_require_summarizer(tmp_path):
     path = str(tmp_path / "w.db")
-    store = WorkingStore(
-        "local", path, WorkingTierConfig(token_budget=8, rolling_summary=False), summarizer=None
+    store = ShortTermStore(
+        "local", path, ShortTermTierConfig(token_budget=8, rolling_summary=False), summarizer=None
     )
     for i in range(5):
         store.append(SCOPE, "user", f"a fairly long message number {i} to exceed the budget")
@@ -113,8 +113,8 @@ def test_scopes_are_isolated(tmp_path):
 
 @pytest.mark.pgvector
 def test_postgres_budget_overflow_summarizes(pgvector_dsn):
-    store = WorkingStore(
-        "external", pgvector_dsn, WorkingTierConfig(token_budget=8), _fake_summarizer
+    store = ShortTermStore(
+        "external", pgvector_dsn, ShortTermTierConfig(token_budget=8), _fake_summarizer
     )
     scope = Scope(level=ScopeLevel.SESSION, session_id="pg-" + uuid.uuid4().hex[:8])
     for i in range(4):

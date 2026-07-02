@@ -1,7 +1,7 @@
-"""Token counting for the working-tier budget.
+"""Token counting for the short-term tier budget.
 
 Uses ``tiktoken`` with the ``cl100k_base`` encoding as a stable, model-agnostic
-approximation of token length. The working tier only needs a consistent measure
+approximation of token length. The short-term tier only needs a consistent measure
 to bound its verbatim window, not exact per-model accounting.
 """
 
