@@ -16,12 +16,12 @@ from kaos_memory.config import (
     LocalStorage,
     ModelConfig,
     StorageConfig,
-    WorkingTierConfig,
+    ShortTermTierConfig,
 )
 from kaos_memory.longterm import LongTermStore
 from kaos_memory.models import ModelClient
 from kaos_memory.service import MemoryService
-from kaos_memory.working import WorkingStore
+from kaos_memory.shortterm import ShortTermStore
 
 
 class MemorySettings(BaseSettings):
@@ -84,33 +84,33 @@ class MemorySettings(BaseSettings):
             base_url=self.model_base_url, model=self.embedding_model, api_key=self.model_api_key
         )
 
-    def working_tier(self) -> WorkingTierConfig:
-        return WorkingTierConfig(
+    def short_term_tier(self) -> ShortTermTierConfig:
+        return ShortTermTierConfig(
             token_budget=self.token_budget,
             rolling_summary=self.rolling_summary,
             hard_event_cap=self.hard_event_cap,
         )
 
-    def working_target(self) -> str:
-        """SQLite file path (local) or Postgres DSN (external) for the working table."""
+    def short_term_target(self) -> str:
+        """SQLite file path (local) or Postgres DSN (external) for the short-term table."""
         if self.storage_type == "local":
-            return f"{self.local_path.rstrip('/')}/working.db"
+            return f"{self.local_path.rstrip('/')}/shortterm.db"
         return self.external_dsn
 
 
 def build_service(settings: MemorySettings) -> MemoryService:
-    """Construct the long-term and working stores and wrap them in a ``MemoryService``."""
+    """Construct the long-term and short-term stores and wrap them in a ``MemoryService``."""
     storage = settings.storage()
     longterm = LongTermStore(storage, settings.summarization(), settings.embedding())
     summarizer = ModelClient(settings.summarization()).as_summarizer()
-    working = WorkingStore(
+    short_term = ShortTermStore(
         settings.storage_type,
-        settings.working_target(),
-        settings.working_tier(),
+        settings.short_term_target(),
+        settings.short_term_tier(),
         summarizer,
     )
     runner = BackgroundRunner(
         concurrency=settings.extraction_concurrency,
         max_retries=settings.extraction_max_retries,
     )
-    return MemoryService(longterm=longterm, working=working, scheduler=runner)
+    return MemoryService(longterm=longterm, short_term=short_term, scheduler=runner)

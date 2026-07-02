@@ -1,6 +1,6 @@
 """Central memory service: a FastAPI app exposing the memory contract over HTTP.
 
-The service composes the two atomic stores (long-term over Mem0, working-tier
+The service composes the two atomic stores (long-term over Mem0, short-term
 relational buffer) into one KAOS-owned process so agents call a shared service
 rather than embedding the engine. This module holds the app factory and the
 liveness/readiness surface; the recall, write, forget and background machinery
@@ -26,13 +26,13 @@ from kaos_memory.api import (
     ForgetResponse,
     RecallRequest,
     RecallResponse,
-    WorkingContext,
+    ShortTermContext,
     WriteRequest,
     WriteResponse,
 )
 from kaos_memory.longterm import LongTermStore
 from kaos_memory.presentation import assemble_block
-from kaos_memory.working import WorkingStore
+from kaos_memory.shortterm import ShortTermStore
 
 tracer = trace.get_tracer("kaos.memory")
 
@@ -53,7 +53,7 @@ class MemoryService:
     """Holds the live store instances the request handlers operate on."""
 
     longterm: LongTermStore
-    working: WorkingStore
+    short_term: ShortTermStore
     scheduler: Scheduler = field(default=_thread_scheduler)
 
     def readiness(self) -> dict:
@@ -65,7 +65,7 @@ class MemoryService:
         """
         stores: dict[str, object] = {}
         ok = True
-        for name, probe in (("working", self.working.ping), ("longterm", self.longterm.ping)):
+        for name, probe in (("short_term", self.short_term.ping), ("longterm", self.longterm.ping)):
             try:
                 probe()
                 stores[name] = True
@@ -76,7 +76,7 @@ class MemoryService:
 
     def recall(self, req: RecallRequest) -> RecallResponse:
         """Assemble recall context for a scope. Fail-soft: long-term errors degrade
-        to working-only context rather than failing the request."""
+        to short-term-only context rather than failing the request."""
         with tracer.start_as_current_span("kaos.memory.recall") as span:
             span.set_attribute("kaos.memory.scope_level", req.scope.level.value)
             facts: list = []
@@ -87,25 +87,25 @@ class MemoryService:
                 degraded = True
 
             summary, recent = "", []
-            if req.include_working:
-                summary = self.working.summary(req.scope)
-                recent = self.working.recent(req.scope, token_budget=req.working_token_budget)
+            if req.include_short_term:
+                summary = self.short_term.summary(req.scope)
+                recent = self.short_term.recent(req.scope, token_budget=req.short_term_token_budget)
 
             span.set_attribute("kaos.memory.degraded", degraded)
             span.set_attribute("kaos.memory.fact_count", len(facts))
             block = assemble_block(facts, summary, recent)
             return RecallResponse(
                 facts=facts,
-                working=WorkingContext(summary=summary, recent=recent),
+                short_term=ShortTermContext(summary=summary, recent=recent),
                 block=block,
                 degraded=degraded,
             )
 
     def write(self, req: WriteRequest) -> WriteResponse:
-        """Append a turn to the working tier synchronously, then schedule long-term
+        """Append a turn to the short-term tier synchronously, then schedule long-term
         extraction off the response path so the call returns immediately.
 
-        The synchronous working append is the cheap durable path. ``strict`` surfaces a
+        The synchronous short-term append is the cheap durable path. ``strict`` surfaces a
         failure as an exception (the handler maps it to an error); ``soft`` returns a
         degraded acknowledgement instead of failing the request.
         """
@@ -114,7 +114,7 @@ class MemoryService:
             strict = req.failure_mode == "strict"
 
             try:
-                self.working.append(req.scope, req.role, req.content)
+                self.short_term.append(req.scope, req.role, req.content)
             except Exception:
                 span.set_attribute("kaos.memory.degraded", True)
                 if strict:
@@ -139,13 +139,13 @@ class MemoryService:
             return WriteResponse(accepted=True, scheduled=True, degraded=False)
 
     def forget(self, req: ForgetRequest) -> ForgetResponse:
-        """Erase a scope across both tiers: clear the working tier (durable) and delete
+        """Erase a scope across both tiers: clear the short-term tier (durable) and delete
         the scope's long-term memories. Fail-soft: a long-term erasure error degrades
-        the response but the working tier is still cleared. The synchronous cross-tier
+        the response but the short-term tier is still cleared. The synchronous cross-tier
         erasure guarantees are completed by the multi-tenancy work."""
         with tracer.start_as_current_span("kaos.memory.forget") as span:
             span.set_attribute("kaos.memory.scope_level", req.scope.level.value)
-            self.working.clear(req.scope)
+            self.short_term.clear(req.scope)
             try:
                 self.longterm.delete_scope(req.scope)
             except Exception:
@@ -184,12 +184,12 @@ def create_app(service: MemoryService) -> FastAPI:
 
     @app.post("/v1/recall", response_model=RecallResponse)
     def recall(req: RecallRequest) -> RecallResponse:
-        """Synchronous recall: assemble long-term facts and working context for a scope."""
+        """Synchronous recall: assemble long-term facts and short-term context for a scope."""
         return app.state.memory.recall(req)
 
     @app.post("/v1/write", response_model=WriteResponse)
     def write(req: WriteRequest) -> JSONResponse:
-        """Record a turn: durable working append now, long-term extraction scheduled."""
+        """Record a turn: durable short-term append now, long-term extraction scheduled."""
         try:
             result = app.state.memory.write(req)
         except Exception as exc:
@@ -213,7 +213,7 @@ def create_app(service: MemoryService) -> FastAPI:
 
 
 def app_from_service(
-    longterm: LongTermStore, working: WorkingStore, _service: Optional[MemoryService] = None
+    longterm: LongTermStore, short_term: ShortTermStore, _service: Optional[MemoryService] = None
 ) -> FastAPI:
     """Convenience constructor used by tests: wrap stores and build the app."""
-    return create_app(MemoryService(longterm=longterm, working=working))
+    return create_app(MemoryService(longterm=longterm, short_term=short_term))

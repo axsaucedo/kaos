@@ -195,5 +195,5 @@ class ShortTermStore:
         self.db.close()
 
     def ping(self) -> None:
-        """Probe working-table reachability with a trivial query; raises if unreachable."""
+        """Probe short-term table reachability with a trivial query; raises if unreachable."""
         self.db.execute("SELECT 1").fetchone()
