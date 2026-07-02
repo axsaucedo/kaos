@@ -35,4 +35,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
 
 EXPOSE 8080
 
-CMD ["python", "-m", "kaos_memory"]
+CMD ["python", "-m", "kaos_memory.app"]

@@ -5,9 +5,9 @@ import threading
 from fastapi.testclient import TestClient
 
 from kaos_memory.config import ShortTermTierConfig
-from kaos_memory.scope import Scope, ScopeLevel
-from kaos_memory.service import MemoryService, create_app
-from kaos_memory.shortterm import ShortTermStore
+from kaos_memory.stores import Scope, ScopeLevel
+from kaos_memory.app import MemoryService, create_app
+from kaos_memory.stores import ShortTermStore
 
 USER_SCOPE = {"level": "user", "principal": "bob"}
 
@@ -19,7 +19,7 @@ class _RecordingLongTerm:
         self.writes = []
         self.gate = threading.Event()
 
-    def write(self, scope, messages, infer=True):
+    def add(self, scope, messages, infer=True):
         self.gate.wait(timeout=5)
         self.writes.append((scope, messages, infer))
 

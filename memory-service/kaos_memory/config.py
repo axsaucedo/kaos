@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 StorageType = Literal["local", "external"]
 LocalProvider = Literal["chroma"]
@@ -74,9 +75,87 @@ class ModelConfig(BaseModel):
 
 
 class ShortTermTierConfig(BaseModel):
-    """Short-term tier behaviour: a token budget bounding the verbatim window, a rolling
-    summary that folds overflow (instead of truncating), and a hard event cap ceiling."""
+    """Short-term tier behaviour: a token budget bounding the verbatim window, an
+    opt-in rolling summary that folds overflow (instead of dropping it), and a hard
+    event cap ceiling. Summarization is disabled by default — a bounded recency
+    window suffices for most agents; enable ``rolling_summary`` to fold overflow."""
 
     token_budget: int = 4096
-    rolling_summary: bool = True
+    rolling_summary: bool = False
     hard_event_cap: int = 2000
+
+
+class MemorySettings(BaseSettings):
+    """Environment-driven configuration for the memory service.
+
+    The operator resolves a ``MemoryStore`` custom resource into these environment
+    variables (all prefixed ``KAOS_MEMORY_``); here we map them onto the typed config
+    objects above. Exactly one storage block is used depending on ``storage_type``.
+    Rolling summarisation is off by default, matching ``ShortTermTierConfig``.
+    """
+
+    model_config = SettingsConfigDict(env_prefix="KAOS_MEMORY_", extra="ignore")
+
+    storage_type: str = "local"
+
+    local_path: str = "/data/memory"
+    local_collection: str = "kaos_memory"
+
+    external_dsn: str = ""
+    external_collection: str = "kaos_memory"
+    external_dims: int = 1536
+
+    model_base_url: str = "http://localhost:8000/v1"
+    model_api_key: str = "kaos"
+    summarization_model: str = "gpt-4o-mini"
+    embedding_model: str = "text-embedding-3-small"
+
+    token_budget: int = 4096
+    rolling_summary: bool = False
+    hard_event_cap: int = 2000
+
+    extraction_concurrency: int = 4
+    extraction_max_retries: int = 2
+
+    host: str = "0.0.0.0"
+    port: int = 8080
+
+    def storage(self) -> StorageConfig:
+        if self.storage_type == "local":
+            return StorageConfig(
+                type="local",
+                local=LocalStorage(path=self.local_path, collection_name=self.local_collection),
+            )
+        if self.storage_type == "external":
+            return StorageConfig(
+                type="external",
+                external=ExternalStorage(
+                    dsn=self.external_dsn,
+                    collection_name=self.external_collection,
+                    embedding_dims=self.external_dims,
+                ),
+            )
+        raise ValueError(f"unknown storage type: {self.storage_type}")
+
+    def summarization(self) -> ModelConfig:
+        return ModelConfig(
+            base_url=self.model_base_url, model=self.summarization_model, api_key=self.model_api_key
+        )
+
+    def embedding(self) -> ModelConfig:
+        return ModelConfig(
+            base_url=self.model_base_url, model=self.embedding_model, api_key=self.model_api_key
+        )
+
+    def short_term_tier(self) -> ShortTermTierConfig:
+        return ShortTermTierConfig(
+            token_budget=self.token_budget,
+            rolling_summary=self.rolling_summary,
+            hard_event_cap=self.hard_event_cap,
+        )
+
+    def short_term_target(self) -> str:
+        """SQLite file path (local) or Postgres DSN (external) for the short-term table."""
+        if self.storage_type == "local":
+            return f"{self.local_path.rstrip('/')}/shortterm.db"
+        return self.external_dsn

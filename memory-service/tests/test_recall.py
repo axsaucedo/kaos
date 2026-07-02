@@ -3,8 +3,8 @@
 from fastapi.testclient import TestClient
 
 from kaos_memory.config import ShortTermTierConfig
-from kaos_memory.service import MemoryService, create_app
-from kaos_memory.shortterm import ShortTermStore
+from kaos_memory.app import MemoryService, create_app
+from kaos_memory.stores import ShortTermStore
 
 
 class _FakeLongTerm:
@@ -37,11 +37,11 @@ def test_recall_returns_facts_and_short_term_context(tmp_path):
     longterm = _FakeLongTerm(facts=[{"memory": "alice prefers dark mode", "score": 0.9}])
     scope = {"level": "user", "principal": "alice", "session_id": "s1"}
     # Seed short-term turns under the same owner key.
-    from kaos_memory.scope import Scope, ScopeLevel
+    from kaos_memory.stores import Scope, ScopeLevel
 
     s = Scope(level=ScopeLevel.USER, principal="alice")
-    short_term.append(s, "user", "hello there")
-    short_term.append(s, "assistant", "hi alice")
+    short_term.add(s, "user", "hello there")
+    short_term.add(s, "assistant", "hi alice")
 
     resp = _client(longterm, short_term).post(
         "/v1/recall", json={"scope": USER_SCOPE, "query": "preferences"}
@@ -58,9 +58,9 @@ def test_recall_returns_facts_and_short_term_context(tmp_path):
 
 def test_recall_degrades_to_short_term_only_on_longterm_failure(tmp_path):
     short_term = _short_term(tmp_path)
-    from kaos_memory.scope import Scope, ScopeLevel
+    from kaos_memory.stores import Scope, ScopeLevel
 
-    short_term.append(
+    short_term.add(
         Scope(level=ScopeLevel.USER, principal="alice"), "user", "remember the budget is 5000"
     )
     longterm = _FakeLongTerm(fail=True)
