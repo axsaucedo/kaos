@@ -57,18 +57,18 @@ class _Backend:
 
     def _ensure_schema(self, serial: str) -> None:
         self.execute(
-            f"CREATE TABLE IF NOT EXISTS working_turns ("
+            f"CREATE TABLE IF NOT EXISTS short_term_turns ("
             f"id {serial}, scope_key TEXT, role TEXT, content TEXT, "
             f"created_at DOUBLE PRECISION, folded INTEGER DEFAULT 0)"
             if self.kind == "external"
             else (
-                f"CREATE TABLE IF NOT EXISTS working_turns ("
+                f"CREATE TABLE IF NOT EXISTS short_term_turns ("
                 f"id {serial}, scope_key TEXT, role TEXT, content TEXT, "
                 f"created_at REAL, folded INTEGER DEFAULT 0)"
             )
         )
         self.execute(
-            "CREATE TABLE IF NOT EXISTS working_summary (scope_key TEXT PRIMARY KEY, text TEXT)"
+            "CREATE TABLE IF NOT EXISTS short_term_summary (scope_key TEXT PRIMARY KEY, text TEXT)"
         )
         self.commit()
 
@@ -110,7 +110,7 @@ class ShortTermStore:
         """Append a turn and re-enforce the budget and hard cap by summarizing overflow."""
         key = scope_key(scope)
         self.db.execute(
-            "INSERT INTO working_turns (scope_key, role, content, created_at, folded) "
+            "INSERT INTO short_term_turns (scope_key, role, content, created_at, folded) "
             "VALUES (?, ?, ?, ?, 0)",
             (key, role, content, time.time()),
         )
@@ -119,7 +119,7 @@ class ShortTermStore:
 
     def _active(self, key: str) -> List[Tuple[int, str, str]]:
         cur = self.db.execute(
-            "SELECT id, role, content FROM working_turns WHERE scope_key = ? AND folded = 0 "
+            "SELECT id, role, content FROM short_term_turns WHERE scope_key = ? AND folded = 0 "
             "ORDER BY id",
             (key,),
         )
@@ -129,7 +129,7 @@ class ShortTermStore:
         return sum(count_tokens(c) for _, _, c in active)
 
     def _summary(self, key: str) -> str:
-        cur = self.db.execute("SELECT text FROM working_summary WHERE scope_key = ?", (key,))
+        cur = self.db.execute("SELECT text FROM short_term_summary WHERE scope_key = ?", (key,))
         row = cur.fetchone()
         return row[0] if row else ""
 
@@ -151,11 +151,11 @@ class ShortTermStore:
                     raise ValueError("rolling_summary is enabled but no summarizer was provided")
                 new_summary = self.summarizer(self._summary(key), [(fold_role, fold_content)])
                 self.db.execute(
-                    "INSERT INTO working_summary (scope_key, text) VALUES (?, ?) "
+                    "INSERT INTO short_term_summary (scope_key, text) VALUES (?, ?) "
                     "ON CONFLICT(scope_key) DO UPDATE SET text = excluded.text",
                     (key, new_summary),
                 )
-            self.db.execute("UPDATE working_turns SET folded = 1 WHERE id = ?", (fold_id,))
+            self.db.execute("UPDATE short_term_turns SET folded = 1 WHERE id = ?", (fold_id,))
             self.db.commit()
 
     def recent(self, scope: Scope, token_budget: Optional[int] = None) -> List[Tuple[str, str]]:
@@ -181,8 +181,8 @@ class ShortTermStore:
     def clear(self, scope: Scope) -> None:
         """Delete all turns and the summary for the scope."""
         key = scope_key(scope)
-        self.db.execute("DELETE FROM working_turns WHERE scope_key = ?", (key,))
-        self.db.execute("DELETE FROM working_summary WHERE scope_key = ?", (key,))
+        self.db.execute("DELETE FROM short_term_turns WHERE scope_key = ?", (key,))
+        self.db.execute("DELETE FROM short_term_summary WHERE scope_key = ?", (key,))
         self.db.commit()
 
     def close(self) -> None:

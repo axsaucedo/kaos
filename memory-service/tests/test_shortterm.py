@@ -49,11 +49,11 @@ def test_budget_overflow_summarizes_not_truncates(tmp_path):
     assert active[-1] == (turns[-1][0], turns[-1][1])
     # Older turns were folded, not deleted: all raw rows are retained.
     total = store.db.execute(
-        "SELECT count(*) FROM working_turns WHERE scope_key = ?", (key,)
+        "SELECT count(*) FROM short_term_turns WHERE scope_key = ?", (key,)
     ).fetchone()[0]
     assert total == len(turns)
     folded = store.db.execute(
-        "SELECT count(*) FROM working_turns WHERE scope_key = ? AND folded = 1", (key,)
+        "SELECT count(*) FROM short_term_turns WHERE scope_key = ? AND folded = 1", (key,)
     ).fetchone()[0]
     assert folded >= 1
 
