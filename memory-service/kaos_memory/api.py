@@ -21,15 +21,15 @@ class RecallRequest(BaseModel):
     scope: Scope
     query: str
     top_k: int = 10
-    include_working: bool = True
-    working_token_budget: Optional[int] = None
+    include_short_term: bool = True
+    short_term_token_budget: Optional[int] = None
 
 
 FailureMode = str  # "soft" | "strict"
 
 
 class WriteRequest(BaseModel):
-    """Record a turn: append to the working tier synchronously, extract long-term async.
+    """Record a turn: append to the short-term tier synchronously, extract long-term async.
 
     ``infer`` controls whether the engine extracts facts (vs storing raw). ``failure_mode``
     selects fail-soft (swallow long-term scheduling errors, return degraded) or strict
@@ -53,7 +53,7 @@ class WriteResponse(BaseModel):
 
 
 class ForgetRequest(BaseModel):
-    """Erase a scope: clear its working tier and delete its long-term memories."""
+    """Erase a scope: clear its short-term tier and delete its long-term memories."""
 
     scope: Scope
     failure_mode: FailureMode = "soft"
@@ -61,29 +61,29 @@ class ForgetRequest(BaseModel):
 
 class ForgetResponse(BaseModel):
     """Acknowledges a forget. ``degraded`` is set when the long-term erasure failed
-    under fail-soft (the working tier was still cleared)."""
+    under fail-soft (the short-term tier was still cleared)."""
 
     forgotten: bool = True
     degraded: bool = False
 
 
-class WorkingContext(BaseModel):
-    """The working-tier slice of a recall response."""
+class ShortTermContext(BaseModel):
+    """The short-term tier slice of a recall response."""
 
     summary: str = ""
     recent: List[Tuple[str, str]] = Field(default_factory=list)
 
 
 class RecallResponse(BaseModel):
-    """Assembled recall context: native long-term facts, working context, and a block.
+    """Assembled recall context: native long-term facts, short-term context, and a block.
 
     ``facts`` are Mem0's native result dicts (memory text, score, id, metadata),
     passed through unmodified. ``block`` is the deterministic structured text the
     runtime injects into the system context. ``degraded`` is set when long-term
-    recall failed and only working context is present.
+    recall failed and only short-term context is present.
     """
 
     facts: List[Dict[str, Any]] = Field(default_factory=list)
-    working: WorkingContext = Field(default_factory=WorkingContext)
+    short_term: ShortTermContext = Field(default_factory=ShortTermContext)
     block: str = ""
     degraded: bool = False

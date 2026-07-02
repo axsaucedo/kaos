@@ -1,7 +1,7 @@
-"""Smoke test: the working and long-term stores compose for one scope.
+"""Smoke test: the short-term and long-term stores compose for one scope.
 
 Drives both stores together in local mode (no service, no operator) to prove they
-share the same Scope abstraction and operate side by side: working turns flow into
+share the same Scope abstraction and operate side by side: short-term turns flow into
 the short-term window while durable facts land in the long-term store and recall
 back, all under one owner.
 """
@@ -10,11 +10,11 @@ from kaos_memory.config import (
     LocalStorage,
     ModelConfig,
     StorageConfig,
-    WorkingTierConfig,
+    ShortTermTierConfig,
 )
 from kaos_memory.longterm import LongTermStore
 from kaos_memory.scope import Scope, ScopeLevel
-from kaos_memory.working import WorkingStore
+from kaos_memory.shortterm import ShortTermStore
 from tests._fakes import DeterministicEmbedder
 
 OFFLINE = ModelConfig(base_url="http://127.0.0.1:0/v1", model="offline", api_key="t")
@@ -24,23 +24,23 @@ def _fake_summarizer(prior, folded):
     return f"{prior} | " + " ".join(c for _, c in folded)
 
 
-def test_working_and_longterm_compose(tmp_path):
+def test_short_term_and_longterm_compose(tmp_path):
     scope = Scope(level=ScopeLevel.USER, principal="alice")
 
-    working = WorkingStore(
+    short_term = ShortTermStore(
         "local",
-        str(tmp_path / "working.db"),
-        WorkingTierConfig(token_budget=10_000),
+        str(tmp_path / "shortterm.db"),
+        ShortTermTierConfig(token_budget=10_000),
         _fake_summarizer,
     )
     storage = StorageConfig(type="local", local=LocalStorage(path=str(tmp_path / "lt")))
     longterm = LongTermStore(storage, OFFLINE, OFFLINE)
     longterm._memory.embedding_model = DeterministicEmbedder()
 
-    # Short-term: conversational turns flow into the working window.
-    working.append(scope, "user", "what port does the deployment use")
-    working.append(scope, "assistant", "the deployment uses port 8080")
-    assert working.recent(scope) == [
+    # Short-term: conversational turns flow into the short-term window.
+    short_term.append(scope, "user", "what port does the deployment use")
+    short_term.append(scope, "assistant", "the deployment uses port 8080")
+    assert short_term.recent(scope) == [
         ("user", "what port does the deployment use"),
         ("assistant", "the deployment uses port 8080"),
     ]
@@ -51,6 +51,6 @@ def test_working_and_longterm_compose(tmp_path):
     assert any("8080" in h["memory"] for h in hits)
 
     # The two tiers are independent stores keyed by the same scope.
-    working.clear(scope)
-    assert working.recent(scope) == []
+    short_term.clear(scope)
+    assert short_term.recent(scope) == []
     assert longterm.recall(scope, "what port does the deployment use", top_k=5)

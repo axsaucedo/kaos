@@ -1,13 +1,13 @@
-"""Write endpoint tests: synchronous working append + scheduled extraction."""
+"""Write endpoint tests: synchronous short-term append + scheduled extraction."""
 
 import threading
 
 from fastapi.testclient import TestClient
 
-from kaos_memory.config import WorkingTierConfig
+from kaos_memory.config import ShortTermTierConfig
 from kaos_memory.scope import Scope, ScopeLevel
 from kaos_memory.service import MemoryService, create_app
-from kaos_memory.working import WorkingStore
+from kaos_memory.shortterm import ShortTermStore
 
 USER_SCOPE = {"level": "user", "principal": "bob"}
 
@@ -27,21 +27,21 @@ class _RecordingLongTerm:
         return None
 
 
-def _working(tmp_path):
-    return WorkingStore("local", str(tmp_path / "w.db"), WorkingTierConfig(), lambda p, f: p)
+def _short_term(tmp_path):
+    return ShortTermStore("local", str(tmp_path / "w.db"), ShortTermTierConfig(), lambda p, f: p)
 
 
-def _client(longterm, working, scheduler):
+def _client(longterm, short_term, scheduler):
     return TestClient(
-        create_app(MemoryService(longterm=longterm, working=working, scheduler=scheduler))
+        create_app(MemoryService(longterm=longterm, short_term=short_term, scheduler=scheduler))
     )
 
 
-def test_write_returns_before_extraction_and_persists_working_row(tmp_path):
-    working = _working(tmp_path)
+def test_write_returns_before_extraction_and_persists_short_term_row(tmp_path):
+    short_term = _short_term(tmp_path)
     longterm = _RecordingLongTerm()  # extraction blocks until gate is set
     captured = []
-    client = _client(longterm, working, captured.append)
+    client = _client(longterm, short_term, captured.append)
 
     resp = client.post(
         "/v1/write", json={"scope": USER_SCOPE, "role": "user", "content": "deploy nginx"}
@@ -50,20 +50,20 @@ def test_write_returns_before_extraction_and_persists_working_row(tmp_path):
     body = resp.json()
     assert body["accepted"] is True and body["scheduled"] is True
 
-    # The working row is present synchronously, before any extraction runs.
-    recent = working.recent(Scope(level=ScopeLevel.USER, principal="bob"))
+    # The short-term row is present synchronously, before any extraction runs.
+    recent = short_term.recent(Scope(level=ScopeLevel.USER, principal="bob"))
     assert recent == [("user", "deploy nginx")]
     # Extraction was scheduled (captured) but not yet executed.
     assert len(captured) == 1
     assert longterm.writes == []
 
 
-def test_strict_surfaces_working_append_failure(tmp_path):
-    class _BrokenWorking:
+def test_strict_surfaces_short_term_append_failure(tmp_path):
+    class _BrokenShortTerm:
         def append(self, *a, **k):
             raise RuntimeError("disk full")
 
-    client = _client(_RecordingLongTerm(), _BrokenWorking(), lambda t: None)
+    client = _client(_RecordingLongTerm(), _BrokenShortTerm(), lambda t: None)
     resp = client.post(
         "/v1/write",
         json={"scope": USER_SCOPE, "role": "user", "content": "x", "failure_mode": "strict"},
@@ -73,12 +73,12 @@ def test_strict_surfaces_working_append_failure(tmp_path):
 
 
 def test_soft_swallows_schedule_failure(tmp_path):
-    working = _working(tmp_path)
+    short_term = _short_term(tmp_path)
 
     def _broken_scheduler(thunk):
         raise RuntimeError("scheduler down")
 
-    client = _client(_RecordingLongTerm(), working, _broken_scheduler)
+    client = _client(_RecordingLongTerm(), short_term, _broken_scheduler)
     resp = client.post(
         "/v1/write",
         json={"scope": USER_SCOPE, "role": "user", "content": "y", "failure_mode": "soft"},
@@ -88,5 +88,5 @@ def test_soft_swallows_schedule_failure(tmp_path):
     assert body["accepted"] is True
     assert body["scheduled"] is False
     assert body["degraded"] is True
-    # The durable working append still happened.
-    assert working.recent(Scope(level=ScopeLevel.USER, principal="bob")) == [("user", "y")]
+    # The durable short-term append still happened.
+    assert short_term.recent(Scope(level=ScopeLevel.USER, principal="bob")) == [("user", "y")]

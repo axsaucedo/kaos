@@ -1,6 +1,6 @@
 """Model client binding the stores to a resolved OpenAI-compatible endpoint.
 
-The working tier needs an LLM to produce its rolling summary; Mem0 needs the same
+The short-term tier needs an LLM to produce its rolling summary; Mem0 needs the same
 kind of endpoint for extraction and embeddings. Both are described by a single
 ``ModelConfig`` (an OpenAI-compatible base URL, a model name, and a key) so one
 binding drives the whole stack. This client wraps the chat-completions call used
@@ -15,7 +15,7 @@ from typing import List, Optional, Tuple
 import httpx
 
 from kaos_memory.config import ModelConfig
-from kaos_memory.working import Summarizer
+from kaos_memory.shortterm import Summarizer
 
 _SUMMARY_SYSTEM = (
     "You maintain a concise rolling summary of a conversation. Fold the prior summary "
@@ -25,7 +25,7 @@ _SUMMARY_SYSTEM = (
 
 
 class ModelClient:
-    """Calls an OpenAI-compatible chat endpoint for working-tier summarization."""
+    """Calls an OpenAI-compatible chat endpoint for short-term tier summarization."""
 
     def __init__(self, config: ModelConfig, client: Optional[httpx.Client] = None) -> None:
         self.config = config
@@ -52,7 +52,7 @@ class ModelClient:
         return resp.json()["choices"][0]["message"]["content"]
 
     def as_summarizer(self) -> Summarizer:
-        """Return a ``Summarizer`` callable for use by the working store."""
+        """Return a ``Summarizer`` callable for use by the short-term store."""
         return self.summarize
 
     def close(self) -> None:

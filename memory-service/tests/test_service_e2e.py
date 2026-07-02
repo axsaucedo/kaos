@@ -1,6 +1,6 @@
 """End-to-end integration: boot the app over real stores and drive write→recall→forget.
 
-Runs the full service against real ``LongTermStore`` and ``WorkingStore`` instances
+Runs the full service against real ``LongTermStore`` and ``ShortTermStore`` instances
 (local Chroma+SQLite, and an external pgvector+Postgres variant behind the marker),
 using a deterministic offline embedder and ``infer=False`` so no model endpoint is
 contacted. Asserts the ``kaos.memory.*`` spans are emitted via an in-memory exporter.
@@ -18,11 +18,11 @@ from kaos_memory.config import (
     LocalStorage,
     ModelConfig,
     StorageConfig,
-    WorkingTierConfig,
+    ShortTermTierConfig,
 )
 from kaos_memory.longterm import LongTermStore
 from kaos_memory.service import MemoryService, create_app
-from kaos_memory.working import WorkingStore
+from kaos_memory.shortterm import ShortTermStore
 from tests._fakes import DeterministicEmbedder
 
 OFFLINE = ModelConfig(base_url="http://127.0.0.1:0/v1", model="offline", api_key="t")
@@ -47,23 +47,23 @@ def span_exporter(_provider_exporter):
     return _provider_exporter
 
 
-def _service(storage: StorageConfig, working_target: str) -> MemoryService:
+def _service(storage: StorageConfig, short_term_target: str) -> MemoryService:
     longterm = LongTermStore(storage, OFFLINE, OFFLINE)
     longterm._memory.embedding_model = DeterministicEmbedder()
     # Synchronous scheduler so the integration flow is deterministic.
-    working = WorkingStore(
+    short_term = ShortTermStore(
         "local" if storage.type == "local" else "external",
-        working_target,
-        WorkingTierConfig(),
+        short_term_target,
+        ShortTermTierConfig(),
         lambda p, f: p,
     )
-    return MemoryService(longterm=longterm, working=working, scheduler=lambda thunk: thunk())
+    return MemoryService(longterm=longterm, short_term=short_term, scheduler=lambda thunk: thunk())
 
 
-def _drive_and_assert(service: MemoryService, span_exporter, working_scope_target):
+def _drive_and_assert(service: MemoryService, span_exporter, short_term_scope_target):
     client = TestClient(create_app(service))
 
-    # Write a turn: durable working append + synchronous extraction (infer=False).
+    # Write a turn: durable short-term append + synchronous extraction (infer=False).
     w = client.post(
         "/v1/write",
         json={
@@ -75,18 +75,18 @@ def _drive_and_assert(service: MemoryService, span_exporter, working_scope_targe
     )
     assert w.status_code == 202
 
-    # Recall: working context is present; long-term recall may match the stored fact.
+    # Recall: short-term context is present; long-term recall may match the stored fact.
     r = client.post("/v1/recall", json={"scope": USER_SCOPE, "query": "where does the cluster run"})
     assert r.status_code == 200
     body = r.json()
     assert body["degraded"] is False
-    assert any("eu-west-1" in c for _, c in body["working"]["recent"])
+    assert any("eu-west-1" in c for _, c in body["short_term"]["recent"])
 
     # Forget: clears both tiers.
     f = client.post("/v1/forget", json={"scope": USER_SCOPE})
     assert f.status_code == 200
     after = client.post("/v1/recall", json={"scope": USER_SCOPE, "query": "cluster"})
-    assert after.json()["working"]["recent"] == []
+    assert after.json()["short_term"]["recent"] == []
 
     names = {s.name for s in span_exporter.get_finished_spans()}
     assert {"kaos.memory.write", "kaos.memory.recall", "kaos.memory.forget"} <= names
@@ -94,8 +94,8 @@ def _drive_and_assert(service: MemoryService, span_exporter, working_scope_targe
 
 def test_local_mode_end_to_end(tmp_path, span_exporter):
     storage = StorageConfig(type="local", local=LocalStorage(path=str(tmp_path / "lt")))
-    service = _service(storage, str(tmp_path / "working.db"))
-    _drive_and_assert(service, span_exporter, str(tmp_path / "working.db"))
+    service = _service(storage, str(tmp_path / "shortterm.db"))
+    _drive_and_assert(service, span_exporter, str(tmp_path / "shortterm.db"))
 
 
 @pytest.mark.pgvector
@@ -108,5 +108,5 @@ def test_external_mode_end_to_end(pgvector_dsn, span_exporter):
     try:
         _drive_and_assert(service, span_exporter, pgvector_dsn)
     finally:
-        # Clean the working table rows for this scope so reruns are deterministic.
-        service.working.close()
+        # Clean the short-term table rows for this scope so reruns are deterministic.
+        service.short_term.close()
