@@ -27,7 +27,11 @@ def test_append_and_recent_ordering(tmp_path):
     store.add(SCOPE, "user", "first")
     store.add(SCOPE, "assistant", "second")
     store.add(SCOPE, "user", "third")
-    assert store.recent(SCOPE) == [("user", "first"), ("assistant", "second"), ("user", "third")]
+    assert store.active_window(SCOPE) == [
+        ("user", "first"),
+        ("assistant", "second"),
+        ("user", "third"),
+    ]
 
 
 def test_budget_overflow_folds_into_summary_when_enabled(tmp_path):
@@ -41,7 +45,7 @@ def test_budget_overflow_folds_into_summary_when_enabled(tmp_path):
     for role, content in turns:
         store.add(SCOPE, role, content)
 
-    summary, active = store.context(SCOPE)
+    summary, active = store.short_term_context(SCOPE)
     key = scope_key(SCOPE)
     # Overflow was folded into a rolling summary, not dropped.
     assert summary, "expected a rolling summary after overflow"
@@ -49,11 +53,12 @@ def test_budget_overflow_folds_into_summary_when_enabled(tmp_path):
     assert active[-1] == (turns[-1][0], turns[-1][1])
     # Folded turns are transient: absorbed into the summary and deleted (no unbounded growth).
     total = store.db.execute(
-        "SELECT count(*) FROM short_term_turns WHERE scope_key = ?", (key,)
+        "SELECT count(*) FROM short_term_memory_window WHERE scope_key = ?", (key,)
     ).fetchone()[0]
     assert total == len(active)
     folded = store.db.execute(
-        "SELECT count(*) FROM short_term_turns WHERE scope_key = ? AND folded = 1", (key,)
+        "SELECT count(*) FROM short_term_memory_window WHERE scope_key = ? AND pending_summary = 1",
+        (key,),
     ).fetchone()[0]
     assert folded == 0
 
@@ -72,10 +77,10 @@ def test_budget_overflow_drops_when_summary_disabled(tmp_path):
     key = scope_key(SCOPE)
     # No summary is produced and no rows linger beyond the active window.
     assert store.summary(SCOPE) == ""
-    active = store.recent(SCOPE)
+    active = store.active_window(SCOPE)
     assert active[-1] == (turns[-1][0], turns[-1][1])
     total = store.db.execute(
-        "SELECT count(*) FROM short_term_turns WHERE scope_key = ?", (key,)
+        "SELECT count(*) FROM short_term_memory_window WHERE scope_key = ?", (key,)
     ).fetchone()[0]
     assert total == len(active)
 
@@ -100,18 +105,18 @@ def test_summarize_pending_folds_all_marked_rows_in_one_call(tmp_path):
     key = scope_key(SCOPE)
     for i in range(3):
         store.db.execute(
-            "INSERT INTO short_term_turns (scope_key, role, content, created_at, folded) "
+            "INSERT INTO short_term_memory_window (scope_key, role, content, created_at, pending_summary) "
             "VALUES (?, ?, ?, ?, 1)",
             (key, "user", f"m{i}", 0.0),
         )
     store.db.commit()
 
-    store.summarize_pending(SCOPE)
+    store.fold_pending_into_summary(SCOPE)
     assert call_count == 1
     assert fold_sizes == [3]
     # Pending rows are deleted once absorbed into the summary.
     remaining = store.db.execute(
-        "SELECT count(*) FROM short_term_turns WHERE scope_key = ?", (key,)
+        "SELECT count(*) FROM short_term_memory_window WHERE scope_key = ?", (key,)
     ).fetchone()[0]
     assert remaining == 0
 
@@ -140,7 +145,7 @@ def test_hard_event_cap_enforced(tmp_path):
     store = _sqlite_store(tmp_path, token_budget=10_000, hard_event_cap=2)
     for i in range(5):
         store.add(SCOPE, "user", f"turn number {i}")
-    active = store.recent(SCOPE)
+    active = store.active_window(SCOPE)
     # Hard cap bounds the active window even though the token budget is huge.
     assert len(active) <= 2
     assert active[-1] == ("user", "turn number 4")
@@ -150,8 +155,8 @@ def test_recent_honours_explicit_smaller_budget(tmp_path):
     store = _sqlite_store(tmp_path, token_budget=10_000)
     for i in range(4):
         store.add(SCOPE, "user", f"message {i} content here")
-    full = store.recent(SCOPE)
-    trimmed = store.recent(SCOPE, token_budget=5)
+    full = store.active_window(SCOPE)
+    trimmed = store.active_window(SCOPE, token_budget=5)
     assert len(trimmed) < len(full)
     assert trimmed[-1] == full[-1]
 
@@ -166,7 +171,8 @@ def test_rolling_summary_disabled_does_not_require_summarizer(tmp_path):
     # No summary produced, but the window is still bounded by folding.
     assert store.summary(SCOPE) == ""
     assert (
-        store._active_tokens(store._active(scope_key(SCOPE))) <= 8 or len(store.recent(SCOPE)) == 1
+        store._window_token_total(store._load_active_window_rows(scope_key(SCOPE))) <= 8
+        or len(store.active_window(SCOPE)) == 1
     )
 
 
@@ -176,7 +182,7 @@ def test_clear_removes_turns_and_summary(tmp_path):
         store.add(SCOPE, "user", f"message {i} with enough tokens to trigger summary folding")
     assert store.summary(SCOPE) != ""
     store.clear(SCOPE)
-    assert store.recent(SCOPE) == []
+    assert store.active_window(SCOPE) == []
     assert store.summary(SCOPE) == ""
 
 
@@ -186,8 +192,8 @@ def test_scopes_are_isolated(tmp_path):
     b = Scope(level=ScopeLevel.SESSION, session_id="run-b")
     store.add(a, "user", "alpha")
     store.add(b, "user", "beta")
-    assert store.recent(a) == [("user", "alpha")]
-    assert store.recent(b) == [("user", "beta")]
+    assert store.active_window(a) == [("user", "alpha")]
+    assert store.active_window(b) == [("user", "beta")]
 
 
 @pytest.mark.pgvector
@@ -201,7 +207,7 @@ def test_postgres_budget_overflow_summarizes(pgvector_dsn):
     scope = Scope(level=ScopeLevel.SESSION, session_id="pg-" + uuid.uuid4().hex[:8])
     for i in range(4):
         store.add(scope, "user", f"a reasonably long postgres turn number {i} about deployments")
-    summary, active = store.context(scope)
+    summary, active = store.short_term_context(scope)
     assert summary
     assert active
     store.clear(scope)

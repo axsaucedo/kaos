@@ -240,18 +240,19 @@ class _Backend:
 
     def _ensure_schema(self, serial: str) -> None:
         self.execute(
-            f"CREATE TABLE IF NOT EXISTS short_term_turns ("
+            f"CREATE TABLE IF NOT EXISTS short_term_memory_window ("
             f"id {serial}, scope_key TEXT, role TEXT, content TEXT, "
-            f"created_at DOUBLE PRECISION, folded INTEGER DEFAULT 0)"
+            f"created_at DOUBLE PRECISION, pending_summary INTEGER DEFAULT 0)"
             if self.kind == "external"
             else (
-                f"CREATE TABLE IF NOT EXISTS short_term_turns ("
+                f"CREATE TABLE IF NOT EXISTS short_term_memory_window ("
                 f"id {serial}, scope_key TEXT, role TEXT, content TEXT, "
-                f"created_at REAL, folded INTEGER DEFAULT 0)"
+                f"created_at REAL, pending_summary INTEGER DEFAULT 0)"
             )
         )
         self.execute(
-            "CREATE TABLE IF NOT EXISTS short_term_summary (scope_key TEXT PRIMARY KEY, text TEXT)"
+            "CREATE TABLE IF NOT EXISTS medium_term_memory_summaries "
+            "(scope_key TEXT PRIMARY KEY, text TEXT)"
         )
         self.commit()
 
@@ -308,68 +309,71 @@ class ShortTermStore:
         key = scope_key(scope)
         with self._lock:
             self.db.execute(
-                "INSERT INTO short_term_turns (scope_key, role, content, created_at, folded) "
+                "INSERT INTO short_term_memory_window "
+                "(scope_key, role, content, created_at, pending_summary) "
                 "VALUES (?, ?, ?, ?, 0)",
                 (key, role, content, time.time()),
             )
             self.db.commit()
-            overflow_ids = self._overflow_ids(key)
-        self._enforce(scope, key, overflow_ids)
+            overflow_ids = self._ids_exceeding_budget(key)
+        self._drop_stale_window(scope, key, overflow_ids)
 
-    def recent(self, scope: Scope, token_budget: Optional[int] = None) -> List[Tuple[str, str]]:
+    def active_window(
+        self, scope: Scope, token_budget: Optional[int] = None
+    ) -> List[Tuple[str, str]]:
         """Return the active verbatim window as ordered (role, content), within the budget."""
         key = scope_key(scope)
         budget = token_budget if token_budget is not None else self.cfg.token_budget
         with self._lock:
-            active = self._active(key)
+            active = self._load_active_window_rows(key)
         # Trim from the oldest end to honour an explicit smaller budget for this read.
-        total = self._active_tokens(active)
+        total = self._window_token_total(active)
         while active and total > budget and len(active) > 1:
             _, _, content = active.pop(0)
             total -= count_tokens(content)
         return [(r, c) for _, r, c in active]
 
     def summary(self, scope: Scope) -> str:
-        """Return the current rolling summary text for the scope (empty if none)."""
+        """Return the current medium-term summary text for the scope (empty if none)."""
         with self._lock:
-            return self._summary(scope_key(scope))
+            return self._load_summary(scope_key(scope))
 
-    def context(self, scope: Scope) -> Tuple[str, List[Tuple[str, str]]]:
-        """Return (rolling_summary, active_window) — the full short-term context for a run."""
-        return self.summary(scope), self.recent(scope)
+    def short_term_context(self, scope: Scope) -> Tuple[str, List[Tuple[str, str]]]:
+        """Return (medium_term_summary, active_window) — the full short-term context for a run."""
+        return self.summary(scope), self.active_window(scope)
 
     def clear(self, scope: Scope) -> None:
         """Delete all turns and the summary for the scope."""
         key = scope_key(scope)
         with self._lock:
-            self.db.execute("DELETE FROM short_term_turns WHERE scope_key = ?", (key,))
-            self.db.execute("DELETE FROM short_term_summary WHERE scope_key = ?", (key,))
+            self.db.execute("DELETE FROM short_term_memory_window WHERE scope_key = ?", (key,))
+            self.db.execute("DELETE FROM medium_term_memory_summaries WHERE scope_key = ?", (key,))
             self.db.commit()
 
-    def summarize_pending(self, scope: Scope) -> None:
-        """Fold all pending (marked) turns for the scope into the rolling summary in one call.
+    def fold_pending_into_summary(self, scope: Scope) -> None:
+        """Fold all pending (marked) turns for the scope into the summary in one call.
 
-        Reads every turn marked ``folded=1``, folds them into the prior summary with a
-        single summariser call, upserts the summary, and deletes the folded rows so the
-        store does not grow unboundedly. Safe to call more than once (extra calls with no
-        pending rows are no-ops). Invoked inline or via the injected scheduler.
+        Reads every turn marked ``pending_summary=1``, folds them into the prior summary
+        with a single summariser call, upserts the summary, and deletes the folded rows so
+        the store does not grow unboundedly. Safe to call more than once (extra calls with
+        no pending rows are no-ops). Invoked inline or via the injected scheduler.
         """
         if self.summarizer is None:
             raise ValueError("rolling_summary is enabled but no summarizer was provided")
         key = scope_key(scope)
         with self._lock:
-            pending = self._folded(key)
+            pending = self._load_pending_summary_rows(key)
             if not pending:
                 return
             turns = [(role, content) for _, role, content in pending]
-            new_summary = self.summarizer(self._summary(key), turns)
+            new_summary = self.summarizer(self._load_summary(key), turns)
             self.db.execute(
-                "INSERT INTO short_term_summary (scope_key, text) VALUES (?, ?) "
+                "INSERT INTO medium_term_memory_summaries (scope_key, text) VALUES (?, ?) "
                 "ON CONFLICT(scope_key) DO UPDATE SET text = excluded.text",
                 (key, new_summary),
             )
             for fid, _, _ in pending:
-                self.db.execute("DELETE FROM short_term_turns WHERE id = ?", (fid,))
+                self.db.execute("DELETE FROM short_term_memory_window WHERE id = ?", (fid,))
             self.db.commit()
 
     def close(self) -> None:
@@ -377,30 +381,33 @@ class ShortTermStore:
 
     # -- internals -------------------------------------------------------- #
 
-    def _enforce(self, scope: Scope, key: str, overflow_ids: List[int]) -> None:
+    def _drop_stale_window(self, scope: Scope, key: str, overflow_ids: List[int]) -> None:
         """Evict the computed overflow: drop it (recency window) or fold it (rolling summary)."""
         if not overflow_ids:
             return
         if not self.cfg.rolling_summary:
             with self._lock:
                 for oid in overflow_ids:
-                    self.db.execute("DELETE FROM short_term_turns WHERE id = ?", (oid,))
+                    self.db.execute("DELETE FROM short_term_memory_window WHERE id = ?", (oid,))
                 self.db.commit()
             return
         with self._lock:
             for oid in overflow_ids:
-                self.db.execute("UPDATE short_term_turns SET folded = 1 WHERE id = ?", (oid,))
+                self.db.execute(
+                    "UPDATE short_term_memory_window SET pending_summary = 1 WHERE id = ?",
+                    (oid,),
+                )
             self.db.commit()
         if self._scheduler is not None:
-            self._scheduler(lambda: self.summarize_pending(scope))
+            self._scheduler(lambda: self.fold_pending_into_summary(scope))
         else:
-            self.summarize_pending(scope)
+            self.fold_pending_into_summary(scope)
 
-    def _overflow_ids(self, key: str) -> List[int]:
+    def _ids_exceeding_budget(self, key: str) -> List[int]:
         """Ids of the oldest active turns to evict to get back within limits (keep >=1)."""
-        active = self._active(key)
+        active = self._load_active_window_rows(key)
         ids: List[int] = []
-        total = self._active_tokens(active)
+        total = self._window_token_total(active)
         i = 0
         while len(active) - i > 1 and (
             len(active) - i > self.cfg.hard_event_cap or total > self.cfg.token_budget
@@ -411,27 +418,29 @@ class ShortTermStore:
             i += 1
         return ids
 
-    def _active(self, key: str) -> List[Tuple[int, str, str]]:
+    def _load_active_window_rows(self, key: str) -> List[Tuple[int, str, str]]:
         cur = self.db.execute(
-            "SELECT id, role, content FROM short_term_turns WHERE scope_key = ? AND folded = 0 "
-            "ORDER BY id",
+            "SELECT id, role, content FROM short_term_memory_window "
+            "WHERE scope_key = ? AND pending_summary = 0 ORDER BY id",
             (key,),
         )
         return list(cur.fetchall())
 
-    def _folded(self, key: str) -> List[Tuple[int, str, str]]:
+    def _load_pending_summary_rows(self, key: str) -> List[Tuple[int, str, str]]:
         cur = self.db.execute(
-            "SELECT id, role, content FROM short_term_turns WHERE scope_key = ? AND folded = 1 "
-            "ORDER BY id",
+            "SELECT id, role, content FROM short_term_memory_window "
+            "WHERE scope_key = ? AND pending_summary = 1 ORDER BY id",
             (key,),
         )
         return list(cur.fetchall())
 
-    def _active_tokens(self, active: List[Tuple[int, str, str]]) -> int:
+    def _window_token_total(self, active: List[Tuple[int, str, str]]) -> int:
         return sum(count_tokens(c) for _, _, c in active)
 
-    def _summary(self, key: str) -> str:
-        cur = self.db.execute("SELECT text FROM short_term_summary WHERE scope_key = ?", (key,))
+    def _load_summary(self, key: str) -> str:
+        cur = self.db.execute(
+            "SELECT text FROM medium_term_memory_summaries WHERE scope_key = ?", (key,)
+        )
         row = cur.fetchone()
         return row[0] if row else ""
 
