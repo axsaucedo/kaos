@@ -125,23 +125,31 @@ class ForgetResponse(BaseModel):
 
 
 class ShortTermContext(BaseModel):
-    """The short-term tier slice of a recall response."""
+    """The short-term tier slice of a recall response: the verbatim active window."""
 
-    summary: str = ""
     recent: List[Tuple[str, str]] = Field(default_factory=list)
 
 
+class MediumTermContext(BaseModel):
+    """The medium-term tier slice of a recall response: the rolling conversation digest."""
+
+    summary: str = ""
+
+
 class RecallResponse(BaseModel):
-    """Assembled recall context: native long-term facts, short-term context, and a block.
+    """Assembled recall context: native long-term facts, the medium-term digest, the
+    short-term window, and a rendered block.
 
     ``facts`` are Mem0's native result dicts (memory text, score, id, metadata),
-    passed through unmodified. ``block`` is the deterministic structured text the
-    runtime injects into the system context. ``degraded`` is set when long-term
-    recall failed and only short-term context is present.
+    passed through unmodified. ``medium_term`` carries the rolling digest and ``short_term``
+    the verbatim recent turns. ``block`` is the deterministic structured text the runtime
+    injects into the system context. ``degraded`` is set when long-term recall failed and
+    only the conversational tiers are present.
     """
 
     facts: List[Dict[str, Any]] = Field(default_factory=list)
     short_term: ShortTermContext = Field(default_factory=ShortTermContext)
+    medium_term: MediumTermContext = Field(default_factory=MediumTermContext)
     block: str = ""
     degraded: bool = False
 
@@ -292,7 +300,7 @@ class MemoryService:
 
     def recall(self, req: RecallRequest) -> RecallResponse:
         """Assemble recall context for a scope. Fail-soft: long-term errors degrade
-        to short-term-only context rather than failing the request."""
+        to conversational-tier-only context rather than failing the request."""
         with tracer.start_as_current_span("kaos.memory.recall") as span:
             span.set_attribute("kaos.memory.scope_level", req.scope.level.value)
             facts: list = []
@@ -314,7 +322,8 @@ class MemoryService:
             block = assemble_block(facts, summary, recent)
             return RecallResponse(
                 facts=facts,
-                short_term=ShortTermContext(summary=summary, recent=recent),
+                short_term=ShortTermContext(recent=recent),
+                medium_term=MediumTermContext(summary=summary),
                 block=block,
                 degraded=degraded,
             )
