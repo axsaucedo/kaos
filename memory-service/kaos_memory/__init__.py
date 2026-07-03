@@ -8,9 +8,23 @@ run in either a ``local`` (embedded Chroma + SQLite) or ``external`` (pgvector +
 Postgres) storage mode.
 """
 
+from kaos_memory.app import (
+    BackgroundRunner,
+    ForgetRequest,
+    ForgetResponse,
+    MemoryService,
+    RecallRequest,
+    RecallResponse,
+    WriteRequest,
+    WriteResponse,
+    assemble_block,
+    build_service,
+    create_app,
+)
 from kaos_memory.config import (
     ExternalStorage,
     LocalStorage,
+    MemorySettings,
     ModelConfig,
     ShortTermTierConfig,
     StorageConfig,
@@ -31,6 +45,7 @@ __version__ = "0.4.8.dev0"
 __all__ = [
     "ExternalStorage",
     "LocalStorage",
+    "MemorySettings",
     "ModelConfig",
     "StorageConfig",
     "ShortTermTierConfig",
@@ -42,4 +57,15 @@ __all__ = [
     "ModelClient",
     "count_tokens",
     "scope_key",
+    "MemoryService",
+    "BackgroundRunner",
+    "RecallRequest",
+    "RecallResponse",
+    "WriteRequest",
+    "WriteResponse",
+    "ForgetRequest",
+    "ForgetResponse",
+    "assemble_block",
+    "build_service",
+    "create_app",
 ]

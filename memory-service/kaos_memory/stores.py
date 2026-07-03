@@ -438,6 +438,11 @@ class ShortTermStore:
     def close(self) -> None:
         self.db.close()
 
+    def ping(self) -> None:
+        """Probe short-term table reachability with a trivial query; raises if unreachable."""
+        with self._lock:
+            self.db.execute("SELECT 1").fetchone()
+
     # -- internals -------------------------------------------------------- #
 
     def _drop_stale_window(self, scope: Scope, key: str, overflow_ids: List[int]) -> None:

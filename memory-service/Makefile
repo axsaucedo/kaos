@@ -1,10 +1,12 @@
-.PHONY: help build docker-build test lint format clean
+.PHONY: help build docker-build run-local test lint format clean
 
-IMG ?= kaos-memory-service:latest
+IMG ?= axsauze/kaos-memory-service:latest
 
 help:
 	@echo "KAOS Memory Service build targets:"
 	@echo "  build               - Install dependencies using UV"
+	@echo "  docker-build        - Build the container image"
+	@echo "  run-local           - Run the service locally in local storage mode"
 	@echo "  test                - Run pytest tests"
 	@echo "  lint                - Run linting (black check + type check)"
 	@echo "  format              - Format code with black"
@@ -13,6 +15,18 @@ help:
 # Install dependencies
 build:
 	uv pip install -e .[dev]
+
+# Build the container image
+docker-build:
+	docker build -t $(IMG) .
+
+# Run the service locally in local (Chroma + SQLite) mode.
+# Override the model endpoint with KAOS_MEMORY_MODEL_BASE_URL for real extraction.
+run-local:
+	KAOS_MEMORY_STORAGE_TYPE=local \
+	KAOS_MEMORY_LOCAL_PATH=$(PWD)/tmp/memory-data \
+	KAOS_MEMORY_PORT=8080 \
+	python -m kaos_memory
 
 # Run tests
 test:
