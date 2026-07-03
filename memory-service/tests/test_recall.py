@@ -32,6 +32,31 @@ def _client(longterm, short_term):
 USER_SCOPE = {"level": "user", "principal": "alice"}
 
 
+def test_recall_surfaces_medium_term_digest(tmp_path):
+    from kaos_memory.stores import Scope, ScopeLevel
+
+    # A tiny budget with the rolling digest on folds evicted turns into the medium-term
+    # summary, which recall must surface distinctly from the verbatim short-term window.
+    short_term = ShortTermStore(
+        "local",
+        str(tmp_path / "w.db"),
+        ShortTermTierConfig(token_budget=4, rolling_summary=True),
+        lambda prior, turns: (prior + " " + " ".join(c for _, c in turns)).strip(),
+    )
+    s = Scope(level=ScopeLevel.USER, principal="alice")
+    for i in range(6):
+        short_term.add(s, [("user", f"message number {i}")])
+
+    resp = _client(_FakeLongTerm(), short_term).post(
+        "/v1/recall", json={"scope": USER_SCOPE, "query": "anything"}
+    )
+    body = resp.json()
+    assert body["medium_term"]["summary"] != ""
+    assert "## Conversation summary" in body["block"]
+    # The digest is separate from the verbatim window.
+    assert "summary" not in body["short_term"]
+
+
 def test_recall_returns_facts_and_short_term_context(tmp_path):
     short_term = _short_term(tmp_path)
     longterm = _FakeLongTerm(facts=[{"memory": "alice prefers dark mode", "score": 0.9}])
@@ -40,8 +65,8 @@ def test_recall_returns_facts_and_short_term_context(tmp_path):
     from kaos_memory.stores import Scope, ScopeLevel
 
     s = Scope(level=ScopeLevel.USER, principal="alice")
-    short_term.add(s, "user", "hello there")
-    short_term.add(s, "assistant", "hi alice")
+    short_term.add(s, [("user", "hello there")])
+    short_term.add(s, [("assistant", "hi alice")])
 
     resp = _client(longterm, short_term).post(
         "/v1/recall", json={"scope": USER_SCOPE, "query": "preferences"}
@@ -61,7 +86,7 @@ def test_recall_degrades_to_short_term_only_on_longterm_failure(tmp_path):
     from kaos_memory.stores import Scope, ScopeLevel
 
     short_term.add(
-        Scope(level=ScopeLevel.USER, principal="alice"), "user", "remember the budget is 5000"
+        Scope(level=ScopeLevel.USER, principal="alice"), [("user", "remember the budget is 5000")]
     )
     longterm = _FakeLongTerm(fail=True)
 

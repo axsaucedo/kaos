@@ -53,7 +53,7 @@ def test_overflow_summarizes_server_side(tmp_path):
     )
     scope = Scope(level=ScopeLevel.USER, principal="carol")
     for i in range(5):
-        short_term.add(scope, "user", f"message number {i} with several tokens here")
+        short_term.add(scope, [("user", f"message number {i} with several tokens here")])
 
     assert calls, "summarizer should have been invoked server-side on overflow"
     assert short_term.summary(scope) != ""
@@ -65,13 +65,13 @@ def test_forget_clears_both_tiers(tmp_path):
     )
     longterm = _RecordingLongTerm()
     scope = Scope(level=ScopeLevel.USER, principal="carol")
-    short_term.add(scope, "user", "something to remember")
-    assert short_term.recent(scope)
+    short_term.add(scope, [("user", "something to remember")])
+    assert short_term.active_window(scope)
 
     resp = _client(longterm, short_term).post("/v1/forget", json={"scope": USER_SCOPE})
     assert resp.status_code == 200
     assert resp.json()["forgotten"] is True
-    assert short_term.recent(scope) == []
+    assert short_term.active_window(scope) == []
     assert short_term.summary(scope) == ""
     assert len(longterm.deleted) == 1
 
@@ -85,7 +85,7 @@ def test_forget_soft_degrades_on_longterm_failure(tmp_path):
         "local", str(tmp_path / "w.db"), ShortTermTierConfig(), lambda p, f: p
     )
     scope = Scope(level=ScopeLevel.USER, principal="carol")
-    short_term.add(scope, "user", "x")
+    short_term.add(scope, [("user", "x")])
 
     resp = _client(_BrokenDelete(), short_term).post(
         "/v1/forget", json={"scope": USER_SCOPE, "failure_mode": "soft"}
@@ -93,4 +93,4 @@ def test_forget_soft_degrades_on_longterm_failure(tmp_path):
     assert resp.status_code == 200
     assert resp.json()["degraded"] is True
     # Short-term tier was still cleared despite the long-term failure.
-    assert short_term.recent(scope) == []
+    assert short_term.active_window(scope) == []

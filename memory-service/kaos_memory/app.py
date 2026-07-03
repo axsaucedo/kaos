@@ -19,6 +19,7 @@ is the outbound dependency, this module is the inbound edge.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -30,7 +31,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from opentelemetry import trace
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from kaos_memory.config import MemorySettings
 from kaos_memory.stores import (
@@ -63,24 +64,45 @@ class RecallRequest(BaseModel):
 FailureMode = str  # "soft" | "strict"
 
 
-class WriteRequest(BaseModel):
-    """Record a turn: add to the short-term tier synchronously, extract long-term async.
+class Turn(BaseModel):
+    """A single conversational turn: a role and its content."""
 
-    ``infer`` controls whether the engine extracts facts (vs storing raw). ``failure_mode``
-    selects fail-soft (swallow long-term scheduling errors, return degraded) or strict
-    (surface failures as an error).
+    role: str
+    content: str
+
+
+class WriteRequest(BaseModel):
+    """Record one or more turns: append them to the short-term window synchronously; long-term
+    extraction runs later, per fold, over the batch the appends evict.
+
+    Turns are supplied either as a ``turns`` list (the batch shape the runtime uses to persist
+    a whole interaction in one call) or as a single ``role``/``content`` pair (normalised into a
+    one-element batch). ``infer`` controls whether the engine extracts facts (vs storing raw).
+    ``failure_mode`` selects fail-soft (swallow long-term scheduling errors, return degraded) or
+    strict (surface failures as an error); when omitted it inherits the service default.
     """
 
     scope: Scope
-    role: str
-    content: str
+    turns: List[Turn] = Field(default_factory=list)
+    role: Optional[str] = None
+    content: Optional[str] = None
     infer: bool = True
-    failure_mode: FailureMode = "soft"
+    failure_mode: Optional[FailureMode] = None
+
+    @model_validator(mode="after")
+    def _normalise_turns(self) -> "WriteRequest":
+        if self.role is not None and self.content is not None:
+            self.turns = [Turn(role=self.role, content=self.content), *self.turns]
+        if not self.turns:
+            raise ValueError("write requires either turns[] or a role/content pair")
+        return self
 
 
 class WriteResponse(BaseModel):
-    """Acknowledges a write. ``scheduled`` indicates long-term extraction was queued;
-    ``degraded`` is set when a fail-soft request swallowed a scheduling error."""
+    """Acknowledges a write. ``scheduled`` indicates the append evicted a batch and long-term
+    extraction of that batch was queued (writes that only buffer the turn return
+    ``scheduled=False``); ``degraded`` is set when a fail-soft request swallowed a
+    scheduling error."""
 
     accepted: bool = True
     scheduled: bool = False
@@ -91,7 +113,7 @@ class ForgetRequest(BaseModel):
     """Erase a scope: clear its short-term tier and delete its long-term memories."""
 
     scope: Scope
-    failure_mode: FailureMode = "soft"
+    failure_mode: Optional[FailureMode] = None
 
 
 class ForgetResponse(BaseModel):
@@ -103,23 +125,31 @@ class ForgetResponse(BaseModel):
 
 
 class ShortTermContext(BaseModel):
-    """The short-term tier slice of a recall response."""
+    """The short-term tier slice of a recall response: the verbatim active window."""
 
-    summary: str = ""
     recent: List[Tuple[str, str]] = Field(default_factory=list)
 
 
+class MediumTermContext(BaseModel):
+    """The medium-term tier slice of a recall response: the rolling conversation digest."""
+
+    summary: str = ""
+
+
 class RecallResponse(BaseModel):
-    """Assembled recall context: native long-term facts, short-term context, and a block.
+    """Assembled recall context: native long-term facts, the medium-term digest, the
+    short-term window, and a rendered block.
 
     ``facts`` are Mem0's native result dicts (memory text, score, id, metadata),
-    passed through unmodified. ``block`` is the deterministic structured text the
-    runtime injects into the system context. ``degraded`` is set when long-term
-    recall failed and only short-term context is present.
+    passed through unmodified. ``medium_term`` carries the rolling digest and ``short_term``
+    the verbatim recent turns. ``block`` is the deterministic structured text the runtime
+    injects into the system context. ``degraded`` is set when long-term recall failed and
+    only the conversational tiers are present.
     """
 
     facts: List[Dict[str, Any]] = Field(default_factory=list)
     short_term: ShortTermContext = Field(default_factory=ShortTermContext)
+    medium_term: MediumTermContext = Field(default_factory=MediumTermContext)
     block: str = ""
     degraded: bool = False
 
@@ -249,6 +279,12 @@ class MemoryService:
     longterm: LongTermStore
     short_term: ShortTermStore
     scheduler: Scheduler = field(default=_thread_scheduler)
+    default_failure_mode: FailureMode = "soft"
+
+    def _resolve_failure_mode(self, requested: Optional[FailureMode]) -> FailureMode:
+        """Layer the failure mode: an explicit per-request value wins, otherwise the
+        service default (itself sourced from the store configuration, defaulting to soft)."""
+        return requested if requested is not None else self.default_failure_mode
 
     def readiness(self) -> dict:
         """Probe both stores and report per-store reachability.
@@ -270,7 +306,7 @@ class MemoryService:
 
     def recall(self, req: RecallRequest) -> RecallResponse:
         """Assemble recall context for a scope. Fail-soft: long-term errors degrade
-        to short-term-only context rather than failing the request."""
+        to conversational-tier-only context rather than failing the request."""
         with tracer.start_as_current_span("kaos.memory.recall") as span:
             span.set_attribute("kaos.memory.scope_level", req.scope.level.value)
             facts: list = []
@@ -283,43 +319,62 @@ class MemoryService:
             summary, recent = "", []
             if req.include_short_term:
                 summary = self.short_term.summary(req.scope)
-                recent = self.short_term.recent(req.scope, token_budget=req.short_term_token_budget)
+                recent = self.short_term.active_window(
+                    req.scope, token_budget=req.short_term_token_budget
+                )
 
             span.set_attribute("kaos.memory.degraded", degraded)
             span.set_attribute("kaos.memory.fact_count", len(facts))
             block = assemble_block(facts, summary, recent)
             return RecallResponse(
                 facts=facts,
-                short_term=ShortTermContext(summary=summary, recent=recent),
+                short_term=ShortTermContext(recent=recent),
+                medium_term=MediumTermContext(summary=summary),
                 block=block,
                 degraded=degraded,
             )
 
     def write(self, req: WriteRequest) -> WriteResponse:
-        """Add a turn to the short-term tier synchronously, then schedule long-term
-        extraction off the response path so the call returns immediately.
+        """Append one or more turns to the short-term window synchronously; when the appends
+        evict a batch, schedule long-term extraction of *that evicted batch* off the response
+        path.
 
-        The synchronous short-term add is the cheap durable path. ``strict`` surfaces a
-        failure as an exception (the handler maps it to an error); ``soft`` returns a
-        degraded acknowledgement instead of failing the request.
+        A single call may carry a batch of turns so the runtime persists a whole interaction
+        in one request. Extraction is not per-turn: new turns enter the verbatim window, and
+        when the window crosses its compaction trigger the oldest turns are evicted and returned.
+        The evicted turns across the batch are collected and long-term fact extraction consumes
+        them once (and the medium-term digest folds the same rows independently inside the
+        store), so the model runs once per fold over a coherent batch rather than once per
+        message. The synchronous append is the cheap durable path; ``strict`` surfaces a
+        failure as an exception (the handler maps it to an error), ``soft`` returns a degraded
+        acknowledgement instead of failing the request.
         """
         with tracer.start_as_current_span("kaos.memory.write") as span:
             span.set_attribute("kaos.memory.scope_level", req.scope.level.value)
-            strict = req.failure_mode == "strict"
+            strict = self._resolve_failure_mode(req.failure_mode) == "strict"
 
             try:
-                self.short_term.add(req.scope, req.role, req.content)
+                evicted = self.short_term.add(
+                    req.scope, [(turn.role, turn.content) for turn in req.turns]
+                )
             except Exception:
                 span.set_attribute("kaos.memory.degraded", True)
                 if strict:
                     raise
                 return WriteResponse(accepted=True, scheduled=False, degraded=True)
 
+            span.set_attribute("kaos.memory.turns", len(req.turns))
+            span.set_attribute("kaos.memory.evicted", len(evicted))
+            if not evicted:
+                # The turns are buffered in the window; nothing has left it yet, so there is
+                # no batch to consolidate. Extraction runs later, when a fold evicts.
+                return WriteResponse(accepted=True, scheduled=False, degraded=False)
+
+            messages = [{"role": role, "content": content} for role, content in evicted]
+
             def _extract() -> None:
                 with tracer.start_as_current_span("kaos.memory.consolidate"):
-                    self.longterm.add(
-                        req.scope, [{"role": req.role, "content": req.content}], infer=req.infer
-                    )
+                    self.longterm.add(req.scope, messages, infer=req.infer)
 
             try:
                 self.scheduler(_extract)
@@ -343,7 +398,7 @@ class MemoryService:
                 self.longterm.delete_scope(req.scope)
             except Exception:
                 span.set_attribute("kaos.memory.degraded", True)
-                if req.failure_mode == "strict":
+                if self._resolve_failure_mode(req.failure_mode) == "strict":
                     raise
                 return ForgetResponse(forgotten=True, degraded=True)
             return ForgetResponse(forgotten=True, degraded=False)
@@ -354,8 +409,16 @@ class MemoryService:
 # --------------------------------------------------------------------------- #
 
 
-def create_app(service: MemoryService) -> FastAPI:
-    """Build the FastAPI app bound to a ``MemoryService``."""
+def create_app(service: MemoryService, request_concurrency: int = 8) -> FastAPI:
+    """Build the FastAPI app bound to a ``MemoryService``.
+
+    The request handlers are async, but the store and Mem0 calls they make are synchronous
+    (Mem0's client is sync and its async surface only wraps threads). Rather than block the
+    event loop or lean on the server's implicit threadpool, blocking work is dispatched to a
+    KAOS-owned bounded executor — the explicit Mem0 isolation boundary — sized by
+    ``request_concurrency``. Native async database access is a later optimisation; here the
+    synchronous short-term path is cheap and runs behind the same boundary.
+    """
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -364,32 +427,39 @@ def create_app(service: MemoryService) -> FastAPI:
         drain = getattr(app.state.memory.scheduler, "shutdown", None)
         if callable(drain):
             drain(wait=True)
+        app.state.request_pool.shutdown(wait=True)
 
     app = FastAPI(title="KAOS Memory Service", lifespan=lifespan)
     app.state.memory = service
+    app.state.request_pool = ThreadPoolExecutor(max_workers=request_concurrency)
+
+    async def _offload(fn: Callable[[], Any]) -> Any:
+        """Run a blocking store/Mem0 call on the bounded executor, off the event loop."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(app.state.request_pool, fn)
 
     @app.get("/healthz")
-    def healthz() -> dict:
+    async def healthz() -> dict:
         """Liveness: the process is up and serving. Independent of store state."""
         return {"status": "ok"}
 
     @app.get("/readyz")
-    def readyz() -> JSONResponse:
+    async def readyz() -> JSONResponse:
         """Readiness: both stores are reachable. 503 when any store probe fails."""
-        result = app.state.memory.readiness()
+        result = await _offload(app.state.memory.readiness)
         code = 200 if result["ready"] else 503
         return JSONResponse(result, status_code=code)
 
     @app.post("/v1/recall", response_model=RecallResponse)
-    def recall(req: RecallRequest) -> RecallResponse:
+    async def recall(req: RecallRequest) -> RecallResponse:
         """Synchronous recall: assemble long-term facts and short-term context for a scope."""
-        return app.state.memory.recall(req)
+        return await _offload(lambda: app.state.memory.recall(req))
 
     @app.post("/v1/write", response_model=WriteResponse)
-    def write(req: WriteRequest) -> JSONResponse:
-        """Record a turn: durable short-term add now, long-term extraction scheduled."""
+    async def write(req: WriteRequest) -> JSONResponse:
+        """Record turns: durable short-term append now, long-term extraction scheduled on fold."""
         try:
-            result = app.state.memory.write(req)
+            result = await _offload(lambda: app.state.memory.write(req))
         except Exception as exc:
             return JSONResponse(
                 {"accepted": False, "error": f"{type(exc).__name__}: {exc}"}, status_code=500
@@ -397,10 +467,10 @@ def create_app(service: MemoryService) -> FastAPI:
         return JSONResponse(result.model_dump(), status_code=202 if result.scheduled else 200)
 
     @app.post("/v1/forget", response_model=ForgetResponse)
-    def forget(req: ForgetRequest) -> JSONResponse:
+    async def forget(req: ForgetRequest) -> JSONResponse:
         """Erase a scope across both tiers."""
         try:
-            result = app.state.memory.forget(req)
+            result = await _offload(lambda: app.state.memory.forget(req))
         except Exception as exc:
             return JSONResponse(
                 {"forgotten": False, "error": f"{type(exc).__name__}: {exc}"}, status_code=500
@@ -438,13 +508,18 @@ def build_service(settings: MemorySettings) -> MemoryService:
         summarizer,
         scheduler=runner,
     )
-    return MemoryService(longterm=longterm, short_term=short_term, scheduler=runner)
+    return MemoryService(
+        longterm=longterm,
+        short_term=short_term,
+        scheduler=runner,
+        default_failure_mode=settings.default_failure_mode,
+    )
 
 
 def main() -> None:
     """Entrypoint: build the service from the environment and serve it with uvicorn."""
     settings = MemorySettings()
-    app = create_app(build_service(settings))
+    app = create_app(build_service(settings), request_concurrency=settings.request_concurrency)
     uvicorn.run(app, host=settings.host, port=settings.port)
 
 
