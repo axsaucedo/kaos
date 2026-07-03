@@ -508,7 +508,7 @@ def build_service(settings: MemorySettings) -> MemoryService:
 def main() -> None:
     """Entrypoint: build the service from the environment and serve it with uvicorn."""
     settings = MemorySettings()
-    app = create_app(build_service(settings))
+    app = create_app(build_service(settings), request_concurrency=settings.request_concurrency)
     uvicorn.run(app, host=settings.host, port=settings.port)
 
 

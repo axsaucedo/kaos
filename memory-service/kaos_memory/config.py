@@ -140,9 +140,14 @@ class MemorySettings(BaseSettings):
     token_budget: int = 4096
     rolling_summary: bool = False
     hard_event_cap: int = 2000
+    high_water: int = 0
+    low_water: int = 0
+    digest_retention: int = 20
 
     extraction_concurrency: int = 4
     extraction_max_retries: int = 2
+
+    request_concurrency: int = 8
 
     host: str = "0.0.0.0"
     port: int = 8080
@@ -179,6 +184,9 @@ class MemorySettings(BaseSettings):
             token_budget=self.token_budget,
             rolling_summary=self.rolling_summary,
             hard_event_cap=self.hard_event_cap,
+            high_water=self.high_water,
+            low_water=self.low_water,
+            digest_retention=self.digest_retention,
         )
 
     def short_term_target(self) -> str:
