@@ -140,9 +140,11 @@ class MemorySettings(BaseSettings):
     token_budget: int = 4096
     rolling_summary: bool = False
     hard_event_cap: int = 2000
-    high_water: int = 0
-    low_water: int = 0
+    compaction_trigger: int = 0
+    compaction_target: int = 0
     digest_retention: int = 20
+
+    default_failure_mode: str = "soft"
 
     extraction_concurrency: int = 4
     extraction_max_retries: int = 2
@@ -184,8 +186,8 @@ class MemorySettings(BaseSettings):
             token_budget=self.token_budget,
             rolling_summary=self.rolling_summary,
             hard_event_cap=self.hard_event_cap,
-            high_water=self.high_water,
-            low_water=self.low_water,
+            compaction_trigger=self.compaction_trigger,
+            compaction_target=self.compaction_target,
             digest_retention=self.digest_retention,
         )
 

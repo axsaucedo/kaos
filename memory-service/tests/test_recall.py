@@ -45,7 +45,7 @@ def test_recall_surfaces_medium_term_digest(tmp_path):
     )
     s = Scope(level=ScopeLevel.USER, principal="alice")
     for i in range(6):
-        short_term.add(s, "user", f"message number {i}")
+        short_term.add(s, [("user", f"message number {i}")])
 
     resp = _client(_FakeLongTerm(), short_term).post(
         "/v1/recall", json={"scope": USER_SCOPE, "query": "anything"}
@@ -65,8 +65,8 @@ def test_recall_returns_facts_and_short_term_context(tmp_path):
     from kaos_memory.stores import Scope, ScopeLevel
 
     s = Scope(level=ScopeLevel.USER, principal="alice")
-    short_term.add(s, "user", "hello there")
-    short_term.add(s, "assistant", "hi alice")
+    short_term.add(s, [("user", "hello there")])
+    short_term.add(s, [("assistant", "hi alice")])
 
     resp = _client(longterm, short_term).post(
         "/v1/recall", json={"scope": USER_SCOPE, "query": "preferences"}
@@ -86,7 +86,7 @@ def test_recall_degrades_to_short_term_only_on_longterm_failure(tmp_path):
     from kaos_memory.stores import Scope, ScopeLevel
 
     short_term.add(
-        Scope(level=ScopeLevel.USER, principal="alice"), "user", "remember the budget is 5000"
+        Scope(level=ScopeLevel.USER, principal="alice"), [("user", "remember the budget is 5000")]
     )
     longterm = _FakeLongTerm(fail=True)
 

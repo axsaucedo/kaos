@@ -79,7 +79,7 @@ class WriteRequest(BaseModel):
     a whole interaction in one call) or as a single ``role``/``content`` pair (normalised into a
     one-element batch). ``infer`` controls whether the engine extracts facts (vs storing raw).
     ``failure_mode`` selects fail-soft (swallow long-term scheduling errors, return degraded) or
-    strict (surface failures as an error).
+    strict (surface failures as an error); when omitted it inherits the service default.
     """
 
     scope: Scope
@@ -87,7 +87,7 @@ class WriteRequest(BaseModel):
     role: Optional[str] = None
     content: Optional[str] = None
     infer: bool = True
-    failure_mode: FailureMode = "soft"
+    failure_mode: Optional[FailureMode] = None
 
     @model_validator(mode="after")
     def _normalise_turns(self) -> "WriteRequest":
@@ -113,7 +113,7 @@ class ForgetRequest(BaseModel):
     """Erase a scope: clear its short-term tier and delete its long-term memories."""
 
     scope: Scope
-    failure_mode: FailureMode = "soft"
+    failure_mode: Optional[FailureMode] = None
 
 
 class ForgetResponse(BaseModel):
@@ -279,6 +279,12 @@ class MemoryService:
     longterm: LongTermStore
     short_term: ShortTermStore
     scheduler: Scheduler = field(default=_thread_scheduler)
+    default_failure_mode: FailureMode = "soft"
+
+    def _resolve_failure_mode(self, requested: Optional[FailureMode]) -> FailureMode:
+        """Layer the failure mode: an explicit per-request value wins, otherwise the
+        service default (itself sourced from the store configuration, defaulting to soft)."""
+        return requested if requested is not None else self.default_failure_mode
 
     def readiness(self) -> dict:
         """Probe both stores and report per-store reachability.
@@ -335,8 +341,8 @@ class MemoryService:
 
         A single call may carry a batch of turns so the runtime persists a whole interaction
         in one request. Extraction is not per-turn: new turns enter the verbatim window, and
-        when the window crosses its water mark the oldest turns are evicted and returned. The
-        evicted turns across the batch are collected and long-term fact extraction consumes
+        when the window crosses its compaction trigger the oldest turns are evicted and returned.
+        The evicted turns across the batch are collected and long-term fact extraction consumes
         them once (and the medium-term digest folds the same rows independently inside the
         store), so the model runs once per fold over a coherent batch rather than once per
         message. The synchronous append is the cheap durable path; ``strict`` surfaces a
@@ -345,12 +351,12 @@ class MemoryService:
         """
         with tracer.start_as_current_span("kaos.memory.write") as span:
             span.set_attribute("kaos.memory.scope_level", req.scope.level.value)
-            strict = req.failure_mode == "strict"
+            strict = self._resolve_failure_mode(req.failure_mode) == "strict"
 
             try:
-                evicted: List[Tuple[str, str]] = []
-                for turn in req.turns:
-                    evicted.extend(self.short_term.add(req.scope, turn.role, turn.content))
+                evicted = self.short_term.add(
+                    req.scope, [(turn.role, turn.content) for turn in req.turns]
+                )
             except Exception:
                 span.set_attribute("kaos.memory.degraded", True)
                 if strict:
@@ -392,7 +398,7 @@ class MemoryService:
                 self.longterm.delete_scope(req.scope)
             except Exception:
                 span.set_attribute("kaos.memory.degraded", True)
-                if req.failure_mode == "strict":
+                if self._resolve_failure_mode(req.failure_mode) == "strict":
                     raise
                 return ForgetResponse(forgotten=True, degraded=True)
             return ForgetResponse(forgotten=True, degraded=False)
@@ -502,7 +508,12 @@ def build_service(settings: MemorySettings) -> MemoryService:
         summarizer,
         scheduler=runner,
     )
-    return MemoryService(longterm=longterm, short_term=short_term, scheduler=runner)
+    return MemoryService(
+        longterm=longterm,
+        short_term=short_term,
+        scheduler=runner,
+        default_failure_mode=settings.default_failure_mode,
+    )
 
 
 def main() -> None:
