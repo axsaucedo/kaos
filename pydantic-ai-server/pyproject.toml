@@ -7,6 +7,7 @@ dependencies = [
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
     "pydantic-ai>=2.0.0,<3.0.0",
+    "kaos-memory[pydantic-ai]>=0.4.8.dev0",
     "fastapi>=0.104.0",
     "uvicorn>=0.24.0",
     "httpx>=0.25.0",
@@ -43,6 +44,13 @@ dev = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+# Resolve the shared memory library from the sibling checkout for local dev, CI
+# and the container build (WORKDIR /app -> ../kaos-memory == /kaos-memory). The
+# published wheel's metadata still depends on kaos-memory from PyPI; hatchling
+# ignores this uv-only source table at build time.
+[tool.uv.sources]
+kaos-memory = { path = "../kaos-memory", editable = true }
 
 [tool.hatch.build.targets.wheel]
 packages = ["pais", "aib"]

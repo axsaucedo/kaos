@@ -6,15 +6,27 @@ import logging
 import httpx
 from abc import ABC, abstractmethod
 from collections import deque
-from enum import Enum
 from inspect import isawaitable
 from typing import Dict, Any, List, Optional, Tuple, Union, Deque, Mapping
 from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
 
-from opentelemetry import trace as trace_api
+from kaos_memory.contract import Scope, ScopeLevel
+from kaos_memory.client import (
+    MemoryServiceClient,
+    RecalledMemory,
+    ShortTermRecall,
+    MediumTermRecall,
+)
+from kaos_memory.pydantic_ai import (
+    scope_from_deps,
+    pydantic_message_to_turns,
+    reconstruct_message_history,
+)
 
-from pais.telemetry import SERVICE_NAME
+# Back-compat alias: the runtime historically named the scope MemoryScope; it is
+# the shared contract Scope, re-exported so existing imports keep working.
+MemoryScope = Scope
 
 logger = logging.getLogger(__name__)
 
@@ -69,228 +81,6 @@ class SessionMemory:
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
         }
-
-
-class ScopeLevel(str, Enum):
-    """The memory scope a recall/write/forget operation targets.
-
-    Mirrors the central memory service's scope levels. Each level binds to one
-    owner identity the service pre-filters on, so an operation only ever touches
-    the memory it is entitled to:
-
-    - ``PRIVATE``: only this agent (bound to the agent's stable client id).
-    - ``USER``: every agent acting for one principal (bound to the principal).
-    - ``SHARED``: every agent on the store (a reserved store-wide owner).
-    - ``SESSION``: a single run/conversation (bound to the session id).
-    """
-
-    PRIVATE = "private"
-    USER = "user"
-    SHARED = "shared"
-    SESSION = "session"
-
-
-@dataclass
-class MemoryScope:
-    """Identifies whose memory an operation touches.
-
-    The scope is always derived server-side from the authenticated request and
-    the agent's verifiable identity; it is never read from model- or tool-supplied
-    arguments. Only the field required by ``level`` must be present — the rest may
-    be unset. The translation to the service's owner identifiers lives in the
-    service client, not here.
-    """
-
-    level: ScopeLevel
-    principal: Optional[str] = None
-    agent_client_id: Optional[str] = None
-    session_id: Optional[str] = None
-
-    def to_payload(self) -> Dict[str, Any]:
-        """Serialize to the service's scope JSON shape."""
-        return {
-            "level": self.level.value,
-            "principal": self.principal,
-            "agent_client_id": self.agent_client_id,
-            "session_id": self.session_id,
-        }
-
-
-@dataclass
-class ShortTermRecall:
-    """Short-term tier slice of a recall: the verbatim active window, oldest first."""
-
-    recent: List[tuple] = field(default_factory=list)
-
-
-@dataclass
-class MediumTermRecall:
-    """Medium-term tier slice of a recall: the rolling conversation digest."""
-
-    summary: str = ""
-
-
-@dataclass
-class RecalledMemory:
-    """Assembled recall result across the three memory tiers, mirroring the service.
-
-    ``facts`` are the long-term engine's native result records (text, score, id,
-    metadata) passed through unmodified. ``short_term`` is the verbatim active window
-    and ``medium_term`` is the rolling digest — the two conversational tiers the
-    service returns as distinct blocks. ``block`` is the deterministic, ready-to-inject
-    context block. ``degraded`` is set when the long-term tier was unavailable and only
-    the conversational tiers are present — recall is best-effort and never aborts a turn.
-
-    ``recent`` and ``summary`` are convenience accessors onto the short-term and
-    medium-term slices so existing call sites read a single field per tier.
-    """
-
-    facts: List[Dict[str, Any]] = field(default_factory=list)
-    short_term: ShortTermRecall = field(default_factory=ShortTermRecall)
-    medium_term: MediumTermRecall = field(default_factory=MediumTermRecall)
-    block: str = ""
-    degraded: bool = False
-
-    @property
-    def recent(self) -> List[tuple]:
-        return self.short_term.recent
-
-    @property
-    def summary(self) -> str:
-        return self.medium_term.summary
-
-    @property
-    def is_empty(self) -> bool:
-        return not self.facts and not self.medium_term.summary and not self.short_term.recent
-
-
-def scope_from_deps(
-    deps: Any,
-    *,
-    level: Union["ScopeLevel", str],
-    agent_identity: Optional[str] = None,
-) -> "MemoryScope":
-    """Build the request :class:`MemoryScope` from server-derived identity.
-
-    The scope is derived only from the authenticated request context (principal,
-    session) carried on ``deps`` and the agent's verifiable identity (its minted
-    actor identity, or the operator-provided ``agent_identity``). It deliberately
-    accepts no scope argument from the model or a tool, so a caller can never
-    widen or redirect the scope it is entitled to; the ``level`` is fixed by the
-    agent's configuration, not by request content.
-
-    Fails closed on ambiguous ownership: a ``PRIVATE`` scope must resolve to a
-    concrete, agent-unique owner (the qualified ``kaos://agent/{namespace}/{name}``
-    identity, threaded via ``agent_identity`` or the request actor). Without one,
-    every agent lacking an identity would collapse onto the same empty owner and
-    silently share one private partition, so this raises rather than cross-contaminate.
-    """
-    resolved_level = level if isinstance(level, ScopeLevel) else ScopeLevel(str(level))
-    security_context = getattr(deps, "security_context", None) or {}
-    agent_client_id = agent_identity or security_context.get("actor") or None
-    if resolved_level is ScopeLevel.PRIVATE and not agent_client_id:
-        raise ValueError(
-            "PRIVATE memory scope requires a stable agent identity; refusing to "
-            "operate on an ambiguously-owned private partition"
-        )
-    return MemoryScope(
-        level=resolved_level,
-        principal=security_context.get("principal") or None,
-        agent_client_id=agent_client_id,
-        session_id=getattr(deps, "session_id", None) or None,
-    )
-
-
-def pydantic_message_to_turns(msg: Any) -> List[tuple]:
-    """Render a Pydantic AI message into short-term tier turns, preserving fidelity.
-
-    Returns a list of ``(role, content)`` turns capturing every replay-relevant
-    part — user prompts, assistant text, tool calls, tool returns, and delegation
-    requests/responses — as readable text. The short-term tier stores turns as text,
-    so a tool call is recorded as a faithful description (the model sees that it
-    already invoked the tool) rather than as a raw tool-call part that could be
-    replayed without its matching return. Returns an empty list for parts with no
-    replay value.
-    """
-    from pydantic_ai.messages import (
-        ModelRequest,
-        ModelResponse as PydanticModelResponse,
-        TextPart,
-        ToolCallPart,
-        ToolReturnPart,
-        UserPromptPart,
-    )
-
-    turns: List[tuple] = []
-
-    def _stringify(value: Any) -> str:
-        if isinstance(value, str):
-            return value
-        try:
-            return json.dumps(value, default=str)
-        except (TypeError, ValueError):
-            return str(value)
-
-    if isinstance(msg, PydanticModelResponse):
-        for part in msg.parts:
-            if isinstance(part, TextPart):
-                if part.content:
-                    turns.append(("assistant", part.content))
-            elif isinstance(part, ToolCallPart):
-                is_deleg = part.tool_name.startswith("delegate_to_")
-                verb = "delegated to" if is_deleg else "called tool"
-                turns.append(("assistant", f"[{verb} {part.tool_name}({_stringify(part.args)})]"))
-    elif isinstance(msg, ModelRequest):
-        for part in msg.parts:
-            if isinstance(part, UserPromptPart):
-                content = part.content
-                turns.append(("user", content if isinstance(content, str) else _stringify(content)))
-            elif isinstance(part, ToolReturnPart):
-                is_deleg = part.tool_name.startswith("delegate_to_")
-                label = "delegation result" if is_deleg else "tool result"
-                turns.append(("tool", f"[{label} {part.tool_name}: {_stringify(part.content)}]"))
-    return turns
-
-
-def reconstruct_message_history(
-    recent: List[tuple],
-    summary: str = "",
-    context_limit: Optional[int] = None,
-) -> Optional[list]:
-    """Rebuild Pydantic AI ``message_history`` from short-term tier turns.
-
-    ``recent`` is the short-term tier's ``(role, content)`` turns, oldest first.
-    ``summary`` is the rolling summary of older turns that overflowed the budget;
-    it is prepended as a leading context note so overflow is represented by
-    summarization rather than truncation. ``context_limit`` bounds how many recent
-    turns are replayed verbatim (the summary still carries the rest). Returns
-    ``None`` when there is nothing to replay.
-    """
-    from pydantic_ai.messages import (
-        ModelRequest,
-        ModelResponse as PydanticModelResponse,
-        TextPart,
-        UserPromptPart,
-    )
-
-    turns = list(recent)
-    if context_limit and len(turns) > context_limit:
-        turns = turns[-context_limit:]
-
-    history: list = []
-    if summary:
-        history.append(
-            ModelRequest(
-                parts=[UserPromptPart(content=f"Summary of earlier conversation:\n{summary}")]
-            )
-        )
-    for role, content in turns:
-        text = content if isinstance(content, str) else str(content)
-        if role == "user":
-            history.append(ModelRequest(parts=[UserPromptPart(content=text)]))
-        else:
-            history.append(PydanticModelResponse(parts=[TextPart(content=text)]))
-    return history or None
 
 
 class Memory(ABC):
@@ -710,13 +500,10 @@ class RemoteMemory(Memory):
         recall_timeout: float = 5.0,
         client: Optional[httpx.AsyncClient] = None,
     ):
-        if not endpoint:
-            raise ValueError("RemoteMemory requires a service endpoint")
-        self.endpoint = endpoint.rstrip("/")
-        self._timeout = timeout
-        self._recall_timeout = recall_timeout
-        self._client = client or httpx.AsyncClient(timeout=timeout)
-        logger.info(f"RemoteMemory initialized -> {self.endpoint}")
+        self._service = MemoryServiceClient(
+            endpoint, timeout=timeout, recall_timeout=recall_timeout, client=client
+        )
+        self.endpoint = self._service.endpoint
 
     async def recall(
         self,
@@ -727,42 +514,13 @@ class RemoteMemory(Memory):
         include_short_term: bool = True,
         token_budget: Optional[int] = None,
     ) -> "RecalledMemory":
-        tracer = trace_api.get_tracer(SERVICE_NAME)
-        with tracer.start_as_current_span(
-            "kaos.memory.recall",
-            attributes={"kaos.memory.scope_level": scope.level.value},
-        ) as span:
-            payload: Dict[str, Any] = {
-                "scope": scope.to_payload(),
-                "query": query,
-                "top_k": top_k,
-                "include_short_term": include_short_term,
-            }
-            if token_budget is not None:
-                payload["short_term_token_budget"] = token_budget
-            try:
-                resp = await self._client.post(
-                    f"{self.endpoint}/v1/recall", json=payload, timeout=self._recall_timeout
-                )
-                resp.raise_for_status()
-                data = resp.json()
-            except Exception as e:
-                logger.warning(f"Memory recall failed, degrading to empty context: {e}")
-                span.set_attribute("kaos.memory.degraded", True)
-                return RecalledMemory(degraded=True)
-
-            short_term = data.get("short_term") or {}
-            medium_term = data.get("medium_term") or {}
-            recalled = RecalledMemory(
-                facts=data.get("facts", []),
-                short_term=ShortTermRecall(recent=[tuple(r) for r in short_term.get("recent", [])]),
-                medium_term=MediumTermRecall(summary=medium_term.get("summary", "")),
-                block=data.get("block", ""),
-                degraded=bool(data.get("degraded", False)),
-            )
-            span.set_attribute("kaos.memory.degraded", recalled.degraded)
-            span.set_attribute("kaos.memory.fact_count", len(recalled.facts))
-            return recalled
+        return await self._service.recall(
+            scope,
+            query,
+            top_k=top_k,
+            include_short_term=include_short_term,
+            token_budget=token_budget,
+        )
 
     async def write(
         self,
@@ -772,66 +530,14 @@ class RemoteMemory(Memory):
         infer: bool = True,
         failure_mode: Optional[str] = None,
     ) -> bool:
-        tracer = trace_api.get_tracer(SERVICE_NAME)
-        with tracer.start_as_current_span(
-            "kaos.memory.write",
-            attributes={"kaos.memory.scope_level": scope.level.value},
-        ) as span:
-            payload: Dict[str, Any] = {
-                "scope": scope.to_payload(),
-                "turns": [{"role": role, "content": content} for role, content in turns],
-                "infer": infer,
-            }
-            if failure_mode:
-                payload["failure_mode"] = failure_mode
-            span.set_attribute("kaos.memory.turns", len(turns))
-            try:
-                resp = await self._client.post(
-                    f"{self.endpoint}/v1/write", json=payload, timeout=self._timeout
-                )
-                resp.raise_for_status()
-                data = resp.json()
-            except Exception as e:
-                if failure_mode == "strict":
-                    raise
-                logger.warning(f"Memory write failed (fail-soft): {e}")
-                span.set_attribute("kaos.memory.degraded", True)
-                return False
-            span.set_attribute("kaos.memory.scheduled", bool(data.get("scheduled", False)))
-            span.set_attribute("kaos.memory.degraded", bool(data.get("degraded", False)))
-            return bool(data.get("accepted", True))
+        return await self._service.write(scope, turns, infer=infer, failure_mode=failure_mode)
 
     async def forget(self, scope: "MemoryScope", *, failure_mode: Optional[str] = None) -> bool:
-        tracer = trace_api.get_tracer(SERVICE_NAME)
-        with tracer.start_as_current_span(
-            "kaos.memory.forget",
-            attributes={"kaos.memory.scope_level": scope.level.value},
-        ) as span:
-            payload: Dict[str, Any] = {"scope": scope.to_payload()}
-            if failure_mode:
-                payload["failure_mode"] = failure_mode
-            try:
-                resp = await self._client.post(
-                    f"{self.endpoint}/v1/forget", json=payload, timeout=self._timeout
-                )
-                resp.raise_for_status()
-                data = resp.json()
-            except Exception as e:
-                if failure_mode == "strict":
-                    raise
-                logger.warning(f"Memory forget failed (fail-soft): {e}")
-                span.set_attribute("kaos.memory.degraded", True)
-                return False
-            span.set_attribute("kaos.memory.degraded", bool(data.get("degraded", False)))
-            return bool(data.get("forgotten", True))
+        return await self._service.forget(scope, failure_mode=failure_mode)
 
     async def close(self) -> None:
-        try:
-            await self._client.aclose()
-        except Exception as e:
-            logger.debug(f"RemoteMemory client close failed: {e}")
+        await self._service.close()
 
-    # --- Legacy short-term tier methods ---------------------------------------
     # The short-term tier lives in the service and is returned inside recall, so
     # these satisfy the interface without holding local session state.
 

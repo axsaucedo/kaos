@@ -40,7 +40,7 @@ jobs:
         run: |
           uv venv
           source .venv/bin/activate
-          uv pip install -e .[service,dev]
+          uv pip install -e ../kaos-memory[pydantic-ai] -e .[dev]
 
       - name: Check formatting with black
         working-directory: pydantic-ai-server
@@ -72,7 +72,7 @@ jobs:
         run: |
           uv venv
           source .venv/bin/activate
-          uv pip install -e .[service,dev]
+          uv pip install -e ../kaos-memory[pydantic-ai] -e .[dev]
           uv run pytest tests/ -v --cov=. --cov-report=xml
 
       - name: Upload coverage

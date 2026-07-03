@@ -139,6 +139,8 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: ./pydantic-ai-server
+          build-contexts: |
+            kaos-memory=./kaos-memory
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=${{ env.AGENT_IMAGE }},push-by-digest=true,name-canonical=true,push=true

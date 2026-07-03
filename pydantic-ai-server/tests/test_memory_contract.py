@@ -28,7 +28,7 @@ class TestMemoryScope:
             agent_client_id="agent-1",
             session_id="sess-1",
         )
-        payload = scope.to_payload()
+        payload = scope.model_dump(mode="json")
         assert payload == {
             "level": "user",
             "principal": "alice",
@@ -45,7 +45,7 @@ class TestMemoryScope:
     def test_under_specified_scope_is_representable(self):
         scope = MemoryScope(level=ScopeLevel.SHARED)
         assert scope.principal is None
-        assert scope.to_payload()["level"] == "shared"
+        assert scope.model_dump(mode="json")["level"] == "shared"
 
 
 class TestRecalledMemory:
