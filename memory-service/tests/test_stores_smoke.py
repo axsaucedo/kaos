@@ -38,8 +38,8 @@ def test_short_term_and_longterm_compose(tmp_path):
     longterm._memory.embedding_model = DeterministicEmbedder()
 
     # Short-term: conversational turns flow into the short-term window.
-    short_term.add(scope, "user", "what port does the deployment use")
-    short_term.add(scope, "assistant", "the deployment uses port 8080")
+    short_term.add(scope, [("user", "what port does the deployment use")])
+    short_term.add(scope, [("assistant", "the deployment uses port 8080")])
     assert short_term.active_window(scope) == [
         ("user", "what port does the deployment use"),
         ("assistant", "the deployment uses port 8080"),

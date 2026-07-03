@@ -297,6 +297,12 @@ class _Backend:
         cur.execute(sql, params)
         return cur
 
+    def executemany(self, sql: str, seq_of_params: List[Tuple[Any, ...]]) -> Any:
+        sql = sql.replace("?", self.ph) if self.ph != "?" else sql
+        cur = self._conn.cursor()
+        cur.executemany(sql, seq_of_params)
+        return cur
+
     def commit(self) -> None:
         self._conn.commit()
 
@@ -340,22 +346,27 @@ class ShortTermStore:
         self._lock = threading.Lock()
         self.db = _Backend(storage_type, target)
 
-    def add(self, scope: Scope, role: str, content: str) -> List[Tuple[str, str]]:
-        """Append a turn, enforce the budget/cap, and return the evicted turns (if any).
+    def add(self, scope: Scope, turns: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
+        """Append a batch of turns, enforce the budget/cap, and return the evicted turns.
 
-        The returned ``(role, content)`` list is the batch that just left the verbatim
-        window. It is the cascade seam: callers forward it to long-term extraction so
-        facts are captured from evicted history (whether the medium-term digest is enabled
-        or not), while the digest fold consumes the same batch independently. Empty when
-        the append did not push the window over its limits.
+        ``turns`` is an ordered ``(role, content)`` list appended in a single transaction;
+        the overflow is computed once after the whole batch has landed. The returned
+        ``(role, content)`` list is the batch that just left the verbatim window. It is the
+        cascade seam: callers forward it to long-term extraction so facts are captured from
+        evicted history (whether the medium-term digest is enabled or not), while the digest
+        fold consumes the same batch independently. Empty when the appends did not push the
+        window over its limits.
         """
+        if not turns:
+            return []
         key = scope_key(scope)
+        now = time.time()
         with self._lock:
-            self.db.execute(
+            self.db.executemany(
                 "INSERT INTO short_term_memory_window "
                 "(scope_key, role, content, created_at, pending_summary) "
                 "VALUES (?, ?, ?, ?, 0)",
-                (key, role, content, time.time()),
+                [(key, role, content, now) for role, content in turns],
             )
             self.db.commit()
             overflow = self._overflow_window_rows(key)
@@ -452,12 +463,12 @@ class ShortTermStore:
             self.fold_pending_into_summary(scope)
 
     def _overflow_window_rows(self, key: str) -> List[Tuple[int, str, str]]:
-        """Oldest active rows to evict, amortised via water marks (keep >=1).
+        """Oldest active rows to evict, amortised via compaction marks (keep >=1).
 
-        Folding is triggered when the window exceeds ``high_water`` tokens or the hard
-        event cap; once triggered, the oldest turns are evicted down to the ``low_water``
-        token target (and within the hard event cap). Evicting to a low-water target
-        rather than to just-under-budget amortises the fold frequency and avoids
+        Folding is triggered when the window exceeds ``compaction_trigger`` tokens or the
+        hard event cap; once triggered, the oldest turns are evicted down to the
+        ``compaction_target`` token target (and within the hard event cap). Evicting to the
+        target rather than to just-under-budget amortises the fold frequency and avoids
         thrashing a fold on nearly every turn once the window sits at the limit. Returns
         full ``(id, role, content)`` rows so callers can both delete them and forward
         their content to long-term extraction.
@@ -465,11 +476,13 @@ class ShortTermStore:
         active = self._load_active_window_rows(key)
         total = self._window_token_total(active)
         n = len(active)
-        if not (total > self.cfg.high_water or n > self.cfg.hard_event_cap):
+        if not (total > self.cfg.compaction_trigger or n > self.cfg.hard_event_cap):
             return []
         rows: List[Tuple[int, str, str]] = []
         i = 0
-        while n - i > 1 and (total > self.cfg.low_water or (n - i) > self.cfg.hard_event_cap):
+        while n - i > 1 and (
+            total > self.cfg.compaction_target or (n - i) > self.cfg.hard_event_cap
+        ):
             rid, role, content = active[i]
             rows.append((rid, role, content))
             total -= count_tokens(content)
