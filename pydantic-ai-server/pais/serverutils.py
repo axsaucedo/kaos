@@ -413,7 +413,10 @@ class AgentServerSettings(BaseSettings):
     memory_store_endpoint: str = ""
     memory_scope: str = "session"
     memory_recall_presentation: str = "block"
-    memory_failure_mode: str = "soft"
+    # Empty means "inherit the memory store's configured default_failure_mode"; the
+    # runtime only sends an explicit failure mode (soft|strict) when set here, so the
+    # MemoryStore CRD default governs the runtime write/forget path by default.
+    memory_failure_mode: str = ""
     memory_short_term_token_budget: int = 0
     memory_rolling_summary: bool = True
     # The agent's stable identity used as the owner of private/agent-scoped memory.

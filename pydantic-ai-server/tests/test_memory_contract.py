@@ -11,10 +11,12 @@ import pytest
 from pais.memory import (
     LocalMemory,
     Memory,
+    MediumTermRecall,
     MemoryScope,
     NullMemory,
     RecalledMemory,
     ScopeLevel,
+    ShortTermRecall,
 )
 
 
@@ -60,8 +62,14 @@ class TestRecalledMemory:
         assert not recalled.is_empty
 
     def test_non_empty_when_short_term_present(self):
-        recalled = RecalledMemory(recent=[("user", "hi")])
+        recalled = RecalledMemory(short_term=ShortTermRecall(recent=[("user", "hi")]))
         assert not recalled.is_empty
+        assert recalled.recent == [("user", "hi")]
+
+    def test_medium_term_summary_is_exposed(self):
+        recalled = RecalledMemory(medium_term=MediumTermRecall(summary="digest"))
+        assert not recalled.is_empty
+        assert recalled.summary == "digest"
 
 
 class TestLongTermDefaultsAreNoOp:

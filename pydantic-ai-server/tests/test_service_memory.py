@@ -131,6 +131,23 @@ class TestWrite:
         assert seen["url"].endswith("/v1/write")
         assert seen["payload"]["turns"] == [{"role": "user", "content": "remember the sky is blue"}]
         assert seen["payload"]["infer"] is True
+        assert "failure_mode" not in seen["payload"]
+        await mem.close()
+
+    @pytest.mark.asyncio
+    async def test_write_includes_explicit_failure_mode(self):
+        seen: dict = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            import json
+
+            seen["payload"] = json.loads(request.content)
+            return httpx.Response(
+                202, json={"accepted": True, "scheduled": True, "degraded": False}
+            )
+
+        mem = _client(handler)
+        await mem.write(_scope(), [("user", "x")], failure_mode="soft")
         assert seen["payload"]["failure_mode"] == "soft"
         await mem.close()
 

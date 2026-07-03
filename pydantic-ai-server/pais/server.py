@@ -466,7 +466,7 @@ class AgentServer:
         await self.memory.write(
             scope,
             turns,
-            failure_mode=self.settings.memory_failure_mode,
+            failure_mode=self.settings.memory_failure_mode or None,
         )
 
     async def _run_agent(

@@ -117,26 +117,51 @@ class MemoryScope:
 
 
 @dataclass
+class ShortTermRecall:
+    """Short-term tier slice of a recall: the verbatim active window, oldest first."""
+
+    recent: List[tuple] = field(default_factory=list)
+
+
+@dataclass
+class MediumTermRecall:
+    """Medium-term tier slice of a recall: the rolling conversation digest."""
+
+    summary: str = ""
+
+
+@dataclass
 class RecalledMemory:
-    """Assembled recall result from the memory tiers.
+    """Assembled recall result across the three memory tiers, mirroring the service.
 
     ``facts`` are the long-term engine's native result records (text, score, id,
-    metadata) passed through unmodified. ``summary`` and ``recent`` are the
-    short-term tier slice (rolling summary plus recent verbatim turns). ``block`` is
-    the deterministic, ready-to-inject context block. ``degraded`` is set when the
-    long-term tier was unavailable and only short-term context is present — recall is
-    best-effort and never aborts a turn.
+    metadata) passed through unmodified. ``short_term`` is the verbatim active window
+    and ``medium_term`` is the rolling digest — the two conversational tiers the
+    service returns as distinct blocks. ``block`` is the deterministic, ready-to-inject
+    context block. ``degraded`` is set when the long-term tier was unavailable and only
+    the conversational tiers are present — recall is best-effort and never aborts a turn.
+
+    ``recent`` and ``summary`` are convenience accessors onto the short-term and
+    medium-term slices so existing call sites read a single field per tier.
     """
 
     facts: List[Dict[str, Any]] = field(default_factory=list)
-    summary: str = ""
-    recent: List[tuple] = field(default_factory=list)
+    short_term: ShortTermRecall = field(default_factory=ShortTermRecall)
+    medium_term: MediumTermRecall = field(default_factory=MediumTermRecall)
     block: str = ""
     degraded: bool = False
 
     @property
+    def recent(self) -> List[tuple]:
+        return self.short_term.recent
+
+    @property
+    def summary(self) -> str:
+        return self.medium_term.summary
+
+    @property
     def is_empty(self) -> bool:
-        return not self.facts and not self.summary and not self.recent
+        return not self.facts and not self.medium_term.summary and not self.short_term.recent
 
 
 def scope_from_deps(
@@ -289,21 +314,25 @@ class Memory(ABC):
         turns: List[Tuple[str, str]],
         *,
         infer: bool = True,
-        failure_mode: str = "soft",
+        failure_mode: Optional[str] = None,
     ) -> bool:
         """Record a batch of turns into the memory tiers off the hot path.
 
         ``turns`` is an ordered ``(role, content)`` list persisted in a single call so a
-        whole interaction lands as one write. Returns ``True`` when the write was accepted.
-        The default implementation is a no-op accept for backends without a long-term tier.
+        whole interaction lands as one write. ``failure_mode`` is optional: when ``None``
+        the memory store's own configured default governs fail-soft vs strict; pass an
+        explicit ``"soft"``/``"strict"`` only to override it. Returns ``True`` when the
+        write was accepted. The default implementation is a no-op accept for backends
+        without a long-term tier.
         """
         return True
 
-    async def forget(self, scope: "MemoryScope", *, failure_mode: str = "soft") -> bool:
+    async def forget(self, scope: "MemoryScope", *, failure_mode: Optional[str] = None) -> bool:
         """Erase a scope: clear its short-term tier and delete its long-term memories.
 
-        The default implementation is a no-op accept for backends without a
-        long-term tier.
+        ``failure_mode`` is optional; when ``None`` the store's configured default
+        governs fail-soft vs strict. The default implementation is a no-op accept for
+        backends without a long-term tier.
         """
         return True
 
@@ -714,8 +743,8 @@ class ServiceMemory(Memory):
             medium_term = data.get("medium_term") or {}
             recalled = RecalledMemory(
                 facts=data.get("facts", []),
-                summary=medium_term.get("summary", ""),
-                recent=[tuple(r) for r in short_term.get("recent", [])],
+                short_term=ShortTermRecall(recent=[tuple(r) for r in short_term.get("recent", [])]),
+                medium_term=MediumTermRecall(summary=medium_term.get("summary", "")),
                 block=data.get("block", ""),
                 degraded=bool(data.get("degraded", False)),
             )
@@ -729,19 +758,20 @@ class ServiceMemory(Memory):
         turns: List[Tuple[str, str]],
         *,
         infer: bool = True,
-        failure_mode: str = "soft",
+        failure_mode: Optional[str] = None,
     ) -> bool:
         tracer = trace_api.get_tracer(SERVICE_NAME)
         with tracer.start_as_current_span(
             "kaos.memory.write",
             attributes={"kaos.memory.scope_level": scope.level.value},
         ) as span:
-            payload = {
+            payload: Dict[str, Any] = {
                 "scope": scope.to_payload(),
                 "turns": [{"role": role, "content": content} for role, content in turns],
                 "infer": infer,
-                "failure_mode": failure_mode,
             }
+            if failure_mode:
+                payload["failure_mode"] = failure_mode
             span.set_attribute("kaos.memory.turns", len(turns))
             try:
                 resp = await self._client.post(
@@ -759,13 +789,15 @@ class ServiceMemory(Memory):
             span.set_attribute("kaos.memory.degraded", bool(data.get("degraded", False)))
             return bool(data.get("accepted", True))
 
-    async def forget(self, scope: "MemoryScope", *, failure_mode: str = "soft") -> bool:
+    async def forget(self, scope: "MemoryScope", *, failure_mode: Optional[str] = None) -> bool:
         tracer = trace_api.get_tracer(SERVICE_NAME)
         with tracer.start_as_current_span(
             "kaos.memory.forget",
             attributes={"kaos.memory.scope_level": scope.level.value},
         ) as span:
-            payload = {"scope": scope.to_payload(), "failure_mode": failure_mode}
+            payload: Dict[str, Any] = {"scope": scope.to_payload()}
+            if failure_mode:
+                payload["failure_mode"] = failure_mode
             try:
                 resp = await self._client.post(
                     f"{self.endpoint}/v1/forget", json=payload, timeout=self._timeout
