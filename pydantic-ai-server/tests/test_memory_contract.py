@@ -75,7 +75,7 @@ class TestLongTermDefaultsAreNoOp:
     @pytest.mark.asyncio
     async def test_local_memory_write_accepts(self):
         scope = MemoryScope(level=ScopeLevel.SESSION, session_id="s1")
-        assert await LocalMemory().write(scope, "user", "hello") is True
+        assert await LocalMemory().write(scope, [("user", "hello")]) is True
 
     @pytest.mark.asyncio
     async def test_local_memory_forget_accepts(self):
@@ -87,7 +87,7 @@ class TestLongTermDefaultsAreNoOp:
         scope = MemoryScope(level=ScopeLevel.PRIVATE, agent_client_id="a1")
         mem = NullMemory()
         assert (await mem.recall(scope, "q")).is_empty
-        assert await mem.write(scope, "user", "hi") is True
+        assert await mem.write(scope, [("user", "hi")]) is True
         assert await mem.forget(scope) is True
 
     def test_long_term_methods_are_on_the_base_interface(self):

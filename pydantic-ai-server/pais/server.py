@@ -446,25 +446,28 @@ class AgentServer:
         return user_prompt, message_history, deps, usage_limits
 
     async def _write_turns(self, deps: AgentDeps, new_messages: list) -> None:
-        """Write all turns from a run to the service short-term tier.
+        """Write all turns from a run to the service short-term tier in one batched call.
 
-        Iterates the run's new messages (user echo, assistant, tool/delegation) and
-        records each as a short-term tier turn under the run scope. No-op for short-term-only
-        backends, whose ``write`` defaults to pass.
+        Flattens the run's new messages (user echo, assistant, tool/delegation) into a
+        single ordered ``(role, content)`` batch and records it with one write, so the
+        whole interaction lands together and eviction/extraction fires once per flush.
+        No-op for short-term-only backends, whose ``write`` defaults to pass.
         """
         scope = deps.memory_scope
         if scope is None:
             return
         from pais.memory import pydantic_message_to_turns
 
-        for msg in new_messages:
-            for role, text in pydantic_message_to_turns(msg):
-                await self.memory.write(
-                    scope,
-                    role,
-                    text,
-                    failure_mode=self.settings.memory_failure_mode,
-                )
+        turns = [
+            (role, text) for msg in new_messages for role, text in pydantic_message_to_turns(msg)
+        ]
+        if not turns:
+            return
+        await self.memory.write(
+            scope,
+            turns,
+            failure_mode=self.settings.memory_failure_mode,
+        )
 
     async def _run_agent(
         self,

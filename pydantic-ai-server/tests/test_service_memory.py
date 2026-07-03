@@ -43,8 +43,10 @@ class TestRecall:
                 json={
                     "facts": [{"memory": "alice likes tea", "score": 0.9}],
                     "short_term": {
-                        "summary": "prior chat",
                         "recent": [["user", "hi"], ["assistant", "hello"]],
+                    },
+                    "medium_term": {
+                        "summary": "prior chat",
                     },
                     "block": "## Relevant memory\nalice likes tea",
                     "degraded": False,
@@ -95,7 +97,8 @@ class TestRecall:
                 200,
                 json={
                     "facts": [],
-                    "short_term": {"summary": "", "recent": [["user", "hi"]]},
+                    "short_term": {"recent": [["user", "hi"]]},
+                    "medium_term": {"summary": ""},
                     "block": "## Recent turns\nuser: hi",
                     "degraded": True,
                 },
@@ -123,11 +126,10 @@ class TestWrite:
             )
 
         mem = _client(handler)
-        ok = await mem.write(_scope(), "user", "remember the sky is blue", infer=True)
+        ok = await mem.write(_scope(), [("user", "remember the sky is blue")], infer=True)
         assert ok is True
         assert seen["url"].endswith("/v1/write")
-        assert seen["payload"]["role"] == "user"
-        assert seen["payload"]["content"] == "remember the sky is blue"
+        assert seen["payload"]["turns"] == [{"role": "user", "content": "remember the sky is blue"}]
         assert seen["payload"]["infer"] is True
         assert seen["payload"]["failure_mode"] == "soft"
         await mem.close()
@@ -138,7 +140,7 @@ class TestWrite:
             raise httpx.ConnectError("service down")
 
         mem = _client(handler)
-        ok = await mem.write(_scope(), "user", "x")
+        ok = await mem.write(_scope(), [("user", "x")])
         assert ok is False
         await mem.close()
 
@@ -149,7 +151,7 @@ class TestWrite:
 
         mem = _client(handler)
         with pytest.raises(httpx.ConnectError):
-            await mem.write(_scope(), "user", "x", failure_mode="strict")
+            await mem.write(_scope(), [("user", "x")], failure_mode="strict")
         await mem.close()
 
 

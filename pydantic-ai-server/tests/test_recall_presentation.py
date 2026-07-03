@@ -29,8 +29,8 @@ class _RecordingMemory(NullMemory):
         self.recalls = []
         self._recalled = recalled or RecalledMemory()
 
-    async def write(self, scope, role, content, *, infer=True, failure_mode="soft"):
-        self.writes.append((scope, role, content, infer))
+    async def write(self, scope, turns, *, infer=True, failure_mode="soft"):
+        self.writes.append((scope, turns, infer))
         return True
 
     async def recall(self, scope, query, **kwargs):
@@ -94,12 +94,12 @@ class TestMemoryToolset:
             SAVE_MEMORY_TOOL, {"content": "alice likes tea"}, _ctx(deps), cast(Any, None)
         )
         assert "Saved" in result
-        scope, role, content, infer = mem.writes[0]
+        scope, turns, infer = mem.writes[0]
         assert isinstance(scope, MemoryScope)
         assert scope.level is ScopeLevel.USER
         assert scope.principal == "alice"
         assert scope.agent_client_id == "stable-id"
-        assert content == "alice likes tea"
+        assert turns == [("user", "alice likes tea")]
 
     @pytest.mark.asyncio
     async def test_search_returns_block_when_present(self):

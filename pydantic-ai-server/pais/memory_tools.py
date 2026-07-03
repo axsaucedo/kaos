@@ -147,7 +147,7 @@ class MemoryToolset(AbstractToolset["AgentDeps"]):
             content = str(tool_args.get("content", "")).strip()
             if not content:
                 return "Nothing to save."
-            ok = await memory.write(scope, "user", content, infer=True)
+            ok = await memory.write(scope, [("user", content)], infer=True)
             return "Saved to long-term memory." if ok else "Could not save to memory right now."
 
         if name == SEARCH_MEMORY_TOOL:

@@ -8,7 +8,7 @@ from abc import ABC, abstractmethod
 from collections import deque
 from enum import Enum
 from inspect import isawaitable
-from typing import Dict, Any, List, Optional, Union, Deque, Mapping
+from typing import Dict, Any, List, Optional, Tuple, Union, Deque, Mapping
 from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
 
@@ -286,16 +286,16 @@ class Memory(ABC):
     async def write(
         self,
         scope: "MemoryScope",
-        role: str,
-        content: str,
+        turns: List[Tuple[str, str]],
         *,
         infer: bool = True,
         failure_mode: str = "soft",
     ) -> bool:
-        """Record a turn into the memory tiers off the hot path.
+        """Record a batch of turns into the memory tiers off the hot path.
 
-        Returns ``True`` when the write was accepted. The default implementation is
-        a no-op accept for backends without a long-term tier.
+        ``turns`` is an ordered ``(role, content)`` list persisted in a single call so a
+        whole interaction lands as one write. Returns ``True`` when the write was accepted.
+        The default implementation is a no-op accept for backends without a long-term tier.
         """
         return True
 
@@ -711,9 +711,10 @@ class ServiceMemory(Memory):
                 return RecalledMemory(degraded=True)
 
             short_term = data.get("short_term") or {}
+            medium_term = data.get("medium_term") or {}
             recalled = RecalledMemory(
                 facts=data.get("facts", []),
-                summary=short_term.get("summary", ""),
+                summary=medium_term.get("summary", ""),
                 recent=[tuple(r) for r in short_term.get("recent", [])],
                 block=data.get("block", ""),
                 degraded=bool(data.get("degraded", False)),
@@ -725,8 +726,7 @@ class ServiceMemory(Memory):
     async def write(
         self,
         scope: "MemoryScope",
-        role: str,
-        content: str,
+        turns: List[Tuple[str, str]],
         *,
         infer: bool = True,
         failure_mode: str = "soft",
@@ -738,11 +738,11 @@ class ServiceMemory(Memory):
         ) as span:
             payload = {
                 "scope": scope.to_payload(),
-                "role": role,
-                "content": content,
+                "turns": [{"role": role, "content": content} for role, content in turns],
                 "infer": infer,
                 "failure_mode": failure_mode,
             }
+            span.set_attribute("kaos.memory.turns", len(turns))
             try:
                 resp = await self._client.post(
                     f"{self.endpoint}/v1/write", json=payload, timeout=self._timeout
