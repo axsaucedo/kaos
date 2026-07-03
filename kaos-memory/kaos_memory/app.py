@@ -67,31 +67,20 @@ def _fact_text(fact: Dict[str, Any]) -> str:
     return fact.get("memory") or fact.get("text") or ""
 
 
-def assemble_block(
-    facts: List[Dict[str, Any]],
-    summary: str,
-    recent: List[Tuple[str, str]],
-) -> str:
-    """Render the structured memory block. Empty inputs yield an empty block.
+def assemble_block(facts: List[Dict[str, Any]]) -> str:
+    """Render the long-term memory block. Empty input yields an empty block.
 
-    The block is plain text the runtime injects into the agent's system context (not
-    as fabricated prior turns). It is always-on and cheap, rendering whatever context
-    is available — long-term facts, a rolling summary, recent verbatim turns.
+    The block is plain text the runtime injects into the agent's system context (as
+    leading context, not fabricated prior turns). It carries only long-term facts:
+    conversational continuity — the rolling summary and the recent verbatim window — is
+    replayed separately as reconstructed message history, so rendering it here too would
+    duplicate it in the prompt. The summary and recent turns are returned in their own
+    response fields for that replay.
     """
-    sections: List[str] = []
-
     fact_lines = [f"- {_fact_text(f)}" for f in facts if _fact_text(f)]
-    if fact_lines:
-        sections.append("## Relevant memory\n" + "\n".join(fact_lines))
-
-    if summary.strip():
-        sections.append("## Conversation summary\n" + summary.strip())
-
-    if recent:
-        turns = "\n".join(f"{role}: {content}" for role, content in recent)
-        sections.append("## Recent turns\n" + turns)
-
-    return "\n\n".join(sections)
+    if not fact_lines:
+        return ""
+    return "## Relevant memory\n" + "\n".join(fact_lines)
 
 
 # --------------------------------------------------------------------------- #
@@ -228,7 +217,7 @@ class MemoryService:
 
             span.set_attribute("kaos.memory.degraded", degraded)
             span.set_attribute("kaos.memory.fact_count", len(facts))
-            block = assemble_block(facts, summary, recent)
+            block = assemble_block(facts)
             return RecallResponse(
                 facts=facts,
                 short_term=ShortTermContext(recent=recent),
