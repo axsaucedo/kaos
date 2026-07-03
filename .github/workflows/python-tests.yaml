@@ -6,7 +6,7 @@ on:
     paths:
       - 'pydantic-ai-server/**'
       - 'kaos-cli/**'
-      - 'memory-service/**'
+      - 'kaos-memory/**'
       - 'operator/config/samples/**'
       - '.github/workflows/python-tests.yaml'
   push:
@@ -14,7 +14,7 @@ on:
     paths:
       - 'pydantic-ai-server/**'
       - 'kaos-cli/**'
-      - 'memory-service/**'
+      - 'kaos-memory/**'
       - 'operator/config/samples/**'
       - '.github/workflows/python-tests.yaml'
   workflow_dispatch:
@@ -40,7 +40,7 @@ jobs:
         run: |
           uv venv
           source .venv/bin/activate
-          uv pip install -e .[dev]
+          uv pip install -e .[service,dev]
 
       - name: Check formatting with black
         working-directory: pydantic-ai-server
@@ -72,7 +72,7 @@ jobs:
         run: |
           uv venv
           source .venv/bin/activate
-          uv pip install -e .[dev]
+          uv pip install -e .[service,dev]
           uv run pytest tests/ -v --cov=. --cov-report=xml
 
       - name: Upload coverage
@@ -122,20 +122,20 @@ jobs:
         uses: astral-sh/setup-uv@v7
 
       - name: Install dependencies
-        working-directory: memory-service
+        working-directory: kaos-memory
         run: |
           uv venv
           source .venv/bin/activate
-          uv pip install -e .[dev]
+          uv pip install -e .[service,dev]
 
       - name: Check formatting with black
-        working-directory: memory-service
+        working-directory: kaos-memory
         run: |
           source .venv/bin/activate
           black --check .
 
       - name: Run type checking
-        working-directory: memory-service
+        working-directory: kaos-memory
         run: uvx ty@0.0.55 check
 
   memory-service-tests:
@@ -171,9 +171,9 @@ jobs:
         uses: astral-sh/setup-uv@v7
 
       - name: Run memory-service tests
-        working-directory: memory-service
+        working-directory: kaos-memory
         run: |
           uv venv
           source .venv/bin/activate
-          uv pip install -e .[dev]
+          uv pip install -e .[service,dev]
           uv run pytest tests/ -v

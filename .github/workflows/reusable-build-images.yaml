@@ -506,7 +506,7 @@ jobs:
         id: build
         uses: docker/build-push-action@v7
         with:
-          context: ./memory-service
+          context: ./kaos-memory
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           outputs: type=image,name=${{ env.MEMORY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
