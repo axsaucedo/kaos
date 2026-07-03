@@ -408,11 +408,17 @@ class AgentServerSettings(BaseSettings):
     memory_max_sessions: int = 1000
     memory_max_session_events: int = 500
     memory_redis_url: str = ""
-    # Central memory service (long-term tier). When set, the runtime uses the
-    # service-client backend; otherwise it falls back to the short-term-only backend.
+    # Central memory service (long-term tier). When a MemoryStore is bound the
+    # operator injects its endpoint here and the runtime uses the RemoteMemory
+    # backend; when empty the runtime falls back to the in-process short-term
+    # LocalMemory backend (no long-term tier, pod-local).
     memory_store_endpoint: str = ""
     memory_scope: str = "session"
-    memory_recall_presentation: str = "block"
+    # Additive explicit memory tools exposed to the agent on top of the automatic
+    # recall-inject/write-extract baseline: "all" (save + search), "read" (search
+    # only), "write" (save only), or empty (none). Long-term tools require a bound
+    # MemoryStore; the operator rejects a tools setting without one.
+    memory_tools: str = ""
     # Empty means "inherit the memory store's configured default_failure_mode"; the
     # runtime only sends an explicit failure mode (soft|strict) when set here, so the
     # MemoryStore CRD default governs the runtime write/forget path by default.

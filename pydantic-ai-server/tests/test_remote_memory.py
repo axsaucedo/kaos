@@ -1,6 +1,6 @@
 """Tests for the service-backed memory client.
 
-Drive ``ServiceMemory`` against a stub of the central memory service using an
+Drive ``RemoteMemory`` against a stub of the central memory service using an
 ``httpx.MockTransport`` so the client is exercised end to end (routes, payloads,
 response parsing) without a running service, and verify its best-effort
 semantics: recall degrades to empty on failure, write/forget fail soft by
@@ -10,12 +10,12 @@ default and raise under strict, and degraded responses never raise.
 import httpx
 import pytest
 
-from pais.memory import MemoryScope, RecalledMemory, ScopeLevel, ServiceMemory
+from pais.memory import MemoryScope, RecalledMemory, ScopeLevel, RemoteMemory
 
 
-def _client(handler) -> ServiceMemory:
+def _client(handler) -> RemoteMemory:
     transport = httpx.MockTransport(handler)
-    return ServiceMemory("http://memory.test:8080", client=httpx.AsyncClient(transport=transport))
+    return RemoteMemory("http://memory.test:8080", client=httpx.AsyncClient(transport=transport))
 
 
 def _scope() -> MemoryScope:
@@ -214,4 +214,4 @@ class TestLegacyMethodsAreNoop:
 
     def test_requires_endpoint(self):
         with pytest.raises(ValueError):
-            ServiceMemory("")
+            RemoteMemory("")

@@ -1,9 +1,8 @@
-"""Tests for recall presentation: block gating and opt-in memory tools.
+"""Tests for the automatic-memory baseline and opt-in memory tools.
 
-Cover which presentation modes inject the block and expose tools, that the
-toolset registers only the enabled tools, and that save/search derive scope
-server-side and operate over the memory backend without taking scope from the
-model.
+Cover which ``memory.tools`` settings expose which tools, that the toolset
+registers only the enabled tools, and that save/search derive scope server-side
+and operate over the memory backend without taking scope from the model.
 """
 
 import pytest
@@ -11,13 +10,14 @@ from typing import Any, cast
 
 from pais.memory import MemoryScope, NullMemory, RecalledMemory, ScopeLevel
 from pais.memory_tools import (
+    MemoryTools,
     MemoryToolset,
-    RecallPresentation,
     SAVE_MEMORY_TOOL,
     SEARCH_MEMORY_TOOL,
     build_memory_toolset,
-    presentation_exposes_tools,
-    presentation_injects_block,
+    parse_memory_tools,
+    tools_expose_save,
+    tools_expose_search,
 )
 from pais.serverutils import AgentDeps
 
@@ -29,7 +29,7 @@ class _RecordingMemory(NullMemory):
         self.recalls = []
         self._recalled = recalled or RecalledMemory()
 
-    async def write(self, scope, turns, *, infer=True, failure_mode="soft"):
+    async def write(self, scope, turns, *, infer=True, failure_mode=None):
         self.writes.append((scope, turns, infer))
         return True
 
@@ -47,25 +47,40 @@ def _ctx(deps) -> Any:
     return cast(Any, _Ctx(deps))
 
 
-class TestPresentationGating:
-    def test_block_mode_injects_block_only(self):
-        assert presentation_injects_block(RecallPresentation.BLOCK)
-        assert not presentation_exposes_tools(RecallPresentation.BLOCK)
+class TestMemoryToolsSelection:
+    def test_parse_empty_is_none(self):
+        assert parse_memory_tools("") is None
 
-    def test_tools_mode_exposes_tools_only(self):
-        assert not presentation_injects_block(RecallPresentation.TOOLS)
-        assert presentation_exposes_tools(RecallPresentation.TOOLS)
+    def test_read_exposes_search_only(self):
+        assert tools_expose_search(MemoryTools.READ)
+        assert not tools_expose_save(MemoryTools.READ)
 
-    def test_both_mode_does_both(self):
-        assert presentation_injects_block(RecallPresentation.BOTH)
-        assert presentation_exposes_tools(RecallPresentation.BOTH)
+    def test_write_exposes_save_only(self):
+        assert tools_expose_save(MemoryTools.WRITE)
+        assert not tools_expose_search(MemoryTools.WRITE)
 
-    def test_build_toolset_returns_none_for_block_mode(self):
-        assert build_memory_toolset(RecallPresentation.BLOCK, ScopeLevel.USER) is None
+    def test_all_exposes_both(self):
+        assert tools_expose_save(MemoryTools.ALL)
+        assert tools_expose_search(MemoryTools.ALL)
+
+    def test_none_exposes_neither(self):
+        assert not tools_expose_save(None)
+        assert not tools_expose_search(None)
+
+    def test_build_toolset_returns_none_when_no_tools(self):
+        assert build_memory_toolset(None, ScopeLevel.USER) is None
 
     def test_build_toolset_returns_toolset_when_tools_enabled(self):
-        ts = build_memory_toolset(RecallPresentation.BOTH, ScopeLevel.USER, "agent-1")
+        ts = build_memory_toolset(MemoryTools.ALL, ScopeLevel.USER, "agent-1")
         assert isinstance(ts, MemoryToolset)
+
+    def test_build_toolset_read_registers_search_only(self):
+        ts = build_memory_toolset(MemoryTools.READ, ScopeLevel.USER, "agent-1")
+        assert ts is not None and ts._expose_search and not ts._expose_save
+
+    def test_build_toolset_write_registers_save_only(self):
+        ts = build_memory_toolset(MemoryTools.WRITE, ScopeLevel.USER, "agent-1")
+        assert ts is not None and ts._expose_save and not ts._expose_search
 
 
 class TestMemoryToolset:
@@ -115,7 +130,11 @@ class TestMemoryToolset:
     @pytest.mark.asyncio
     async def test_search_falls_back_to_facts(self):
         mem = _RecordingMemory(RecalledMemory(facts=[{"memory": "fact one"}]))
-        deps = AgentDeps(session_id="s1", memory=mem, security_context={"principal": "a"})
+        deps = AgentDeps(
+            session_id="s1",
+            memory=mem,
+            security_context={"principal": "a", "actor": "agent-a"},
+        )
         ts = MemoryToolset(ScopeLevel.PRIVATE)
         result = await ts.call_tool(SEARCH_MEMORY_TOOL, {"query": "x"}, _ctx(deps), cast(Any, None))
         assert "fact one" in result
@@ -123,7 +142,11 @@ class TestMemoryToolset:
     @pytest.mark.asyncio
     async def test_search_handles_no_results(self):
         mem = _RecordingMemory(RecalledMemory())
-        deps = AgentDeps(session_id="s1", memory=mem, security_context={"principal": "a"})
+        deps = AgentDeps(
+            session_id="s1",
+            memory=mem,
+            security_context={"principal": "a", "actor": "agent-a"},
+        )
         ts = MemoryToolset(ScopeLevel.PRIVATE)
         result = await ts.call_tool(SEARCH_MEMORY_TOOL, {"query": "x"}, _ctx(deps), cast(Any, None))
         assert "No relevant memories" in result
@@ -133,7 +156,11 @@ class TestMemoryToolset:
         # Even if the model passes scope-like args, they are ignored; scope comes
         # from deps + configured level only.
         mem = _RecordingMemory()
-        deps = AgentDeps(session_id="s1", memory=mem, security_context={"principal": "alice"})
+        deps = AgentDeps(
+            session_id="s1",
+            memory=mem,
+            security_context={"principal": "alice", "actor": "agent-a"},
+        )
         ts = MemoryToolset(ScopeLevel.PRIVATE)
         await ts.call_tool(
             SAVE_MEMORY_TOOL,

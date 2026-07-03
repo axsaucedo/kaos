@@ -178,13 +178,25 @@ def scope_from_deps(
     accepts no scope argument from the model or a tool, so a caller can never
     widen or redirect the scope it is entitled to; the ``level`` is fixed by the
     agent's configuration, not by request content.
+
+    Fails closed on ambiguous ownership: a ``PRIVATE`` scope must resolve to a
+    concrete, agent-unique owner (the qualified ``kaos://agent/{namespace}/{name}``
+    identity, threaded via ``agent_identity`` or the request actor). Without one,
+    every agent lacking an identity would collapse onto the same empty owner and
+    silently share one private partition, so this raises rather than cross-contaminate.
     """
     resolved_level = level if isinstance(level, ScopeLevel) else ScopeLevel(str(level))
     security_context = getattr(deps, "security_context", None) or {}
+    agent_client_id = agent_identity or security_context.get("actor") or None
+    if resolved_level is ScopeLevel.PRIVATE and not agent_client_id:
+        raise ValueError(
+            "PRIVATE memory scope requires a stable agent identity; refusing to "
+            "operate on an ambiguously-owned private partition"
+        )
     return MemoryScope(
         level=resolved_level,
         principal=security_context.get("principal") or None,
-        agent_client_id=agent_identity or security_context.get("actor") or None,
+        agent_client_id=agent_client_id,
         session_id=getattr(deps, "session_id", None) or None,
     )
 
@@ -678,7 +690,7 @@ class NullMemory(Memory):
         return True
 
 
-class ServiceMemory(Memory):
+class RemoteMemory(Memory):
     """Memory backend that calls the central memory service over HTTP.
 
     Implements the long-term tier — ``recall``/``write``/``forget`` — against the
@@ -699,12 +711,12 @@ class ServiceMemory(Memory):
         client: Optional[httpx.AsyncClient] = None,
     ):
         if not endpoint:
-            raise ValueError("ServiceMemory requires a service endpoint")
+            raise ValueError("RemoteMemory requires a service endpoint")
         self.endpoint = endpoint.rstrip("/")
         self._timeout = timeout
         self._recall_timeout = recall_timeout
         self._client = client or httpx.AsyncClient(timeout=timeout)
-        logger.info(f"ServiceMemory initialized -> {self.endpoint}")
+        logger.info(f"RemoteMemory initialized -> {self.endpoint}")
 
     async def recall(
         self,
@@ -817,7 +829,7 @@ class ServiceMemory(Memory):
         try:
             await self._client.aclose()
         except Exception as e:
-            logger.debug(f"ServiceMemory client close failed: {e}")
+            logger.debug(f"RemoteMemory client close failed: {e}")
 
     # --- Legacy short-term tier methods ---------------------------------------
     # The short-term tier lives in the service and is returned inside recall, so

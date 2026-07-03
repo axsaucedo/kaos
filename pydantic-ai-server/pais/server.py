@@ -124,9 +124,7 @@ class AgentServer:
         self._mcp_servers = mcp_servers or []
         self._model = model
         self._custom_tools = custom_tools or []
-        from pais.memory_tools import RecallPresentation
 
-        self._recall_presentation = RecallPresentation(settings.memory_recall_presentation)
         self._agent_identity = settings.agent_identity or settings.security_actor or ""
         if task_manager_type == "local":
             setup_fn = self._mock_state.reset if self._mock_state else None
@@ -409,7 +407,6 @@ class AgentServer:
 
         # Derive the server-side memory scope (owner) for the long-term tier.
         from pais.memory import scope_from_deps, reconstruct_message_history
-        from pais.memory_tools import presentation_injects_block
 
         scope = scope_from_deps(
             deps,
@@ -437,8 +434,9 @@ class AgentServer:
                 session_id, self.settings.memory_context_limit
             )
 
-        # Inject the recalled long-term block as leading system context.
-        if recalled.block and presentation_injects_block(self._recall_presentation):
+        # Automatic recall: inject the recalled long-term block as leading system
+        # context whenever memory is enabled (the baseline behavior of enabling memory).
+        if recalled.block:
             block_msg = ModelRequest(parts=[SystemPromptPart(content=recalled.block)])
             message_history = [block_msg] + (message_history or [])
 
@@ -713,13 +711,13 @@ def _create_memory(settings: AgentServerSettings) -> "Memory":
     Otherwise it falls back to a short-term-only backend (Redis when configured, else
     local) so single-agent runs work without the service deployed.
     """
-    from pais.memory import LocalMemory, RedisMemory, NullMemory, ServiceMemory
+    from pais.memory import LocalMemory, RedisMemory, NullMemory, RemoteMemory
 
     if not settings.memory_enabled:
         return NullMemory()
 
     if settings.memory_store_endpoint:
-        return ServiceMemory(settings.memory_store_endpoint)
+        return RemoteMemory(settings.memory_store_endpoint)
 
     if settings.memory_type == "redis" and settings.memory_redis_url:
         return RedisMemory(
@@ -795,13 +793,14 @@ def create_agent_server(
     if sub_agents_dict:
         toolsets.append(DelegationToolset(sub_agents_dict, settings.memory_context_limit))
 
-    # Opt-in memory tools (save_memory/search_memory) when the recall presentation
-    # exposes tools. Scope is derived server-side per run; the model only supplies text.
+    # Additive explicit memory tools (save_memory/search_memory) layered on the
+    # automatic memory baseline, per the agent's memory.tools setting. Scope is
+    # derived server-side per run; the model only supplies text.
     from pais.memory import ScopeLevel
-    from pais.memory_tools import RecallPresentation, build_memory_toolset
+    from pais.memory_tools import build_memory_toolset, parse_memory_tools
 
     memory_toolset = build_memory_toolset(
-        RecallPresentation(settings.memory_recall_presentation),
+        parse_memory_tools(settings.memory_tools),
         ScopeLevel(settings.memory_scope),
         agent_identity=settings.agent_identity or settings.security_actor or None,
     )

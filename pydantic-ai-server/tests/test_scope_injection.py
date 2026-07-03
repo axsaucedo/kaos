@@ -48,6 +48,18 @@ class TestScopeFromDeps:
         assert scope.agent_client_id is None
         assert scope.session_id == "sess-9"
 
+    def test_private_scope_without_identity_fails_closed(self):
+        # A private scope with no agent identity would collapse every identity-less
+        # agent onto one shared-empty owner; refuse rather than cross-contaminate.
+        deps = AgentDeps(session_id="sess-1", security_context=None)
+        with pytest.raises(ValueError):
+            scope_from_deps(deps, level=ScopeLevel.PRIVATE)
+
+    def test_private_scope_uses_actor_when_no_operator_identity(self):
+        deps = _deps(actor="agent-actor")
+        scope = scope_from_deps(deps, level=ScopeLevel.PRIVATE)
+        assert scope.agent_client_id == "agent-actor"
+
     def test_helper_takes_no_scope_argument(self):
         # The derivation must not accept caller/model-supplied scope: there is no
         # parameter through which request content could set principal, owner, or level.

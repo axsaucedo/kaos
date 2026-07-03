@@ -1,14 +1,14 @@
-"""Opt-in agent memory tools and recall-presentation gating.
+"""Opt-in agent memory tools and automatic-memory layering.
 
-The runtime presents recalled long-term memory to the agent in one of two ways,
-selected per agent by ``recall.presentation``:
+When memory is enabled the runtime always applies the automatic baseline: it
+recalls relevant memory and injects it as a context block before the run, and
+flushes the run's turns for extraction afterwards. On top of that baseline,
+``memory.tools`` optionally exposes explicit agent-driven tools:
 
-- ``block`` (default): the recalled context is assembled by the service and
-  injected into the run as a structured context block; the agent does not call
-  any tool.
-- ``tools``: the agent is given explicit ``save_memory`` / ``search_memory``
-  tools and decides when to read or write long-term memory.
-- ``both``: the block is injected *and* the tools are available.
+- ``read``: expose ``search_memory`` (the agent retrieves on demand).
+- ``write``: expose ``save_memory`` (the agent saves on demand).
+- ``all``: expose both.
+- unset: no explicit tools (pure automatic).
 
 The tools never accept a scope from the model. The scope is derived server-side
 from the run dependencies and the agent's configured level/identity, so a tool
@@ -59,22 +59,31 @@ _SEARCH_SCHEMA: Dict[str, Any] = {
 _VALIDATOR = SchemaValidator(schema=core_schema.any_schema())
 
 
-class RecallPresentation(str, Enum):
-    """How recalled long-term memory is surfaced to the agent."""
+class MemoryTools(str, Enum):
+    """Which explicit memory tools an agent is given, on top of automatic memory.
 
-    BLOCK = "block"
-    TOOLS = "tools"
-    BOTH = "both"
+    Memory, when enabled, always recalls-and-injects before a run and flushes-and-
+    extracts after it (the automatic baseline). This selects the *additional*
+    agent-driven tools layered on top:
+
+    - ``READ``: expose ``search_memory`` (on-demand retrieval).
+    - ``WRITE``: expose ``save_memory`` (on-demand save).
+    - ``ALL``: expose both.
+    """
+
+    ALL = "all"
+    READ = "read"
+    WRITE = "write"
 
 
-def presentation_injects_block(presentation: "RecallPresentation") -> bool:
-    """True when the recalled block should be injected into the run context."""
-    return presentation in (RecallPresentation.BLOCK, RecallPresentation.BOTH)
+def tools_expose_save(tools: Optional["MemoryTools"]) -> bool:
+    """True when ``save_memory`` should be registered."""
+    return tools in (MemoryTools.ALL, MemoryTools.WRITE)
 
 
-def presentation_exposes_tools(presentation: "RecallPresentation") -> bool:
-    """True when the save/search memory tools should be registered."""
-    return presentation in (RecallPresentation.TOOLS, RecallPresentation.BOTH)
+def tools_expose_search(tools: Optional["MemoryTools"]) -> bool:
+    """True when ``search_memory`` should be registered."""
+    return tools in (MemoryTools.ALL, MemoryTools.READ)
 
 
 class MemoryToolset(AbstractToolset["AgentDeps"]):
@@ -164,12 +173,29 @@ class MemoryToolset(AbstractToolset["AgentDeps"]):
         return f"Unknown memory tool: {name}"
 
 
+def parse_memory_tools(value: str) -> Optional["MemoryTools"]:
+    """Parse the ``memory_tools`` setting into a :class:`MemoryTools`, or ``None``.
+
+    Empty/unset means no explicit tools (pure automatic memory).
+    """
+    if not value:
+        return None
+    return MemoryTools(value)
+
+
 def build_memory_toolset(
-    presentation: "RecallPresentation",
+    tools: Optional["MemoryTools"],
     scope_level: ScopeLevel,
     agent_identity: Optional[str] = None,
 ) -> Optional[MemoryToolset]:
-    """Return a ``MemoryToolset`` when the presentation exposes tools, else ``None``."""
-    if not presentation_exposes_tools(presentation):
+    """Return a ``MemoryToolset`` exposing the selected tools, or ``None`` when none."""
+    expose_save = tools_expose_save(tools)
+    expose_search = tools_expose_search(tools)
+    if not (expose_save or expose_search):
         return None
-    return MemoryToolset(scope_level, agent_identity)
+    return MemoryToolset(
+        scope_level,
+        agent_identity,
+        expose_save=expose_save,
+        expose_search=expose_search,
+    )
