@@ -19,6 +19,7 @@ is the outbound dependency, this module is the inbound edge.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -393,8 +394,16 @@ class MemoryService:
 # --------------------------------------------------------------------------- #
 
 
-def create_app(service: MemoryService) -> FastAPI:
-    """Build the FastAPI app bound to a ``MemoryService``."""
+def create_app(service: MemoryService, request_concurrency: int = 8) -> FastAPI:
+    """Build the FastAPI app bound to a ``MemoryService``.
+
+    The request handlers are async, but the store and Mem0 calls they make are synchronous
+    (Mem0's client is sync and its async surface only wraps threads). Rather than block the
+    event loop or lean on the server's implicit threadpool, blocking work is dispatched to a
+    KAOS-owned bounded executor — the explicit Mem0 isolation boundary — sized by
+    ``request_concurrency``. Native async database access is a later optimisation; here the
+    synchronous short-term path is cheap and runs behind the same boundary.
+    """
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -403,32 +412,39 @@ def create_app(service: MemoryService) -> FastAPI:
         drain = getattr(app.state.memory.scheduler, "shutdown", None)
         if callable(drain):
             drain(wait=True)
+        app.state.request_pool.shutdown(wait=True)
 
     app = FastAPI(title="KAOS Memory Service", lifespan=lifespan)
     app.state.memory = service
+    app.state.request_pool = ThreadPoolExecutor(max_workers=request_concurrency)
+
+    async def _offload(fn: Callable[[], Any]) -> Any:
+        """Run a blocking store/Mem0 call on the bounded executor, off the event loop."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(app.state.request_pool, fn)
 
     @app.get("/healthz")
-    def healthz() -> dict:
+    async def healthz() -> dict:
         """Liveness: the process is up and serving. Independent of store state."""
         return {"status": "ok"}
 
     @app.get("/readyz")
-    def readyz() -> JSONResponse:
+    async def readyz() -> JSONResponse:
         """Readiness: both stores are reachable. 503 when any store probe fails."""
-        result = app.state.memory.readiness()
+        result = await _offload(app.state.memory.readiness)
         code = 200 if result["ready"] else 503
         return JSONResponse(result, status_code=code)
 
     @app.post("/v1/recall", response_model=RecallResponse)
-    def recall(req: RecallRequest) -> RecallResponse:
+    async def recall(req: RecallRequest) -> RecallResponse:
         """Synchronous recall: assemble long-term facts and short-term context for a scope."""
-        return app.state.memory.recall(req)
+        return await _offload(lambda: app.state.memory.recall(req))
 
     @app.post("/v1/write", response_model=WriteResponse)
-    def write(req: WriteRequest) -> JSONResponse:
-        """Record a turn: durable short-term add now, long-term extraction scheduled."""
+    async def write(req: WriteRequest) -> JSONResponse:
+        """Record turns: durable short-term append now, long-term extraction scheduled on fold."""
         try:
-            result = app.state.memory.write(req)
+            result = await _offload(lambda: app.state.memory.write(req))
         except Exception as exc:
             return JSONResponse(
                 {"accepted": False, "error": f"{type(exc).__name__}: {exc}"}, status_code=500
@@ -436,10 +452,10 @@ def create_app(service: MemoryService) -> FastAPI:
         return JSONResponse(result.model_dump(), status_code=202 if result.scheduled else 200)
 
     @app.post("/v1/forget", response_model=ForgetResponse)
-    def forget(req: ForgetRequest) -> JSONResponse:
+    async def forget(req: ForgetRequest) -> JSONResponse:
         """Erase a scope across both tiers."""
         try:
-            result = app.state.memory.forget(req)
+            result = await _offload(lambda: app.state.memory.forget(req))
         except Exception as exc:
             return JSONResponse(
                 {"forgotten": False, "error": f"{type(exc).__name__}: {exc}"}, status_code=500
