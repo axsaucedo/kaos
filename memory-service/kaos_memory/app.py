@@ -30,7 +30,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from opentelemetry import trace
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from kaos_memory.config import MemorySettings
 from kaos_memory.stores import (
@@ -63,20 +63,38 @@ class RecallRequest(BaseModel):
 FailureMode = str  # "soft" | "strict"
 
 
-class WriteRequest(BaseModel):
-    """Record a turn: append to the short-term window synchronously; long-term extraction
-    runs later, per fold, over the batch the append evicts.
+class Turn(BaseModel):
+    """A single conversational turn: a role and its content."""
 
-    ``infer`` controls whether the engine extracts facts (vs storing raw). ``failure_mode``
-    selects fail-soft (swallow long-term scheduling errors, return degraded) or strict
-    (surface failures as an error).
+    role: str
+    content: str
+
+
+class WriteRequest(BaseModel):
+    """Record one or more turns: append them to the short-term window synchronously; long-term
+    extraction runs later, per fold, over the batch the appends evict.
+
+    Turns are supplied either as a ``turns`` list (the batch shape the runtime uses to persist
+    a whole interaction in one call) or as a single ``role``/``content`` pair (normalised into a
+    one-element batch). ``infer`` controls whether the engine extracts facts (vs storing raw).
+    ``failure_mode`` selects fail-soft (swallow long-term scheduling errors, return degraded) or
+    strict (surface failures as an error).
     """
 
     scope: Scope
-    role: str
-    content: str
+    turns: List[Turn] = Field(default_factory=list)
+    role: Optional[str] = None
+    content: Optional[str] = None
     infer: bool = True
     failure_mode: FailureMode = "soft"
+
+    @model_validator(mode="after")
+    def _normalise_turns(self) -> "WriteRequest":
+        if self.role is not None and self.content is not None:
+            self.turns = [Turn(role=self.role, content=self.content), *self.turns]
+        if not self.turns:
+            raise ValueError("write requires either turns[] or a role/content pair")
+        return self
 
 
 class WriteResponse(BaseModel):
@@ -301,16 +319,18 @@ class MemoryService:
             )
 
     def write(self, req: WriteRequest) -> WriteResponse:
-        """Append a turn to the short-term window synchronously; when the append evicts a
-        batch, schedule long-term extraction of *that evicted batch* off the response path.
+        """Append one or more turns to the short-term window synchronously; when the appends
+        evict a batch, schedule long-term extraction of *that evicted batch* off the response
+        path.
 
-        Extraction is not per-turn. New turns enter the verbatim window; when the window
-        crosses its water mark the oldest turns are evicted, and ``add`` returns that
-        evicted batch. Long-term fact extraction consumes the evicted batch (and the
-        medium-term digest folds the same rows independently inside the store), so the
-        model runs once per fold over a coherent batch rather than once per message. The
-        synchronous append is the cheap durable path; ``strict`` surfaces a failure as an
-        exception (the handler maps it to an error), ``soft`` returns a degraded
+        A single call may carry a batch of turns so the runtime persists a whole interaction
+        in one request. Extraction is not per-turn: new turns enter the verbatim window, and
+        when the window crosses its water mark the oldest turns are evicted and returned. The
+        evicted turns across the batch are collected and long-term fact extraction consumes
+        them once (and the medium-term digest folds the same rows independently inside the
+        store), so the model runs once per fold over a coherent batch rather than once per
+        message. The synchronous append is the cheap durable path; ``strict`` surfaces a
+        failure as an exception (the handler maps it to an error), ``soft`` returns a degraded
         acknowledgement instead of failing the request.
         """
         with tracer.start_as_current_span("kaos.memory.write") as span:
@@ -318,16 +338,19 @@ class MemoryService:
             strict = req.failure_mode == "strict"
 
             try:
-                evicted = self.short_term.add(req.scope, req.role, req.content)
+                evicted: List[Tuple[str, str]] = []
+                for turn in req.turns:
+                    evicted.extend(self.short_term.add(req.scope, turn.role, turn.content))
             except Exception:
                 span.set_attribute("kaos.memory.degraded", True)
                 if strict:
                     raise
                 return WriteResponse(accepted=True, scheduled=False, degraded=True)
 
+            span.set_attribute("kaos.memory.turns", len(req.turns))
             span.set_attribute("kaos.memory.evicted", len(evicted))
             if not evicted:
-                # The turn is buffered in the window; nothing has left it yet, so there is
+                # The turns are buffered in the window; nothing has left it yet, so there is
                 # no batch to consolidate. Extraction runs later, when a fold evicts.
                 return WriteResponse(accepted=True, scheduled=False, degraded=False)
 

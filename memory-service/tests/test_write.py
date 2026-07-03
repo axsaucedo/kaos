@@ -79,6 +79,44 @@ def test_write_buffers_without_eviction_then_extracts_the_evicted_batch(tmp_path
     assert messages == [{"role": "user", "content": "deploy nginx"}]
 
 
+def test_batch_write_appends_all_turns_and_extracts_combined_eviction(tmp_path):
+    # A single request carrying several turns; the cap forces evictions and one combined
+    # extraction of the evicted batch.
+    short_term = _short_term(tmp_path, ShortTermTierConfig(hard_event_cap=1))
+    longterm = _RecordingLongTerm()
+    longterm.gate.set()  # let extraction run immediately when invoked
+    captured = []
+    client = _client(longterm, short_term, captured.append)
+
+    resp = client.post(
+        "/v1/write",
+        json={
+            "scope": USER_SCOPE,
+            "turns": [
+                {"role": "user", "content": "one"},
+                {"role": "assistant", "content": "two"},
+                {"role": "user", "content": "three"},
+            ],
+        },
+    )
+    assert resp.status_code == 202
+    assert resp.json()["scheduled"] is True
+
+    # The newest turn remains in the window; the older turns were evicted.
+    recent = short_term.active_window(Scope(level=ScopeLevel.USER, principal="bob"))
+    assert recent == [("user", "three")]
+
+    # A single extraction was scheduled over the combined evicted batch, in order.
+    assert len(captured) == 1
+    captured[0]()
+    assert len(longterm.writes) == 1
+    _, messages, _ = longterm.writes[0]
+    assert messages == [
+        {"role": "user", "content": "one"},
+        {"role": "assistant", "content": "two"},
+    ]
+
+
 def test_strict_surfaces_short_term_append_failure(tmp_path):
     class _BrokenShortTerm:
         def append(self, *a, **k):
