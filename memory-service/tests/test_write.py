@@ -27,8 +27,10 @@ class _RecordingLongTerm:
         return None
 
 
-def _short_term(tmp_path):
-    return ShortTermStore("local", str(tmp_path / "w.db"), ShortTermTierConfig(), lambda p, f: p)
+def _short_term(tmp_path, cfg=None):
+    return ShortTermStore(
+        "local", str(tmp_path / "w.db"), cfg or ShortTermTierConfig(), lambda p, f: p
+    )
 
 
 def _client(longterm, short_term, scheduler):
@@ -37,25 +39,44 @@ def _client(longterm, short_term, scheduler):
     )
 
 
-def test_write_returns_before_extraction_and_persists_short_term_row(tmp_path):
-    short_term = _short_term(tmp_path)
+def _write(client, content, **extra):
+    return client.post(
+        "/v1/write", json={"scope": USER_SCOPE, "role": "user", "content": content, **extra}
+    )
+
+
+def test_write_buffers_without_eviction_then_extracts_the_evicted_batch(tmp_path):
+    # hard_event_cap=1 makes the second turn evict the first, triggering extraction.
+    short_term = _short_term(tmp_path, ShortTermTierConfig(hard_event_cap=1))
     longterm = _RecordingLongTerm()  # extraction blocks until gate is set
     captured = []
     client = _client(longterm, short_term, captured.append)
 
-    resp = client.post(
-        "/v1/write", json={"scope": USER_SCOPE, "role": "user", "content": "deploy nginx"}
-    )
-    assert resp.status_code == 202
-    body = resp.json()
+    # First turn is buffered in the window: nothing has been evicted, so nothing is scheduled.
+    first = _write(client, "deploy nginx")
+    assert first.status_code == 200
+    assert first.json()["scheduled"] is False
+    assert captured == []
+
+    # Second turn pushes the window over the cap, evicting the first turn and scheduling
+    # extraction of that evicted batch (not the just-written turn).
+    second = _write(client, "scale to three")
+    assert second.status_code == 202
+    body = second.json()
     assert body["accepted"] is True and body["scheduled"] is True
 
-    # The short-term row is present synchronously, before any extraction runs.
+    # The newest turn is present synchronously; extraction was scheduled but not executed.
     recent = short_term.active_window(Scope(level=ScopeLevel.USER, principal="bob"))
-    assert recent == [("user", "deploy nginx")]
-    # Extraction was scheduled (captured) but not yet executed.
+    assert recent == [("user", "scale to three")]
     assert len(captured) == 1
     assert longterm.writes == []
+
+    # When the gate opens, extraction runs over the evicted batch.
+    longterm.gate.set()
+    captured[0]()
+    assert len(longterm.writes) == 1
+    _, messages, _ = longterm.writes[0]
+    assert messages == [{"role": "user", "content": "deploy nginx"}]
 
 
 def test_strict_surfaces_short_term_append_failure(tmp_path):
@@ -73,22 +94,21 @@ def test_strict_surfaces_short_term_append_failure(tmp_path):
 
 
 def test_soft_swallows_schedule_failure(tmp_path):
-    short_term = _short_term(tmp_path)
+    short_term = _short_term(tmp_path, ShortTermTierConfig(hard_event_cap=1))
 
     def _broken_scheduler(thunk):
         raise RuntimeError("scheduler down")
 
     client = _client(_RecordingLongTerm(), short_term, _broken_scheduler)
-    resp = client.post(
-        "/v1/write",
-        json={"scope": USER_SCOPE, "role": "user", "content": "y", "failure_mode": "soft"},
-    )
+    # First turn buffers without scheduling; the second evicts and hits the broken scheduler.
+    assert _write(client, "x").json()["scheduled"] is False
+    resp = _write(client, "y", failure_mode="soft")
     assert resp.status_code == 200
     body = resp.json()
     assert body["accepted"] is True
     assert body["scheduled"] is False
     assert body["degraded"] is True
-    # The durable short-term append still happened.
+    # The durable short-term append still happened (newest turn retained after eviction).
     assert short_term.active_window(Scope(level=ScopeLevel.USER, principal="bob")) == [
         ("user", "y")
     ]

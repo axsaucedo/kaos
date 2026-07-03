@@ -64,7 +64,8 @@ FailureMode = str  # "soft" | "strict"
 
 
 class WriteRequest(BaseModel):
-    """Record a turn: add to the short-term tier synchronously, extract long-term async.
+    """Record a turn: append to the short-term window synchronously; long-term extraction
+    runs later, per fold, over the batch the append evicts.
 
     ``infer`` controls whether the engine extracts facts (vs storing raw). ``failure_mode``
     selects fail-soft (swallow long-term scheduling errors, return degraded) or strict
@@ -79,8 +80,10 @@ class WriteRequest(BaseModel):
 
 
 class WriteResponse(BaseModel):
-    """Acknowledges a write. ``scheduled`` indicates long-term extraction was queued;
-    ``degraded`` is set when a fail-soft request swallowed a scheduling error."""
+    """Acknowledges a write. ``scheduled`` indicates the append evicted a batch and long-term
+    extraction of that batch was queued (writes that only buffer the turn return
+    ``scheduled=False``); ``degraded`` is set when a fail-soft request swallowed a
+    scheduling error."""
 
     accepted: bool = True
     scheduled: bool = False
@@ -298,30 +301,41 @@ class MemoryService:
             )
 
     def write(self, req: WriteRequest) -> WriteResponse:
-        """Add a turn to the short-term tier synchronously, then schedule long-term
-        extraction off the response path so the call returns immediately.
+        """Append a turn to the short-term window synchronously; when the append evicts a
+        batch, schedule long-term extraction of *that evicted batch* off the response path.
 
-        The synchronous short-term add is the cheap durable path. ``strict`` surfaces a
-        failure as an exception (the handler maps it to an error); ``soft`` returns a
-        degraded acknowledgement instead of failing the request.
+        Extraction is not per-turn. New turns enter the verbatim window; when the window
+        crosses its water mark the oldest turns are evicted, and ``add`` returns that
+        evicted batch. Long-term fact extraction consumes the evicted batch (and the
+        medium-term digest folds the same rows independently inside the store), so the
+        model runs once per fold over a coherent batch rather than once per message. The
+        synchronous append is the cheap durable path; ``strict`` surfaces a failure as an
+        exception (the handler maps it to an error), ``soft`` returns a degraded
+        acknowledgement instead of failing the request.
         """
         with tracer.start_as_current_span("kaos.memory.write") as span:
             span.set_attribute("kaos.memory.scope_level", req.scope.level.value)
             strict = req.failure_mode == "strict"
 
             try:
-                self.short_term.add(req.scope, req.role, req.content)
+                evicted = self.short_term.add(req.scope, req.role, req.content)
             except Exception:
                 span.set_attribute("kaos.memory.degraded", True)
                 if strict:
                     raise
                 return WriteResponse(accepted=True, scheduled=False, degraded=True)
 
+            span.set_attribute("kaos.memory.evicted", len(evicted))
+            if not evicted:
+                # The turn is buffered in the window; nothing has left it yet, so there is
+                # no batch to consolidate. Extraction runs later, when a fold evicts.
+                return WriteResponse(accepted=True, scheduled=False, degraded=False)
+
+            messages = [{"role": role, "content": content} for role, content in evicted]
+
             def _extract() -> None:
                 with tracer.start_as_current_span("kaos.memory.consolidate"):
-                    self.longterm.add(
-                        req.scope, [{"role": req.role, "content": req.content}], infer=req.infer
-                    )
+                    self.longterm.add(req.scope, messages, infer=req.infer)
 
             try:
                 self.scheduler(_extract)

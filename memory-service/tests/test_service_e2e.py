@@ -54,7 +54,7 @@ def _service(storage: StorageConfig, short_term_target: str) -> MemoryService:
     short_term = ShortTermStore(
         "local" if storage.type == "local" else "external",
         short_term_target,
-        ShortTermTierConfig(),
+        ShortTermTierConfig(hard_event_cap=1),
         lambda p, f: p,
     )
     return MemoryService(longterm=longterm, short_term=short_term, scheduler=lambda thunk: thunk())
@@ -63,24 +63,30 @@ def _service(storage: StorageConfig, short_term_target: str) -> MemoryService:
 def _drive_and_assert(service: MemoryService, span_exporter, short_term_scope_target):
     client = TestClient(create_app(service))
 
-    # Write a turn: durable short-term append + synchronous extraction (infer=False).
-    w = client.post(
-        "/v1/write",
-        json={
-            "scope": USER_SCOPE,
-            "role": "user",
-            "content": "the production cluster runs in eu-west-1",
-            "infer": False,
-        },
-    )
-    assert w.status_code == 202
+    def _write(content: str):
+        return client.post(
+            "/v1/write",
+            json={"scope": USER_SCOPE, "role": "user", "content": content, "infer": False},
+        )
 
-    # Recall: short-term context is present; long-term recall may match the stored fact.
+    # First turn buffers in the window without evicting: nothing consolidated yet.
+    first = _write("the production cluster runs in eu-west-1")
+    assert first.status_code == 200
+    assert first.json()["scheduled"] is False
+
+    # Second turn pushes past the cap, evicting the first turn and (with the inline
+    # scheduler) extracting that evicted batch into long-term synchronously.
+    second = _write("the staging cluster runs in us-east-1")
+    assert second.status_code == 202
+    assert second.json()["scheduled"] is True
+
+    # Recall: short-term context holds the newest turn; long-term recall returns a list.
     r = client.post("/v1/recall", json={"scope": USER_SCOPE, "query": "where does the cluster run"})
     assert r.status_code == 200
     body = r.json()
     assert body["degraded"] is False
-    assert any("eu-west-1" in c for _, c in body["short_term"]["recent"])
+    assert any("us-east-1" in c for _, c in body["short_term"]["recent"])
+    assert isinstance(body["facts"], list)
 
     # Forget: clears both tiers.
     f = client.post("/v1/forget", json={"scope": USER_SCOPE})
@@ -89,7 +95,12 @@ def _drive_and_assert(service: MemoryService, span_exporter, short_term_scope_ta
     assert after.json()["short_term"]["recent"] == []
 
     names = {s.name for s in span_exporter.get_finished_spans()}
-    assert {"kaos.memory.write", "kaos.memory.recall", "kaos.memory.forget"} <= names
+    assert {
+        "kaos.memory.write",
+        "kaos.memory.consolidate",
+        "kaos.memory.recall",
+        "kaos.memory.forget",
+    } <= names
 
 
 def test_local_mode_end_to_end(tmp_path, span_exporter):
