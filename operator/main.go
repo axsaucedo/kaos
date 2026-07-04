@@ -91,6 +91,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err = (&controllers.MemoryStoreReconciler{
+		Client: mgr.GetClient(),
+		Log:    setupLog,
+		Scheme: mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "MemoryStore")
+		os.Exit(1)
+	}
+
 	if err = (&controllers.AgentReconciler{
 		Client: mgr.GetClient(),
 		Log:    setupLog,
