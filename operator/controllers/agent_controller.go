@@ -12,6 +12,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -43,6 +44,7 @@ type AgentReconciler struct {
 //+kubebuilder:rbac:groups=kaos.tools,resources=agents/finalizers,verbs=update
 //+kubebuilder:rbac:groups=kaos.tools,resources=modelapis,verbs=get;list;watch
 //+kubebuilder:rbac:groups=kaos.tools,resources=mcpservers,verbs=get;list;watch
+//+kubebuilder:rbac:groups=kaos.tools,resources=memorystores,verbs=get;list;watch
 //+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
 
@@ -212,6 +214,46 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		}
 	}
 
+	// Resolve the bound MemoryStore (long-term tier). Memory is an augmentation,
+	// never a tier-1 dependency: an unresolved or not-ready store degrades memory
+	// but must not block the agent from serving, so failures here surface a
+	// MemoryDegraded condition and leave the endpoint empty (short-term fallback).
+	memoryEndpoint := ""
+	memoryDegraded := false
+	memoryDegradedMsg := ""
+	memoryStoreName := ""
+	if agent.Spec.Config != nil && agent.Spec.Config.Memory != nil {
+		mem := agent.Spec.Config.Memory
+		effectiveType := mem.Type
+		if effectiveType == "" {
+			if mem.MemoryStore != "" {
+				effectiveType = "remote"
+			} else {
+				effectiveType = "local"
+			}
+		}
+		if effectiveType == "remote" && mem.MemoryStore != "" {
+			memoryStoreName = mem.MemoryStore
+			store := &kaosv1alpha1.MemoryStore{}
+			err := r.Get(ctx, types.NamespacedName{Name: mem.MemoryStore, Namespace: agent.Namespace}, store)
+			if err != nil {
+				if apierrors.IsNotFound(err) {
+					memoryDegraded = true
+					memoryDegradedMsg = fmt.Sprintf("MemoryStore %s not found", mem.MemoryStore)
+				} else {
+					log.Error(err, "failed to resolve MemoryStore", "memorystore", mem.MemoryStore)
+					return ctrl.Result{}, err
+				}
+			} else if !store.Status.Ready {
+				memoryDegraded = true
+				memoryDegradedMsg = fmt.Sprintf("MemoryStore %s is not ready", mem.MemoryStore)
+				memoryEndpoint = store.Status.Endpoint
+			} else {
+				memoryEndpoint = store.Status.Endpoint
+			}
+		}
+	}
+
 	// When gateway routing is enabled, repoint internal endpoints at the gateway so
 	// agent->ModelAPI/MCP/peer traffic traverses jwt_authn/ext_authz/ext_proc rather
 	// than reaching the workload Service directly (which NetworkPolicy denies).
@@ -224,7 +266,7 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	if err != nil && apierrors.IsNotFound(err) {
 		// Create new Deployment
-		deployment, err = r.constructDeployment(agent, modelapi, mcpServers, peerAgents)
+		deployment, err = r.constructDeployment(agent, modelapi, mcpServers, peerAgents, memoryEndpoint)
 		if err != nil {
 			log.Error(err, "failed to construct Deployment")
 			agent.Status.Phase = "Failed"
@@ -254,7 +296,7 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, err
 	} else {
 		// Deployment exists - check if spec has changed using hash annotation
-		desiredDeployment, err := r.constructDeployment(agent, modelapi, mcpServers, peerAgents)
+		desiredDeployment, err := r.constructDeployment(agent, modelapi, mcpServers, peerAgents, memoryEndpoint)
 		if err != nil {
 			log.Error(err, "failed to construct Deployment for comparison")
 			return ctrl.Result{}, err
@@ -357,6 +399,29 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	// Update status
 	agent.Status.LinkedResources = make(map[string]string)
 	agent.Status.LinkedResources["modelapi"] = agent.Spec.ModelAPI
+	if memoryStoreName != "" {
+		agent.Status.LinkedResources["memorystore"] = memoryStoreName
+	}
+
+	// Surface memory health as a condition without affecting agent readiness: a
+	// degraded store leaves the agent serving short-term-only memory.
+	if memoryStoreName != "" {
+		if memoryDegraded {
+			meta.SetStatusCondition(&agent.Status.Conditions, metav1.Condition{
+				Type:    "MemoryDegraded",
+				Status:  metav1.ConditionTrue,
+				Reason:  "MemoryStoreNotReady",
+				Message: memoryDegradedMsg,
+			})
+		} else {
+			meta.SetStatusCondition(&agent.Status.Conditions, metav1.Condition{
+				Type:    "MemoryDegraded",
+				Status:  metav1.ConditionFalse,
+				Reason:  "MemoryStoreReady",
+				Message: fmt.Sprintf("MemoryStore %s is ready", memoryStoreName),
+			})
+		}
+	}
 
 	// Copy deployment status for rolling update visibility
 	agent.Status.Deployment = util.CopyDeploymentStatus(deployment)
@@ -429,7 +494,7 @@ func (r *AgentReconciler) applyGatewayRouting(
 }
 
 // constructDeployment creates a Deployment for the Agent
-func (r *AgentReconciler) constructDeployment(agent *kaosv1alpha1.Agent, modelapi *kaosv1alpha1.ModelAPI, mcpServers map[string]string, peerAgents map[string]string) (*appsv1.Deployment, error) {
+func (r *AgentReconciler) constructDeployment(agent *kaosv1alpha1.Agent, modelapi *kaosv1alpha1.ModelAPI, mcpServers map[string]string, peerAgents map[string]string, memoryEndpoint string) (*appsv1.Deployment, error) {
 	labels := map[string]string{
 		"app":   "agent",
 		"agent": agent.Name,
@@ -438,7 +503,7 @@ func (r *AgentReconciler) constructDeployment(agent *kaosv1alpha1.Agent, modelap
 	replicas := int32(1)
 
 	// Build environment variables
-	env := r.constructEnvVars(agent, modelapi, mcpServers, peerAgents)
+	env := r.constructEnvVars(agent, modelapi, mcpServers, peerAgents, memoryEndpoint)
 
 	// Get agent image from environment (required - set via ConfigMap)
 	agentImage := os.Getenv("DEFAULT_AGENT_IMAGE")
@@ -543,7 +608,7 @@ func (r *AgentReconciler) constructDeployment(agent *kaosv1alpha1.Agent, modelap
 }
 
 // constructEnvVars builds environment variables for the agent
-func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *kaosv1alpha1.ModelAPI, mcpServers map[string]string, peerAgents map[string]string) []corev1.EnvVar {
+func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *kaosv1alpha1.ModelAPI, mcpServers map[string]string, peerAgents map[string]string, memoryEndpoint string) []corev1.EnvVar {
 	var env []corev1.EnvVar
 
 	// Agent identity and configuration
@@ -599,57 +664,80 @@ func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *
 	// Memory configuration
 	if agent.Spec.Config != nil && agent.Spec.Config.Memory != nil {
 		mem := agent.Spec.Config.Memory
+
+		enabled := true
 		if mem.Enabled != nil {
-			env = append(env, corev1.EnvVar{
-				Name:  "MEMORY_ENABLED",
-				Value: fmt.Sprintf("%t", *mem.Enabled),
-			})
+			enabled = *mem.Enabled
 		}
-		if mem.Type != "" {
-			env = append(env, corev1.EnvVar{
-				Name:  "MEMORY_TYPE",
-				Value: mem.Type,
-			})
-			// Pass Redis URL from operator config when memory type is redis
-			// Only inject if user hasn't set MEMORY_REDIS_URL in spec.container.env
-			if mem.Type == "redis" {
-				userHasRedisURL := false
-				if agent.Spec.Container != nil {
-					for _, e := range agent.Spec.Container.Env {
-						if e.Name == "MEMORY_REDIS_URL" {
-							userHasRedisURL = true
-							break
-						}
-					}
-				}
-				if !userHasRedisURL {
-					if redisURL := os.Getenv("DEFAULT_REDIS_URL"); redisURL != "" {
-						env = append(env, corev1.EnvVar{
-							Name:  "MEMORY_REDIS_URL",
-							Value: redisURL,
-						})
-					}
-				}
+		env = append(env, corev1.EnvVar{
+			Name:  "MEMORY_ENABLED",
+			Value: fmt.Sprintf("%t", enabled),
+		})
+
+		// Effective backend: explicit type when set, else derived from memoryStore
+		// presence (remote when bound, local otherwise).
+		effectiveType := mem.Type
+		if effectiveType == "" {
+			if mem.MemoryStore != "" {
+				effectiveType = "remote"
+			} else {
+				effectiveType = "local"
 			}
 		}
-		if mem.ContextLimit != nil {
+		env = append(env, corev1.EnvVar{
+			Name:  "MEMORY_TYPE",
+			Value: effectiveType,
+		})
+
+		// The store endpoint is injected only for the remote backend; a local agent
+		// runs the pod-local short-term fallback with no long-term tier.
+		if effectiveType == "remote" && memoryEndpoint != "" {
 			env = append(env, corev1.EnvVar{
-				Name:  "MEMORY_CONTEXT_LIMIT",
-				Value: fmt.Sprintf("%d", *mem.ContextLimit),
+				Name:  "MEMORY_STORE_ENDPOINT",
+				Value: memoryEndpoint,
 			})
 		}
-		if mem.MaxSessions != nil {
+
+		if mem.Scope != "" {
 			env = append(env, corev1.EnvVar{
-				Name:  "MEMORY_MAX_SESSIONS",
-				Value: fmt.Sprintf("%d", *mem.MaxSessions),
+				Name:  "MEMORY_SCOPE",
+				Value: mem.Scope,
 			})
 		}
-		if mem.MaxSessionEvents != nil {
+		if mem.Tools != "" {
 			env = append(env, corev1.EnvVar{
-				Name:  "MEMORY_MAX_SESSION_EVENTS",
-				Value: fmt.Sprintf("%d", *mem.MaxSessionEvents),
+				Name:  "MEMORY_TOOLS",
+				Value: mem.Tools,
 			})
 		}
+		if mem.FailureMode != "" {
+			env = append(env, corev1.EnvVar{
+				Name:  "MEMORY_FAILURE_MODE",
+				Value: mem.FailureMode,
+			})
+		}
+		if mem.ClientParams != nil {
+			if mem.ClientParams.TokenBudget != nil {
+				env = append(env, corev1.EnvVar{
+					Name:  "MEMORY_SHORT_TERM_TOKEN_BUDGET",
+					Value: fmt.Sprintf("%d", *mem.ClientParams.TokenBudget),
+				})
+			}
+			if mem.ClientParams.RollingSummary != nil {
+				env = append(env, corev1.EnvVar{
+					Name:  "MEMORY_ROLLING_SUMMARY",
+					Value: fmt.Sprintf("%t", *mem.ClientParams.RollingSummary),
+				})
+			}
+		}
+
+		// Always inject the fully-qualified agent identity so private-scope memory
+		// is owned by a verifiable, unique principal rather than collapsing onto a
+		// shared partition when identity is absent.
+		env = append(env, corev1.EnvVar{
+			Name:  "AGENT_IDENTITY",
+			Value: fmt.Sprintf("kaos://agent/%s/%s", agent.Namespace, agent.Name),
+		})
 	}
 
 	// Autonomous configuration — goal presence activates autonomous mode
