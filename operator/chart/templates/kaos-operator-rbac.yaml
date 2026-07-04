@@ -9,6 +9,7 @@ rules:
   - ""
   resources:
   - configmaps
+  - persistentvolumeclaims
   - services
   verbs:
   - create
@@ -50,6 +51,19 @@ rules:
   - update
   - watch
 - apiGroups:
+  - gateway.envoyproxy.io
+  resources:
+  - envoyextensionpolicies
+  - securitypolicies
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - gateway.networking.k8s.io
   resources:
   - gateways
@@ -70,35 +84,11 @@ rules:
   - update
   - watch
 - apiGroups:
-  - gateway.envoyproxy.io
-  resources:
-  - envoyextensionpolicies
-  - securitypolicies
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
-  - networking.k8s.io
-  resources:
-  - networkpolicies
-  verbs:
-  - create
-  - delete
-  - get
-  - list
-  - patch
-  - update
-  - watch
-- apiGroups:
   - kaos.tools
   resources:
   - agents
   - mcpservers
+  - memorystores
   - modelapis
   verbs:
   - create
@@ -113,6 +103,7 @@ rules:
   resources:
   - agents/finalizers
   - mcpservers/finalizers
+  - memorystores/finalizers
   - modelapis/finalizers
   verbs:
   - update
@@ -121,8 +112,21 @@ rules:
   resources:
   - agents/status
   - mcpservers/status
+  - memorystores/status
   - modelapis/status
   verbs:
   - get
   - patch
   - update
+- apiGroups:
+  - networking.k8s.io
+  resources:
+  - networkpolicies
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch

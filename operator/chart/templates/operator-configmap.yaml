@@ -13,6 +13,7 @@ data:
   DEFAULT_MCP_SERVER_IMAGE: {{ .Values.defaultImages.mcpServer | quote }}
   DEFAULT_LITELLM_IMAGE: {{ .Values.defaultImages.litellm | quote }}
   DEFAULT_OLLAMA_IMAGE: {{ .Values.defaultImages.ollama | quote }}
+  DEFAULT_MEMORY_SERVICE_IMAGE: {{ .Values.defaultImages.memoryService | quote }}
   # Gateway API configuration
   {{- if .Values.gatewayAPI.enabled }}
   GATEWAY_API_ENABLED: "true"
