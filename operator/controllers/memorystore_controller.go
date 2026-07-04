@@ -374,8 +374,24 @@ func (r *MemoryStoreReconciler) buildStorageEnv(store *kaosv1alpha1.MemoryStore)
 		return env, volumes, mounts
 	}
 
-	// External mode: storage type only here; the DSN secret and dims are wired separately.
+	// External mode: connect to an external pgvector database. The DSN is sourced
+	// from the referenced Secret key and the embedding dimensionality is passed
+	// through so the service can provision the vector column.
 	env := []corev1.EnvVar{{Name: "KAOS_MEMORY_STORAGE_TYPE", Value: "external"}}
+	if ext := store.Spec.Storage.External; ext != nil {
+		if ext.ConnectionSecretRef != nil {
+			env = append(env, corev1.EnvVar{
+				Name:      "KAOS_MEMORY_EXTERNAL_DSN",
+				ValueFrom: &corev1.EnvVarSource{SecretKeyRef: ext.ConnectionSecretRef},
+			})
+		}
+		if ext.EmbeddingDims != nil {
+			env = append(env, corev1.EnvVar{
+				Name:  "KAOS_MEMORY_EXTERNAL_DIMS",
+				Value: fmt.Sprintf("%d", *ext.EmbeddingDims),
+			})
+		}
+	}
 	return env, nil, nil
 }
 
