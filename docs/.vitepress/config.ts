@@ -109,6 +109,7 @@ export default withMermaid(defineConfig({
           { text: 'Agent CRD', link: '/operator/agent-crd' },
           { text: 'ModelAPI CRD', link: '/operator/modelapi-crd' },
           { text: 'MCPServer CRD', link: '/operator/mcpserver-crd' },
+          { text: 'MemoryStore CRD', link: '/operator/memorystore-crd' },
           { text: 'Gateway API', link: '/operator/gateway-api' },
           { text: 'OpenTelemetry', link: '/operator/telemetry' }
         ]
