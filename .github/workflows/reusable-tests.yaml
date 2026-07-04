@@ -75,7 +75,7 @@ jobs:
       matrix:
         shard:
           - name: core
-            files: "e2e/test_base_func_e2e.py e2e/test_modelapi_e2e.py e2e/test_a2a_e2e.py e2e/test_autonomous_e2e.py"
+            files: "e2e/test_base_func_e2e.py e2e/test_modelapi_e2e.py e2e/test_a2a_e2e.py e2e/test_autonomous_e2e.py e2e/test_memory_store_e2e.py"
           - name: mcp
             files: "e2e/test_mcp_tools_e2e.py"
           - name: multi-agent
@@ -207,6 +207,16 @@ jobs:
           cache-to: type=gha,scope=mcp-fastmcp-codemode-e2e,mode=max
           github-token: ${{ github.token }}
 
+      - name: Build memory-service image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./kaos-memory
+          load: true
+          tags: ${{ env.REGISTRY }}/kaos-memory-service:${{ env.AGENT_TAG }}
+          cache-from: type=gha,scope=memory-service-e2e
+          cache-to: type=gha,scope=memory-service-e2e,mode=max
+          github-token: ${{ github.token }}
+
 
       - name: Load images into KIND
         run: |
@@ -218,6 +228,7 @@ jobs:
           kind load docker-image ${{ env.REGISTRY }}/kaos-mcp-python-string:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }} &
           kind load docker-image ${{ env.REGISTRY }}/kaos-mcp-pctx-codemode:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }} &
           kind load docker-image ${{ env.REGISTRY }}/kaos-mcp-fastmcp-codemode:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }} &
+          kind load docker-image ${{ env.REGISTRY }}/kaos-memory-service:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }} &
           wait
           kind load docker-image ghcr.io/berriai/litellm:main-stable --name ${{ env.KIND_CLUSTER_NAME }}
           kind load docker-image ollama/ollama:latest --name ${{ env.KIND_CLUSTER_NAME }}
