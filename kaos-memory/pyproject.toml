@@ -27,6 +27,8 @@ service = [
     "opentelemetry-sdk>=1.20.0",
     "opentelemetry-exporter-otlp-proto-grpc>=1.20.0",
     "opentelemetry-instrumentation-fastapi>=0.41b0",
+    "opentelemetry-instrumentation-logging>=0.41b0",
+    "opentelemetry-instrumentation-httpx>=0.41b0",
 ]
 # Direct Pydantic AI integration: message/turn adapters and the memory toolset.
 pydantic-ai = [
