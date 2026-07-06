@@ -1068,12 +1068,34 @@ func (r *AgentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return requests
 	})
 
+	// Map MemoryStore changes to related Agents so a store appearing or becoming
+	// Ready promptly requeues the agents bound to it (memory binding recovery).
+	mapMemoryStoreToAgents := handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []ctrl.Request {
+		store := obj.(*kaosv1alpha1.MemoryStore)
+		agentList := &kaosv1alpha1.AgentList{}
+		if err := r.List(ctx, agentList, client.InNamespace(store.Namespace)); err != nil {
+			return []ctrl.Request{}
+		}
+
+		requests := []ctrl.Request{}
+		for _, agent := range agentList.Items {
+			if agent.Spec.Config != nil && agent.Spec.Config.Memory != nil &&
+				agent.Spec.Config.Memory.MemoryStore == store.Name {
+				requests = append(requests, ctrl.Request{
+					NamespacedName: types.NamespacedName{Name: agent.Name, Namespace: agent.Namespace},
+				})
+			}
+		}
+		return requests
+	})
+
 	builder := ctrl.NewControllerManagedBy(mgr).
 		For(&kaosv1alpha1.Agent{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
 		Watches(&kaosv1alpha1.ModelAPI{}, mapModelAPIToAgents).
-		Watches(&kaosv1alpha1.MCPServer{}, mapMCPServerToAgents)
+		Watches(&kaosv1alpha1.MCPServer{}, mapMCPServerToAgents).
+		Watches(&kaosv1alpha1.MemoryStore{}, mapMemoryStoreToAgents)
 
 	// Own HTTPRoutes if Gateway API is enabled
 	if gateway.GetConfig().Enabled {
