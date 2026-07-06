@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -17,7 +18,7 @@ import (
 )
 
 func uniqueMemoryStoreName(base string) string {
-	return fmt.Sprintf("%s-%d", base, time.Now().UnixNano()%100000)
+	return fmt.Sprintf("%s-%d-%d", base, time.Now().UnixNano()%100000, atomic.AddUint64(&nameCounter, 1))
 }
 
 func int32Ptr(v int32) *int32 { return &v }
