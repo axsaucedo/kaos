@@ -22,27 +22,30 @@ type Config struct {
 	GatewayName      string
 	GatewayNamespace string
 	// Default timeouts for each resource type (Gateway API Duration format)
-	DefaultAgentTimeout    string
-	DefaultModelAPITimeout string
-	DefaultMCPTimeout      string
+	DefaultAgentTimeout       string
+	DefaultModelAPITimeout    string
+	DefaultMCPTimeout         string
+	DefaultMemoryStoreTimeout string
 }
 
 // Default timeout values (used when env vars are not set)
 const (
-	defaultAgentTimeout    = "120s" // Agents may do multi-step reasoning
-	defaultModelAPITimeout = "120s" // LLM inference can take time
-	defaultMCPTimeout      = "30s"  // Tool calls are typically fast
+	defaultAgentTimeout       = "120s" // Agents may do multi-step reasoning
+	defaultModelAPITimeout    = "120s" // LLM inference can take time
+	defaultMCPTimeout         = "30s"  // Tool calls are typically fast
+	defaultMemoryStoreTimeout = "30s"  // Recall/write are synchronous but light
 )
 
 // GetConfig reads Gateway API configuration from environment variables
 func GetConfig() Config {
 	return Config{
-		Enabled:                os.Getenv("GATEWAY_API_ENABLED") == "true",
-		GatewayName:            os.Getenv("GATEWAY_NAME"),
-		GatewayNamespace:       os.Getenv("GATEWAY_NAMESPACE"),
-		DefaultAgentTimeout:    getEnvOrDefault("GATEWAY_DEFAULT_AGENT_TIMEOUT", defaultAgentTimeout),
-		DefaultModelAPITimeout: getEnvOrDefault("GATEWAY_DEFAULT_MODELAPI_TIMEOUT", defaultModelAPITimeout),
-		DefaultMCPTimeout:      getEnvOrDefault("GATEWAY_DEFAULT_MCP_TIMEOUT", defaultMCPTimeout),
+		Enabled:                   os.Getenv("GATEWAY_API_ENABLED") == "true",
+		GatewayName:               os.Getenv("GATEWAY_NAME"),
+		GatewayNamespace:          os.Getenv("GATEWAY_NAMESPACE"),
+		DefaultAgentTimeout:       getEnvOrDefault("GATEWAY_DEFAULT_AGENT_TIMEOUT", defaultAgentTimeout),
+		DefaultModelAPITimeout:    getEnvOrDefault("GATEWAY_DEFAULT_MODELAPI_TIMEOUT", defaultModelAPITimeout),
+		DefaultMCPTimeout:         getEnvOrDefault("GATEWAY_DEFAULT_MCP_TIMEOUT", defaultMCPTimeout),
+		DefaultMemoryStoreTimeout: getEnvOrDefault("GATEWAY_DEFAULT_MEMORYSTORE_TIMEOUT", defaultMemoryStoreTimeout),
 	}
 }
 
@@ -58,9 +61,10 @@ func getEnvOrDefault(key, defaultValue string) string {
 type ResourceType string
 
 const (
-	ResourceTypeAgent    ResourceType = "agent"
-	ResourceTypeModelAPI ResourceType = "modelapi"
-	ResourceTypeMCP      ResourceType = "mcp"
+	ResourceTypeAgent       ResourceType = "agent"
+	ResourceTypeModelAPI    ResourceType = "modelapi"
+	ResourceTypeMCP         ResourceType = "mcp"
+	ResourceTypeMemoryStore ResourceType = "memorystore"
 )
 
 // HTTPRouteName generates a consistent name for an HTTPRoute
@@ -127,6 +131,8 @@ func DefaultTimeout(resourceType ResourceType) string {
 		return config.DefaultAgentTimeout
 	case ResourceTypeMCP:
 		return config.DefaultMCPTimeout
+	case ResourceTypeMemoryStore:
+		return config.DefaultMemoryStoreTimeout
 	default:
 		return config.DefaultMCPTimeout
 	}

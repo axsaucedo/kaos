@@ -272,7 +272,7 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	// When gateway routing is enabled, repoint internal endpoints at the gateway so
 	// agent->ModelAPI/MCP/peer traffic traverses jwt_authn/ext_authz/ext_proc rather
 	// than reaching the workload Service directly (which NetworkPolicy denies).
-	r.applyGatewayRouting(ctx, agent, modelapi, mcpServers, peerAgents, log)
+	r.applyGatewayRouting(ctx, agent, modelapi, mcpServers, peerAgents, memoryStoreName, &memoryEndpoint, log)
 
 	// Create or update Deployment
 	deployment := &appsv1.Deployment{}
@@ -470,9 +470,9 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	return ctrl.Result{}, nil
 }
 
-// applyGatewayRouting rewrites the resolved ModelAPI, MCP, and peer endpoints to
-// gateway-routed URLs when gateway routing is enabled. All referenced resources
-// live in the agent's namespace, so each URL becomes
+// applyGatewayRouting rewrites the resolved ModelAPI, MCP, peer, and memory
+// endpoints to gateway-routed URLs when gateway routing is enabled. All
+// referenced resources live in the agent's namespace, so each URL becomes
 // http://<gatewayHost>/<namespace>/<type>/<name>, which the per-resource
 // HTTPRoute matches and rewrites back to the workload. The gateway host is taken
 // from explicit config or, failing that, the Gateway resource's status address;
@@ -484,6 +484,8 @@ func (r *AgentReconciler) applyGatewayRouting(
 	modelapi *kaosv1alpha1.ModelAPI,
 	mcpServers map[string]string,
 	peerAgents map[string]string,
+	memoryStoreName string,
+	memoryEndpoint *string,
 	log logr.Logger,
 ) {
 	secCfg := security.GetConfig()
@@ -511,6 +513,11 @@ func (r *AgentReconciler) applyGatewayRouting(
 	}
 	for name := range peerAgents {
 		peerAgents[name] = gateway.GatewayEndpoint(host, agent.Namespace, gateway.ResourceTypeAgent, name)
+	}
+	// Only a resolved (Ready) memory endpoint is rewritten; an empty endpoint
+	// means the store is absent or not ready and memory stays short-term only.
+	if memoryEndpoint != nil && *memoryEndpoint != "" && memoryStoreName != "" {
+		*memoryEndpoint = gateway.GatewayEndpoint(host, agent.Namespace, gateway.ResourceTypeMemoryStore, memoryStoreName)
 	}
 }
 

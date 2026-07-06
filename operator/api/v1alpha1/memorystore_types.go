@@ -149,6 +149,21 @@ type MemoryStoreSpec struct {
 	// +kubebuilder:validation:Enum=soft;strict
 	// +kubebuilder:default=soft
 	DefaultFailureMode string `json:"defaultFailureMode,omitempty"`
+
+	// GatewayRoute configures Gateway API routing (timeout, etc.) for the memory
+	// service so agents reach it through the gateway data-plane rather than a
+	// direct Service address.
+	// +kubebuilder:validation:Optional
+	GatewayRoute *GatewayRoute `json:"gatewayRoute,omitempty"`
+
+	// Telemetry configures OpenTelemetry instrumentation for the memory service.
+	// +kubebuilder:validation:Optional
+	Telemetry *TelemetryConfig `json:"telemetry,omitempty"`
+
+	// Container provides shorthand container overrides (image, env, resources)
+	// for the memory-service container.
+	// +kubebuilder:validation:Optional
+	Container *ContainerOverride `json:"container,omitempty"`
 }
 
 // +kubebuilder:object:generate=true

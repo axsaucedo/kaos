@@ -103,7 +103,6 @@ rules:
   resources:
   - agents/finalizers
   - mcpservers/finalizers
-  - memorystores/finalizers
   - modelapis/finalizers
   verbs:
   - update

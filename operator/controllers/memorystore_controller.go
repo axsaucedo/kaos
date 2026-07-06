@@ -21,6 +21,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	kaosv1alpha1 "github.com/axsaucedo/kaos/operator/api/v1alpha1"
+	"github.com/axsaucedo/kaos/operator/pkg/gateway"
+	"github.com/axsaucedo/kaos/operator/pkg/security"
 	"github.com/axsaucedo/kaos/operator/pkg/util"
 )
 
@@ -100,6 +102,12 @@ func (r *MemoryStoreReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		r.Status().Update(ctx, store)
 		return ctrl.Result{}, err
 	}
+
+	// Route the memory service through the gateway data-plane and guard it with a
+	// default-deny NetworkPolicy so agents cannot bypass the gateway to reach it
+	// directly. Memory is internal-only (no external clients), but the same
+	// gateway path carries the identity headers scope enforcement relies on.
+	r.reconcileGatewayAndSecurity(ctx, store, serviceName, log)
 
 	// Update status endpoint and readiness.
 	store.Status.Endpoint = fmt.Sprintf("http://%s.%s.svc.cluster.local:%d", serviceName, store.Namespace, memoryServicePort)
@@ -259,6 +267,9 @@ func (r *MemoryStoreReconciler) reconcileDeployment(ctx context.Context, store *
 // constructDeployment builds the memory-service Deployment for the store.
 func (r *MemoryStoreReconciler) constructDeployment(store *kaosv1alpha1.MemoryStore, modelEnv []corev1.EnvVar) (*appsv1.Deployment, error) {
 	image := os.Getenv("DEFAULT_MEMORY_SERVICE_IMAGE")
+	if store.Spec.Container != nil && store.Spec.Container.Image != "" {
+		image = store.Spec.Container.Image
+	}
 	if image == "" {
 		return nil, fmt.Errorf("DEFAULT_MEMORY_SERVICE_IMAGE environment variable is required but not set")
 	}
@@ -272,6 +283,10 @@ func (r *MemoryStoreReconciler) constructDeployment(store *kaosv1alpha1.MemorySt
 	env, volumes, mounts := r.buildStorageEnv(store)
 	env = append(env, modelEnv...)
 	env = append(env, r.buildOperationalEnv(store)...)
+	env = append(env, util.BuildTelemetryEnvVars(util.MergeTelemetryConfig(store.Spec.Telemetry), memoryStoreResourceName(store.Name), store.Namespace)...)
+	if store.Spec.Container != nil {
+		env = append(env, store.Spec.Container.Env...)
+	}
 
 	container := corev1.Container{
 		Name:            "memory",
@@ -300,6 +315,17 @@ func (r *MemoryStoreReconciler) constructDeployment(store *kaosv1alpha1.MemorySt
 			TimeoutSeconds:      5,
 			FailureThreshold:    3,
 		},
+	}
+	if c := store.Spec.Container; c != nil {
+		if len(c.Command) > 0 {
+			container.Command = c.Command
+		}
+		if len(c.Args) > 0 {
+			container.Args = c.Args
+		}
+		if c.Resources != nil {
+			container.Resources = *c.Resources
+		}
 	}
 
 	podSpec := corev1.PodSpec{
@@ -424,6 +450,58 @@ func (r *MemoryStoreReconciler) reconcileService(ctx context.Context, store *kao
 	}
 	log.Info("Creating Service", "name", name)
 	return r.Create(ctx, service)
+}
+
+// reconcileGatewayAndSecurity wires the memory service into the Gateway API and
+// applies the default-deny NetworkPolicy plus gateway policies, mirroring the
+// other workloads. Failures are logged but non-fatal: memory routing is an
+// augmentation and must not block the store from reporting Ready.
+func (r *MemoryStoreReconciler) reconcileGatewayAndSecurity(ctx context.Context, store *kaosv1alpha1.MemoryStore, serviceName string, log logr.Logger) {
+	labels := memoryStoreLabels(store.Name)
+
+	timeout := ""
+	if store.Spec.GatewayRoute != nil {
+		timeout = store.Spec.GatewayRoute.Timeout
+	}
+	if err := gateway.ReconcileHTTPRoute(ctx, r.Client, r.Scheme, store, gateway.HTTPRouteParams{
+		ResourceType: gateway.ResourceTypeMemoryStore,
+		ResourceName: store.Name,
+		Namespace:    store.Namespace,
+		ServiceName:  serviceName,
+		ServicePort:  memoryServicePort,
+		Labels:       labels,
+		Timeout:      timeout,
+	}, log); err != nil {
+		log.Error(err, "failed to reconcile HTTPRoute")
+	}
+
+	secCfg := security.GetConfig()
+	if !secCfg.IsOperational() && !secCfg.ExtProcEnabled() {
+		return
+	}
+	routeName := gateway.HTTPRouteName(gateway.ResourceTypeMemoryStore, store.Name)
+	policyParams := security.PolicyParams{
+		Name:      routeName,
+		Namespace: store.Namespace,
+		RouteName: routeName,
+		Labels:    labels,
+	}
+	if err := security.ReconcileSecurityPolicy(ctx, r.Client, r.Scheme, store, policyParams, secCfg, log); err != nil {
+		log.Error(err, "failed to reconcile SecurityPolicy")
+	}
+	if err := security.ReconcileEnvoyExtensionPolicy(ctx, r.Client, r.Scheme, store, policyParams, secCfg, log); err != nil {
+		log.Error(err, "failed to reconcile EnvoyExtensionPolicy")
+	}
+	// Memory has no external clients, so egress stays namespace-restricted (no
+	// AllowExternalEgress) unlike ModelAPI proxies.
+	if err := security.ReconcileNetworkPolicy(ctx, r.Client, r.Scheme, store, security.NetworkPolicyParams{
+		Name:        routeName,
+		Namespace:   store.Namespace,
+		PodSelector: labels,
+		Labels:      labels,
+	}, secCfg, log); err != nil {
+		log.Error(err, "failed to reconcile NetworkPolicy")
+	}
 }
 
 func memoryStoreResourceName(name string) string { return fmt.Sprintf("memorystore-%s", name) }

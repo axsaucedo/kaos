@@ -9,6 +9,7 @@ import (
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -205,6 +206,52 @@ var _ = Describe("MemoryStore Controller", func() {
 				Name: fmt.Sprintf("memorystore-%s-data", name), Namespace: namespace}, pvc)
 		}, timeout, interval).Should(Succeed())
 		Expect(pvc.Spec.Resources.Requests.Storage().String()).To(Equal("5Gi"))
+	})
+
+	It("applies telemetry env and container resource overrides on the deployment", func() {
+		modelAPIName := uniqueMemoryStoreName("mem-model")
+		modelAPI := createReadyModelAPI(ctx, namespace, modelAPIName)
+		defer func() { k8sClient.Delete(ctx, modelAPI) }()
+
+		name := uniqueMemoryStoreName("telemetry-store")
+		store := &kaosv1alpha1.MemoryStore{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+			Spec: kaosv1alpha1.MemoryStoreSpec{
+				Storage: kaosv1alpha1.MemoryStorage{Type: kaosv1alpha1.MemoryStorageLocal},
+				Models: kaosv1alpha1.MemoryModels{
+					Summarization: kaosv1alpha1.MemoryModelRef{ModelAPI: modelAPIName, Model: "mock-model"},
+					Embedding:     kaosv1alpha1.MemoryModelRef{ModelAPI: modelAPIName, Model: "mock-embed"},
+				},
+				Telemetry: &kaosv1alpha1.TelemetryConfig{
+					Enabled:  true,
+					Endpoint: "http://otel-collector.observability:4317",
+				},
+				Container: &kaosv1alpha1.ContainerOverride{
+					Env: []corev1.EnvVar{{Name: "EXTRA_FLAG", Value: "on"}},
+					Resources: &corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{corev1.ResourceMemory: resource.MustParse("512Mi")},
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, store)).To(Succeed())
+		defer func() { k8sClient.Delete(ctx, store) }()
+
+		deployment := &appsv1.Deployment{}
+		Eventually(func() error {
+			return k8sClient.Get(ctx, types.NamespacedName{
+				Name: fmt.Sprintf("memorystore-%s", name), Namespace: namespace}, deployment)
+		}, timeout, interval).Should(Succeed())
+
+		container := deployment.Spec.Template.Spec.Containers[0]
+		envMap := map[string]string{}
+		for _, e := range container.Env {
+			envMap[e.Name] = e.Value
+		}
+		Expect(envMap["OTEL_SERVICE_NAME"]).To(Equal(fmt.Sprintf("memorystore-%s", name)))
+		Expect(envMap["OTEL_EXPORTER_OTLP_ENDPOINT"]).To(Equal("http://otel-collector.observability:4317"))
+		Expect(envMap["EXTRA_FLAG"]).To(Equal("on"))
+		Expect(container.Resources.Limits.Memory().String()).To(Equal("512Mi"))
 	})
 
 	It("should wire the external DSN secret and embedding dimensionality in external mode", func() {
