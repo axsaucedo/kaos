@@ -94,3 +94,33 @@ def test_external_delete_scope(pgvector_dsn, offline_models):
     store.delete_scope(alice)
     assert store.recall(alice, "what port does the deployment use", top_k=10) == []
     assert store.recall(bob, "what port does the deployment use", top_k=10)
+
+
+def test_fact_extraction_prompt_threads_into_mem0_config(tmp_path, offline_models, monkeypatch):
+    captured = {}
+
+    class _StubMemory:
+        embedding_model = None
+
+        @classmethod
+        def from_config(cls, config):
+            captured["config"] = config
+            return cls()
+
+    monkeypatch.setattr("kaos_memory.stores.Memory", _StubMemory)
+    storage = StorageConfig(
+        type="local",
+        local=LocalStorage(path=str(tmp_path), collection_name="t_" + uuid.uuid4().hex[:8]),
+    )
+
+    LongTermStore(
+        storage,
+        offline_models["summarization"],
+        offline_models["embedding"],
+        fact_extraction_prompt="only extract deployment facts",
+    )
+    assert captured["config"]["custom_fact_extraction_prompt"] == "only extract deployment facts"
+
+    captured.clear()
+    LongTermStore(storage, offline_models["summarization"], offline_models["embedding"])
+    assert "custom_fact_extraction_prompt" not in captured["config"]

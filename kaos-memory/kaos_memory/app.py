@@ -393,8 +393,15 @@ def build_service(settings: MemorySettings) -> MemoryService:
         concurrency=settings.extraction_concurrency,
         max_retries=settings.extraction_max_retries,
     )
-    longterm = LongTermStore(storage, settings.summarization(), settings.embedding())
-    summarizer = ModelClient(settings.summarization()).as_summarizer()
+    longterm = LongTermStore(
+        storage,
+        settings.summarization(),
+        settings.embedding(),
+        fact_extraction_prompt=settings.fact_extraction_prompt or None,
+    )
+    summarizer = ModelClient(
+        settings.summarization(), system_prompt=settings.summary_prompt or None
+    ).as_summarizer()
     short_term = ShortTermStore(
         settings.storage_type,
         settings.short_term_target(),

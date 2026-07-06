@@ -87,9 +87,15 @@ class ModelClient:
     embedding/extraction calls, configured from the same ``ModelConfig`` values.
     """
 
-    def __init__(self, config: ModelConfig, client: Optional[httpx.Client] = None) -> None:
+    def __init__(
+        self,
+        config: ModelConfig,
+        client: Optional[httpx.Client] = None,
+        system_prompt: Optional[str] = None,
+    ) -> None:
         self.config = config
         self._client = client or httpx.Client(timeout=30.0)
+        self._system_prompt = system_prompt or _SUMMARY_SYSTEM
 
     def summarize(self, prior_summary: str, folded_turns: List[Tuple[str, str]]) -> str:
         """Fold ``prior_summary`` and ``folded_turns`` into an updated rolling summary."""
@@ -103,7 +109,7 @@ class ModelClient:
             json={
                 "model": self.config.model,
                 "messages": [
-                    {"role": "system", "content": _SUMMARY_SYSTEM},
+                    {"role": "system", "content": self._system_prompt},
                     {"role": "user", "content": user},
                 ],
             },
@@ -527,6 +533,7 @@ class LongTermStore:
         storage: StorageConfig,
         summarization: ModelConfig,
         embedding: ModelConfig,
+        fact_extraction_prompt: Optional[str] = None,
     ) -> None:
         block = storage.resolved()
         # pgvector needs the embedding dimension; Chroma infers it.
@@ -537,6 +544,10 @@ class LongTermStore:
             "vector_store": _vector_store_config(block),
             "history_db_path": _history_db_path(block),
         }
+        # Mem0 uses this to steer which facts it extracts from a turn; unset leaves
+        # its built-in default extraction prompt in place.
+        if fact_extraction_prompt:
+            config["custom_fact_extraction_prompt"] = fact_extraction_prompt
         self._memory = Memory.from_config(config)
 
     @staticmethod

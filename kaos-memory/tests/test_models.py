@@ -57,3 +57,27 @@ def test_summarize_raises_on_http_error():
     client = ModelClient(cfg, client=httpx.Client(transport=httpx.MockTransport(handler)))
     with pytest.raises(httpx.HTTPStatusError):
         client.summarize("", [("user", "x")])
+
+
+def test_summarize_uses_custom_system_prompt_when_provided():
+    captured = {}
+    cfg = ModelConfig(base_url="http://modelapi:8000/v1", model="m")
+    client = ModelClient(cfg, client=_mock_client(captured), system_prompt="fold tersely")
+
+    client.summarize("prior", [("user", "older turn")])
+
+    system_msg = captured["body"]["messages"][0]
+    assert system_msg["role"] == "system"
+    assert system_msg["content"] == "fold tersely"
+
+
+def test_summarize_falls_back_to_default_system_prompt():
+    captured = {}
+    cfg = ModelConfig(base_url="http://modelapi:8000/v1", model="m")
+    client = ModelClient(cfg, client=_mock_client(captured))
+
+    client.summarize("prior", [("user", "older turn")])
+
+    system_msg = captured["body"]["messages"][0]
+    assert system_msg["role"] == "system"
+    assert system_msg["content"] != ""
