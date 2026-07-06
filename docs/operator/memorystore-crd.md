@@ -150,4 +150,4 @@ spec:
       tools: all
 ```
 
-Memory binding is degraded-aware: if the referenced MemoryStore is missing or not yet ready, the agent still serves and reports a `MemoryDegraded` status condition, falling back to its pod-local short-term window until the store becomes available.
+Memory binding is degraded-aware once an agent is running: if the referenced MemoryStore later becomes missing or not ready, the agent keeps serving and reports a `MemoryDegraded` status condition, falling back to its pod-local short-term window until the store becomes available. The agent's initial creation, however, waits for the bound store: with `waitForDependencies` enabled (the default), an agent whose MemoryStore is missing or not yet ready stays `Waiting` until the store is Ready, so it never starts up degraded.

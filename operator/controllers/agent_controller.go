@@ -215,16 +215,19 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	// Resolve the bound MemoryStore (long-term tier). Memory is an augmentation,
-	// never a tier-1 dependency: an unresolved or not-ready store degrades memory
-	// but must not block the agent from serving.
+	// not a tier-1 dependency at runtime: an unresolved or not-ready store degrades
+	// an already-running agent to short-term only rather than tearing it down. The
+	// one exception is the agent's *initial* creation, which is gated on memory
+	// availability (parity with ModelAPI/MCPServer) so an agent never starts up
+	// degraded — see the gating block below.
 	//
 	// Resolution states (invariant: memoryEndpoint is non-empty iff the store is
 	// Ready, so "degraded" uniformly means "fall back to short-term only"):
 	//
 	//   1. no memory block             -> endpoint "", not degraded, no memory
 	//   2. effective type local        -> endpoint "", not degraded, short-term only
-	//   3. remote, store NotFound      -> endpoint "", degraded (hard)
-	//   4. remote, store not Ready     -> endpoint "", degraded (warming up)
+	//   3. remote, store NotFound      -> endpoint "", degraded (gates first creation)
+	//   4. remote, store not Ready     -> endpoint "", degraded (gates first creation)
 	//   5. remote, store Ready         -> endpoint set, not degraded, full memory
 	//   6. remote, transient Get error -> requeue (return err)
 	//
@@ -266,6 +269,30 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			} else {
 				memoryEndpoint = store.Status.Endpoint
 			}
+		}
+	}
+
+	// Gate only the agent's *initial* creation on memory availability. If the
+	// bound store is unavailable (missing or warming up) and the agent has no
+	// Deployment yet, wait rather than starting up degraded — mirroring the
+	// ModelAPI/MCPServer dependency gate. An already-running agent is never gated
+	// or torn down when its store later disappears; it degrades to short-term
+	// only. The MemoryStore watch requeues the agent once the store turns Ready.
+	if memoryDegraded && waitForDeps {
+		exists, err := r.agentDeploymentExists(ctx, agent)
+		if err != nil {
+			log.Error(err, "failed to check existing Deployment for memory gating")
+			return ctrl.Result{}, err
+		}
+		if !exists {
+			log.Info("MemoryStore not available and agent not yet created, waiting",
+				"memorystore", memoryStoreName)
+			agent.Status.Phase = "Waiting"
+			agent.Status.Message = memoryDegradedMsg
+			if err := r.Status().Update(ctx, agent); err != nil {
+				log.Error(err, "failed to update status")
+			}
+			return ctrl.Result{RequeueAfter: time.Second * 5}, nil
 		}
 	}
 
@@ -519,6 +546,24 @@ func (r *AgentReconciler) applyGatewayRouting(
 	if memoryEndpoint != nil && *memoryEndpoint != "" && memoryStoreName != "" {
 		*memoryEndpoint = gateway.GatewayEndpoint(host, agent.Namespace, gateway.ResourceTypeMemoryStore, memoryStoreName)
 	}
+}
+
+// agentDeploymentExists reports whether the agent's Deployment already exists.
+// It is used to gate only the agent's initial creation on memory availability:
+// a missing Deployment means "first creation" (gate when memory is unavailable),
+// while an existing one means the agent is already running and must degrade
+// rather than be gated.
+func (r *AgentReconciler) agentDeploymentExists(ctx context.Context, agent *kaosv1alpha1.Agent) (bool, error) {
+	deployment := &appsv1.Deployment{}
+	name := fmt.Sprintf("agent-%s", agent.Name)
+	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: agent.Namespace}, deployment)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
 }
 
 // constructDeployment creates a Deployment for the Agent

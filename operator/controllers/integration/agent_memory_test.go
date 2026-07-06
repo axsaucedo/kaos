@@ -7,6 +7,7 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -257,6 +258,99 @@ var _ = Describe("Agent memory binding", func() {
 		env := agentMemoryEnv(ctx, namespace, agentName)
 		Expect(env["MEMORY_TYPE"]).To(Equal("remote"))
 		Expect(env).NotTo(HaveKey("MEMORY_STORE_ENDPOINT"))
+
+		Eventually(func() bool {
+			updated := &kaosv1alpha1.Agent{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: agentName, Namespace: namespace}, updated); err != nil {
+				return false
+			}
+			for _, c := range updated.Status.Conditions {
+				if c.Type == "MemoryDegraded" {
+					return c.Status == metav1.ConditionTrue
+				}
+			}
+			return false
+		}, timeout, interval).Should(BeTrue())
+	})
+
+	It("gates initial creation until the bound store is available (waitForDependencies default)", func() {
+		modelAPIName := uniqueAgentName("agent-mem-model")
+		modelAPI := createReadyModelAPI(ctx, namespace, modelAPIName)
+		defer func() { k8sClient.Delete(ctx, modelAPI) }()
+
+		// waitForDependencies defaults to true (field omitted), so an agent bound
+		// to a missing store must not be created degraded — it waits instead.
+		agentName := uniqueAgentName("agent")
+		agent := &kaosv1alpha1.Agent{
+			ObjectMeta: metav1.ObjectMeta{Name: agentName, Namespace: namespace},
+			Spec: kaosv1alpha1.AgentSpec{
+				ModelAPI: modelAPIName,
+				Model:    "mock-model",
+				Config: &kaosv1alpha1.AgentConfig{
+					Description: "gated mem agent",
+					Memory:      &kaosv1alpha1.MemoryConfig{Type: "remote", MemoryStore: "does-not-exist"},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, agent)).To(Succeed())
+		defer func() { k8sClient.Delete(ctx, agent) }()
+
+		// No Deployment is created while the store is unavailable.
+		Consistently(func() bool {
+			deployment := &appsv1.Deployment{}
+			err := k8sClient.Get(ctx, types.NamespacedName{
+				Name: fmt.Sprintf("agent-%s", agentName), Namespace: namespace}, deployment)
+			return apierrors.IsNotFound(err)
+		}, "2s", interval).Should(BeTrue())
+
+		// The agent reports Waiting rather than serving degraded.
+		Eventually(func() string {
+			updated := &kaosv1alpha1.Agent{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: agentName, Namespace: namespace}, updated); err != nil {
+				return ""
+			}
+			return updated.Status.Phase
+		}, timeout, interval).Should(Equal("Waiting"))
+	})
+
+	It("keeps a running agent serving and degrades when the bound store later disappears", func() {
+		modelAPIName := uniqueAgentName("agent-mem-model")
+		modelAPI := createReadyModelAPI(ctx, namespace, modelAPIName)
+		defer func() { k8sClient.Delete(ctx, modelAPI) }()
+
+		storeName := uniqueAgentName("agent-store")
+		store := createReadyMemoryStore(ctx, namespace, storeName, modelAPIName)
+
+		agentName := uniqueAgentName("agent")
+		agent := &kaosv1alpha1.Agent{
+			ObjectMeta: metav1.ObjectMeta{Name: agentName, Namespace: namespace},
+			Spec: kaosv1alpha1.AgentSpec{
+				ModelAPI: modelAPIName,
+				Model:    "mock-model",
+				Config: &kaosv1alpha1.AgentConfig{
+					Description: "running mem agent",
+					Memory:      &kaosv1alpha1.MemoryConfig{Type: "remote", MemoryStore: storeName},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, agent)).To(Succeed())
+		defer func() { k8sClient.Delete(ctx, agent) }()
+
+		// The Deployment is created with the resolved endpoint while the store is Ready.
+		Eventually(func() string {
+			return agentMemoryEnv(ctx, namespace, agentName)["MEMORY_STORE_ENDPOINT"]
+		}, timeout, interval).ShouldNot(BeEmpty())
+
+		// The store disappears after the agent is already running.
+		Expect(k8sClient.Delete(ctx, store)).To(Succeed())
+
+		// The agent is neither gated nor torn down: its Deployment stays, and it
+		// degrades to short-term only (endpoint cleared, condition True).
+		Consistently(func() error {
+			deployment := &appsv1.Deployment{}
+			return k8sClient.Get(ctx, types.NamespacedName{
+				Name: fmt.Sprintf("agent-%s", agentName), Namespace: namespace}, deployment)
+		}, "2s", interval).Should(Succeed())
 
 		Eventually(func() bool {
 			updated := &kaosv1alpha1.Agent{}

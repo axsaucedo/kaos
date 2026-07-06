@@ -243,7 +243,7 @@ config:
 **Remote memory:**
 - Set `type: remote` and reference a ready MemoryStore via `memoryStore`.
 - The operator injects `MEMORY_STORE_ENDPOINT`, `MEMORY_SCOPE`, and a qualified `AGENT_IDENTITY` (`kaos://agent/<namespace>/<name>`) into the agent container.
-- Binding is degraded-aware: a missing or not-ready store does not block serving; the agent reports a `MemoryDegraded` status condition and falls back to its local short-term window.
+- Binding is degraded-aware for a running agent: if the store later becomes missing or not-ready it does not block serving — the agent reports a `MemoryDegraded` status condition and falls back to its local short-term window. Initial creation is gated, though: with `waitForDependencies` enabled (default) the agent stays `Waiting` until the bound store is Ready, so it never starts up degraded.
 
 **When to disable memory:**
 - Stateless agents that don't need conversation history
