@@ -404,6 +404,18 @@ func (r *MemoryStoreReconciler) buildOperationalEnv(store *kaosv1alpha1.MemorySt
 			Value: fmt.Sprintf("%d", *store.Spec.Extraction.Concurrency),
 		})
 	}
+	if store.Spec.Extraction != nil && store.Spec.Extraction.FactPrompt != "" {
+		env = append(env, corev1.EnvVar{
+			Name:  "KAOS_MEMORY_FACT_EXTRACTION_PROMPT",
+			Value: store.Spec.Extraction.FactPrompt,
+		})
+	}
+	if store.Spec.Summarization != nil && store.Spec.Summarization.Prompt != "" {
+		env = append(env, corev1.EnvVar{
+			Name:  "KAOS_MEMORY_SUMMARY_PROMPT",
+			Value: store.Spec.Summarization.Prompt,
+		})
+	}
 	if store.Spec.DefaultFailureMode != "" {
 		env = append(env, corev1.EnvVar{
 			Name:  "KAOS_MEMORY_DEFAULT_FAILURE_MODE",

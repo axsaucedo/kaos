@@ -114,6 +114,22 @@ type MemoryExtractionConfig struct {
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:default=4
 	Concurrency *int32 `json:"concurrency,omitempty"`
+
+	// FactPrompt overrides Mem0's fact-extraction prompt, steering which facts are
+	// distilled into long-term memory. When empty the engine's built-in prompt is used.
+	// +kubebuilder:validation:Optional
+	FactPrompt string `json:"factPrompt,omitempty"`
+}
+
+// +kubebuilder:object:generate=true
+
+// MemorySummarizationConfig tunes the medium-term rolling digest summariser. It
+// tunes the prompt only; the model itself is bound via models.summarization.
+type MemorySummarizationConfig struct {
+	// Prompt overrides the system prompt used when folding overflowed short-term
+	// turns into the rolling digest. When empty the service's built-in prompt is used.
+	// +kubebuilder:validation:Optional
+	Prompt string `json:"prompt,omitempty"`
 }
 
 // +kubebuilder:object:generate=true
@@ -144,6 +160,11 @@ type MemoryStoreSpec struct {
 	// Extraction tunes the long-term extraction executor.
 	// +kubebuilder:validation:Optional
 	Extraction *MemoryExtractionConfig `json:"extraction,omitempty"`
+
+	// Summarization tunes the medium-term rolling-digest summariser prompt. The
+	// summariser model itself is bound via models.summarization.
+	// +kubebuilder:validation:Optional
+	Summarization *MemorySummarizationConfig `json:"summarization,omitempty"`
 
 	// DefaultFailureMode is the store-wide default for the write/forget path.
 	// +kubebuilder:validation:Enum=soft;strict
