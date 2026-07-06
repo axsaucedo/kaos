@@ -71,6 +71,7 @@ var _ = Describe("Agent Controller", func() {
 				Config: &kaosv1alpha1.AgentConfig{
 					Description:           "Test agent",
 					Instructions:          "You are a test agent.",
+					SystemPrompt:          "You are a persisted system prompt.",
 					ReasoningLoopMaxSteps: &maxSteps,
 				},
 			},
@@ -98,6 +99,7 @@ var _ = Describe("Agent Controller", func() {
 		Expect(envMap["AGENT_NAME"]).To(Equal(agentName))
 		Expect(envMap["AGENT_DESCRIPTION"]).To(Equal("Test agent"))
 		Expect(envMap["AGENT_INSTRUCTIONS"]).To(Equal("You are a test agent."))
+		Expect(envMap["AGENT_SYSTEM_PROMPT"]).To(Equal("You are a persisted system prompt."))
 		Expect(envMap["AGENTIC_LOOP_MAX_STEPS"]).To(Equal("10"))
 
 		// Verify Service is created (expose defaults to true)

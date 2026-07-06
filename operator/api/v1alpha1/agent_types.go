@@ -141,9 +141,16 @@ type AgentConfig struct {
 	// +kubebuilder:validation:Optional
 	Description string `json:"description,omitempty"`
 
-	// Instructions are the system instructions for the agent
+	// Instructions are the system instructions for the agent. Instructions are
+	// re-evaluated on every run and are not retained in the conversation history.
 	// +kubebuilder:validation:Optional
 	Instructions string `json:"instructions,omitempty"`
+
+	// SystemPrompt is an optional system prompt for the agent. Unlike
+	// instructions, a system prompt is retained in the conversation history.
+	// When empty, only instructions are applied.
+	// +kubebuilder:validation:Optional
+	SystemPrompt string `json:"systemPrompt,omitempty"`
 
 	// ReasoningLoopMaxSteps is the maximum number of reasoning steps before stopping
 	// +kubebuilder:validation:Minimum=1

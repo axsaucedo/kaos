@@ -383,6 +383,7 @@ class AgentServerSettings(BaseSettings):
     # Optional settings with defaults
     agent_description: str = "AI Agent"
     agent_instructions: str = "You are a helpful assistant."
+    agent_system_prompt: str = ""
     agent_port: int = 8000
     agent_log_level: str = "INFO"
 

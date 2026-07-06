@@ -171,7 +171,7 @@ config:
 
 #### config.instructions
 
-System prompt for the agent:
+Instructions for the agent. Instructions are re-evaluated on every run and are not retained in the conversation history:
 
 ```yaml
 config:
@@ -181,6 +181,16 @@ config:
     1. Search for relevant information
     2. Summarize findings concisely
     3. Cite your sources
+```
+
+#### config.systemPrompt
+
+Optional system prompt for the agent. Unlike `instructions`, a system prompt is retained in the conversation history. When empty, only `instructions` are applied:
+
+```yaml
+config:
+  systemPrompt: |
+    You are a helpful, concise assistant.
 ```
 
 #### config.reasoningLoopMaxSteps

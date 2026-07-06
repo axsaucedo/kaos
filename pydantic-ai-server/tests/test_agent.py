@@ -80,6 +80,35 @@ class TestAgentCreationAndCard:
         with pytest.raises(ValueError, match="Agent requires either"):
             _resolve_model("test-agent")
 
+    def test_system_prompt_applied_when_set(self):
+        """A configured system prompt is registered on the Pydantic AI agent."""
+        from pais.server import create_agent_server
+        from pais.serverutils import AgentServerSettings
+
+        settings = AgentServerSettings(
+            agent_name="sp-agent",
+            agent_instructions="You are helpful.",
+            agent_system_prompt="You are a persisted system prompt.",
+            model_name="mock-model",
+            model_api_url="http://mock",
+        )
+        server = create_agent_server(settings)
+        assert server._agent._system_prompts == ("You are a persisted system prompt.",)
+
+    def test_system_prompt_absent_by_default(self):
+        """No system prompt is registered when the setting is empty."""
+        from pais.server import create_agent_server
+        from pais.serverutils import AgentServerSettings
+
+        settings = AgentServerSettings(
+            agent_name="no-sp-agent",
+            agent_instructions="You are helpful.",
+            model_name="mock-model",
+            model_api_url="http://mock",
+        )
+        server = create_agent_server(settings)
+        assert server._agent._system_prompts == ()
+
 
 class TestAgentMessageProcessing:
     """Tests for Agent message processing with Pydantic AI."""

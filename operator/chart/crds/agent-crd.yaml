@@ -102,7 +102,9 @@ spec:
                       agent
                     type: string
                   instructions:
-                    description: Instructions are the system instructions for the agent
+                    description: |-
+                      Instructions are the system instructions for the agent. Instructions are
+                      re-evaluated on every run and are not retained in the conversation history.
                     type: string
                   memory:
                     description: Memory configures the agent's memory system
@@ -192,6 +194,12 @@ spec:
                     maximum: 20
                     minimum: 1
                     type: integer
+                  systemPrompt:
+                    description: |-
+                      SystemPrompt is an optional system prompt for the agent. Unlike
+                      instructions, a system prompt is retained in the conversation history.
+                      When empty, only instructions are applied.
+                    type: string
                   taskConfig:
                     description: TaskConfig configures budget limits for A2A async tasks
                     properties:

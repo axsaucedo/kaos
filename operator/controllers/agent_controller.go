@@ -704,6 +704,13 @@ func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *
 				Value: agent.Spec.Config.Instructions,
 			})
 		}
+
+		if agent.Spec.Config.SystemPrompt != "" {
+			env = append(env, corev1.EnvVar{
+				Name:  "AGENT_SYSTEM_PROMPT",
+				Value: agent.Spec.Config.SystemPrompt,
+			})
+		}
 	}
 
 	// ModelAPI configuration
