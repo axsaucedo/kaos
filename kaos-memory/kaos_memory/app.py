@@ -397,10 +397,10 @@ def build_service(settings: MemorySettings) -> MemoryService:
         storage,
         settings.summarization(),
         settings.embedding(),
-        fact_extraction_prompt=settings.fact_extraction_prompt or None,
+        system_prompt=settings.extraction_system_prompt or None,
     )
     summarizer = ModelClient(
-        settings.summarization(), system_prompt=settings.summary_prompt or None
+        settings.summarization(), system_prompt=settings.summarization_system_prompt or None
     ).as_summarizer()
     short_term = ShortTermStore(
         settings.storage_type,

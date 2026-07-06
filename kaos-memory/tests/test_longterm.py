@@ -96,7 +96,7 @@ def test_external_delete_scope(pgvector_dsn, offline_models):
     assert store.recall(bob, "what port does the deployment use", top_k=10)
 
 
-def test_fact_extraction_prompt_threads_into_mem0_config(tmp_path, offline_models, monkeypatch):
+def test_extraction_system_prompt_threads_into_mem0_config(tmp_path, offline_models, monkeypatch):
     captured = {}
 
     class _StubMemory:
@@ -117,7 +117,7 @@ def test_fact_extraction_prompt_threads_into_mem0_config(tmp_path, offline_model
         storage,
         offline_models["summarization"],
         offline_models["embedding"],
-        fact_extraction_prompt="only extract deployment facts",
+        system_prompt="only extract deployment facts",
     )
     assert captured["config"]["custom_fact_extraction_prompt"] == "only extract deployment facts"
 

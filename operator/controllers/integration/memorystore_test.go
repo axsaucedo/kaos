@@ -86,10 +86,10 @@ var _ = Describe("MemoryStore Controller", func() {
 					Embedding:     kaosv1alpha1.MemoryModelRef{ModelAPI: modelAPIName, Model: "mock-embed"},
 				},
 				Extraction: &kaosv1alpha1.MemoryExtractionConfig{
-					Concurrency: int32Ptr(3),
-					FactPrompt:  "only extract deployment facts",
+					Concurrency:  int32Ptr(3),
+					SystemPrompt: "only extract deployment facts",
 				},
-				Summarization:      &kaosv1alpha1.MemorySummarizationConfig{Prompt: "fold tersely"},
+				Summarization:      &kaosv1alpha1.MemorySummarizationConfig{SystemPrompt: "fold tersely"},
 				DefaultFailureMode: "strict",
 			},
 		}
@@ -119,8 +119,8 @@ var _ = Describe("MemoryStore Controller", func() {
 		Expect(envMap["KAOS_MEMORY_EMBEDDING_MODEL"]).To(Equal("mock-embed"))
 		Expect(envMap["KAOS_MEMORY_MODEL_BASE_URL"]).To(HaveSuffix("/v1"))
 		Expect(envMap["KAOS_MEMORY_EXTRACTION_CONCURRENCY"]).To(Equal("3"))
-		Expect(envMap["KAOS_MEMORY_FACT_EXTRACTION_PROMPT"]).To(Equal("only extract deployment facts"))
-		Expect(envMap["KAOS_MEMORY_SUMMARY_PROMPT"]).To(Equal("fold tersely"))
+		Expect(envMap["KAOS_MEMORY_EXTRACTION_SYSTEM_PROMPT"]).To(Equal("only extract deployment facts"))
+		Expect(envMap["KAOS_MEMORY_SUMMARIZATION_SYSTEM_PROMPT"]).To(Equal("fold tersely"))
 		Expect(envMap["KAOS_MEMORY_DEFAULT_FAILURE_MODE"]).To(Equal("strict"))
 
 		// Volume mount and probes.

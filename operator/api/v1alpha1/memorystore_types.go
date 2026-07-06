@@ -115,10 +115,11 @@ type MemoryExtractionConfig struct {
 	// +kubebuilder:default=4
 	Concurrency *int32 `json:"concurrency,omitempty"`
 
-	// FactPrompt overrides Mem0's fact-extraction prompt, steering which facts are
-	// distilled into long-term memory. When empty the engine's built-in prompt is used.
+	// SystemPrompt overrides the system prompt for Mem0's long-term fact
+	// extraction, steering which facts are distilled into long-term memory. When
+	// empty the engine's built-in extraction prompt is used.
 	// +kubebuilder:validation:Optional
-	FactPrompt string `json:"factPrompt,omitempty"`
+	SystemPrompt string `json:"systemPrompt,omitempty"`
 }
 
 // +kubebuilder:object:generate=true
@@ -126,10 +127,11 @@ type MemoryExtractionConfig struct {
 // MemorySummarizationConfig tunes the medium-term rolling digest summariser. It
 // tunes the prompt only; the model itself is bound via models.summarization.
 type MemorySummarizationConfig struct {
-	// Prompt overrides the system prompt used when folding overflowed short-term
-	// turns into the rolling digest. When empty the service's built-in prompt is used.
+	// SystemPrompt overrides the system prompt used when folding overflowed
+	// short-term turns into the rolling digest. When empty the service's built-in
+	// summariser prompt is used.
 	// +kubebuilder:validation:Optional
-	Prompt string `json:"prompt,omitempty"`
+	SystemPrompt string `json:"systemPrompt,omitempty"`
 }
 
 // +kubebuilder:object:generate=true

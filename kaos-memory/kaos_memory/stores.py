@@ -533,7 +533,7 @@ class LongTermStore:
         storage: StorageConfig,
         summarization: ModelConfig,
         embedding: ModelConfig,
-        fact_extraction_prompt: Optional[str] = None,
+        system_prompt: Optional[str] = None,
     ) -> None:
         block = storage.resolved()
         # pgvector needs the embedding dimension; Chroma infers it.
@@ -544,10 +544,10 @@ class LongTermStore:
             "vector_store": _vector_store_config(block),
             "history_db_path": _history_db_path(block),
         }
-        # Mem0 uses this to steer which facts it extracts from a turn; unset leaves
-        # its built-in default extraction prompt in place.
-        if fact_extraction_prompt:
-            config["custom_fact_extraction_prompt"] = fact_extraction_prompt
+        # Mem0 uses this system prompt to steer which facts it extracts from a
+        # turn; unset leaves its built-in default extraction prompt in place.
+        if system_prompt:
+            config["custom_fact_extraction_prompt"] = system_prompt
         self._memory = Memory.from_config(config)
 
     @staticmethod

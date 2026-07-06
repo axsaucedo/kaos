@@ -317,10 +317,11 @@ spec:
                     format: int32
                     minimum: 1
                     type: integer
-                  factPrompt:
+                  systemPrompt:
                     description: |-
-                      FactPrompt overrides Mem0's fact-extraction prompt, steering which facts are
-                      distilled into long-term memory. When empty the engine's built-in prompt is used.
+                      SystemPrompt overrides the system prompt for Mem0's long-term fact
+                      extraction, steering which facts are distilled into long-term memory. When
+                      empty the engine's built-in extraction prompt is used.
                     type: string
                 type: object
               gatewayRoute:
@@ -470,10 +471,11 @@ spec:
                   Summarization tunes the medium-term rolling-digest summariser prompt. The
                   summariser model itself is bound via models.summarization.
                 properties:
-                  prompt:
+                  systemPrompt:
                     description: |-
-                      Prompt overrides the system prompt used when folding overflowed short-term
-                      turns into the rolling digest. When empty the service's built-in prompt is used.
+                      SystemPrompt overrides the system prompt used when folding overflowed
+                      short-term turns into the rolling digest. When empty the service's built-in
+                      summariser prompt is used.
                     type: string
                 type: object
               telemetry:

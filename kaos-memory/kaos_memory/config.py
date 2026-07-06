@@ -146,8 +146,8 @@ class MemorySettings(BaseSettings):
 
     default_failure_mode: str = "soft"
 
-    fact_extraction_prompt: str = ""
-    summary_prompt: str = ""
+    extraction_system_prompt: str = ""
+    summarization_system_prompt: str = ""
 
     extraction_concurrency: int = 4
     extraction_max_retries: int = 2
