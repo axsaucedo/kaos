@@ -216,8 +216,21 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	// Resolve the bound MemoryStore (long-term tier). Memory is an augmentation,
 	// never a tier-1 dependency: an unresolved or not-ready store degrades memory
-	// but must not block the agent from serving, so failures here surface a
-	// MemoryDegraded condition and leave the endpoint empty (short-term fallback).
+	// but must not block the agent from serving.
+	//
+	// Resolution states (invariant: memoryEndpoint is non-empty iff the store is
+	// Ready, so "degraded" uniformly means "fall back to short-term only"):
+	//
+	//   1. no memory block             -> endpoint "", not degraded, no memory
+	//   2. effective type local        -> endpoint "", not degraded, short-term only
+	//   3. remote, store NotFound      -> endpoint "", degraded (hard)
+	//   4. remote, store not Ready     -> endpoint "", degraded (warming up)
+	//   5. remote, store Ready         -> endpoint set, not degraded, full memory
+	//   6. remote, transient Get error -> requeue (return err)
+	//
+	// MemoryDegraded is always reconciled to reflect the current state (including
+	// cleared to False on states 1/2/5), so a store recovering or an agent moving
+	// remote->local clears a stale condition.
 	memoryEndpoint := ""
 	memoryDegraded := false
 	memoryDegradedMsg := ""
@@ -245,9 +258,11 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 					return ctrl.Result{}, err
 				}
 			} else if !store.Status.Ready {
+				// Store exists but is warming up. Withhold the endpoint so the
+				// runtime falls back to short-term rather than dialling a service
+				// that is not yet serving.
 				memoryDegraded = true
 				memoryDegradedMsg = fmt.Sprintf("MemoryStore %s is not ready", mem.MemoryStore)
-				memoryEndpoint = store.Status.Endpoint
 			} else {
 				memoryEndpoint = store.Status.Endpoint
 			}
@@ -404,8 +419,10 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	// Surface memory health as a condition without affecting agent readiness: a
-	// degraded store leaves the agent serving short-term-only memory.
-	if memoryStoreName != "" {
+	// degraded store leaves the agent serving short-term-only memory. Reconcile
+	// the condition whenever a memory block is configured so a recovering store
+	// or a remote->local move clears a stale MemoryDegraded=True.
+	if agent.Spec.Config != nil && agent.Spec.Config.Memory != nil {
 		if memoryDegraded {
 			meta.SetStatusCondition(&agent.Status.Conditions, metav1.Condition{
 				Type:    "MemoryDegraded",
@@ -414,11 +431,15 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 				Message: memoryDegradedMsg,
 			})
 		} else {
+			msg := "Memory is healthy"
+			if memoryStoreName != "" {
+				msg = fmt.Sprintf("MemoryStore %s is ready", memoryStoreName)
+			}
 			meta.SetStatusCondition(&agent.Status.Conditions, metav1.Condition{
 				Type:    "MemoryDegraded",
 				Status:  metav1.ConditionFalse,
-				Reason:  "MemoryStoreReady",
-				Message: fmt.Sprintf("MemoryStore %s is ready", memoryStoreName),
+				Reason:  "MemoryHealthy",
+				Message: msg,
 			})
 		}
 	}

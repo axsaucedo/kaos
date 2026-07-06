@@ -213,6 +213,65 @@ var _ = Describe("Agent memory binding", func() {
 		}, timeout, interval).Should(BeTrue())
 	})
 
+	It("withholds the endpoint and reports degraded while the bound store is not yet ready", func() {
+		modelAPIName := uniqueAgentName("agent-mem-model")
+		modelAPI := createReadyModelAPI(ctx, namespace, modelAPIName)
+		defer func() { k8sClient.Delete(ctx, modelAPI) }()
+
+		// A store whose Deployment never becomes available stays not-ready.
+		storeName := uniqueAgentName("agent-store")
+		store := &kaosv1alpha1.MemoryStore{
+			ObjectMeta: metav1.ObjectMeta{Name: storeName, Namespace: namespace},
+			Spec: kaosv1alpha1.MemoryStoreSpec{
+				Engine: "mem0",
+				Storage: kaosv1alpha1.MemoryStorage{
+					Type:  kaosv1alpha1.MemoryStorageLocal,
+					Local: &kaosv1alpha1.LocalMemoryStorage{Provider: "chroma"},
+				},
+				Models: kaosv1alpha1.MemoryModels{
+					Summarization: kaosv1alpha1.MemoryModelRef{ModelAPI: modelAPIName, Model: "mock-model"},
+					Embedding:     kaosv1alpha1.MemoryModelRef{ModelAPI: modelAPIName, Model: "mock-embed"},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, store)).To(Succeed())
+		defer func() { k8sClient.Delete(ctx, store) }()
+
+		agentName := uniqueAgentName("agent")
+		agent := &kaosv1alpha1.Agent{
+			ObjectMeta: metav1.ObjectMeta{Name: agentName, Namespace: namespace},
+			Spec: kaosv1alpha1.AgentSpec{
+				ModelAPI:            modelAPIName,
+				Model:               "mock-model",
+				WaitForDependencies: boolPtr(false),
+				Config: &kaosv1alpha1.AgentConfig{
+					Description: "warming mem agent",
+					Memory:      &kaosv1alpha1.MemoryConfig{Type: "remote", MemoryStore: storeName},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, agent)).To(Succeed())
+		defer func() { k8sClient.Delete(ctx, agent) }()
+
+		// State 4: store present but not Ready -> no endpoint, degraded True.
+		env := agentMemoryEnv(ctx, namespace, agentName)
+		Expect(env["MEMORY_TYPE"]).To(Equal("remote"))
+		Expect(env).NotTo(HaveKey("MEMORY_STORE_ENDPOINT"))
+
+		Eventually(func() bool {
+			updated := &kaosv1alpha1.Agent{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: agentName, Namespace: namespace}, updated); err != nil {
+				return false
+			}
+			for _, c := range updated.Status.Conditions {
+				if c.Type == "MemoryDegraded" {
+					return c.Status == metav1.ConditionTrue
+				}
+			}
+			return false
+		}, timeout, interval).Should(BeTrue())
+	})
+
 	It("rejects invalid memory field combinations via CEL validation", func() {
 		modelAPIName := uniqueAgentName("agent-mem-model")
 
