@@ -176,7 +176,9 @@ spec:
                     - connectionSecretRef
                     type: object
                   local:
-                    description: Local configures the single-container local mode.
+                    description: |-
+                      Local configures the single-container local mode. When omitted in local
+                      mode the provider and persistent-volume size fall back to their defaults.
                     properties:
                       persistentVolume:
                         description: PersistentVolume sizes the PVC that backs Chroma
@@ -207,8 +209,6 @@ spec:
                 - type
                 type: object
                 x-kubernetes-validations:
-                - message: storage.local is required when storage.type is local
-                  rule: self.type != 'local' || has(self.local)
                 - message: storage.external is required when storage.type is external
                   rule: self.type != 'external' || has(self.external)
             required:

@@ -24,8 +24,6 @@ import (
 	"github.com/axsaucedo/kaos/operator/pkg/util"
 )
 
-const memoryStoreFinalizerName = "kaos.tools/memorystore-finalizer"
-
 // memoryServicePort is the container/service port the memory service listens on.
 const memoryServicePort = 8080
 
@@ -41,7 +39,6 @@ type MemoryStoreReconciler struct {
 
 //+kubebuilder:rbac:groups=kaos.tools,resources=memorystores,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=kaos.tools,resources=memorystores/status,verbs=get;update;patch
-//+kubebuilder:rbac:groups=kaos.tools,resources=memorystores/finalizers,verbs=update
 //+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
@@ -54,29 +51,6 @@ func (r *MemoryStoreReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	store := &kaosv1alpha1.MemoryStore{}
 	if err := r.Get(ctx, req.NamespacedName, store); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
-	}
-
-	// Handle deletion with finalizer (owned resources are garbage-collected via owner refs).
-	if store.ObjectMeta.DeletionTimestamp != nil {
-		if controllerutil.ContainsFinalizer(store, memoryStoreFinalizerName) {
-			log.Info("Deleting MemoryStore", "name", store.Name)
-			controllerutil.RemoveFinalizer(store, memoryStoreFinalizerName)
-			if err := r.Update(ctx, store); err != nil {
-				log.Error(err, "failed to remove finalizer")
-				return ctrl.Result{}, err
-			}
-		}
-		return ctrl.Result{}, nil
-	}
-
-	// Add finalizer if not present.
-	if !controllerutil.ContainsFinalizer(store, memoryStoreFinalizerName) {
-		controllerutil.AddFinalizer(store, memoryStoreFinalizerName)
-		if err := r.Update(ctx, store); err != nil {
-			log.Error(err, "failed to add finalizer")
-			return ctrl.Result{}, err
-		}
-		return ctrl.Result{Requeue: true}, nil
 	}
 
 	// Set initial status.

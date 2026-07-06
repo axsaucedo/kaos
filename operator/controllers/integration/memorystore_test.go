@@ -167,6 +167,46 @@ var _ = Describe("MemoryStore Controller", func() {
 		}, timeout, interval).Should(BeTrue())
 	})
 
+	It("defaults the local storage block so only the type is required", func() {
+		modelAPIName := uniqueMemoryStoreName("mem-model")
+		modelAPI := createReadyModelAPI(ctx, namespace, modelAPIName)
+		defer func() { k8sClient.Delete(ctx, modelAPI) }()
+
+		name := uniqueMemoryStoreName("defaulted-store")
+		// No Local block at all: type local alone must be valid and provision the
+		// PVC at the default 5Gi with the local storage env.
+		store := &kaosv1alpha1.MemoryStore{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+			Spec: kaosv1alpha1.MemoryStoreSpec{
+				Storage: kaosv1alpha1.MemoryStorage{Type: kaosv1alpha1.MemoryStorageLocal},
+				Models: kaosv1alpha1.MemoryModels{
+					Summarization: kaosv1alpha1.MemoryModelRef{ModelAPI: modelAPIName, Model: "mock-model"},
+					Embedding:     kaosv1alpha1.MemoryModelRef{ModelAPI: modelAPIName, Model: "mock-embed"},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, store)).To(Succeed())
+		defer func() { k8sClient.Delete(ctx, store) }()
+
+		deployment := &appsv1.Deployment{}
+		Eventually(func() error {
+			return k8sClient.Get(ctx, types.NamespacedName{
+				Name: fmt.Sprintf("memorystore-%s", name), Namespace: namespace}, deployment)
+		}, timeout, interval).Should(Succeed())
+		envMap := map[string]string{}
+		for _, e := range deployment.Spec.Template.Spec.Containers[0].Env {
+			envMap[e.Name] = e.Value
+		}
+		Expect(envMap["KAOS_MEMORY_STORAGE_TYPE"]).To(Equal("local"))
+
+		pvc := &corev1.PersistentVolumeClaim{}
+		Eventually(func() error {
+			return k8sClient.Get(ctx, types.NamespacedName{
+				Name: fmt.Sprintf("memorystore-%s-data", name), Namespace: namespace}, pvc)
+		}, timeout, interval).Should(Succeed())
+		Expect(pvc.Spec.Resources.Requests.Storage().String()).To(Equal("5Gi"))
+	})
+
 	It("should wire the external DSN secret and embedding dimensionality in external mode", func() {
 		modelAPIName := uniqueMemoryStoreName("mem-model")
 		modelAPI := createReadyModelAPI(ctx, namespace, modelAPIName)

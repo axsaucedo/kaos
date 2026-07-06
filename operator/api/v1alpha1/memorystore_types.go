@@ -61,16 +61,17 @@ type ExternalMemoryStorage struct {
 
 // +kubebuilder:object:generate=true
 
-// MemoryStorage selects and configures the storage backend. Exactly one of the
-// mode blocks must be set, matching the selected type.
-// +kubebuilder:validation:XValidation:rule="self.type != 'local' || has(self.local)",message="storage.local is required when storage.type is local"
+// MemoryStorage selects and configures the storage backend. The mode block for
+// the selected type is optional in local mode (all fields default) but required
+// in external mode, where the connection secret cannot be defaulted.
 // +kubebuilder:validation:XValidation:rule="self.type != 'external' || has(self.external)",message="storage.external is required when storage.type is external"
 type MemoryStorage struct {
 	// Type selects the storage mode.
 	// +kubebuilder:validation:Enum=local;external
 	Type MemoryStorageType `json:"type"`
 
-	// Local configures the single-container local mode.
+	// Local configures the single-container local mode. When omitted in local
+	// mode the provider and persistent-volume size fall back to their defaults.
 	// +kubebuilder:validation:Optional
 	Local *LocalMemoryStorage `json:"local,omitempty"`
 
