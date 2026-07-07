@@ -3,6 +3,9 @@ package main
 import (
 	"flag"
 	"os"
+	"strconv"
+	"strings"
+	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -17,6 +20,7 @@ import (
 
 	kaosv1alpha1 "github.com/axsaucedo/kaos/operator/api/v1alpha1"
 	"github.com/axsaucedo/kaos/operator/controllers"
+	"github.com/axsaucedo/kaos/operator/internal/aib"
 )
 
 var (
@@ -100,6 +104,30 @@ func main() {
 		os.Exit(1)
 	}
 
+	// The AIB projection controller is the operator's only caller of the broker
+	// admin API and the only minter of per-agent credential Secrets. It runs
+	// independently of the workload controllers so a broker outage never stalls
+	// workload reconciliation. It is enabled by configuring the broker admin URL;
+	// when unset the operator runs without any projection (unchanged behaviour).
+	if aibAdminURL := os.Getenv("AIB_ADMIN_URL"); aibAdminURL != "" {
+		admin := aib.New(
+			aibAdminURL,
+			getEnvWithDefault("AIB_PRINCIPAL", "kaos-operator"),
+			getEnvWithDefault("AIB_PRINCIPAL_HEADER", "X-Remote-User"),
+			getDurationWithDefault("AIB_REQUEST_TIMEOUT", 10*time.Second),
+		)
+		if err = (&controllers.AIBProjectionReconciler{
+			Client:       mgr.GetClient(),
+			AIB:          admin,
+			Namespaces:   splitCSV(os.Getenv("AIB_PROJECTION_NAMESPACES")),
+			SecretPrefix: getEnvWithDefault("SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX", "kaos-aib"),
+			Prune:        getBoolWithDefault("AIB_PROJECTION_PRUNE_ENABLED", true),
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "AIBProjection")
+			os.Exit(1)
+		}
+	}
+
 	// Webhooks not implemented yet in this version
 	// TODO: Add webhook setup when webhooks are needed
 
@@ -124,4 +152,39 @@ func getEnvWithDefault(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+func getBoolWithDefault(key string, defaultValue bool) bool {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return defaultValue
+	}
+	parsed, err := strconv.ParseBool(v)
+	if err != nil {
+		return defaultValue
+	}
+	return parsed
+}
+
+func getDurationWithDefault(key string, defaultValue time.Duration) time.Duration {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return defaultValue
+	}
+	parsed, err := time.ParseDuration(v)
+	if err != nil {
+		return defaultValue
+	}
+	return parsed
+}
+
+// splitCSV splits a comma-separated list into trimmed, non-empty entries.
+func splitCSV(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
