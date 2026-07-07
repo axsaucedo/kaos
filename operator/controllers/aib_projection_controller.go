@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"net/http"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -62,6 +63,13 @@ type AIBProjectionReconciler struct {
 	// the Model-1 data path.
 	PolicyConfigMapName      string
 	PolicyConfigMapNamespace string
+	// AgentJWKSURI, when set, switches the policy to verified mode: the controller
+	// fetches the IdP JWKS from this endpoint and injects it at `data.kaos.jwks`
+	// so the policy verifies the actor token signature. Empty leaves the policy in
+	// demo mode (unverified decode).
+	AgentJWKSURI string
+	// JWKSClient optionally overrides the HTTP client used to fetch the JWKS.
+	JWKSClient *http.Client
 }
 
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
@@ -310,9 +318,18 @@ func (r *AIBProjectionReconciler) writePolicyConfigMap(ctx context.Context, desi
 		return nil
 	}
 	grants := projection.GrantData(desired)
-	// JWKS injection (verified mode) is derived and added by the JWKS path when
-	// an issuer is configured; demo mode carries grants only.
-	data, err := authz.ConfigMapData(grants, nil)
+	// Verified mode: when an agent JWKS endpoint is configured, fetch the IdP
+	// signing keys and inject them so the policy verifies the actor token
+	// signature; demo mode (no endpoint) carries grants only.
+	var jwks map[string]any
+	if r.AgentJWKSURI != "" {
+		fetched, err := authz.FetchJWKS(ctx, r.JWKSClient, r.AgentJWKSURI)
+		if err != nil {
+			return err
+		}
+		jwks = fetched
+	}
+	data, err := authz.ConfigMapData(grants, jwks)
 	if err != nil {
 		return err
 	}

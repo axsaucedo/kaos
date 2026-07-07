@@ -185,6 +185,28 @@ func TestAgentJWKSURI(t *testing.T) {
 	}
 }
 
+func TestAuthzJWKSURI(t *testing.T) {
+	cases := []struct {
+		name             string
+		issuer           string
+		verificationMode VerificationMode
+		want             string
+	}{
+		{"demo default without issuer", "", "", ""},
+		{"verified default with issuer", "http://aib:8000", "", "http://aib:8000/oauth2/jwks.json"},
+		{"forced demo suppresses jwks", "http://aib:8000", VerificationDemo, ""},
+		{"forced verified without issuer", "", VerificationVerified, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := Config{Issuer: tc.issuer, VerificationMode: tc.verificationMode}
+			if got := c.AuthzJWKSURI(); got != tc.want {
+				t.Errorf("AuthzJWKSURI() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestUserJWKSURI(t *testing.T) {
 	cases := []struct {
 		name       string

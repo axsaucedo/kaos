@@ -2,6 +2,8 @@ package controllers
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
@@ -195,6 +197,43 @@ func TestProjectionSkipsPolicyConfigMapWhenUnset(t *testing.T) {
 	}
 	if len(cmList.Items) != 0 {
 		t.Fatalf("expected no ConfigMap written, got %d", len(cmList.Items))
+	}
+}
+
+func TestProjectionInjectsJWKSInVerifiedMode(t *testing.T) {
+	jwksBody := `{"keys":[{"kty":"RSA","kid":"k1","n":"abc","e":"AQAB"}]}`
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(jwksBody))
+	}))
+	defer srv.Close()
+
+	scheme := newTestScheme(t)
+	agent := &kaosv1alpha1.Agent{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "researcher"},
+		Spec:       kaosv1alpha1.AgentSpec{MCPServers: []string{"github"}},
+	}
+	mcp := &kaosv1alpha1.MCPServer{ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "github"}}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(agent, mcp).Build()
+	r := &AIBProjectionReconciler{
+		Client:                   c,
+		Scheme:                   scheme,
+		AIB:                      newFakeAIB(),
+		SecretPrefix:             "kaos-aib",
+		PolicyConfigMapName:      "kaos-authz-policy",
+		PolicyConfigMapNamespace: "aib-system",
+		AgentJWKSURI:             srv.URL,
+	}
+
+	if _, err := r.Reconcile(context.Background(), aibSentinel); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	cm := &corev1.ConfigMap{}
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "aib-system", Name: "kaos-authz-policy"}, cm); err != nil {
+		t.Fatalf("expected policy ConfigMap: %v", err)
+	}
+	if !contains(cm.Data["data.json"], "\"jwks\"") || !contains(cm.Data["data.json"], "\"kid\": \"k1\"") {
+		t.Fatalf("data.json missing injected jwks: %s", cm.Data["data.json"])
 	}
 }
 

@@ -485,9 +485,16 @@ func (c Config) EnforcementModeOrDefault() EnforcementMode {
 		EnforcementExtProc)
 }
 
-// VerificationModeOrDefault returns the configured verification mode. When unset
-// or unrecognized it is derived from the agent issuer: verified when an issuer is
-// configured, demo (header-trust) otherwise.
+// AuthzJWKSURI returns the agent (actor) JWKS endpoint the operator injects into
+// the authorization policy data, but only in verified mode. In demo mode it
+// returns an empty string so no JWKS is injected and the policy decodes the
+// actor token without verifying it.
+func (c Config) AuthzJWKSURI() string {
+	if c.VerificationModeOrDefault() != VerificationVerified {
+		return ""
+	}
+	return c.AgentJWKSURI()
+}
 func (c Config) VerificationModeOrDefault() VerificationMode {
 	def := VerificationDemo
 	if strings.TrimSpace(c.Issuer) != "" {

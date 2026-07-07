@@ -21,6 +21,7 @@ import (
 	kaosv1alpha1 "github.com/axsaucedo/kaos/operator/api/v1alpha1"
 	"github.com/axsaucedo/kaos/operator/controllers"
 	"github.com/axsaucedo/kaos/operator/internal/aib"
+	"github.com/axsaucedo/kaos/operator/pkg/security"
 )
 
 var (
@@ -125,6 +126,7 @@ func main() {
 			Prune:                    getBoolWithDefault("AIB_PROJECTION_PRUNE_ENABLED", true),
 			PolicyConfigMapName:      os.Getenv("AIB_AUTHZ_CONFIGMAP_NAME"),
 			PolicyConfigMapNamespace: os.Getenv("AIB_AUTHZ_CONFIGMAP_NAMESPACE"),
+			AgentJWKSURI:             security.GetConfig().AuthzJWKSURI(),
 		}).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create controller", "controller", "AIBProjection")
 			os.Exit(1)
