@@ -118,6 +118,7 @@ func main() {
 		)
 		if err = (&controllers.AIBProjectionReconciler{
 			Client:       mgr.GetClient(),
+			Scheme:       mgr.GetScheme(),
 			AIB:          admin,
 			Namespaces:   splitCSV(os.Getenv("AIB_PROJECTION_NAMESPACES")),
 			SecretPrefix: getEnvWithDefault("SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX", "kaos-aib"),

@@ -96,7 +96,7 @@ func TestProjectionReconcileMintsCredentialSecret(t *testing.T) {
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(agent).Build()
 	admin := newFakeAIB()
-	r := &AIBProjectionReconciler{Client: c, AIB: admin, SecretPrefix: "kaos-aib", Prune: false}
+	r := &AIBProjectionReconciler{Client: c, Scheme: scheme, AIB: admin, SecretPrefix: "kaos-aib", Prune: false}
 
 	if _, err := r.Reconcile(context.Background(), aibSentinel); err != nil {
 		t.Fatalf("reconcile: %v", err)
@@ -111,6 +111,15 @@ func TestProjectionReconcileMintsCredentialSecret(t *testing.T) {
 	}
 	if secret.StringData["client_id"] != "cid" {
 		t.Fatalf("client_id = %q", secret.StringData["client_id"])
+	}
+	// The credential Secret must be owned by its Agent so Kubernetes GC removes it
+	// on Agent deletion.
+	if len(secret.OwnerReferences) != 1 {
+		t.Fatalf("owner references = %d, want 1", len(secret.OwnerReferences))
+	}
+	owner := secret.OwnerReferences[0]
+	if owner.Kind != "Agent" || owner.Name != "researcher" || owner.Controller == nil || !*owner.Controller {
+		t.Fatalf("unexpected owner reference: %+v", owner)
 	}
 	// Second pass must not re-mint once the secret carries a client_id.
 	provisioned := secret.DeepCopy()

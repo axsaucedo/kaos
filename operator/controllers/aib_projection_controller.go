@@ -7,10 +7,12 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -18,6 +20,7 @@ import (
 	kaosv1alpha1 "github.com/axsaucedo/kaos/operator/api/v1alpha1"
 	"github.com/axsaucedo/kaos/operator/internal/aib"
 	"github.com/axsaucedo/kaos/operator/internal/projection"
+	"github.com/axsaucedo/kaos/operator/pkg/security"
 )
 
 // aibManagedBy labels the credential Secrets provisioned by the projection
@@ -47,16 +50,11 @@ type AIBAdmin interface {
 // so a broker outage stalls only projection and never workload reconciliation.
 type AIBProjectionReconciler struct {
 	Client       client.Client
+	Scheme       *runtime.Scheme
 	AIB          AIBAdmin
 	Namespaces   []string
 	SecretPrefix string
 	Prune        bool
-}
-
-// CredentialSecretName is the per-agent credential Secret name, derivable by both
-// the projection controller and the workload mounting path.
-func CredentialSecretName(prefix, agentName string) string {
-	return prefix + "-" + agentName
 }
 
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
@@ -239,7 +237,12 @@ func (r *AIBProjectionReconciler) reconcileAgent(ctx context.Context, agent proj
 		return false, fmt.Errorf("creating agent: %w", err)
 	}
 
-	secretName := CredentialSecretName(r.SecretPrefix, agent.Name)
+	owner := &kaosv1alpha1.Agent{}
+	if err := r.Client.Get(ctx, types.NamespacedName{Namespace: agent.Namespace, Name: agent.Name}, owner); err != nil {
+		return false, fmt.Errorf("reading agent for ownership: %w", err)
+	}
+
+	secretName := security.CredentialSecretName(r.SecretPrefix, agent.Name)
 	existing := &corev1.Secret{}
 	getErr := r.Client.Get(ctx, types.NamespacedName{Namespace: agent.Namespace, Name: secretName}, existing)
 	switch {
@@ -258,18 +261,18 @@ func (r *AIBProjectionReconciler) reconcileAgent(ctx context.Context, agent proj
 	if cred.ClientID == "" || cred.ClientSecret == "" {
 		return false, fmt.Errorf("broker returned incomplete credentials")
 	}
-	if err := r.upsertSecret(ctx, agent.Namespace, secretName, cred); err != nil {
+	if err := r.upsertSecret(ctx, owner, secretName, cred); err != nil {
 		return false, fmt.Errorf("writing secret: %w", err)
 	}
 	return true, nil
 }
 
-func (r *AIBProjectionReconciler) upsertSecret(ctx context.Context, namespace, name string, cred aib.Credentials) error {
+func (r *AIBProjectionReconciler) upsertSecret(ctx context.Context, owner *kaosv1alpha1.Agent, name string, cred aib.Credentials) error {
 	secret := &corev1.Secret{
 		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
-			Namespace: namespace,
+			Namespace: owner.Namespace,
 			Labels:    map[string]string{"app.kubernetes.io/managed-by": aibManagedBy},
 		},
 		Type: corev1.SecretTypeOpaque,
@@ -277,6 +280,11 @@ func (r *AIBProjectionReconciler) upsertSecret(ctx context.Context, namespace, n
 			"client_id":     cred.ClientID,
 			"client_secret": cred.ClientSecret,
 		},
+	}
+	// Own the Secret from its Agent so Kubernetes garbage-collects the credentials
+	// when the Agent is deleted; no explicit Secret prune pass is needed.
+	if err := controllerutil.SetControllerReference(owner, secret, r.Scheme); err != nil {
+		return fmt.Errorf("setting owner reference: %w", err)
 	}
 	// Server-Side Apply: the API server reconciles create-vs-update by field
 	// ownership, so there is no read-before-write or conflict branching.
@@ -304,10 +312,6 @@ func (r *AIBProjectionReconciler) prune(ctx context.Context, desiredServiceIDs, 
 		if _, err := r.AIB.Delete(ctx, "agents", id); err != nil {
 			return err
 		}
-	}
-
-	if err := r.pruneSecrets(ctx, desired); err != nil {
-		return err
 	}
 
 	desiredPSNames := map[string]bool{}
@@ -344,27 +348,6 @@ func (r *AIBProjectionReconciler) prune(ctx context.Context, desiredServiceIDs, 
 			continue
 		}
 		if _, err := r.AIB.Delete(ctx, "services", id); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (r *AIBProjectionReconciler) pruneSecrets(ctx context.Context, desired projection.DesiredState) error {
-	desiredSecrets := map[string]bool{}
-	for _, a := range desired.Agents {
-		desiredSecrets[a.Namespace+"/"+CredentialSecretName(r.SecretPrefix, a.Name)] = true
-	}
-	list := &corev1.SecretList{}
-	if err := r.Client.List(ctx, list, client.MatchingLabels{"app.kubernetes.io/managed-by": aibManagedBy}); err != nil {
-		return err
-	}
-	for i := range list.Items {
-		s := &list.Items[i]
-		if desiredSecrets[s.Namespace+"/"+s.Name] {
-			continue
-		}
-		if err := r.Client.Delete(ctx, s); err != nil && !apierrors.IsNotFound(err) {
 			return err
 		}
 	}

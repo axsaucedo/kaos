@@ -278,11 +278,18 @@ func (c Config) CredentialMountingEnabled() bool {
 	return c.SecurityEnabled() && strings.TrimSpace(c.CredentialSecretPrefix) != ""
 }
 
+// CredentialSecretName returns the per-agent credential Secret name for the given
+// prefix and agent. It is the single naming helper shared by the projection
+// controller that writes the Secret and the mounting path that consumes it.
+func CredentialSecretName(prefix, agentName string) string {
+	return fmt.Sprintf("%s-%s", strings.TrimSpace(prefix), agentName)
+}
+
 // CredentialSecretName returns the name of the per-agent credential Secret for the
-// given agent, using the configured prefix. It matches the name the sync service
-// writes, so the operator can mount it without coordination.
+// given agent, using the configured prefix. It matches the name the projection
+// controller writes, so the operator can mount it without coordination.
 func (c Config) CredentialSecretName(agentName string) string {
-	return fmt.Sprintf("%s-%s", strings.TrimSpace(c.CredentialSecretPrefix), agentName)
+	return CredentialSecretName(c.CredentialSecretPrefix, agentName)
 }
 
 // TokenEndpoint returns the agent-auth token endpoint derived from the issuer, or an
