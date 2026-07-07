@@ -16,11 +16,12 @@ const authzManagedBy = "kaos-operator-authz"
 
 // ConfigMapProjector applies authorization policy and grant data to a ConfigMap.
 type ConfigMapProjector struct {
-	Client     client.Client
-	Name       string
-	Namespace  string
-	JWKSURI    string
-	JWKSClient *http.Client
+	Client         client.Client
+	Name           string
+	Namespace      string
+	JWKSURI        string
+	JWKSClient     *http.Client
+	WriteGrantData bool
 }
 
 // Apply renders the authorization policy and projected grant data and applies
@@ -29,18 +30,22 @@ func (p *ConfigMapProjector) Apply(ctx context.Context, desired projection.Desir
 	if p.Name == "" || p.Namespace == "" {
 		return nil
 	}
-	grants := projection.GrantData(desired)
-	var jwks map[string]any
-	if p.JWKSURI != "" {
-		fetched, err := authz.FetchJWKS(ctx, p.JWKSClient, p.JWKSURI)
+	data := map[string]string{authz.PolicyKey: authz.Policy()}
+	if p.WriteGrantData {
+		grants := projection.GrantData(desired)
+		var jwks map[string]any
+		if p.JWKSURI != "" {
+			fetched, err := authz.FetchJWKS(ctx, p.JWKSClient, p.JWKSURI)
+			if err != nil {
+				return err
+			}
+			jwks = fetched
+		}
+		dataDoc, err := authz.DataDocument(grants, jwks)
 		if err != nil {
 			return err
 		}
-		jwks = fetched
-	}
-	data, err := authz.ConfigMapData(grants, jwks)
-	if err != nil {
-		return err
+		data[authz.DataKey] = string(dataDoc)
 	}
 	cm := &corev1.ConfigMap{
 		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "ConfigMap"},

@@ -46,7 +46,7 @@ func TestBrokerProjectorMintsCredentialSecret(t *testing.T) {
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(agent).Build()
 	admin := newFakeAIB()
-	p := &BrokerProjector{Client: c, Scheme: scheme, AIB: admin, SecretPrefix: "kaos-aib", Prune: false}
+	p := &BrokerProjector{Client: c, Scheme: scheme, AIB: admin, SecretPrefix: "kaos-aib", Prune: false, BindPermissionSets: true}
 	desired := projection.Project([]projection.Resource{resourceFromAgent(agent)})
 
 	if err := p.Apply(context.Background(), desired); err != nil {

@@ -24,7 +24,7 @@ func TestConfigMapProjectorWritesPolicyConfigMap(t *testing.T) {
 		Spec:       kaosv1alpha1.AgentSpec{MCPServers: []string{"github"}},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(mcp, agent).Build()
-	p := &ConfigMapProjector{Client: c, Name: "kaos-authz-policy", Namespace: "aib-system"}
+	p := &ConfigMapProjector{Client: c, Name: "kaos-authz-policy", Namespace: "aib-system", WriteGrantData: true}
 	desired := projection.Project([]projection.Resource{resourceFromAgent(agent), {
 		Kind: projection.MCPServer.ResourceKind, Namespace: "demo", Name: "github",
 	}})
@@ -85,7 +85,7 @@ func TestConfigMapProjectorInjectsJWKSInVerifiedMode(t *testing.T) {
 	}
 	mcp := &kaosv1alpha1.MCPServer{ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "github"}}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(agent, mcp).Build()
-	p := &ConfigMapProjector{Client: c, Name: "kaos-authz-policy", Namespace: "aib-system", JWKSURI: srv.URL}
+	p := &ConfigMapProjector{Client: c, Name: "kaos-authz-policy", Namespace: "aib-system", JWKSURI: srv.URL, WriteGrantData: true}
 	desired := projection.Project([]projection.Resource{resourceFromAgent(agent), {
 		Kind: projection.MCPServer.ResourceKind, Namespace: "demo", Name: "github",
 	}})
