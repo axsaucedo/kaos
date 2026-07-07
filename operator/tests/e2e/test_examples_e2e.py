@@ -124,10 +124,11 @@ class TestExamplesViaJupytext:
         assert result.returncode == 0, f"Example execution failed: {result.stderr}"
 
     def test_memory_example(self):
-        """Execute the cross-session memory example.
-        
-        Tests: MemoryStore sample deploy, verbatim short-term round-trip,
-        cross-session recall, and scope isolation via the memory service.
+        """Execute the agent memory example.
+
+        Tests: a memory-enabled Agent bound to a local MemoryStore, automatic
+        persist-after-run and recall-before-run, and cross-session accumulation
+        verified by querying the memory service API directly.
         """
         example_file = DOCS_EXAMPLES_PATH / "memory.md"
         assert example_file.exists(), f"Example file not found: {example_file}"
