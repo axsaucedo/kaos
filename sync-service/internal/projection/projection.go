@@ -35,13 +35,16 @@ type EdgeKind struct {
 	ScopeDescription string // description attached to the synthetic "call" scope
 }
 
-// The two edge kinds an agent can request.
+// The edge kinds an agent can request. Agent->Agent edges (spec.agentNetwork.access)
+// authorize peer A2A delegation on the calling agent's actor identity, the same
+// way MCPServer/ModelAPI edges authorize tool and model calls.
 var (
 	MCPServer = EdgeKind{Slug: "mcpserver", ResourceKind: "MCPServer", DisplayLabel: "MCPServer", ScopeDescription: "Invoke the MCP server"}
 	ModelAPI  = EdgeKind{Slug: "modelapi", ResourceKind: "ModelAPI", DisplayLabel: "ModelAPI", ScopeDescription: "Invoke the model API"}
+	Agent     = EdgeKind{Slug: AgentSlug, ResourceKind: AgentKind, DisplayLabel: "Agent", ScopeDescription: "Invoke the agent (A2A)"}
 )
 
-var serviceClientIDPrefixes = []string{"kaos-" + MCPServer.Slug + "-", "kaos-" + ModelAPI.Slug + "-"}
+var serviceClientIDPrefixes = []string{"kaos-" + MCPServer.Slug + "-", "kaos-" + ModelAPI.Slug + "-", "kaos-" + Agent.Slug + "-"}
 
 // Resource is the minimal KAOS resource shape the projection needs. The runtime
 // converts unstructured CRDs into this; tests construct it directly.
@@ -51,6 +54,7 @@ type Resource struct {
 	Name       string
 	MCPServers []string // spec.mcpServers (Agent only)
 	ModelAPI   string   // spec.modelAPI (Agent only)
+	Access     []string // spec.agentNetwork.access -- peer agents this agent may call (Agent only)
 }
 
 func logicalPath(namespace, name string) string {
@@ -204,11 +208,12 @@ type DesiredState struct {
 	Agents         []DesiredAgent
 }
 
-// Project turns a list of KAOS resources into the desired AIB state. Both MCP
-// server edges and the model API edge are projected so an agent is authorized
-// against every external dependency it declares. Agents with no edges are
-// skipped. Logical identity is always kaos://<slug>/<ns>/<name>, so identities
-// are unique by construction and need no conflict resolution.
+// Project turns a list of KAOS resources into the desired AIB state. MCP server
+// edges, the model API edge and agent->agent access edges are all projected so
+// an agent is authorized against every external dependency and peer it declares.
+// Agents with no edges are skipped. Logical identity is always
+// kaos://<slug>/<ns>/<name>, so identities are unique by construction and need
+// no conflict resolution.
 func Project(resources []Resource) DesiredState {
 	var state DesiredState
 
@@ -230,7 +235,9 @@ func Project(resources []Resource) DesiredState {
 		return ps
 	}
 
-	// Pass 1: project every declared edge target as a synthetic service.
+	// Pass 1: project every declared MCP/ModelAPI edge target as a synthetic
+	// service. Agent peers are projected lazily in pass 2, only when an agent
+	// declares an access edge to them.
 	declaredKinds := map[string]EdgeKind{MCPServer.ResourceKind: MCPServer, ModelAPI.ResourceKind: ModelAPI}
 	for _, r := range resources {
 		kind, ok := declaredKinds[r.Kind]
@@ -256,6 +263,12 @@ func Project(resources []Resource) DesiredState {
 		}
 		if r.ModelAPI != "" {
 			addEdge(ModelAPI, r.ModelAPI)
+		}
+		for _, peer := range r.Access {
+			if peer == "" || peer == r.Name {
+				continue // skip empty and self edges
+			}
+			addEdge(Agent, peer)
 		}
 		if len(psNames) == 0 {
 			continue
