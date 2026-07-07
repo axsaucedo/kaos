@@ -11,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	kaosv1alpha1 "github.com/axsaucedo/kaos/operator/api/v1alpha1"
@@ -132,5 +133,42 @@ func TestConfigMapProjectorLeavesBYOConfigMapUntouched(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got.Data, byo.Data) {
 		t.Fatalf("operator clobbered admin ConfigMap: %v", got.Data)
+	}
+}
+
+func TestConfigMapProjectorRegoOverrideLeavesAdminDataUntouched(t *testing.T) {
+	scheme := newTestScheme(t)
+	agent := &kaosv1alpha1.Agent{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "researcher"},
+		Spec:       kaosv1alpha1.AgentSpec{MCPServers: []string{"github"}},
+	}
+	adminData := `{"kaos":{"grants":{"kaos://agent/demo/researcher":["kaos://mcpserver/demo/other"]}}}`
+	adminCM := &corev1.ConfigMap{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "ConfigMap"},
+		ObjectMeta: metav1.ObjectMeta{Namespace: "aib-system", Name: "kaos-authz-policy"},
+		Data:       map[string]string{"data.json": adminData},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(agent).Build()
+	if err := c.Patch(context.Background(), adminCM, client.Apply, client.FieldOwner("admin")); err != nil {
+		t.Fatalf("admin apply: %v", err)
+	}
+	p := &ConfigMapProjector{Client: c, Name: "kaos-authz-policy", Namespace: "aib-system", WriteGrantData: false}
+	desired := projection.Project([]projection.Resource{resourceFromAgent(agent)})
+
+	for i := 0; i < 2; i++ {
+		if err := p.Apply(context.Background(), desired); err != nil {
+			t.Fatalf("apply %d: %v", i, err)
+		}
+	}
+
+	got := &corev1.ConfigMap{}
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "aib-system", Name: "kaos-authz-policy"}, got); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Data["policy.rego"] == "" {
+		t.Fatalf("operator did not write policy.rego: %v", got.Data)
+	}
+	if got.Data["data.json"] != adminData {
+		t.Fatalf("operator clobbered admin-authored data.json: %q", got.Data["data.json"])
 	}
 }
