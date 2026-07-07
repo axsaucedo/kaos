@@ -12,10 +12,11 @@ admin calls and the Secret provisioning.
 ## What it does
 
 1. **Project** KAOS resources into the AIB admin model — each external dependency
-   an agent declares (`spec.mcpServers`, `spec.modelAPI`) becomes a synthetic AIB
-   service exposing a single `call` scope, each requested edge becomes a
-   permission set, and each Agent becomes a local AIB agent bound to those
-   permission sets. Logical identity is always `kaos://<kind>/<namespace>/<name>`,
+   an agent declares (`spec.mcpServers`, `spec.modelAPI`) and each peer agent it
+   may call (`spec.agentNetwork.access`) becomes a synthetic AIB service exposing
+   a single `call` scope, each requested edge becomes a permission set, and each
+   Agent becomes a local AIB agent bound to those permission sets. Logical
+   identity is always `kaos://<kind>/<namespace>/<name>`,
    unique by construction.
 2. **Provision** a per-agent credential `Secret` (`client_id` / `client_secret`)
    by minting against the broker. The Secret name is `<prefix>-<agent>` (default
