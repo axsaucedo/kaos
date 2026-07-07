@@ -20,6 +20,7 @@ import (
 type fakeAIB struct {
 	created map[string][]string
 	minted  int
+	deleted int
 }
 
 func newFakeAIB() *fakeAIB { return &fakeAIB{created: map[string][]string{}} }
@@ -31,7 +32,10 @@ func (f *fakeAIB) CreateOrGet(_ context.Context, collection, _, matchValue strin
 	return collection + ":" + matchValue, nil
 }
 
-func (f *fakeAIB) Delete(context.Context, string, string) (bool, error) { return false, nil }
+func (f *fakeAIB) Delete(context.Context, string, string) (bool, error) {
+	f.deleted++
+	return true, nil
+}
 
 func (f *fakeAIB) MintCredentials(context.Context, string) (aib.Credentials, error) {
 	f.minted++
@@ -174,5 +178,41 @@ func TestAdminBodiesCarryNoApprovalStatus(t *testing.T) {
 		if len(entry) != 2 || entry["requirement_type"] != "mandatory" {
 			t.Fatalf("binding entry = %v", entry)
 		}
+	}
+}
+
+func TestBrokerProjectorExternalOffSwitchProjectsIdentityOnly(t *testing.T) {
+	scheme := newTestScheme(t)
+	agent := &kaosv1alpha1.Agent{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "researcher"},
+		Spec:       kaosv1alpha1.AgentSpec{MCPServers: []string{"github"}, ModelAPI: "gpt"},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(agent).Build()
+	admin := newFakeAIB()
+	p := &BrokerProjector{Client: c, Scheme: scheme, AIB: admin, SecretPrefix: "kaos-aib", Prune: true, BindPermissionSets: false}
+	desired := projection.Project([]projection.Resource{resourceFromAgent(agent), {
+		Kind: projection.MCPServer.ResourceKind, Namespace: "demo", Name: "github",
+	}})
+
+	if err := p.Apply(context.Background(), desired); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	if admin.minted != 1 {
+		t.Fatalf("minted = %d, want 1", admin.minted)
+	}
+	if len(admin.created["agents"]) != 1 {
+		t.Fatalf("agents created = %v, want 1", admin.created["agents"])
+	}
+	secret := &corev1.Secret{}
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "demo", Name: "kaos-aib-researcher"}, secret); err != nil {
+		t.Fatalf("expected credential secret: %v", err)
+	}
+	if len(admin.created["services"]) != 0 || len(admin.created["permission-sets"]) != 0 {
+		t.Fatalf("authorization projected in off-switch: services=%v permission-sets=%v",
+			admin.created["services"], admin.created["permission-sets"])
+	}
+	if admin.deleted != 0 {
+		t.Fatalf("prune deleted %d records in off-switch mode", admin.deleted)
 	}
 }
