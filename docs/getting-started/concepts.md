@@ -117,10 +117,14 @@ The operator automatically configures peer agent URLs based on `agentNetwork.acc
 
 ## Memory and Sessions
 
-Each agent maintains session storage (local in-memory, or a central memory service when bound to a `MemoryStore`):
-- Sessions track conversation context
-- Events logged: user_message, agent_response, tool_call, delegation
-- Debug endpoints available for testing: `/memory/events`, `/memory/sessions`
+Agents keep conversation context and can build durable, cross-session memory:
+
+- **Local memory** (default, no `MemoryStore`): a pod-local short-term window of recent turns for conversational continuity within a session.
+- **Remote memory** (bound to a `MemoryStore`): a central memory service adds two more tiers on top of the short-term window — a **medium-term** rolling digest per session, and a **long-term** semantic store that extracts facts and recalls them by relevance across sessions.
+
+A `MemoryStore` is a first-class resource the operator deploys (see the [MemoryStore CRD](../operator/memorystore-crd.md)). An agent binds to one via `config.memory` and selects a **scope** (`private`, `user`, `shared`, `session`) that governs whose long-term memory it reads and writes. Memory is augmentation, not a hard dependency: if the store is unavailable, the agent keeps serving in short-term-only mode.
+
+See [Memory Architecture](../operator/memory-architecture.md) for the full design.
 
 ## Environment Variable Configuration
 

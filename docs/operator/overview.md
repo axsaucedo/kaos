@@ -10,27 +10,32 @@ flowchart TB
         crd1["Agent CRD"]
         crd2["ModelAPI CRD"]
         crd3["MCPServer CRD"]
+        crd4["MemoryStore CRD"]
     end
     
     subgraph controller["Agentic Operator Controller Manager<br/>(kaos-system namespace)"]
         ar["AgentReconciler"]
         mr["ModelAPIReconciler"]
         mcpr["MCPServerReconciler"]
+        msr["MemoryStoreReconciler"]
     end
     
     subgraph user["User Namespace"]
         ad["Agent Deployment<br/>+ Service<br/>+ ConfigMap"]
         md["ModelAPI Deploy<br/>+ Service<br/>+ ConfigMap"]
         mcpd["MCPServer Deploy<br/>+ Service"]
+        msd["Memory Service Deploy<br/>+ Service<br/>(+ PVC / PDB)"]
     end
     
     crd1 --> ar
     crd2 --> mr
     crd3 --> mcpr
+    crd4 --> msr
     
     ar --> ad
     mr --> md
     mcpr --> mcpd
+    msr --> msd
 ```
 
 ## Controllers
@@ -102,6 +107,25 @@ Manages MCPServer custom resources:
 4. **Update Status**
    - Record available tools
 
+### MemoryStoreReconciler
+
+Manages MemoryStore custom resources (the central memory service backing long-term memory):
+
+1. **Resolve Model Bindings**
+   - Validate the referenced `summarization` and `embedding` ModelAPIs exist and are Ready
+
+2. **Create/Update Deployment**
+   - Wire storage (`local` PVC-backed SQLite+Chroma, or `external` pgvector via a connection secret)
+   - External stores default to two replicas; local stores are single-replica
+
+3. **Create/Update Service and PodDisruptionBudget**
+   - A Service fronts the replicas; a PDB (`minAvailable=1`) guards stores running two or more replicas
+
+4. **Update Status**
+   - Report health and the service endpoint
+
+See [Memory Architecture](./memory-architecture.md) for the full design.
+
 ## Resource Dependencies
 
 ```mermaid
@@ -109,9 +133,11 @@ flowchart LR
     Agent -->|requires| ModelAPI["ModelAPI (must be Ready)"]
     Agent -.->|optional| MCPServers["MCPServer[] (must be Ready)"]
     Agent -.->|optional| Peers["Agent[] (peer agents, must be Ready)"]
+    Agent -.->|optional| MemoryStore["MemoryStore (gates initial start; degrades after)"]
+    MemoryStore -->|requires| MemModels["ModelAPI[] (summarization + embedding)"]
 ```
 
-The operator waits for dependencies before marking an Agent as Ready.
+The operator waits for dependencies before marking an Agent as Ready. A bound MemoryStore gates only the agent's initial creation; once running, a store outage degrades the agent (a `MemoryDegraded` condition) rather than stopping it.
 
 ## Status Phases
 
@@ -120,7 +146,7 @@ The operator waits for dependencies before marking an Agent as Ready.
 | `Pending` | Resource created, waiting for dependencies |
 | `Ready` | All dependencies ready, pods running |
 | `Failed` | Error occurred during reconciliation |
-| `Waiting` | Waiting for ModelAPI/MCPServer to become ready |
+| `Waiting` | Waiting for ModelAPI/MCPServer/MemoryStore to become ready |
 
 ## Environment Variable Mapping
 
@@ -139,9 +165,13 @@ The operator translates CRD fields to container environment variables:
 | `config.toolCallMode` | `TOOL_CALL_MODE` |
 | `config.memory.enabled` | `MEMORY_ENABLED` |
 | `config.memory.type` | `MEMORY_TYPE` |
-| `config.memory.contextLimit` | `MEMORY_CONTEXT_LIMIT` |
-| `config.memory.maxSessions` | `MEMORY_MAX_SESSIONS` |
-| `config.memory.maxSessionEvents` | `MEMORY_MAX_SESSION_EVENTS` |
+| MemoryStore endpoint (remote only) | `MEMORY_STORE_ENDPOINT` |
+| `config.memory.scope` | `MEMORY_SCOPE` |
+| `config.memory.tools` | `MEMORY_TOOLS` |
+| `config.memory.failureMode` | `MEMORY_FAILURE_MODE` |
+| `config.memory.clientParams.tokenBudget` | `MEMORY_SHORT_TERM_TOKEN_BUDGET` |
+| `config.memory.clientParams.rollingSummary` | `MEMORY_ROLLING_SUMMARY` |
+| `kaos://agent/<ns>/<name>` (always) | `AGENT_IDENTITY` |
 | `config.autonomous.goal` | `AUTONOMOUS_GOAL` |
 | `config.autonomous.intervalSeconds` | `AUTONOMOUS_INTERVAL_SECONDS` |
 | `config.autonomous.maxIterRuntimeSeconds` | `AUTONOMOUS_MAX_ITER_RUNTIME_SECONDS` |

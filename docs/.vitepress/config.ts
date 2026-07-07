@@ -110,6 +110,7 @@ export default withMermaid(defineConfig({
           { text: 'ModelAPI CRD', link: '/operator/modelapi-crd' },
           { text: 'MCPServer CRD', link: '/operator/mcpserver-crd' },
           { text: 'MemoryStore CRD', link: '/operator/memorystore-crd' },
+          { text: 'Memory Architecture', link: '/operator/memory-architecture' },
           { text: 'Gateway API', link: '/operator/gateway-api' },
           { text: 'OpenTelemetry', link: '/operator/telemetry' }
         ]
