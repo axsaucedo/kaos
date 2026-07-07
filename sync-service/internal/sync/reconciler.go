@@ -179,6 +179,9 @@ func toResource(kind string, obj *unstructured.Unstructured) projection.Resource
 		if modelAPI, ok, _ := unstructured.NestedString(obj.Object, "spec", "modelAPI"); ok {
 			res.ModelAPI = modelAPI
 		}
+		if access, ok, _ := unstructured.NestedStringSlice(obj.Object, "spec", "agentNetwork", "access"); ok {
+			res.Access = access
+		}
 	}
 	return res
 }
