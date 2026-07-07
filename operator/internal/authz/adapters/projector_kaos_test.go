@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -104,4 +105,32 @@ func TestConfigMapProjectorInjectsJWKSInVerifiedMode(t *testing.T) {
 
 func contains(s, sub string) bool {
 	return strings.Contains(s, sub)
+}
+
+func TestConfigMapProjectorLeavesBYOConfigMapUntouched(t *testing.T) {
+	scheme := newTestScheme(t)
+	agent := &kaosv1alpha1.Agent{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "researcher"},
+		Spec:       kaosv1alpha1.AgentSpec{MCPServers: []string{"github"}},
+	}
+	byo := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "aib-system", Name: "kaos-authz-policy"},
+		Data: map[string]string{
+			"policy.rego": "package admin.owned\n",
+			"data.json":   `{"kaos":{"grants":{"admin":["x"]}}}`,
+		},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(agent, byo).Build()
+	p := &ConfigMapProjector{Client: c}
+
+	if err := p.Apply(context.Background(), projection.Project([]projection.Resource{resourceFromAgent(agent)})); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	got := &corev1.ConfigMap{}
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "aib-system", Name: "kaos-authz-policy"}, got); err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if !reflect.DeepEqual(got.Data, byo.Data) {
+		t.Fatalf("operator clobbered admin ConfigMap: %v", got.Data)
+	}
 }
