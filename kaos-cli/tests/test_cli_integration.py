@@ -867,7 +867,6 @@ class TestSystemInstallFlags:
         output = strip_ansi(result.output)
         assert "--gateway-enabled" in output
         assert "--metallb-enabled" in output
-        assert "--redis-enabled" in output
 
     def test_uninstall_help_shows_gateway_flag(self):
         result = runner.invoke(app, ["system", "uninstall", "--help"])
@@ -875,7 +874,6 @@ class TestSystemInstallFlags:
         output = strip_ansi(result.output)
         assert "--gateway-enabled" in output
         assert "--metallb-enabled" in output
-        assert "--redis-enabled" in output
 
     def test_install_help_shows_auth_flag(self):
         result = runner.invoke(app, ["system", "install", "--help"])

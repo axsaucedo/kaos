@@ -82,11 +82,6 @@ def install(
         "--metallb-enabled",
         help="Install MetalLB for LoadBalancer support (KIND/bare-metal clusters).",
     ),
-    redis_enabled: bool = typer.Option(
-        False,
-        "--redis-enabled",
-        help="Enable Redis for distributed agent memory.",
-    ),
     chart_path: str | None = typer.Option(
         None,
         "--chart-path",
@@ -245,7 +240,6 @@ def install(
         monitoring_enabled=monitoring_enabled,
         gateway_enabled=gateway_enabled,
         metallb_enabled=metallb_enabled,
-        redis_enabled=redis_enabled,
         chart_path=chart_path,
         auth_enabled=auth_enabled,
         auth_namespace=auth_namespace,
@@ -303,11 +297,6 @@ def uninstall(
         "--metallb-enabled",
         help="Also uninstall MetalLB.",
     ),
-    redis_enabled: bool = typer.Option(
-        False,
-        "--redis-enabled",
-        help="Also uninstall Redis.",
-    ),
 ) -> None:
     """Uninstall the KAOS operator."""
     if monitoring_enabled is not None and monitoring_enabled not in MONITORING_BACKENDS:
@@ -322,7 +311,6 @@ def uninstall(
         monitoring_enabled=monitoring_enabled,
         gateway_enabled=gateway_enabled,
         metallb_enabled=metallb_enabled,
-        redis_enabled=redis_enabled,
     )
 
 

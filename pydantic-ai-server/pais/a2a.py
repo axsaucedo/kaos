@@ -225,7 +225,7 @@ class TaskManager(ABC):
     """ABC for A2A task lifecycle management.
 
     Implementations handle task creation, execution, and state management internally.
-    The interface mirrors the Memory ABC pattern (LocalMemory/RedisMemory/NullMemory).
+    The interface mirrors the Memory ABC pattern (LocalMemory/NullMemory).
     """
 
     @abstractmethod

@@ -16,7 +16,7 @@ from pydantic_ai import Agent as PydanticAgent
 
 from tests.helpers import make_test_server
 from pais.serverutils import AgentCard, AgentCardSkill, AgentCardCapabilities, RemoteAgent
-from pais.memory import LocalMemory, NullMemory, RedisMemory
+from pais.memory import LocalMemory, NullMemory
 
 logger = logging.getLogger(__name__)
 
@@ -587,44 +587,6 @@ class TestNullMemory:
 
         sessions = await null_memory.list_sessions()
         assert sessions == []
-
-
-class TestRedisMemory:
-    """Tests for RedisMemory verifying actual Redis commands issued."""
-
-    def _make_redis_memory(self, mock_redis):
-        from unittest.mock import patch
-        from pais.memory import RedisMemory
-
-        with patch("redis.asyncio.from_url", return_value=mock_redis):
-            return RedisMemory(redis_url="redis://localhost:6379", max_events_per_session=10)
-
-    @pytest.mark.asyncio
-    async def test_create_session_issues_hset_and_zadd(self):
-        from unittest.mock import AsyncMock, MagicMock
-        from pais.memory import RedisMemory
-
-        mock_redis = AsyncMock()
-        mock_pipe = MagicMock()
-        mock_pipe.execute = AsyncMock(return_value=[])
-        mock_redis.pipeline = MagicMock(return_value=mock_pipe)
-        mock_redis.zcard = AsyncMock(return_value=0)
-
-        memory = self._make_redis_memory(mock_redis)
-        sid = await memory.create_session("app", "user1", "s1")
-        assert sid == "s1"
-        mock_pipe.hset.assert_called_once()
-        mock_pipe.zadd.assert_called_once()
-        mock_pipe.execute.assert_awaited_once()
-
-    @pytest.mark.asyncio
-    async def test_close_calls_aclose(self):
-        from unittest.mock import AsyncMock, MagicMock
-
-        mock_redis = AsyncMock()
-        memory = self._make_redis_memory(mock_redis)
-        await memory.close()
-        mock_redis.aclose.assert_awaited_once()
 
 
 class TestMessageProcessing:
