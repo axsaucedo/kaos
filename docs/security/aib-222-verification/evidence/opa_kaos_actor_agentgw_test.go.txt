@@ -1,0 +1,283 @@
+// Package extproc_test — Phase 2: KAOS actor->resource authorization end-to-end
+// through a REAL proxy (agentgateway Docker) over HTTP.
+//
+// Architecture (mirrors opa_agentgateway_e2e_test.go):
+//
+//	MCP client (mcp-go, custom x-agent-authorization header)
+//	  → agentgateway (Docker)
+//	  → ext_proc (#222, in-process, OPA enabled with kaos_actor_agentgw.rego)
+//	  → mock identity broker (token exchange)
+//	  → mock MCP backend (captures forwarded Authorization)
+//
+// What Phase 1 (opa_kaos_actor_test.go) already proved at the ext_proc gRPC
+// contract level: the host-based A/B/X/Y matrix and data-driven grants.
+//
+// What THIS phase uniquely proves over real HTTP through the proxy:
+//   1. agentgateway forwards the custom x-agent-authorization actor header to ext_proc,
+//   2. an operator-supplied Rego policy reads the actor and decides allow/deny,
+//   3. allow reaches the backend (exchanged token forwarded) / deny is blocked (403),
+//   4. the AUTONOMOUS gap: a request with NO Authorization bearer bypasses OPA
+//      entirely and reaches the backend UNAUTHORIZED — an AIB limitation that
+//      would require a #222 extension to close.
+//
+// Requires Docker; skipped when unavailable.
+//
+// Focused run:
+//
+//	cd tests/e2e/extproc && go test -run TestExtProcTokenExchange -args -ginkgo.focus="KAOS actor .* agentgateway"
+package extproc_test
+
+import (
+	"context"
+	"fmt"
+	"net"
+	"net/http/httptest"
+	"sync"
+	"time"
+
+	"github.com/mark3labs/mcp-go/client"
+	"github.com/mark3labs/mcp-go/client/transport"
+	"github.com/mark3labs/mcp-go/mcp"
+	. "github.com/onsi/ginkgo/v2"
+	. "github.com/onsi/gomega"
+	"github.com/testcontainers/testcontainers-go"
+	"google.golang.org/grpc"
+
+	extprocv3 "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
+
+	extprocconfig "github.com/agentic-identity-broker/agentic-identity-broker/internal/extproc/config"
+	extprocserver "github.com/agentic-identity-broker/agentic-identity-broker/internal/extproc/server"
+	"github.com/agentic-identity-broker/agentic-identity-broker/tests/e2e/extproc/bootstrap"
+)
+
+const (
+	kaosActorGwOriginalBearerToken = "kaos-actor-gw-original-bearer"
+	kaosActorGwExchangedToken      = "kaos-actor-gw-exchanged-token"
+)
+
+// kaosActorGwStartExtProc starts an in-process ext_proc (#222) with OPA enabled,
+// pointed at the Phase 2 actor policy. Mirrors opaAgentgwStartExtProc but swaps
+// the policy file.
+func kaosActorGwStartExtProc(oauth2URL, tokenExchangeURL string) (net.Listener, *grpc.Server, *extprocserver.TokenExchanger) {
+	cfg := &extprocconfig.Config{
+		GRPC: extprocconfig.GRPCConfig{Bind: "0.0.0.0", Port: 0, MaxConcurrentStreams: 100},
+		OAuth2: extprocconfig.OAuth2Config{
+			TokenEndpoint:             tokenExchangeURL + "/oauth2/token",
+			Issuer:                    oauth2URL,
+			ClientID:                  "kaos-actor-gw-client",
+			ClientSecret:              "kaos-actor-gw-secret",
+			ClientCredentialsEndpoint: oauth2URL + "/oauth/token",
+			ClientAssertionType:       "access_token",
+			ExchangeTimeout:           10 * time.Second,
+			TLS:                       extprocconfig.TLSConfig{AllowHTTP: true},
+		},
+		Cache: extprocconfig.CacheConfig{DefaultTTL: 5 * time.Minute, MaxTTL: 1 * time.Hour},
+		Log:   extprocconfig.LogConfig{Level: "debug", Format: "text"},
+		Authorization: extprocconfig.AuthorizationConfig{
+			Enabled: true,
+			Policy: extprocconfig.PolicyConfig{
+				Path:     policyPath("kaos_actor_agentgw.rego"),
+				Package:  "aib.extproc.authz",
+				Decision: "result",
+			},
+			DefaultDecision:   "deny",
+			EvaluationTimeout: 500 * time.Millisecond,
+			MaxBodySize:       1024 * 1024,
+		},
+	}
+
+	slogLogger := bootstrap.NewTestLogger()
+	exchanger, err := extprocserver.NewTokenExchanger(cfg, slogLogger)
+	Expect(err).NotTo(HaveOccurred(), "failed to create token exchanger")
+
+	authorizer, err := bootstrap.NewOPAAuthorizer(cfg, slogLogger)
+	Expect(err).NotTo(HaveOccurred(), "failed to create OPA authorizer")
+
+	svc := extprocserver.NewServerWithAuthorizer(cfg, exchanger, authorizer, slogLogger)
+
+	listener, err := net.Listen("tcp", "0.0.0.0:0")
+	Expect(err).NotTo(HaveOccurred(), "failed to create ext_proc listener")
+
+	grpcSrv := grpc.NewServer()
+	extprocv3.RegisterExternalProcessorServer(grpcSrv, svc)
+	go func() {
+		if serveErr := grpcSrv.Serve(listener); serveErr != nil {
+			opaAgentgwLogger.Error("KAOS actor gw ext_proc serve error", "err", serveErr)
+		}
+	}()
+	return listener, grpcSrv, exchanger
+}
+
+// kaosActorGwNewMCPClient creates an MCP client through agentgateway, injecting
+// the actor token (and optionally the user Authorization bearer). It performs the
+// MCP Initialize handshake (allowed for all actors by the lifecycle rule).
+//
+// agentgateway accepts the TCP port before it is fully ready to proxy /mcp, so the
+// first POST can race and return EOF. We retry connect+Initialize until the proxy
+// is ready (this is proxy warm-up, not an authorization outcome).
+func kaosActorGwNewMCPClient(ctx context.Context, gwURL, actorSub string, withBearer bool) *client.Client {
+	headers := map[string]string{
+		"x-agent-authorization": actorToken(actorSub),
+	}
+	if withBearer {
+		headers["Authorization"] = "Bearer " + kaosActorGwOriginalBearerToken
+	}
+
+	var mcpClient *client.Client
+	Eventually(func() error {
+		c, err := client.NewStreamableHttpClient(gwURL+"/mcp", transport.WithHTTPHeaders(headers))
+		if err != nil {
+			return err
+		}
+		if err := c.Start(ctx); err != nil {
+			c.Close() //nolint:errcheck
+			return err
+		}
+		initReq := mcp.InitializeRequest{}
+		initReq.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
+		initReq.Params.ClientInfo = mcp.Implementation{Name: "kaos-actor-gw-client", Version: "1.0.0"}
+		if _, err := c.Initialize(ctx, initReq); err != nil {
+			c.Close() //nolint:errcheck
+			return err
+		}
+		mcpClient = c
+		return nil
+	}, 20*time.Second, 500*time.Millisecond).Should(Succeed(), "MCP Initialize should succeed (lifecycle allowed) once proxy is ready")
+	return mcpClient
+}
+
+var _ = Describe("KAOS actor->resource authorization via agentgateway (HTTP e2e)", Ordered, func() {
+	var (
+		ctx                  context.Context
+		cancel               context.CancelFunc
+		mockOAuth2Srv        *httptest.Server
+		mockTokenExchangeSvr *opaAgentgwMockTokenExchangeSrv
+		extprocGRPC          *grpc.Server
+		exchanger            *extprocserver.TokenExchanger
+		gwURL                string
+
+		lastReceivedAuthHeader string
+		authHeaderMu           sync.Mutex
+	)
+
+	BeforeAll(func() {
+		_, dockerErr := testcontainers.ProviderDocker.GetProvider()
+		if dockerErr != nil {
+			Skip("Skipping KAOS actor agentgateway e2e: Docker not available")
+		}
+		ctx, cancel = context.WithTimeout(context.Background(), 300*time.Second)
+
+		mockOAuth2Srv = opaAgentgwNewMockOAuth2Srv()
+		mockTokenExchangeSvr = opaAgentgwNewMockTokenExchangeSrv()
+
+		mcpListener := opaAgentgwStartMCPServer(&lastReceivedAuthHeader, &authHeaderMu)
+		mcpPort := mcpListener.Addr().(*net.TCPAddr).Port
+
+		var extprocListener net.Listener
+		extprocListener, extprocGRPC, exchanger = kaosActorGwStartExtProc(mockOAuth2Srv.URL, mockTokenExchangeSvr.URL)
+		extprocPort := extprocListener.Addr().(*net.TCPAddr).Port
+
+		gwPort := opaAgentgwStartContainer(ctx, extprocPort, mcpPort)
+		gwURL = fmt.Sprintf("http://localhost:%s", gwPort)
+
+		DeferCleanup(func() {
+			if extprocGRPC != nil {
+				extprocGRPC.GracefulStop()
+			}
+			if exchanger != nil {
+				exchanger.Shutdown()
+			}
+			if mockTokenExchangeSvr != nil {
+				mockTokenExchangeSvr.Close()
+			}
+			if mockOAuth2Srv != nil {
+				mockOAuth2Srv.Close()
+			}
+			cancel()
+		})
+	})
+
+	BeforeEach(func() {
+		authHeaderMu.Lock()
+		lastReceivedAuthHeader = ""
+		authHeaderMu.Unlock()
+		mockTokenExchangeSvr.reset()
+		mockTokenExchangeSvr.withExchangedToken(kaosActorGwExchangedToken)
+	})
+
+	It("allows granted actor (agent-A): request reaches backend with exchanged token", func() {
+		mc := kaosActorGwNewMCPClient(ctx, gwURL, "agent-A", true)
+		defer mc.Close() //nolint:errcheck
+
+		// Isolate the tool call from lifecycle (initialize/notifications) traffic,
+		// which is legitimately allowed and also reaches the backend.
+		authHeaderMu.Lock()
+		lastReceivedAuthHeader = ""
+		authHeaderMu.Unlock()
+
+		result, err := mc.CallTool(ctx, mcp.CallToolRequest{Params: mcp.CallToolParams{Name: "list_repositories"}})
+		Expect(err).NotTo(HaveOccurred(), "granted actor should be allowed")
+		Expect(result).NotTo(BeNil())
+		Expect(result.IsError).To(BeFalse())
+
+		authHeaderMu.Lock()
+		received := lastReceivedAuthHeader
+		authHeaderMu.Unlock()
+		Expect(received).To(ContainSubstring(kaosActorGwExchangedToken),
+			"allowed tool call must forward the exchanged token to the backend — proves the proxy forwarded the actor header AND the policy allowed")
+	})
+
+	It("denies ungranted actor (agent-B): tool call is blocked, backend receives nothing", func() {
+		mc := kaosActorGwNewMCPClient(ctx, gwURL, "agent-B", true)
+		defer mc.Close() //nolint:errcheck
+
+		// Reset capture after connect so we observe only the tool call, not the
+		// allowed lifecycle handshake that already reached the backend.
+		authHeaderMu.Lock()
+		lastReceivedAuthHeader = ""
+		authHeaderMu.Unlock()
+
+		result, err := mc.CallTool(ctx, mcp.CallToolRequest{Params: mcp.CallToolParams{Name: "list_repositories"}})
+		Expect(err != nil || (result != nil && result.IsError)).To(BeTrue(),
+			"ungranted actor's tool call must be denied (OPA deny via ext_proc)")
+
+		authHeaderMu.Lock()
+		received := lastReceivedAuthHeader
+		authHeaderMu.Unlock()
+		Expect(received).To(BeEmpty(),
+			"denied tool call must NOT reach the backend")
+	})
+
+	// GAP: autonomous / no user bearer. #222 gates OPA behind the presence of an
+	// Authorization bearer; with none it passes through WITHOUT evaluating OPA.
+	// Here agent-B (which the policy WOULD deny with a bearer) sends NO Authorization
+	// bearer — yet the tool call REACHES the backend, proving the actor->resource
+	// policy is bypassed entirely. This is the concrete AIB limitation requiring a
+	// #222 extension (evaluate OPA on the actor even without a user subject).
+	It("does NOT enforce without an Authorization bearer — ungranted actor's tool call still reaches backend (autonomous gap)", func() {
+		mc := kaosActorGwNewMCPClient(ctx, gwURL, "agent-B", false) // no bearer
+		defer mc.Close()                                            //nolint:errcheck
+
+		authHeaderMu.Lock()
+		lastReceivedAuthHeader = ""
+		authHeaderMu.Unlock()
+		exchangesBefore := mockTokenExchangeSvr.callCount()
+
+		result, err := mc.CallTool(ctx, mcp.CallToolRequest{Params: mcp.CallToolParams{Name: "list_repositories"}})
+		Expect(err).NotTo(HaveOccurred(),
+			"no-bearer tool call bypasses OPA (passthrough) so even an ungranted actor is NOT blocked")
+		Expect(result).NotTo(BeNil())
+		Expect(result.IsError).To(BeFalse(),
+			"tool call succeeded — it reached the backend despite the actor being ungranted")
+
+		// No bearer => no token exchange => backend never sees an exchanged token,
+		// confirming both OPA authorization AND the exchange were skipped entirely.
+		Expect(mockTokenExchangeSvr.callCount()).To(Equal(exchangesBefore),
+			"no-bearer passthrough performs NO token exchange")
+		authHeaderMu.Lock()
+		received := lastReceivedAuthHeader
+		authHeaderMu.Unlock()
+		Expect(received).NotTo(ContainSubstring(kaosActorGwExchangedToken),
+			"backend sees no exchanged token — OPA/exchange were skipped")
+	})
+})
