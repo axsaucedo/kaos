@@ -146,6 +146,14 @@ func (p DesiredPermissionSet) ServiceClientID() string {
 	return edgeServiceClientID(p.Kind, p.Namespace, p.Target)
 }
 
+// ResourceID is the kaos://<slug>/<ns>/<name> logical identity of the resource
+// this permission set grants access to. It is the value a Model-1 grant map
+// associates with an actor and that the enforcement policy matches a request
+// against.
+func (p DesiredPermissionSet) ResourceID() string {
+	return ResolveLogicalID(p.Kind.Slug, p.Namespace, p.Target)
+}
+
 // DesiredAgent is a local AIB agent projected from a KAOS Agent and its edges.
 type DesiredAgent struct {
 	Namespace          string

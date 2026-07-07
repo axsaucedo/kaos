@@ -19,6 +19,7 @@ import (
 
 	kaosv1alpha1 "github.com/axsaucedo/kaos/operator/api/v1alpha1"
 	"github.com/axsaucedo/kaos/operator/internal/aib"
+	"github.com/axsaucedo/kaos/operator/internal/authz"
 	"github.com/axsaucedo/kaos/operator/internal/projection"
 	"github.com/axsaucedo/kaos/operator/pkg/security"
 )
@@ -55,6 +56,12 @@ type AIBProjectionReconciler struct {
 	Namespaces   []string
 	SecretPrefix string
 	Prune        bool
+	// PolicyConfigMapName and PolicyConfigMapNamespace, when both set, name the
+	// ConfigMap the controller writes with the Model-1 authorization policy and
+	// projected grant data for the enforcement engine to mount. Empty disables
+	// the Model-1 data path.
+	PolicyConfigMapName      string
+	PolicyConfigMapNamespace string
 }
 
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
@@ -112,6 +119,10 @@ func (r *AIBProjectionReconciler) Reconcile(ctx context.Context, _ reconcile.Req
 		if err := r.prune(ctx, serviceIDs, permissionSetIDs, desired); err != nil {
 			logger.Error(err, "prune pass failed")
 		}
+	}
+
+	if err := r.writePolicyConfigMap(ctx, desired); err != nil {
+		logger.Error(err, "writing authorization policy ConfigMap failed")
 	}
 
 	logger.Info("reconciled AIB projection",
@@ -289,6 +300,32 @@ func (r *AIBProjectionReconciler) upsertSecret(ctx context.Context, owner *kaosv
 	// Server-Side Apply: the API server reconciles create-vs-update by field
 	// ownership, so there is no read-before-write or conflict branching.
 	return r.Client.Patch(ctx, secret, client.Apply, client.FieldOwner(aibManagedBy), client.ForceOwnership)
+}
+
+// writePolicyConfigMap renders the Model-1 authorization policy and projected
+// grant data and applies them to the configured ConfigMap for the enforcement
+// engine to mount. It is a no-op unless both a name and namespace are set.
+func (r *AIBProjectionReconciler) writePolicyConfigMap(ctx context.Context, desired projection.DesiredState) error {
+	if r.PolicyConfigMapName == "" || r.PolicyConfigMapNamespace == "" {
+		return nil
+	}
+	grants := projection.GrantData(desired)
+	// JWKS injection (verified mode) is derived and added by the JWKS path when
+	// an issuer is configured; demo mode carries grants only.
+	data, err := authz.ConfigMapData(grants, nil)
+	if err != nil {
+		return err
+	}
+	cm := &corev1.ConfigMap{
+		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "ConfigMap"},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      r.PolicyConfigMapName,
+			Namespace: r.PolicyConfigMapNamespace,
+			Labels:    map[string]string{"app.kubernetes.io/managed-by": aibManagedBy},
+		},
+		Data: data,
+	}
+	return r.Client.Patch(ctx, cm, client.Apply, client.FieldOwner(aibManagedBy), client.ForceOwnership)
 }
 
 // prune removes KAOS-managed broker records and credential Secrets that are no

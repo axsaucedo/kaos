@@ -57,6 +57,12 @@ data:
   {{- if hasKey . "prune" }}
   AIB_PROJECTION_PRUNE_ENABLED: {{ .prune | quote }}
   {{- end }}
+  {{- with .policyConfigMap }}
+  {{- if and .name .namespace }}
+  AIB_AUTHZ_CONFIGMAP_NAME: {{ .name | quote }}
+  AIB_AUTHZ_CONFIGMAP_NAMESPACE: {{ .namespace | quote }}
+  {{- end }}
+  {{- end }}
   {{- end }}
   {{- end }}
   {{- end }}

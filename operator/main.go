@@ -117,12 +117,14 @@ func main() {
 			getDurationWithDefault("AIB_REQUEST_TIMEOUT", 10*time.Second),
 		)
 		if err = (&controllers.AIBProjectionReconciler{
-			Client:       mgr.GetClient(),
-			Scheme:       mgr.GetScheme(),
-			AIB:          admin,
-			Namespaces:   splitCSV(os.Getenv("AIB_PROJECTION_NAMESPACES")),
-			SecretPrefix: getEnvWithDefault("SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX", "kaos-aib"),
-			Prune:        getBoolWithDefault("AIB_PROJECTION_PRUNE_ENABLED", true),
+			Client:                   mgr.GetClient(),
+			Scheme:                   mgr.GetScheme(),
+			AIB:                      admin,
+			Namespaces:               splitCSV(os.Getenv("AIB_PROJECTION_NAMESPACES")),
+			SecretPrefix:             getEnvWithDefault("SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX", "kaos-aib"),
+			Prune:                    getBoolWithDefault("AIB_PROJECTION_PRUNE_ENABLED", true),
+			PolicyConfigMapName:      os.Getenv("AIB_AUTHZ_CONFIGMAP_NAME"),
+			PolicyConfigMapNamespace: os.Getenv("AIB_AUTHZ_CONFIGMAP_NAMESPACE"),
 		}).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create controller", "controller", "AIBProjection")
 			os.Exit(1)

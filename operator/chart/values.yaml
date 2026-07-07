@@ -117,6 +117,13 @@ security:
       # prune removes broker records (services, permission sets, agents) that no
       # longer correspond to any KAOS resource. On by default.
       prune: true
+      # policyConfigMap names the ConfigMap the operator writes with the Model-1
+      # authorization policy and projected grant data for the enforcement engine
+      # to mount. When name and namespace are both set, the operator maintains
+      # it; leaving either empty disables the Model-1 data path.
+      policyConfigMap:
+        name: ""
+        namespace: ""
   # userAuth configures the human user identity provider (e.g. Keycloak) whose
   # subject tokens are verified at the gateway alongside agent actor tokens. When
   # issuer is unset, no user jwt provider is generated (agent-only/autonomous

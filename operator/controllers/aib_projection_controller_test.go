@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -138,3 +139,65 @@ func TestProjectionReconcileMintsCredentialSecret(t *testing.T) {
 var _ client.Client = fake.NewClientBuilder().Build()
 
 var _ reconcile.Reconciler = (*AIBProjectionReconciler)(nil)
+
+func TestProjectionWritesPolicyConfigMap(t *testing.T) {
+	scheme := newTestScheme(t)
+	mcp := &kaosv1alpha1.MCPServer{ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "github"}}
+	agent := &kaosv1alpha1.Agent{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "researcher"},
+		Spec:       kaosv1alpha1.AgentSpec{MCPServers: []string{"github"}},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(mcp, agent).Build()
+	r := &AIBProjectionReconciler{
+		Client:                   c,
+		Scheme:                   scheme,
+		AIB:                      newFakeAIB(),
+		SecretPrefix:             "kaos-aib",
+		PolicyConfigMapName:      "kaos-authz-policy",
+		PolicyConfigMapNamespace: "aib-system",
+	}
+
+	if _, err := r.Reconcile(context.Background(), aibSentinel); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	cm := &corev1.ConfigMap{}
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "aib-system", Name: "kaos-authz-policy"}, cm); err != nil {
+		t.Fatalf("expected policy ConfigMap: %v", err)
+	}
+	if _, ok := cm.Data["policy.rego"]; !ok {
+		t.Fatalf("ConfigMap missing policy.rego: %v", cm.Data)
+	}
+	data, ok := cm.Data["data.json"]
+	if !ok {
+		t.Fatalf("ConfigMap missing data.json")
+	}
+	if !contains(data, "kaos://agent/demo/researcher") || !contains(data, "kaos://mcpserver/demo/github") {
+		t.Fatalf("data.json missing expected grant: %s", data)
+	}
+}
+
+func TestProjectionSkipsPolicyConfigMapWhenUnset(t *testing.T) {
+	scheme := newTestScheme(t)
+	agent := &kaosv1alpha1.Agent{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "researcher"},
+		Spec:       kaosv1alpha1.AgentSpec{MCPServers: []string{"github"}},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(agent).Build()
+	r := &AIBProjectionReconciler{Client: c, Scheme: scheme, AIB: newFakeAIB(), SecretPrefix: "kaos-aib"}
+
+	if _, err := r.Reconcile(context.Background(), aibSentinel); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	cmList := &corev1.ConfigMapList{}
+	if err := c.List(context.Background(), cmList); err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(cmList.Items) != 0 {
+		t.Fatalf("expected no ConfigMap written, got %d", len(cmList.Items))
+	}
+}
+
+func contains(s, sub string) bool {
+	return strings.Contains(s, sub)
+}
