@@ -883,7 +883,7 @@ class TestSystemInstallFlags:
         output = strip_ansi(result.output)
         assert "--auth-enabled" in output
         assert "--auth-namespace" in output
-        assert "--sync-chart-path" in output
+        assert "--aib-chart-path" in output
         assert "--user-auth" in output
         assert "--keycloak-namespace" in output
 
@@ -963,6 +963,29 @@ class TestAuthWiring:
         joined = " ".join(captured.get("args", []))
         assert "security.agentAuth.extAuthzUrl=" in joined
         assert "security.agentAuth.credentialSecretPrefix=kaos-aib" in joined
+        assert "security.agentAuth.adminUrl=" in joined
+
+    def test_build_auth_operator_args_includes_admin_url(self):
+        from kaos_cli.install import _build_auth_operator_args
+
+        args = _build_auth_operator_args(
+            "aib-access-check-grpc.aib-system:9191",
+            "http://aib.aib-system:8000",
+            "kaos-aib",
+            admin_url="http://aib.aib-system:8000/api",
+        )
+        joined = " ".join(args)
+        assert "security.agentAuth.adminUrl=http://aib.aib-system:8000/api" in joined
+
+    def test_build_auth_operator_args_omits_admin_url_when_unset(self):
+        from kaos_cli.install import _build_auth_operator_args
+
+        args = _build_auth_operator_args(
+            "aib-access-check-grpc.aib-system:9191",
+            "http://aib.aib-system:8000",
+            "kaos-aib",
+        )
+        assert "security.agentAuth.adminUrl" not in " ".join(args)
 
     def test_build_auth_operator_args_includes_user_auth(self):
         from kaos_cli.install import _build_auth_operator_args

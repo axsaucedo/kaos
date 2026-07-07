@@ -30,7 +30,7 @@ type Config struct {
 	Issuer string
 
 	// CredentialSecretPrefix is the name prefix of the per-agent credential
-	// Secret provisioned by the sync service (agentAuth.credentialSecretPrefix).
+	// Secret provisioned by the identity projection controller (agentAuth.credentialSecretPrefix).
 	// An empty value disables credential mounting into agent pods.
 	CredentialSecretPrefix string
 

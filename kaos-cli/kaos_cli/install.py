@@ -34,7 +34,6 @@ AUTH_EXT_PROC_PORT = 50051
 AUTH_EXT_PROC_CLIENT_ID = "extproc-gateway"
 AUTH_EXT_PROC_CLIENT_SECRET = "extproc-gateway-secret"
 DEFAULT_THIRD_PARTY_SERVICE_ID = "dummy-third-party"
-DEFAULT_SYNC_RELEASE = "kaos-sync"
 
 # User-auth (human identity provider, Keycloak by default) defaults
 DEFAULT_KEYCLOAK_NAMESPACE = "keycloak"
@@ -561,7 +560,7 @@ def _default_auth_issuer(auth_namespace: str, auth_release: str) -> str:
 
 
 def _default_auth_admin_url(auth_namespace: str, auth_release: str) -> str:
-    """Default broker admin API base URL used by the sync service."""
+    """Default broker admin API base URL used by the operator identity projection."""
     host = f"{_auth_broker_fullname(auth_release)}.{auth_namespace}.svc.cluster.local"
     return f"http://{host}:{AUTH_ADMIN_PORT}/api"
 
@@ -576,6 +575,7 @@ def _build_auth_operator_args(
     ext_authz_url: str,
     issuer: str,
     credential_secret_prefix: str,
+    admin_url: str = "",
     user_issuer: str = "",
     user_audience: str = "",
     user_jwks_uri: str = "",
@@ -595,7 +595,10 @@ def _build_auth_operator_args(
     independently of running Helm. User-auth (``security.userAuth.*``) arguments
     are appended only when a user issuer is supplied, keeping agent-only and
     autonomous-only installs unchanged. The token-exchange ext_proc backend
-    (``security.agentAuth.extProcUrl``) is appended only when supplied.
+    (``security.agentAuth.extProcUrl``) is appended only when supplied. When an
+    admin URL is supplied, the operator's identity projection controller is
+    enabled via ``security.agentAuth.adminUrl`` so it registers agents and mints
+    their per-agent credential Secrets directly.
 
     Bypass-prevention and transport-security arguments are appended too:
     NetworkPolicy is on unless explicitly disabled, egress isolation is opt-in,
@@ -613,6 +616,8 @@ def _build_auth_operator_args(
     )
     if ext_proc_url:
         args.extend(["--set", f"security.agentAuth.extProcUrl={ext_proc_url}"])
+    if admin_url:
+        args.extend(["--set", f"security.agentAuth.adminUrl={admin_url}"])
     if user_issuer:
         args.extend(["--set", f"security.userAuth.issuer={user_issuer}"])
     if user_audience:
@@ -640,44 +645,6 @@ def _build_auth_operator_args(
         if tls_secret_name:
             args.extend(["--set", f"security.tls.secretName={tls_secret_name}"])
     return args
-
-
-def _deploy_sync_service(
-    namespace: str,
-    release: str,
-    chart_path: str,
-    admin_url: str,
-    credential_secret_prefix: str,
-    image_repository: str | None,
-    image_tag: str | None,
-) -> bool:
-    """Deploy the KAOS sync service that projects resources into the broker."""
-    typer.echo("Deploying sync service...")
-    helm_args = [
-        "upgrade",
-        "--install",
-        release,
-        chart_path,
-        "--namespace",
-        namespace,
-        "--create-namespace",
-        "--set",
-        f"broker.adminUrl={admin_url}",
-        "--set",
-        f"sync.credentialSecretPrefix={credential_secret_prefix}",
-    ]
-    if image_repository:
-        helm_args.extend(["--set", f"image.repository={image_repository}"])
-    if image_tag:
-        helm_args.extend(["--set", f"image.tag={image_tag}"])
-
-    result = run_helm_command(helm_args, check=False)
-    if result.returncode != 0:
-        typer.echo(f"Error deploying sync service: {result.stderr}", err=True)
-        return False
-
-    typer.echo(f"✅ Sync service deployed in '{namespace}' namespace")
-    return True
 
 
 def _install_aib(
@@ -1112,9 +1079,6 @@ def install_command(
     ext_proc_url: str | None = None,
     aib_chart_path: str | None = None,
     aib_values_path: str | None = None,
-    sync_chart_path: str | None = None,
-    sync_image_repository: str | None = None,
-    sync_image_tag: str | None = None,
     user_auth: bool = True,
     keycloak_namespace: str = DEFAULT_KEYCLOAK_NAMESPACE,
     keycloak_release: str = DEFAULT_KEYCLOAK_RELEASE,
@@ -1207,24 +1171,10 @@ def install_command(
                 f"is already installed in namespace '{auth_namespace}'.",
             )
 
-        # Deploy the sync service when a chart path is provided.
-        if sync_chart_path:
-            if not _deploy_sync_service(
-                auth_namespace,
-                DEFAULT_SYNC_RELEASE,
-                sync_chart_path,
-                auth_admin_url,
-                credential_secret_prefix,
-                sync_image_repository,
-                sync_image_tag,
-            ):
-                typer.echo(
-                    "Warning: sync service deployment failed, continuing...", err=True
-                )
-        else:
-            typer.echo(
-                "Note: --sync-chart-path not provided; skipping sync service deployment.",
-            )
+        # The operator's identity projection controller (enabled via
+        # security.agentAuth.adminUrl on the operator chart) registers agents and
+        # mints their per-agent credential Secrets directly; no separate
+        # deployable is required.
 
         # Install Keycloak as the human user identity provider and bootstrap its
         # realm so the gateway can verify user subject tokens alongside agent
@@ -1356,6 +1306,7 @@ def install_command(
                 ext_authz_url or _default_ext_authz_url(auth_namespace),
                 auth_issuer or _default_auth_issuer(auth_namespace, auth_release),
                 credential_secret_prefix,
+                admin_url=_default_auth_admin_url(auth_namespace, auth_release),
                 user_issuer=resolved_user_issuer,
                 user_audience=user_auth_audience if user_auth else "",
                 ext_proc_url=(

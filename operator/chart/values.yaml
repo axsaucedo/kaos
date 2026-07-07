@@ -93,11 +93,30 @@ security:
     # from it. Example: http://aib-enduser.aib-system.svc.cluster.local:8000
     issuer: ""
     # credentialSecretPrefix is the name prefix of the per-agent credential
-    # Secret provisioned by the sync service. When set (and extAuthzUrl is set),
-    # the operator mounts the matching Secret into each agent pod as the
-    # AGENT_AUTH_CLIENT_ID/AGENT_AUTH_CLIENT_SECRET environment variables. Empty disables
-    # credential mounting. Example: kaos-aib
+    # Secret provisioned by the operator's identity projection. When set (and
+    # extAuthzUrl is set), the operator mounts the matching Secret into each
+    # agent pod as the AGENT_AUTH_CLIENT_ID/AGENT_AUTH_CLIENT_SECRET environment
+    # variables. Empty disables credential mounting. Example: kaos-aib
     credentialSecretPrefix: ""
+    # adminUrl is the base URL of the identity broker admin API. When set, the
+    # operator's identity projection controller registers agents, mints their
+    # per-agent credential Secrets, and projects services and permission sets
+    # into the broker. Leaving it empty disables projection entirely. Example:
+    # http://aib-agentic-identity-broker.aib-system.svc.cluster.local:8000/api
+    adminUrl: ""
+    # adminPrincipal is the principal the projection controller presents to the
+    # broker admin API (via adminPrincipalHeader). Defaults to kaos-operator.
+    adminPrincipal: "kaos-operator"
+    # adminPrincipalHeader is the header carrying the admin principal identity.
+    adminPrincipalHeader: "X-Remote-User"
+    # projection tunes the identity projection controller behavior.
+    projection:
+      # namespaces optionally restricts projection to a comma-separated list of
+      # namespaces. Empty projects across all namespaces.
+      namespaces: ""
+      # prune removes broker records (services, permission sets, agents) that no
+      # longer correspond to any KAOS resource. On by default.
+      prune: true
   # userAuth configures the human user identity provider (e.g. Keycloak) whose
   # subject tokens are verified at the gateway alongside agent actor tokens. When
   # issuer is unset, no user jwt provider is generated (agent-only/autonomous

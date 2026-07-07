@@ -96,12 +96,12 @@ def install(
         False,
         "--auth-enabled",
         help="Enable agent authentication: wire the operator to the identity broker, "
-        "mount per-agent credentials, and optionally install the broker and sync service.",
+        "mount per-agent credentials, and optionally install the identity broker.",
     ),
     auth_namespace: str = typer.Option(
         "aib-system",
         "--auth-namespace",
-        help="Namespace for the identity broker and sync service.",
+        help="Namespace for the identity broker.",
     ),
     ext_authz_url: str | None = typer.Option(
         None,
@@ -137,21 +137,6 @@ def install(
         None,
         "--aib-values",
         help="Values file for the identity broker chart (e.g. the dev preset).",
-    ),
-    sync_chart_path: str | None = typer.Option(
-        None,
-        "--sync-chart-path",
-        help="Path to the sync service Helm chart to deploy.",
-    ),
-    sync_image_repository: str | None = typer.Option(
-        None,
-        "--sync-image-repository",
-        help="Override the sync service image repository (for local/dev images).",
-    ),
-    sync_image_tag: str | None = typer.Option(
-        None,
-        "--sync-image-tag",
-        help="Override the sync service image tag (for local/dev images).",
     ),
     user_auth: bool = typer.Option(
         True,
@@ -255,9 +240,6 @@ def install(
         ext_proc_url=ext_proc_url,
         aib_chart_path=aib_chart_path,
         aib_values_path=aib_values_path,
-        sync_chart_path=sync_chart_path,
-        sync_image_repository=sync_image_repository,
-        sync_image_tag=sync_image_tag,
         user_auth=user_auth,
         keycloak_namespace=keycloak_namespace,
         keycloak_release="keycloak",

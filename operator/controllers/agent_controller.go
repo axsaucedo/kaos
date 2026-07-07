@@ -778,7 +778,7 @@ func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *
 // agent its actor identity and, when provisioned, the credentials it uses to mint
 // an actor token, under the provider-agnostic AGENT_AUTH_ prefix. The client_id/client_secret
 // are sourced from the per-agent credential Secret as optional references, so the pod can
-// start before the sync service has written the Secret; the values appear once it exists.
+// start before the identity projection controller has written the Secret; the values appear once it exists.
 // Returns nil when credential mounting is not enabled, leaving existing pods unchanged.
 func buildAgentAuthEnvVars(agent *kaosv1alpha1.Agent) []corev1.EnvVar {
 	cfg := security.GetConfig()
@@ -830,7 +830,7 @@ func buildAgentAuthEnvVars(agent *kaosv1alpha1.Agent) []corev1.EnvVar {
 // for the agent container when credential mounting is enabled, or nil otherwise. The
 // per-agent credential Secret is mounted at the configured directory so the runtime can
 // re-read the client_secret on rotation. The Secret reference is optional so the pod can
-// start before the sync service has written it.
+// start before the identity projection controller has written it.
 func buildAgentAuthVolume(agent *kaosv1alpha1.Agent) (*corev1.Volume, *corev1.VolumeMount) {
 	cfg := security.GetConfig()
 	if !cfg.CredentialMountingEnabled() {
