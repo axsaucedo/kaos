@@ -84,14 +84,14 @@ spec:
       Remember facts the user tells you about themselves and recall them in
       later conversations. Keep responses concise.
     reasoningLoopMaxSteps: 5
-  memory:
-    type: remote
-    memoryStore: shared-memory
-    scope: user
-    clientParams:
-      tokenBudget: 2048
-      rollingSummary: true
-    tools: all
-    failureMode: soft
+    memory:
+      type: remote
+      memoryStore: shared-memory
+      scope: user
+      clientParams:
+        tokenBudget: 2048
+        rollingSummary: true
+      tools: all
+      failureMode: soft
   agentNetwork:
     expose: true

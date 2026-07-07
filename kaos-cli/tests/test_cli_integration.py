@@ -624,8 +624,8 @@ class TestSamples:
         store = next(d for d in docs if d["kind"] == "MemoryStore")
         assert store["spec"]["storage"]["type"] == "local"
         agent = next(d for d in docs if d["kind"] == "Agent")
-        assert agent["spec"]["memory"]["memoryStore"] == "shared-memory"
-        assert agent["spec"]["memory"]["scope"] == "user"
+        assert agent["spec"]["config"]["memory"]["memoryStore"] == "shared-memory"
+        assert agent["spec"]["config"]["memory"]["scope"] == "user"
         result = runner.invoke(
             app, ["samples", "deploy", "1-simple-echo-agent", "--dry-run"]
         )
