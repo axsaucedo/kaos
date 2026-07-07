@@ -70,15 +70,15 @@ data:
   AIB_PRINCIPAL_HEADER: {{ .adminPrincipalHeader | default "X-Remote-User" | quote }}
   {{- with .projection }}
   {{- if .namespaces }}
-  AIB_PROJECTION_NAMESPACES: {{ .namespaces | quote }}
+  AUTHZ_PROJECTION_NAMESPACES: {{ .namespaces | quote }}
   {{- end }}
   {{- if hasKey . "prune" }}
-  AIB_PROJECTION_PRUNE_ENABLED: {{ .prune | quote }}
+  AUTHZ_PROJECTION_PRUNE_ENABLED: {{ .prune | quote }}
   {{- end }}
   {{- with .policyConfigMap }}
   {{- if and .name .namespace }}
-  AIB_AUTHZ_CONFIGMAP_NAME: {{ .name | quote }}
-  AIB_AUTHZ_CONFIGMAP_NAMESPACE: {{ .namespace | quote }}
+  AUTHZ_POLICY_CONFIGMAP_NAME: {{ .name | quote }}
+  AUTHZ_POLICY_CONFIGMAP_NAMESPACE: {{ .namespace | quote }}
   {{- end }}
   {{- end }}
   {{- end }}

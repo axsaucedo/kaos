@@ -105,30 +105,40 @@ func main() {
 		os.Exit(1)
 	}
 
-	// The AIB projection controller is the operator's only caller of the broker
-	// admin API and the only minter of per-agent credential Secrets. It runs
-	// independently of the workload controllers so a broker outage never stalls
-	// workload reconciliation. It is enabled by configuring the broker admin URL;
-	// when unset the operator runs without any projection (unchanged behaviour).
-	if aibAdminURL := os.Getenv("AIB_ADMIN_URL"); aibAdminURL != "" {
-		admin := aib.New(
-			aibAdminURL,
-			getEnvWithDefault("AIB_PRINCIPAL", "kaos-operator"),
-			getEnvWithDefault("AIB_PRINCIPAL_HEADER", "X-Remote-User"),
-			getDurationWithDefault("AIB_REQUEST_TIMEOUT", 10*time.Second),
-		)
-		if err = (&controllers.AIBProjectionReconciler{
+	// The authorization projection controller applies the configured provider:
+	// the KAOS provider writes projected grant data into the policy ConfigMap
+	// (no broker required), while the AIB provider registers agents, mints
+	// per-agent credential Secrets, and projects services/permission sets into
+	// the broker admin API. It runs independently of the workload controllers, so
+	// a broker outage never stalls workload reconciliation. Provider "none"
+	// (default) leaves the operator without any projection.
+	if provider := security.GetConfig().AuthzProviderOrDefault(); provider != security.AuthzProviderNone {
+		brokerProjection := provider == security.AuthzProviderAIB
+		policyDataProjection := provider == security.AuthzProviderKAOS
+
+		var admin controllers.AIBAdmin
+		if brokerProjection {
+			admin = aib.New(
+				os.Getenv("AIB_ADMIN_URL"),
+				getEnvWithDefault("AIB_PRINCIPAL", "kaos-operator"),
+				getEnvWithDefault("AIB_PRINCIPAL_HEADER", "X-Remote-User"),
+				getDurationWithDefault("AIB_REQUEST_TIMEOUT", 10*time.Second),
+			)
+		}
+		if err = (&controllers.AuthzProjectionReconciler{
 			Client:                   mgr.GetClient(),
 			Scheme:                   mgr.GetScheme(),
 			AIB:                      admin,
-			Namespaces:               splitCSV(os.Getenv("AIB_PROJECTION_NAMESPACES")),
+			Namespaces:               splitCSV(os.Getenv("AUTHZ_PROJECTION_NAMESPACES")),
 			SecretPrefix:             getEnvWithDefault("SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX", "kaos-aib"),
-			Prune:                    getBoolWithDefault("AIB_PROJECTION_PRUNE_ENABLED", true),
-			PolicyConfigMapName:      os.Getenv("AIB_AUTHZ_CONFIGMAP_NAME"),
-			PolicyConfigMapNamespace: os.Getenv("AIB_AUTHZ_CONFIGMAP_NAMESPACE"),
+			Prune:                    getBoolWithDefault("AUTHZ_PROJECTION_PRUNE_ENABLED", true),
+			BrokerProjection:         brokerProjection,
+			PolicyDataProjection:     policyDataProjection,
+			PolicyConfigMapName:      os.Getenv("AUTHZ_POLICY_CONFIGMAP_NAME"),
+			PolicyConfigMapNamespace: os.Getenv("AUTHZ_POLICY_CONFIGMAP_NAMESPACE"),
 			AgentJWKSURI:             security.GetConfig().AuthzJWKSURI(),
 		}).SetupWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create controller", "controller", "AIBProjection")
+			setupLog.Error(err, "unable to create controller", "controller", "AuthzProjection")
 			os.Exit(1)
 		}
 	}

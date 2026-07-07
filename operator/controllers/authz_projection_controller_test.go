@@ -99,9 +99,9 @@ func TestProjectionReconcileMintsCredentialSecret(t *testing.T) {
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(agent).Build()
 	admin := newFakeAIB()
-	r := &AIBProjectionReconciler{Client: c, Scheme: scheme, AIB: admin, SecretPrefix: "kaos-aib", Prune: false}
+	r := &AuthzProjectionReconciler{Client: c, Scheme: scheme, AIB: admin, SecretPrefix: "kaos-aib", Prune: false, BrokerProjection: true}
 
-	if _, err := r.Reconcile(context.Background(), aibSentinel); err != nil {
+	if _, err := r.Reconcile(context.Background(), authzSentinel); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
 
@@ -130,7 +130,7 @@ func TestProjectionReconcileMintsCredentialSecret(t *testing.T) {
 	if err := c.Update(context.Background(), provisioned); err != nil {
 		t.Fatalf("seed provisioned secret: %v", err)
 	}
-	if _, err := r.Reconcile(context.Background(), aibSentinel); err != nil {
+	if _, err := r.Reconcile(context.Background(), authzSentinel); err != nil {
 		t.Fatalf("second reconcile: %v", err)
 	}
 	if admin.minted != 1 {
@@ -140,7 +140,7 @@ func TestProjectionReconcileMintsCredentialSecret(t *testing.T) {
 
 var _ client.Client = fake.NewClientBuilder().Build()
 
-var _ reconcile.Reconciler = (*AIBProjectionReconciler)(nil)
+var _ reconcile.Reconciler = (*AuthzProjectionReconciler)(nil)
 
 func TestProjectionWritesPolicyConfigMap(t *testing.T) {
 	scheme := newTestScheme(t)
@@ -150,16 +150,17 @@ func TestProjectionWritesPolicyConfigMap(t *testing.T) {
 		Spec:       kaosv1alpha1.AgentSpec{MCPServers: []string{"github"}},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(mcp, agent).Build()
-	r := &AIBProjectionReconciler{
+	r := &AuthzProjectionReconciler{
 		Client:                   c,
 		Scheme:                   scheme,
 		AIB:                      newFakeAIB(),
 		SecretPrefix:             "kaos-aib",
+		PolicyDataProjection:     true,
 		PolicyConfigMapName:      "kaos-authz-policy",
 		PolicyConfigMapNamespace: "aib-system",
 	}
 
-	if _, err := r.Reconcile(context.Background(), aibSentinel); err != nil {
+	if _, err := r.Reconcile(context.Background(), authzSentinel); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
 
@@ -186,9 +187,9 @@ func TestProjectionSkipsPolicyConfigMapWhenUnset(t *testing.T) {
 		Spec:       kaosv1alpha1.AgentSpec{MCPServers: []string{"github"}},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(agent).Build()
-	r := &AIBProjectionReconciler{Client: c, Scheme: scheme, AIB: newFakeAIB(), SecretPrefix: "kaos-aib"}
+	r := &AuthzProjectionReconciler{Client: c, Scheme: scheme, AIB: newFakeAIB(), SecretPrefix: "kaos-aib", PolicyDataProjection: true}
 
-	if _, err := r.Reconcile(context.Background(), aibSentinel); err != nil {
+	if _, err := r.Reconcile(context.Background(), authzSentinel); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
 	cmList := &corev1.ConfigMapList{}
@@ -215,17 +216,18 @@ func TestProjectionInjectsJWKSInVerifiedMode(t *testing.T) {
 	}
 	mcp := &kaosv1alpha1.MCPServer{ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "github"}}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(agent, mcp).Build()
-	r := &AIBProjectionReconciler{
+	r := &AuthzProjectionReconciler{
 		Client:                   c,
 		Scheme:                   scheme,
 		AIB:                      newFakeAIB(),
 		SecretPrefix:             "kaos-aib",
+		PolicyDataProjection:     true,
 		PolicyConfigMapName:      "kaos-authz-policy",
 		PolicyConfigMapNamespace: "aib-system",
 		AgentJWKSURI:             srv.URL,
 	}
 
-	if _, err := r.Reconcile(context.Background(), aibSentinel); err != nil {
+	if _, err := r.Reconcile(context.Background(), authzSentinel); err != nil {
 		t.Fatalf("reconcile: %v", err)
 	}
 	cm := &corev1.ConfigMap{}
