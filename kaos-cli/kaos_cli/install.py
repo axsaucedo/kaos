@@ -588,6 +588,13 @@ def _build_auth_operator_args(
     tls_issuer_name: str = "",
     tls_issuer_kind: str = "ClusterIssuer",
     tls_secret_name: str = "",
+    authz_provider: str = "",
+    authz_gateway_extension: str = "",
+    agent_jwt_verification: str = "",
+    policy_data_source: str = "",
+    policy_rego_override: bool = False,
+    policy_configmap_name: str = "",
+    policy_configmap_namespace: str = "",
 ) -> list[str]:
     """Build the operator Helm --set arguments that enable agent-auth wiring.
 
@@ -604,6 +611,10 @@ def _build_auth_operator_args(
     NetworkPolicy is on unless explicitly disabled, egress isolation is opt-in,
     gateway routing and host are set when requested, and ``security.tls.*`` is
     configured when a TLS mode is supplied.
+
+    Authorization knobs (``security.agentAuth.authorization.*``) and the policy
+    ConfigMap projection target are appended only when set, so the default
+    install leaves authorization projection off.
     """
     args: list[str] = []
     args.extend(["--set", f"security.agentAuth.extAuthzUrl={ext_authz_url}"])
@@ -618,6 +629,49 @@ def _build_auth_operator_args(
         args.extend(["--set", f"security.agentAuth.extProcUrl={ext_proc_url}"])
     if admin_url:
         args.extend(["--set", f"security.agentAuth.adminUrl={admin_url}"])
+    if authz_provider:
+        args.extend(
+            ["--set", f"security.agentAuth.authorization.provider={authz_provider}"]
+        )
+    if authz_gateway_extension:
+        args.extend(
+            [
+                "--set",
+                f"security.agentAuth.authorization.gatewayExtension={authz_gateway_extension}",
+            ]
+        )
+    if agent_jwt_verification:
+        args.extend(
+            [
+                "--set",
+                f"security.agentAuth.authorization.agentJwtVerification={agent_jwt_verification}",
+            ]
+        )
+    if policy_data_source:
+        args.extend(
+            [
+                "--set",
+                f"security.agentAuth.authorization.policyDataSource={policy_data_source}",
+            ]
+        )
+    if policy_rego_override:
+        args.extend(
+            ["--set", "security.agentAuth.authorization.policyRegoOverride=true"]
+        )
+    if policy_configmap_name:
+        args.extend(
+            [
+                "--set",
+                f"security.agentAuth.projection.policyConfigMap.name={policy_configmap_name}",
+            ]
+        )
+    if policy_configmap_namespace:
+        args.extend(
+            [
+                "--set",
+                f"security.agentAuth.projection.policyConfigMap.namespace={policy_configmap_namespace}",
+            ]
+        )
     if user_issuer:
         args.extend(["--set", f"security.userAuth.issuer={user_issuer}"])
     if user_audience:
@@ -1093,6 +1147,14 @@ def install_command(
     tls_issuer_name: str | None = None,
     tls_issuer_kind: str = "ClusterIssuer",
     tls_secret_name: str | None = None,
+    authz_provider: str | None = None,
+    authz_gateway_extension: str | None = None,
+    agent_jwt_verification: str | None = None,
+    policy_data_source: str | None = None,
+    policy_rego_override: bool = False,
+    admin_url: str | None = None,
+    policy_configmap_name: str | None = None,
+    policy_configmap_namespace: str | None = None,
 ) -> None:
     """Install the KAOS operator using Helm."""
     if not check_helm_installed():
@@ -1306,7 +1368,8 @@ def install_command(
                 ext_authz_url or _default_ext_authz_url(auth_namespace),
                 auth_issuer or _default_auth_issuer(auth_namespace, auth_release),
                 credential_secret_prefix,
-                admin_url=_default_auth_admin_url(auth_namespace, auth_release),
+                admin_url=admin_url
+                or _default_auth_admin_url(auth_namespace, auth_release),
                 user_issuer=resolved_user_issuer,
                 user_audience=user_auth_audience if user_auth else "",
                 ext_proc_url=(
@@ -1322,6 +1385,13 @@ def install_command(
                 tls_issuer_name=tls_issuer_name or "",
                 tls_issuer_kind=tls_issuer_kind,
                 tls_secret_name=tls_secret_name or "",
+                authz_provider=authz_provider or "",
+                authz_gateway_extension=authz_gateway_extension or "",
+                agent_jwt_verification=agent_jwt_verification or "",
+                policy_data_source=policy_data_source or "",
+                policy_rego_override=policy_rego_override,
+                policy_configmap_name=policy_configmap_name or "",
+                policy_configmap_namespace=policy_configmap_namespace or "",
             )
         )
 

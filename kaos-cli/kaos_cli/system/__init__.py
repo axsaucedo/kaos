@@ -212,6 +212,54 @@ def install(
         "--tls-secret-name",
         help="Existing kubernetes.io/tls Secret name (with --tls-mode provided).",
     ),
+    authz_provider: str | None = typer.Option(
+        None,
+        "--authz-provider",
+        help="Authorization provider: 'kaos' (KAOS-owned policy data) or 'aib' "
+        "(broker permission sets). Omit to leave authorization projection off.",
+    ),
+    authz_gateway_extension: str | None = typer.Option(
+        None,
+        "--authz-gateway-extension",
+        help="Envoy gateway extension that enforces authorization: 'ext_proc' "
+        "(default OPA in ext_proc) or 'ext_authz'.",
+    ),
+    agent_jwt_verification: str | None = typer.Option(
+        None,
+        "--agent-jwt-verification",
+        help="How the agent (actor) JWT is trusted: 'skip' (header-trust, "
+        "non-production) or 'verified' (signature verified against the IdP JWKS).",
+    ),
+    policy_data_source: str | None = typer.Option(
+        None,
+        "--policy-data-source",
+        help="Who authors the authorization policy data: 'automated' (operator "
+        "projects from CRDs), 'manual' (admin authors), or 'external' (broker "
+        "authoritative, projection and prune off).",
+    ),
+    policy_rego_override: bool = typer.Option(
+        False,
+        "--policy-rego-override",
+        help="Have the operator own only the policy.rego key and leave the grant "
+        "data for an admin to author. Orthogonal to --policy-data-source.",
+    ),
+    admin_url: str | None = typer.Option(
+        None,
+        "--admin-url",
+        help="Base URL of the identity broker admin API. Defaults to the "
+        "conventional broker service when authorization is enabled.",
+    ),
+    policy_configmap_name: str | None = typer.Option(
+        None,
+        "--policy-configmap-name",
+        help="Name of the ConfigMap the operator writes the KAOS authorization "
+        "policy and grant data into for the enforcement engine to mount.",
+    ),
+    policy_configmap_namespace: str | None = typer.Option(
+        None,
+        "--policy-configmap-namespace",
+        help="Namespace of the authorization policy ConfigMap.",
+    ),
 ) -> None:
     """Install the KAOS operator using Helm."""
     # Default to signoz if flag provided without value
@@ -254,6 +302,14 @@ def install(
         tls_issuer_name=tls_issuer_name,
         tls_issuer_kind=tls_issuer_kind,
         tls_secret_name=tls_secret_name,
+        authz_provider=authz_provider,
+        authz_gateway_extension=authz_gateway_extension,
+        agent_jwt_verification=agent_jwt_verification,
+        policy_data_source=policy_data_source,
+        policy_rego_override=policy_rego_override,
+        admin_url=admin_url,
+        policy_configmap_name=policy_configmap_name,
+        policy_configmap_namespace=policy_configmap_namespace,
     )
 
 

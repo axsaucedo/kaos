@@ -1045,6 +1045,79 @@ class TestAuthWiring:
         )
         assert "security.agentAuth.extProcUrl=" not in " ".join(args)
 
+    def test_build_auth_operator_args_kaos_authorization(self):
+        from kaos_cli.install import _build_auth_operator_args
+
+        args = _build_auth_operator_args(
+            "aib-access-check-grpc.aib-system:9191",
+            "http://aib.aib-system:8000",
+            "kaos-aib",
+            authz_provider="kaos",
+            policy_data_source="automated",
+            agent_jwt_verification="verified",
+            policy_configmap_name="kaos-authz-policy",
+            policy_configmap_namespace="aib-system",
+        )
+        joined = " ".join(args)
+        assert "security.agentAuth.authorization.provider=kaos" in joined
+        assert "security.agentAuth.authorization.policyDataSource=automated" in joined
+        assert (
+            "security.agentAuth.authorization.agentJwtVerification=verified" in joined
+        )
+        assert (
+            "security.agentAuth.projection.policyConfigMap.name=kaos-authz-policy"
+            in joined
+        )
+        assert (
+            "security.agentAuth.projection.policyConfigMap.namespace=aib-system"
+            in joined
+        )
+
+    def test_build_auth_operator_args_rego_override(self):
+        from kaos_cli.install import _build_auth_operator_args
+
+        args = _build_auth_operator_args(
+            "aib-access-check-grpc.aib-system:9191",
+            "http://aib.aib-system:8000",
+            "kaos-aib",
+            authz_provider="kaos",
+            policy_data_source="manual",
+            policy_rego_override=True,
+        )
+        joined = " ".join(args)
+        assert "security.agentAuth.authorization.policyRegoOverride=true" in joined
+        assert "security.agentAuth.authorization.policyDataSource=manual" in joined
+
+    def test_build_auth_operator_args_broker_external_off_switch(self):
+        from kaos_cli.install import _build_auth_operator_args
+
+        args = _build_auth_operator_args(
+            "aib-access-check-grpc.aib-system:9191",
+            "http://aib.aib-system:8000",
+            "kaos-aib",
+            admin_url="http://aib.aib-system:8000/api",
+            authz_provider="aib",
+            policy_data_source="external",
+            authz_gateway_extension="ext_authz",
+        )
+        joined = " ".join(args)
+        assert "security.agentAuth.authorization.provider=aib" in joined
+        assert "security.agentAuth.authorization.policyDataSource=external" in joined
+        assert "security.agentAuth.authorization.gatewayExtension=ext_authz" in joined
+        assert "security.agentAuth.adminUrl=http://aib.aib-system:8000/api" in joined
+
+    def test_build_auth_operator_args_omits_authorization_when_unset(self):
+        from kaos_cli.install import _build_auth_operator_args
+
+        args = _build_auth_operator_args(
+            "aib-access-check-grpc.aib-system:9191",
+            "http://aib.aib-system:8000",
+            "kaos-aib",
+        )
+        joined = " ".join(args)
+        assert "security.agentAuth.authorization" not in joined
+        assert "security.agentAuth.projection.policyConfigMap" not in joined
+
     def test_build_auth_operator_args_network_policy_default_on(self):
         from kaos_cli.install import _build_auth_operator_args
 
