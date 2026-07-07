@@ -192,7 +192,7 @@ func resourceFromAgent(a *kaosv1alpha1.Agent) projection.Resource {
 func (r *AIBProjectionReconciler) applyServices(ctx context.Context, desired projection.DesiredState) (map[string]string, error) {
 	ids := map[string]string{}
 	for _, svc := range desired.Services {
-		id, err := r.AIB.CreateOrGet(ctx, "services", "client_id", svc.ClientID(), svc.AdminBody())
+		id, err := r.AIB.CreateOrGet(ctx, "services", "client_id", svc.ClientID(), aib.ServiceBody(svc))
 		if err != nil {
 			return nil, fmt.Errorf("service %s: %w", svc.ClientID(), err)
 		}
@@ -209,7 +209,7 @@ func (r *AIBProjectionReconciler) applyPermissionSets(ctx context.Context, desir
 			// Fail closed for this edge: its service could not be created.
 			continue
 		}
-		id, err := r.AIB.CreateOrGet(ctx, "permission-sets", "name", ps.Name(), ps.AdminBody(serviceID))
+		id, err := r.AIB.CreateOrGet(ctx, "permission-sets", "name", ps.Name(), aib.PermissionSetBody(ps, serviceID))
 		if err != nil {
 			return nil, fmt.Errorf("permission-set %s: %w", ps.Name(), err)
 		}
@@ -232,7 +232,7 @@ func (r *AIBProjectionReconciler) reconcileAgent(ctx context.Context, agent proj
 		bound = append(bound, id)
 	}
 
-	agentID, err := r.AIB.CreateOrGet(ctx, "agents", "display_name", agent.ExternalID(), agent.AdminBody(bound))
+	agentID, err := r.AIB.CreateOrGet(ctx, "agents", "display_name", agent.ExternalID(), aib.AgentBody(agent, bound))
 	if err != nil {
 		return false, fmt.Errorf("creating agent: %w", err)
 	}

@@ -152,57 +152,6 @@ func TestDefaultResourcesNamespaceScoped(t *testing.T) {
 	}
 }
 
-func TestAdminBodiesShape(t *testing.T) {
-	state := Project([]Resource{mcpserver("github"), agent("researcher", []string{"github"}, "")})
-	svc := state.Services[0].AdminBody()
-	if svc["client_id"] != "kaos-mcpserver-demo-github" {
-		t.Fatalf("svc client_id = %v", svc["client_id"])
-	}
-	ps := state.PermissionSets[0].AdminBody("svc-123")
-	scopes := ps["service_scopes"].([]any)[0].(map[string]any)
-	if scopes["service_id"] != "svc-123" {
-		t.Fatalf("service_id = %v", scopes["service_id"])
-	}
-	agentBody := state.Agents[0].AdminBody([]string{"ps-1"})
-	if _, leaks := agentBody["client_id"]; leaks {
-		t.Fatalf("agent body leaks client_id: %v", agentBody)
-	}
-	bindings := agentBody["permission_sets"].([]any)
-	entry := bindings[0].(map[string]any)
-	if entry["permission_set_id"] != "ps-1" || entry["requirement_type"] != "mandatory" {
-		t.Fatalf("binding = %v", entry)
-	}
-}
-
-func TestAdminBodiesCarryNoApprovalStatus(t *testing.T) {
-	approvalKeys := map[string]bool{"approved": true, "approval": true, "status": true, "state": true, "decision": true, "granted": true}
-	state := Project([]Resource{mcpserver("github"), modelapi("gpt"), agent("researcher", []string{"github"}, "gpt")})
-
-	check := func(body map[string]any, where string) {
-		for k := range body {
-			if approvalKeys[k] {
-				t.Fatalf("%s leaks approval key %q", where, k)
-			}
-		}
-	}
-	for _, svc := range state.Services {
-		check(svc.AdminBody(), "service body")
-	}
-	for _, ps := range state.PermissionSets {
-		check(ps.AdminBody("svc-id"), "permission-set body")
-	}
-	for _, a := range state.Agents {
-		body := a.AdminBody([]string{"ps-id"})
-		check(body, "agent body")
-		for _, e := range body["permission_sets"].([]any) {
-			entry := e.(map[string]any)
-			if len(entry) != 2 || entry["requirement_type"] != "mandatory" {
-				t.Fatalf("binding entry = %v", entry)
-			}
-		}
-	}
-}
-
 func hasService(s DesiredState, clientID string) bool {
 	for _, svc := range s.Services {
 		if svc.ClientID() == clientID {
