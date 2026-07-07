@@ -329,7 +329,7 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			log.Error(err, "failed to reconcile HTTPRoute")
 		}
 
-		if secCfg := security.GetConfig(); secCfg.IsOperational() || secCfg.ExtProcEnabled() {
+		if secCfg := security.GetConfig(); secCfg.SecurityEnabled() {
 			routeName := gateway.HTTPRouteName(gateway.ResourceTypeAgent, agent.Name)
 			policyParams := security.PolicyParams{
 				Name:      routeName,

@@ -291,7 +291,7 @@ func (r *ModelAPIReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		log.Error(err, "failed to reconcile HTTPRoute")
 	}
 
-	if secCfg := security.GetConfig(); secCfg.IsOperational() || secCfg.ExtProcEnabled() {
+	if secCfg := security.GetConfig(); secCfg.SecurityEnabled() {
 		routeName := gateway.HTTPRouteName(gateway.ResourceTypeModelAPI, modelapi.Name)
 		policyParams := security.PolicyParams{
 			Name:      routeName,

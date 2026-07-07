@@ -217,7 +217,7 @@ func (r *MCPServerReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		log.Error(err, "failed to reconcile HTTPRoute")
 	}
 
-	if secCfg := security.GetConfig(); secCfg.IsOperational() || secCfg.ExtProcEnabled() {
+	if secCfg := security.GetConfig(); secCfg.SecurityEnabled() {
 		routeName := gateway.HTTPRouteName(gateway.ResourceTypeMCP, mcpserver.Name)
 		policyParams := security.PolicyParams{
 			Name:      routeName,

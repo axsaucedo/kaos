@@ -511,6 +511,27 @@ func TestEnforcementModeOrDefault(t *testing.T) {
 	}
 }
 
+func TestExtAuthzEnabled(t *testing.T) {
+	url := "aib-access-check.kaos-system.svc.cluster.local:9191"
+	cases := []struct {
+		name string
+		cfg  Config
+		want bool
+	}{
+		{"default extproc mode with url off", Config{ExtAuthzURL: url}, false},
+		{"extauthz mode with url on", Config{ExtAuthzURL: url, EnforcementMode: EnforcementExtAuthz}, true},
+		{"extauthz mode without url off", Config{EnforcementMode: EnforcementExtAuthz}, false},
+		{"explicit extproc mode off", Config{ExtAuthzURL: url, EnforcementMode: EnforcementExtProc}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.cfg.ExtAuthzEnabled(); got != tc.want {
+				t.Errorf("ExtAuthzEnabled() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestVerificationModeOrDefault(t *testing.T) {
 	cases := []struct {
 		name   string

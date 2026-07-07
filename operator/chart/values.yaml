@@ -77,9 +77,15 @@ security:
   # an agent-auth ext_authz URL; when unset, the operator generates no
   # authorization policies and routing behavior is unchanged.
   agentAuth:
+    # enforcementMode selects the gateway authorization enforcement path.
+    # "extproc" (default) enforces via OPA embedded in the ext_proc filter;
+    # "extauthz" enables the optional, default-off external-authorization seam
+    # and requires extAuthzUrl to point at a gRPC ext_authz backend.
+    enforcementMode: ""
     # extAuthzUrl is the host:port of the Envoy ext_authz access-check gRPC
-    # backend (AIB by default; OPA is a drop-in via the standard contract).
-    # Example: aib-ext-authz.aib-system.svc.cluster.local:9002
+    # backend used only when enforcementMode is "extauthz" (any standards-
+    # compliant gRPC ext_authz backend, e.g. opa-envoy, is a drop-in).
+    # Example: opa-envoy.opa-system.svc.cluster.local:9191
     extAuthzUrl: ""
     # extProcUrl is the host:port of the Envoy ext_proc token-exchange gRPC
     # backend (AIB ExtProc by default). When set, the operator generates an

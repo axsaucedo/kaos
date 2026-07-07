@@ -7,7 +7,10 @@ import (
 )
 
 func operationalConfig() Config {
-	return Config{ExtAuthzURL: "aib-access-check.kaos-system.svc.cluster.local:9191"}
+	return Config{
+		ExtAuthzURL:     "aib-access-check.kaos-system.svc.cluster.local:9191",
+		EnforcementMode: EnforcementExtAuthz,
+	}
 }
 
 func TestConstructSecurityPolicyShape(t *testing.T) {
@@ -79,8 +82,46 @@ func TestConstructSecurityPolicyNoLabels(t *testing.T) {
 }
 
 func TestConstructSecurityPolicyInvalidConfig(t *testing.T) {
-	if _, err := constructSecurityPolicy(PolicyParams{Name: "a", Namespace: "ns", RouteName: "a"}, Config{ExtAuthzURL: "no-port"}); err == nil {
+	cfg := Config{ExtAuthzURL: "no-port", EnforcementMode: EnforcementExtAuthz}
+	if _, err := constructSecurityPolicy(PolicyParams{Name: "a", Namespace: "ns", RouteName: "a"}, cfg); err == nil {
 		t.Errorf("expected error for malformed ext_authz URL")
+	}
+}
+
+func TestConstructSecurityPolicyExtAuthzDefaultOff(t *testing.T) {
+	// ext_authz URL set but enforcement mode defaults to ext_proc: no extAuth
+	// block is emitted, and with no issuer there is nothing to attach.
+	policy, err := constructSecurityPolicy(
+		PolicyParams{Name: "a", Namespace: "ns", RouteName: "a"},
+		Config{ExtAuthzURL: "aib-access-check.kaos-system.svc.cluster.local:9191"},
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if policy != nil {
+		t.Fatalf("expected nil policy when ext_authz off and no issuers, got %+v", policy.Object)
+	}
+}
+
+func TestConstructSecurityPolicyJWTOnlyWhenExtAuthzOff(t *testing.T) {
+	// ext_proc-only install with a user issuer: JWT authn is attached, but no
+	// extAuth block, so gateway authentication stays intact without ext_authz.
+	cfg := Config{
+		ExtProcURL: "aib-extproc.kaos-system.svc.cluster.local:9002",
+		UserIssuer: "http://keycloak.kaos-system.svc.cluster.local:8080/realms/kaos",
+	}
+	policy, err := constructSecurityPolicy(PolicyParams{Name: "a", Namespace: "ns", RouteName: "a"}, cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if policy == nil {
+		t.Fatal("expected a policy with jwt providers")
+	}
+	if _, found, _ := unstructured.NestedMap(policy.Object, "spec", "extAuth"); found {
+		t.Errorf("expected no extAuth block in ext_proc-only mode")
+	}
+	if _, found, _ := unstructured.NestedSlice(policy.Object, "spec", "jwt", "providers"); !found {
+		t.Errorf("expected jwt providers to be attached")
 	}
 }
 
@@ -246,7 +287,7 @@ func TestConstructSecurityPolicyBackendRefIsConfigDriven(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			policy, err := constructSecurityPolicy(params, Config{ExtAuthzURL: tc.url})
+			policy, err := constructSecurityPolicy(params, Config{ExtAuthzURL: tc.url, EnforcementMode: EnforcementExtAuthz})
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}

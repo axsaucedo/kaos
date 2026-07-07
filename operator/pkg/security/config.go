@@ -477,6 +477,16 @@ func (c Config) AuthorizationEnabled() bool {
 	return c.AuthorizationModelOrDefault() != AuthorizationModelOff
 }
 
+// ExtAuthzEnabled reports whether the operator should attach the ext_authz
+// external-authorization check to protected routes. It is the optional,
+// default-off enforcement seam: it requires the enforcement mode to be set to
+// ext_authz explicitly and a backend to be configured. The default enforcement
+// path is OPA embedded in ext_proc, so this returns false unless ext_authz is
+// deliberately selected.
+func (c Config) ExtAuthzEnabled() bool {
+	return c.EnforcementModeOrDefault() == EnforcementExtAuthz && c.IsOperational()
+}
+
 // EnforcementModeOrDefault returns the configured enforcement path, defaulting to
 // OPA embedded in ext_proc.
 func (c Config) EnforcementModeOrDefault() EnforcementMode {
