@@ -114,6 +114,12 @@ export default withMermaid(defineConfig({
         ]
       },
       {
+        text: 'Security',
+        items: [
+          { text: 'Authorization', link: '/security/authorization' }
+        ]
+      },
+      {
         text: 'Python Framework',
         items: [
           { text: 'Overview', link: '/python-framework/overview' },

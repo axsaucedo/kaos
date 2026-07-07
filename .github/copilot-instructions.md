@@ -86,9 +86,14 @@ tmp/                       # Local work files (gitignored)
 - **MCPServer**: MCP tool server with runtime-based architecture (python-string, fastmcp-codemode, pctx-codemode, kubernetes, slack, custom)
 - **ModelAPI**: LLM proxy (LiteLLM) or hosted (Ollama) mode
 
+## Authorization (optional, off by default)
+Enforced at the gateway by an OPA policy in the Envoy `ext_proc` filter. `AuthzProjectionReconciler` projects a policy ConfigMap (`policy.rego` + `data.json`) from CRDs. Provider `kaos` (KAOS-owned grants) or `aib` (broker permission sets); modes automated / bring-your-own ConfigMap / operator-rego+admin-data / broker external off-switch; verification `verified` (inject JWKS, verify actor token) or `skip` (demo, non-production). `data.kaos.grants`/`data.kaos.jwks` is a published contract. Enable via `kaos system install --auth-enabled --authz-provider ...`. See `docs/security/authorization.md`.
+
 ## Key Files
 - `operator/api/v1alpha1/*_types.go`: CRD schemas
 - `operator/controllers/*_controller.go`: Reconciliation logic
+- `operator/controllers/authz_projection_controller.go`: Authorization policy ConfigMap + identity projection
+- `operator/internal/authz/`: Static policy rego, data document builder, JWKS fetch, published `data-schema.md`
 - `operator/chart/`: Helm chart (generated from kustomize)
 - `pydantic-ai-server/pais/server.py`: AgentServer, create_agent_server, routes, _run_autonomous
 - `pydantic-ai-server/pais/serverutils.py`: AgentDeps, AgentCard (Pydantic BaseModel, A2A-compliant), RemoteAgent (A2A + chat delegation), AgentServerSettings
