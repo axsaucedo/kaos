@@ -97,6 +97,9 @@ jobs:
           - name: example-autonomous
             files: "e2e/test_examples_e2e.py"
             pytest_filter: "test_autonomous_agent_example"
+          - name: example-memory
+            files: "e2e/test_examples_e2e.py"
+            pytest_filter: "test_memory_example"
     name: E2E (${{ matrix.shard.name }})
     steps:
       - name: Checkout
