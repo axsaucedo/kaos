@@ -9,6 +9,7 @@ import (
 	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	policyv1 "k8s.io/api/policy/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -42,6 +43,7 @@ type MemoryStoreReconciler struct {
 //+kubebuilder:rbac:groups=kaos.tools,resources=memorystores,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=kaos.tools,resources=memorystores/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=policy,resources=poddisruptionbudgets,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=persistentvolumeclaims,verbs=get;list;watch;create;update;patch;delete
 
@@ -99,6 +101,16 @@ func (r *MemoryStoreReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		log.Error(err, "failed to reconcile Service")
 		store.Status.Phase = "Failed"
 		store.Status.Message = fmt.Sprintf("Failed to reconcile Service: %v", err)
+		r.Status().Update(ctx, store)
+		return ctrl.Result{}, err
+	}
+
+	// Guard availability of multi-replica external stores with a PodDisruptionBudget
+	// so voluntary disruptions cannot drain the stateless fleet below one Pod.
+	if err := r.reconcilePodDisruptionBudget(ctx, store); err != nil {
+		log.Error(err, "failed to reconcile PodDisruptionBudget")
+		store.Status.Phase = "Failed"
+		store.Status.Message = fmt.Sprintf("Failed to reconcile PodDisruptionBudget: %v", err)
 		r.Status().Update(ctx, store)
 		return ctrl.Result{}, err
 	}
@@ -275,10 +287,7 @@ func (r *MemoryStoreReconciler) constructDeployment(store *kaosv1alpha1.MemorySt
 	}
 
 	labels := memoryStoreLabels(store.Name)
-	replicas := int32(1)
-	if store.Spec.Replicas != nil {
-		replicas = *store.Spec.Replicas
-	}
+	replicas := memoryStoreReplicas(store)
 
 	env, volumes, mounts := r.buildStorageEnv(store)
 	env = append(env, modelEnv...)
@@ -516,6 +525,71 @@ func (r *MemoryStoreReconciler) reconcileGatewayAndSecurity(ctx context.Context,
 	}
 }
 
+// memoryStoreReplicas resolves the desired replica count. An explicit spec value
+// always wins; otherwise external (stateless, shared-Postgres) stores default to
+// two replicas for availability while local (single-writer) stores stay at one.
+func memoryStoreReplicas(store *kaosv1alpha1.MemoryStore) int32 {
+	if store.Spec.Replicas != nil {
+		return *store.Spec.Replicas
+	}
+	if store.Spec.Storage.Type == kaosv1alpha1.MemoryStorageExternal {
+		return 2
+	}
+	return 1
+}
+
+// reconcilePodDisruptionBudget ensures a PodDisruptionBudget guards multi-replica
+// external stores and is absent for single-replica stores. A PDB pinning
+// minAvailable=1 on a single-replica store would block all voluntary evictions,
+// so it is only applied when at least two replicas are desired.
+func (r *MemoryStoreReconciler) reconcilePodDisruptionBudget(ctx context.Context, store *kaosv1alpha1.MemoryStore) error {
+	log := log.FromContext(ctx)
+	name := memoryStoreResourceName(store.Name)
+	labels := memoryStoreLabels(store.Name)
+
+	existing := &policyv1.PodDisruptionBudget{}
+	err := r.Get(ctx, types.NamespacedName{Name: name, Namespace: store.Namespace}, existing)
+
+	if memoryStoreReplicas(store) < 2 {
+		// Single-replica store: ensure no PDB lingers from a previous multi-replica spec.
+		if err == nil {
+			log.Info("Deleting PodDisruptionBudget for single-replica store", "name", name)
+			return client.IgnoreNotFound(r.Delete(ctx, existing))
+		}
+		return client.IgnoreNotFound(err)
+	}
+
+	minAvailable := intstr.FromInt(1)
+	desired := &policyv1.PodDisruptionBudget{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      name,
+			Namespace: store.Namespace,
+			Labels:    labels,
+		},
+		Spec: policyv1.PodDisruptionBudgetSpec{
+			MinAvailable: &minAvailable,
+			Selector:     &metav1.LabelSelector{MatchLabels: labels},
+		},
+	}
+	if err := controllerutil.SetControllerReference(store, desired, r.Scheme); err != nil {
+		return err
+	}
+
+	if apierrors.IsNotFound(err) {
+		log.Info("Creating PodDisruptionBudget", "name", name)
+		return r.Create(ctx, desired)
+	} else if err != nil {
+		return err
+	}
+
+	if existing.Spec.MinAvailable == nil || existing.Spec.MinAvailable.IntValue() != 1 {
+		existing.Spec = desired.Spec
+		log.Info("Updating PodDisruptionBudget", "name", name)
+		return r.Update(ctx, existing)
+	}
+	return nil
+}
+
 func memoryStoreResourceName(name string) string { return fmt.Sprintf("memorystore-%s", name) }
 
 func memoryStorePVCName(name string) string { return fmt.Sprintf("memorystore-%s-data", name) }
@@ -531,5 +605,6 @@ func (r *MemoryStoreReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
 		Owns(&corev1.PersistentVolumeClaim{}).
+		Owns(&policyv1.PodDisruptionBudget{}).
 		Complete(r)
 }

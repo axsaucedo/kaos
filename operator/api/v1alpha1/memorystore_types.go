@@ -150,9 +150,10 @@ type MemoryStoreSpec struct {
 	// +kubebuilder:validation:Required
 	Storage MemoryStorage `json:"storage"`
 
-	// Replicas is the number of memory-service replicas. Must be 1 in local mode.
+	// Replicas overrides the number of memory-service replicas. When unset it
+	// defaults by storage mode: external (stateless, shared Postgres) stores run
+	// two replicas for availability, local (single-writer) stores run one.
 	// +kubebuilder:validation:Minimum=1
-	// +kubebuilder:default=1
 	Replicas *int32 `json:"replicas,omitempty"`
 
 	// Models binds the summarization and embedding model roles to existing ModelAPIs.

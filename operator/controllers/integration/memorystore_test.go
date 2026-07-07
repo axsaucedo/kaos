@@ -10,6 +10,7 @@ import (
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	policyv1 "k8s.io/api/policy/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -122,6 +123,15 @@ var _ = Describe("MemoryStore Controller", func() {
 		Expect(envMap["KAOS_MEMORY_EXTRACTION_SYSTEM_PROMPT"]).To(Equal("only extract deployment facts"))
 		Expect(envMap["KAOS_MEMORY_SUMMARIZATION_SYSTEM_PROMPT"]).To(Equal("fold tersely"))
 		Expect(envMap["KAOS_MEMORY_DEFAULT_FAILURE_MODE"]).To(Equal("strict"))
+
+		// Single-replica local store stays at one replica with no PodDisruptionBudget.
+		Expect(deployment.Spec.Replicas).NotTo(BeNil())
+		Expect(*deployment.Spec.Replicas).To(Equal(int32(1)))
+		Consistently(func() bool {
+			err := k8sClient.Get(ctx, types.NamespacedName{
+				Name: fmt.Sprintf("memorystore-%s", name), Namespace: namespace}, &policyv1.PodDisruptionBudget{})
+			return err != nil
+		}, "2s", interval).Should(BeTrue())
 
 		// Volume mount and probes.
 		Expect(container.VolumeMounts).To(HaveLen(1))
@@ -327,6 +337,18 @@ var _ = Describe("MemoryStore Controller", func() {
 		Expect(dsnEnv.ValueFrom.SecretKeyRef).NotTo(BeNil())
 		Expect(dsnEnv.ValueFrom.SecretKeyRef.Name).To(Equal(secretName))
 		Expect(dsnEnv.ValueFrom.SecretKeyRef.Key).To(Equal("dsn"))
+
+		// External stores default to two replicas guarded by a PodDisruptionBudget.
+		Expect(deployment.Spec.Replicas).NotTo(BeNil())
+		Expect(*deployment.Spec.Replicas).To(Equal(int32(2)))
+
+		pdb := &policyv1.PodDisruptionBudget{}
+		Eventually(func() error {
+			return k8sClient.Get(ctx, types.NamespacedName{
+				Name: fmt.Sprintf("memorystore-%s", name), Namespace: namespace}, pdb)
+		}, timeout, interval).Should(Succeed())
+		Expect(pdb.Spec.MinAvailable).NotTo(BeNil())
+		Expect(pdb.Spec.MinAvailable.IntValue()).To(Equal(1))
 
 		// No PVC is provisioned in external mode.
 		pvc := &corev1.PersistentVolumeClaim{}

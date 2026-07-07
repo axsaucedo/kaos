@@ -380,9 +380,10 @@ spec:
                 - summarization
                 type: object
               replicas:
-                default: 1
-                description: Replicas is the number of memory-service replicas. Must
-                  be 1 in local mode.
+                description: |-
+                  Replicas overrides the number of memory-service replicas. When unset it
+                  defaults by storage mode: external (stateless, shared Postgres) stores run
+                  two replicas for availability, local (single-writer) stores run one.
                 format: int32
                 minimum: 1
                 type: integer
