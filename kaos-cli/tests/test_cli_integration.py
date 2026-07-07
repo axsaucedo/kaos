@@ -862,18 +862,24 @@ class TestMonitoringValidation:
 
 class TestSystemInstallFlags:
     def test_install_help_shows_gateway_flag(self):
-        result = runner.invoke(app, ["system", "install", "--help"])
+        result = runner.invoke(
+            app, ["system", "install", "--help"], env={"COLUMNS": "200"}
+        )
         assert result.exit_code == 0
         output = strip_ansi(result.output)
         assert "--gateway-enabled" in output
         assert "--metallb-enabled" in output
+        assert "--pgvector-memory-enabled" in output
 
     def test_uninstall_help_shows_gateway_flag(self):
-        result = runner.invoke(app, ["system", "uninstall", "--help"])
+        result = runner.invoke(
+            app, ["system", "uninstall", "--help"], env={"COLUMNS": "200"}
+        )
         assert result.exit_code == 0
         output = strip_ansi(result.output)
         assert "--gateway-enabled" in output
         assert "--metallb-enabled" in output
+        assert "--pgvector-memory-enabled" in output
 
     def test_install_help_shows_auth_flag(self):
         result = runner.invoke(app, ["system", "install", "--help"])
@@ -884,6 +890,50 @@ class TestSystemInstallFlags:
         assert "--sync-chart-path" in output
         assert "--user-auth" in output
         assert "--keycloak-namespace" in output
+
+
+class TestPgvectorMemoryInstall:
+    def test_dsn_format(self):
+        from kaos_cli.install import _pgvector_dsn
+
+        dsn = _pgvector_dsn("kaos-system")
+        assert dsn.startswith("postgresql://")
+        assert "kaos-memory-pgvector.kaos-system.svc.cluster.local:5432" in dsn
+        assert dsn.endswith("/kaos")
+
+    def test_manifest_contract(self):
+        from kaos_cli.install import (
+            _pgvector_manifest,
+            PGVECTOR_IMAGE,
+            PGVECTOR_SECRET_NAME,
+            PGVECTOR_SECRET_KEY,
+        )
+
+        manifest = _pgvector_manifest("kaos-system")
+        assert f"name: {PGVECTOR_SECRET_NAME}" in manifest
+        assert f"{PGVECTOR_SECRET_KEY}: postgresql://" in manifest
+        assert f"image: {PGVECTOR_IMAGE}" in manifest
+        assert "kind: Deployment" in manifest
+        assert "kind: Service" in manifest
+
+    def test_install_applies_manifest(self):
+        from unittest.mock import patch, MagicMock
+        from kaos_cli import install as install_mod
+
+        applied = {}
+
+        def fake_kubectl(args, check=False, input=None):
+            result = MagicMock()
+            result.returncode = 0
+            result.stderr = ""
+            if args[:2] == ["apply", "-f"]:
+                applied["input"] = input
+            return result
+
+        with patch.object(install_mod, "_run_kubectl", side_effect=fake_kubectl):
+            assert install_mod._install_pgvector("kaos-system") is True
+        assert "kind: Secret" in applied["input"]
+        assert "image: pgvector/pgvector" in applied["input"]
 
 
 class TestAuthWiring:

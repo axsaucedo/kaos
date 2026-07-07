@@ -82,6 +82,11 @@ def install(
         "--metallb-enabled",
         help="Install MetalLB for LoadBalancer support (KIND/bare-metal clusters).",
     ),
+    pgvector_memory_enabled: bool = typer.Option(
+        False,
+        "--pgvector-memory-enabled",
+        help="Provision a development pgvector Postgres for external-mode MemoryStores (dev-only).",
+    ),
     chart_path: str | None = typer.Option(
         None,
         "--chart-path",
@@ -240,6 +245,7 @@ def install(
         monitoring_enabled=monitoring_enabled,
         gateway_enabled=gateway_enabled,
         metallb_enabled=metallb_enabled,
+        pgvector_memory_enabled=pgvector_memory_enabled,
         chart_path=chart_path,
         auth_enabled=auth_enabled,
         auth_namespace=auth_namespace,
@@ -297,6 +303,11 @@ def uninstall(
         "--metallb-enabled",
         help="Also uninstall MetalLB.",
     ),
+    pgvector_memory_enabled: bool = typer.Option(
+        False,
+        "--pgvector-memory-enabled",
+        help="Also uninstall the development pgvector Postgres.",
+    ),
 ) -> None:
     """Uninstall the KAOS operator."""
     if monitoring_enabled is not None and monitoring_enabled not in MONITORING_BACKENDS:
@@ -311,6 +322,7 @@ def uninstall(
         monitoring_enabled=monitoring_enabled,
         gateway_enabled=gateway_enabled,
         metallb_enabled=metallb_enabled,
+        pgvector_memory_enabled=pgvector_memory_enabled,
     )
 
 
