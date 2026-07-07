@@ -611,7 +611,21 @@ class TestSamples:
         assert "4-dev-ollama-proxy-agent" in result.output
         assert "5-proxy-external-api" in result.output
 
-    def test_deploy_sample_dry_run(self):
+    def test_deploy_memory_sample_dry_run(self):
+        result = runner.invoke(
+            app, ["samples", "deploy", "7-memory-agent", "--dry-run"]
+        )
+        assert result.exit_code == 0
+        docs = [d for d in yaml.safe_load_all(result.output) if d]
+        kinds = {d["kind"] for d in docs}
+        assert "ModelAPI" in kinds
+        assert "MemoryStore" in kinds
+        assert "Agent" in kinds
+        store = next(d for d in docs if d["kind"] == "MemoryStore")
+        assert store["spec"]["storage"]["type"] == "local"
+        agent = next(d for d in docs if d["kind"] == "Agent")
+        assert agent["spec"]["memory"]["memoryStore"] == "shared-memory"
+        assert agent["spec"]["memory"]["scope"] == "user"
         result = runner.invoke(
             app, ["samples", "deploy", "1-simple-echo-agent", "--dry-run"]
         )
@@ -829,10 +843,11 @@ class TestPackageData:
         from kaos_cli.samples import _get_sample_files
 
         files = _get_sample_files()
-        assert len(files) == 6
+        assert len(files) == 7
         names = [f.stem for f in files]
         assert "1-simple-echo-agent" in names
         assert "5-proxy-external-api" in names
+        assert "7-memory-agent" in names
 
 
 # ─── Monitoring validation ──────────────────────────────────────────────

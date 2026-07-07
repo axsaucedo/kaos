@@ -1,0 +1,97 @@
+---
+# Sample 7: Agent with cross-session memory
+# A single agent bound to a MemoryStore so it remembers facts across sessions.
+# Deploy: kaos samples deploy 7-memory-agent -n <namespace>
+#
+# This sample is self-contained and stands up on a fresh cluster with no external
+# dependencies: it uses a Proxy ModelAPI (LiteLLM) with wildcard models and a
+# local-mode MemoryStore (embedded Chroma + SQLite short-term window on a PVC).
+# The short-term tier is verbatim durable storage and needs no real inference, so
+# the memory round-trip works even against a mock/placeholder model. For real
+# semantic long-term recall, point the model references at a real provider and
+# switch the store to external/pgvector (see the override notes below).
+#
+# Switch to the development pgvector Postgres provisioned by
+# `kaos system install --pgvector-memory-enabled` by replacing the MemoryStore
+# `storage` block with:
+#   storage:
+#     type: external
+#     external:
+#       provider: pgvector
+#       connectionSecretRef:
+#         name: kaos-memory-pgvector
+#         key: dsn
+#       embeddingDims: 1536
+
+---
+# ModelAPI: LiteLLM proxy exposing summarization and embedding models.
+# Uses a placeholder key so the sample applies with zero prerequisites; replace
+# it with a real provider key for genuine long-term semantic recall.
+apiVersion: kaos.tools/v1alpha1
+kind: ModelAPI
+metadata:
+  name: memory-modelapi
+spec:
+  mode: Proxy
+  proxyConfig:
+    models:
+    - "*"
+  container:
+    env:
+    - name: OPENAI_API_KEY
+      value: "sk-placeholder"
+    - name: LITELLM_LOG
+      value: "WARN"
+
+---
+# MemoryStore: local-mode central memory service shared by bound agents.
+# Local mode is a single replica backed by an embedded Chroma vector store and a
+# SQLite short-term window on a PersistentVolume — no external database required.
+apiVersion: kaos.tools/v1alpha1
+kind: MemoryStore
+metadata:
+  name: shared-memory
+spec:
+  engine: mem0
+  storage:
+    type: local
+    local:
+      provider: chroma
+      persistentVolume:
+        size: "5Gi"
+  models:
+    summarization:
+      modelAPI: memory-modelapi
+      model: gpt-4o-mini
+    embedding:
+      modelAPI: memory-modelapi
+      model: text-embedding-3-small
+  defaultFailureMode: soft
+
+---
+# Agent: bound to the MemoryStore with user-scoped, cross-session memory.
+apiVersion: kaos.tools/v1alpha1
+kind: Agent
+metadata:
+  name: memory-agent
+spec:
+  modelAPI: memory-modelapi
+  model: gpt-4o-mini
+  config:
+    description: "An assistant that remembers user facts across sessions"
+    instructions: |
+      You are a helpful assistant with long-term memory.
+      Remember facts the user tells you about themselves and recall them in
+      later conversations. Keep responses concise.
+    reasoningLoopMaxSteps: 5
+  memory:
+    type: remote
+    memoryStore: shared-memory
+    scope: user
+    clientParams:
+      tokenBudget: 2048
+      rollingSummary: true
+    tools: all
+    failureMode: soft
+  agentNetwork:
+    expose: true
