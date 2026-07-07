@@ -1,4 +1,4 @@
-.PHONY: help build docker-build deploy generate manifests test test-unit clean envtest helm kind-create kind-delete kind-load-images kind-e2e-install-kaos kind-e2e-run-tests e2e-test e2e-test-seq e2e-clean kind-load-aib-images kind-e2e-install-aib e2e-test-aib kind-e2e-aib
+.PHONY: help build docker-build deploy generate manifests test test-unit test-chart clean envtest helm kind-create kind-delete kind-load-images kind-e2e-install-kaos kind-e2e-run-tests e2e-test e2e-test-seq e2e-clean kind-load-aib-images kind-e2e-install-aib e2e-test-aib kind-e2e-aib
 
 # Configuration
 IMG ?= axsauze/kaos-operator:latest
@@ -70,6 +70,10 @@ test-unit: generate manifests envtest
 
 # Alias for backward compatibility
 test: test-unit
+
+# Render the operator chart across the authorization mode combinations
+test-chart:
+	./chart/tests/render_authz_modes.sh
 
 # Generate Helm chart from kustomize manifests
 # CRDs are moved to crds/ dir so --skip-crds works properly during install
