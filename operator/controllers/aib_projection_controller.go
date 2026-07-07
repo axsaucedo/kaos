@@ -29,6 +29,10 @@ import (
 // controller so they can be pruned when their agent is gone.
 const aibManagedBy = "kaos-operator-aib"
 
+// aibProjectionControllerName is the manager-registered name of the projection
+// controller.
+const aibProjectionControllerName = "kaos-aib-projection"
+
 // aibSentinel is the single request key every KAOS resource change maps to. The
 // projection is a whole-world function (agents reference other resources), so the
 // controller funnels every event to one reconcile that recomputes the full state.
@@ -82,7 +86,7 @@ func (r *AIBProjectionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return []reconcile.Request{aibSentinel}
 	})
 	return builder.ControllerManagedBy(mgr).
-		Named("kaos-aib-projection").
+		Named(aibProjectionControllerName).
 		Watches(&kaosv1alpha1.Agent{}, toSentinel).
 		Watches(&kaosv1alpha1.MCPServer{}, toSentinel).
 		Watches(&kaosv1alpha1.ModelAPI{}, toSentinel).
