@@ -105,7 +105,7 @@ for _ in range(20):
         if httpx.get(f"{base_url}/healthz", timeout=2.0).status_code == 200:
             print("Memory service reachable")
             break
-    except httpx.ConnectError:
+    except httpx.HTTPError:
         time.sleep(1)
 else:
     raise AssertionError("Memory service did not become reachable")
