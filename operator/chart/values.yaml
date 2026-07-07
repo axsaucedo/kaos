@@ -77,13 +77,30 @@ security:
   # an agent-auth ext_authz URL; when unset, the operator generates no
   # authorization policies and routing behavior is unchanged.
   agentAuth:
-    # enforcementMode selects the gateway authorization enforcement path.
-    # "extproc" (default) enforces via OPA embedded in the ext_proc filter;
-    # "extauthz" enables the optional, default-off external-authorization seam
-    # and requires extAuthzUrl to point at a gRPC ext_authz backend.
-    enforcementMode: ""
+    # authorization groups the coarse authorization knobs. All are optional with
+    # safe defaults: provider "none" leaves authorization projection off.
+    authorization:
+      # provider selects the authorization provider: "none" (default), "kaos"
+      # (OPA data from CRDs), or "aib" (broker permission sets).
+      provider: ""
+      # gatewayExtension selects which Envoy gateway extension enforces authz.
+      # "ext_proc" (default) enforces via OPA embedded in the ext_proc filter;
+      # "ext_authz" enables the optional, default-off external-authorization
+      # extension and requires extAuthzUrl to point at a gRPC ext_authz backend.
+      gatewayExtension: ""
+      # agentJwtVerification selects how the agent (actor) JWT is trusted:
+      # "skip" (header-trust, non-production) or "verified" (signature-checked).
+      # Empty derives it from the issuer.
+      agentJwtVerification: ""
+      # policyDataSource selects who authors the authorization policy data:
+      # "automated" (operator projects data, default), "manual" (admin authors
+      # data), or "external" (broker authoritative, projection+prune off).
+      policyDataSource: ""
+      # policyRegoOverride, when true, has the operator own only the policy.rego
+      # key and leaves the data key to the admin. Orthogonal to policyDataSource.
+      policyRegoOverride: false
     # extAuthzUrl is the host:port of the Envoy ext_authz access-check gRPC
-    # backend used only when enforcementMode is "extauthz" (any standards-
+    # backend used only when gatewayExtension is "ext_authz" (any standards-
     # compliant gRPC ext_authz backend, e.g. opa-envoy, is a drop-in).
     # Example: opa-envoy.opa-system.svc.cluster.local:9191
     extAuthzUrl: ""

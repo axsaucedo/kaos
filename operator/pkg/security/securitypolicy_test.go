@@ -8,8 +8,8 @@ import (
 
 func operationalConfig() Config {
 	return Config{
-		ExtAuthzURL:     "aib-access-check.kaos-system.svc.cluster.local:9191",
-		EnforcementMode: EnforcementExtAuthz,
+		ExtAuthzURL:                      "aib-access-check.kaos-system.svc.cluster.local:9191",
+		AuthzGatewayEnforcementExtension: EnforcementExtAuthz,
 	}
 }
 
@@ -82,7 +82,7 @@ func TestConstructSecurityPolicyNoLabels(t *testing.T) {
 }
 
 func TestConstructSecurityPolicyInvalidConfig(t *testing.T) {
-	cfg := Config{ExtAuthzURL: "no-port", EnforcementMode: EnforcementExtAuthz}
+	cfg := Config{ExtAuthzURL: "no-port", AuthzGatewayEnforcementExtension: EnforcementExtAuthz}
 	if _, err := constructSecurityPolicy(PolicyParams{Name: "a", Namespace: "ns", RouteName: "a"}, cfg); err == nil {
 		t.Errorf("expected error for malformed ext_authz URL")
 	}
@@ -287,7 +287,7 @@ func TestConstructSecurityPolicyBackendRefIsConfigDriven(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			policy, err := constructSecurityPolicy(params, Config{ExtAuthzURL: tc.url, EnforcementMode: EnforcementExtAuthz})
+			policy, err := constructSecurityPolicy(params, Config{ExtAuthzURL: tc.url, AuthzGatewayEnforcementExtension: EnforcementExtAuthz})
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}

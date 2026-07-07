@@ -26,14 +26,28 @@ data:
   GATEWAY_DEFAULT_MODELAPI_TIMEOUT: {{ .Values.gateway.defaultTimeouts.modelAPI | quote }}
   GATEWAY_DEFAULT_MCP_TIMEOUT: {{ .Values.gateway.defaultTimeouts.mcp | quote }}
   # Operator-wide security configuration. Authorization is enforced by OPA
-  # embedded in the ext_proc filter by default; the ext_authz seam is optional
-  # and default-off, enabled only when enforcementMode is "extauthz" with an
-  # ext_authz backend URL. Leaving all hooks unset disables enforcement and
-  # leaves existing routing behavior unchanged.
+  # embedded in the ext_proc filter by default; the ext_authz extension is
+  # optional and default-off, enabled only when gatewayExtension is "ext_authz"
+  # with an ext_authz backend URL. Leaving all hooks unset disables enforcement
+  # and leaves existing routing behavior unchanged.
   {{- with .Values.security }}
   {{- with .agentAuth }}
-  {{- if .enforcementMode }}
-  SECURITY_AUTHORIZATION_ENFORCEMENT: {{ .enforcementMode | quote }}
+  {{- with .authorization }}
+  {{- if .provider }}
+  SECURITY_AUTHORIZATION_PROVIDER: {{ .provider | quote }}
+  {{- end }}
+  {{- if .gatewayExtension }}
+  SECURITY_AUTHORIZATION_GATEWAY_EXTENSION: {{ .gatewayExtension | quote }}
+  {{- end }}
+  {{- if .agentJwtVerification }}
+  SECURITY_AUTHORIZATION_AGENT_JWT_VERIFICATION: {{ .agentJwtVerification | quote }}
+  {{- end }}
+  {{- if .policyDataSource }}
+  SECURITY_AUTHORIZATION_POLICY_DATA_SOURCE: {{ .policyDataSource | quote }}
+  {{- end }}
+  {{- if .policyRegoOverride }}
+  SECURITY_AUTHORIZATION_POLICY_REGO_OVERRIDE: {{ .policyRegoOverride | quote }}
+  {{- end }}
   {{- end }}
   {{- if .extAuthzUrl }}
   SECURITY_AGENT_AUTH_EXT_AUTHZ_URL: {{ .extAuthzUrl | quote }}

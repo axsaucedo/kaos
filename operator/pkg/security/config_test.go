@@ -189,17 +189,17 @@ func TestAuthzJWKSURI(t *testing.T) {
 	cases := []struct {
 		name             string
 		issuer           string
-		verificationMode VerificationMode
+		verificationMode AgentJWTVerificationMode
 		want             string
 	}{
-		{"demo default without issuer", "", "", ""},
+		{"skip default without issuer", "", "", ""},
 		{"verified default with issuer", "http://aib:8000", "", "http://aib:8000/oauth2/jwks.json"},
-		{"forced demo suppresses jwks", "http://aib:8000", VerificationDemo, ""},
+		{"forced skip suppresses jwks", "http://aib:8000", VerificationSkip, ""},
 		{"forced verified without issuer", "", VerificationVerified, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			c := Config{Issuer: tc.issuer, VerificationMode: tc.verificationMode}
+			c := Config{Issuer: tc.issuer, AgentJWTVerificationMode: tc.verificationMode}
 			if got := c.AuthzJWKSURI(); got != tc.want {
 				t.Errorf("AuthzJWKSURI() = %q, want %q", got, tc.want)
 			}
@@ -471,42 +471,42 @@ func TestNetworkPolicyEnabledWithExtProcOnly(t *testing.T) {
 	}
 }
 
-func TestAuthorizationModelOrDefault(t *testing.T) {
+func TestAuthzProviderOrDefault(t *testing.T) {
 	cases := []struct {
-		in   AuthorizationModel
-		want AuthorizationModel
+		in   AuthzProvider
+		want AuthzProvider
 	}{
-		{"", AuthorizationModelOff},
-		{"model1", AuthorizationModelData},
-		{"model2", AuthorizationModelBroker},
-		{"both", AuthorizationModelBoth},
-		{"bogus", AuthorizationModelOff},
+		{"", AuthzProviderNone},
+		{"none", AuthzProviderNone},
+		{"kaos", AuthzProviderKAOS},
+		{"aib", AuthzProviderAIB},
+		{"bogus", AuthzProviderNone},
 	}
 	for _, tc := range cases {
-		cfg := Config{AuthorizationModel: tc.in}
-		if got := cfg.AuthorizationModelOrDefault(); got != tc.want {
-			t.Errorf("AuthorizationModelOrDefault(%q) = %q, want %q", tc.in, got, tc.want)
+		cfg := Config{AuthzProvider: tc.in}
+		if got := cfg.AuthzProviderOrDefault(); got != tc.want {
+			t.Errorf("AuthzProviderOrDefault(%q) = %q, want %q", tc.in, got, tc.want)
 		}
-		wantEnabled := tc.want != AuthorizationModelOff
+		wantEnabled := tc.want != AuthzProviderNone
 		if got := cfg.AuthorizationEnabled(); got != wantEnabled {
 			t.Errorf("AuthorizationEnabled(%q) = %v, want %v", tc.in, got, wantEnabled)
 		}
 	}
 }
 
-func TestEnforcementModeOrDefault(t *testing.T) {
+func TestGatewayEnforcementExtensionOrDefault(t *testing.T) {
 	cases := []struct {
-		in   EnforcementMode
-		want EnforcementMode
+		in   AuthzGatewayEnforcementExtension
+		want AuthzGatewayEnforcementExtension
 	}{
 		{"", EnforcementExtProc},
-		{"extproc", EnforcementExtProc},
-		{"extauthz", EnforcementExtAuthz},
+		{"ext_proc", EnforcementExtProc},
+		{"ext_authz", EnforcementExtAuthz},
 		{"bogus", EnforcementExtProc},
 	}
 	for _, tc := range cases {
-		if got := (Config{EnforcementMode: tc.in}).EnforcementModeOrDefault(); got != tc.want {
-			t.Errorf("EnforcementModeOrDefault(%q) = %q, want %q", tc.in, got, tc.want)
+		if got := (Config{AuthzGatewayEnforcementExtension: tc.in}).GatewayEnforcementExtensionOrDefault(); got != tc.want {
+			t.Errorf("GatewayEnforcementExtensionOrDefault(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
 }
@@ -518,10 +518,10 @@ func TestExtAuthzEnabled(t *testing.T) {
 		cfg  Config
 		want bool
 	}{
-		{"default extproc mode with url off", Config{ExtAuthzURL: url}, false},
-		{"extauthz mode with url on", Config{ExtAuthzURL: url, EnforcementMode: EnforcementExtAuthz}, true},
-		{"extauthz mode without url off", Config{EnforcementMode: EnforcementExtAuthz}, false},
-		{"explicit extproc mode off", Config{ExtAuthzURL: url, EnforcementMode: EnforcementExtProc}, false},
+		{"default ext_proc mode with url off", Config{ExtAuthzURL: url}, false},
+		{"ext_authz mode with url on", Config{ExtAuthzURL: url, AuthzGatewayEnforcementExtension: EnforcementExtAuthz}, true},
+		{"ext_authz mode without url off", Config{AuthzGatewayEnforcementExtension: EnforcementExtAuthz}, false},
+		{"explicit ext_proc mode off", Config{ExtAuthzURL: url, AuthzGatewayEnforcementExtension: EnforcementExtProc}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -532,66 +532,69 @@ func TestExtAuthzEnabled(t *testing.T) {
 	}
 }
 
-func TestVerificationModeOrDefault(t *testing.T) {
+func TestAgentJWTVerificationModeOrDefault(t *testing.T) {
 	cases := []struct {
 		name   string
-		mode   VerificationMode
+		mode   AgentJWTVerificationMode
 		issuer string
-		want   VerificationMode
+		want   AgentJWTVerificationMode
 	}{
-		{"derive demo without issuer", "", "", VerificationDemo},
+		{"derive skip without issuer", "", "", VerificationSkip},
 		{"derive verified with issuer", "", "http://aib:8000", VerificationVerified},
-		{"explicit demo overrides issuer", "demo", "http://aib:8000", VerificationDemo},
+		{"explicit skip overrides issuer", "skip", "http://aib:8000", VerificationSkip},
 		{"explicit verified without issuer", "verified", "", VerificationVerified},
 		{"bogus falls back to derived", "bogus", "http://aib:8000", VerificationVerified},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := Config{VerificationMode: tc.mode, Issuer: tc.issuer}
-			if got := cfg.VerificationModeOrDefault(); got != tc.want {
-				t.Errorf("VerificationModeOrDefault() = %q, want %q", got, tc.want)
+			cfg := Config{AgentJWTVerificationMode: tc.mode, Issuer: tc.issuer}
+			if got := cfg.AgentJWTVerificationModeOrDefault(); got != tc.want {
+				t.Errorf("AgentJWTVerificationModeOrDefault() = %q, want %q", got, tc.want)
 			}
 		})
 	}
 }
 
-func TestPopulatorModeOrDefault(t *testing.T) {
+func TestPolicyDataSourceOrDefault(t *testing.T) {
 	cases := []struct {
-		in   PopulatorMode
-		want PopulatorMode
+		in   PolicyDataSource
+		want PolicyDataSource
 	}{
-		{"", PopulatorCRD},
-		{"crd", PopulatorCRD},
-		{"byo-configmap", PopulatorBYOConfigMap},
-		{"operator-rego", PopulatorOperatorRego},
-		{"external", PopulatorExternal},
-		{"bogus", PopulatorCRD},
+		{"", PolicyDataAutomated},
+		{"automated", PolicyDataAutomated},
+		{"manual", PolicyDataManual},
+		{"external", PolicyDataExternal},
+		{"bogus", PolicyDataAutomated},
 	}
 	for _, tc := range cases {
-		if got := (Config{PopulatorMode: tc.in}).PopulatorModeOrDefault(); got != tc.want {
-			t.Errorf("PopulatorModeOrDefault(%q) = %q, want %q", tc.in, got, tc.want)
+		if got := (Config{PolicyDataSource: tc.in}).PolicyDataSourceOrDefault(); got != tc.want {
+			t.Errorf("PolicyDataSourceOrDefault(%q) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
 }
 
 func TestGetConfigReadsAuthorizationModes(t *testing.T) {
-	t.Setenv(envAuthorizationModel, "Both")
-	t.Setenv(envEnforcementMode, "ExtAuthz")
-	t.Setenv(envVerificationMode, "Verified")
-	t.Setenv(envPopulatorMode, "Operator-Rego")
+	t.Setenv(envAuthzProvider, "AIB")
+	t.Setenv(envGatewayEnforcementExt, "Ext_Authz")
+	t.Setenv(envAgentJWTVerification, "Verified")
+	t.Setenv(envPolicyDataSource, "External")
+	t.Setenv(envPolicyRegoOverride, "true")
 
 	cfg := GetConfig()
 
-	if got := cfg.AuthorizationModelOrDefault(); got != AuthorizationModelBoth {
-		t.Errorf("AuthorizationModel = %q, want both", got)
+	if got := cfg.AuthzProviderOrDefault(); got != AuthzProviderAIB {
+		t.Errorf("AuthzProvider = %q, want aib", got)
 	}
-	if got := cfg.EnforcementModeOrDefault(); got != EnforcementExtAuthz {
-		t.Errorf("EnforcementMode = %q, want extauthz", got)
+	if got := cfg.GatewayEnforcementExtensionOrDefault(); got != EnforcementExtAuthz {
+		t.Errorf("AuthzGatewayEnforcementExtension = %q, want ext_authz", got)
 	}
-	if got := cfg.VerificationModeOrDefault(); got != VerificationVerified {
-		t.Errorf("VerificationMode = %q, want verified", got)
+	if got := cfg.AgentJWTVerificationModeOrDefault(); got != VerificationVerified {
+		t.Errorf("AgentJWTVerificationMode = %q, want verified", got)
 	}
-	if got := cfg.PopulatorModeOrDefault(); got != PopulatorOperatorRego {
-		t.Errorf("PopulatorMode = %q, want operator-rego", got)
+	if got := cfg.PolicyDataSourceOrDefault(); got != PolicyDataExternal {
+		t.Errorf("PolicyDataSource = %q, want external", got)
+	}
+	if !cfg.PolicyRegoOverride {
+		t.Errorf("PolicyRegoOverride = false, want true")
 	}
 }

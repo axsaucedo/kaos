@@ -94,82 +94,86 @@ type Config struct {
 	// gateway to be the only application path between workloads.
 	GatewayRouting bool
 
-	// AuthorizationModel selects which coarse authorization model(s) the operator
-	// projects and enforces at the ext_proc OPA decision point
-	// (security.authorization.model). Empty means authorization projection is off.
-	AuthorizationModel AuthorizationModel
+	// AuthzProvider selects which authorization provider the operator projects
+	// and enforces at the ext_proc OPA decision point
+	// (security.authorization.provider). "none" (default) means authorization
+	// projection is off.
+	AuthzProvider AuthzProvider
 
-	// EnforcementMode selects the gateway enforcement path
-	// (security.authorization.enforcement). Defaults to OPA embedded in ext_proc;
-	// the legacy ext_authz seam is opt-in.
-	EnforcementMode EnforcementMode
+	// AuthzGatewayEnforcementExtension selects which Envoy gateway extension
+	// enforces authorization (security.authorization.gatewayExtension). Defaults
+	// to OPA embedded in ext_proc; the ext_authz extension is opt-in.
+	AuthzGatewayEnforcementExtension AuthzGatewayEnforcementExtension
 
-	// VerificationMode selects how the actor token is trusted
-	// (security.authorization.verification). Empty derives the mode from the agent
-	// issuer: verified when an issuer is configured, demo (header-trust) otherwise.
-	VerificationMode VerificationMode
+	// AgentJWTVerificationMode selects how the agent (actor) JWT is trusted
+	// (security.authorization.agentJwtVerification). Empty derives the mode from
+	// the agent issuer: verified when an issuer is configured, skip (header-trust)
+	// otherwise.
+	AgentJWTVerificationMode AgentJWTVerificationMode
 
-	// PopulatorMode selects who owns the authorization policy data
-	// (security.authorization.populator). Defaults to operator CRD projection.
-	PopulatorMode PopulatorMode
+	// PolicyDataSource selects who authors the authorization policy data
+	// (security.authorization.policyDataSource). Defaults to operator projection.
+	PolicyDataSource PolicyDataSource
+
+	// PolicyRegoOverride, when true, has the operator own only the policy.rego key
+	// and never author the data key, so an admin supplies the grant data. It is an
+	// orthogonal install-time option available in any PolicyDataSource.
+	PolicyRegoOverride bool
 }
 
-// AuthorizationModel selects which coarse authorization model(s) the operator
-// projects and enforces. Both models share one OPA decision point in ext_proc;
-// they differ only in where the grant facts live.
-type AuthorizationModel string
+// AuthzProvider selects which authorization provider the operator projects and
+// enforces. All providers share one OPA decision point in ext_proc; they differ
+// only in where the grant facts live.
+type AuthzProvider string
 
 const (
-	// AuthorizationModelOff disables authorization projection (default).
-	AuthorizationModelOff AuthorizationModel = ""
-	// AuthorizationModelData enforces from KAOS-owned OPA data (data.kaos.grants)
-	// derived from CRDs — the actor-keyed "Model 1" path.
-	AuthorizationModelData AuthorizationModel = "model1"
-	// AuthorizationModelBroker enforces from broker permission sets returned by
-	// token exchange (granted_permission_sets) — the "Model 2" path.
-	AuthorizationModelBroker AuthorizationModel = "model2"
-	// AuthorizationModelBoth exposes both fact sources to the policy at once.
-	AuthorizationModelBoth AuthorizationModel = "both"
+	// AuthzProviderNone disables authorization projection (default).
+	AuthzProviderNone AuthzProvider = "none"
+	// AuthzProviderKAOS enforces from KAOS-owned OPA data (data.kaos.grants)
+	// derived from CRDs — the actor-keyed provider.
+	AuthzProviderKAOS AuthzProvider = "kaos"
+	// AuthzProviderAIB enforces from broker permission sets returned by token
+	// exchange (granted_permission_sets) — the broker provider.
+	AuthzProviderAIB AuthzProvider = "aib"
 )
 
-// EnforcementMode selects the gateway enforcement path.
-type EnforcementMode string
+// AuthzGatewayEnforcementExtension selects which Envoy gateway extension enforces
+// authorization.
+type AuthzGatewayEnforcementExtension string
 
 const (
 	// EnforcementExtProc enforces via OPA embedded in the ext_proc filter (default).
-	EnforcementExtProc EnforcementMode = "extproc"
-	// EnforcementExtAuthz enforces via the optional, default-off ext_authz seam.
-	EnforcementExtAuthz EnforcementMode = "extauthz"
+	EnforcementExtProc AuthzGatewayEnforcementExtension = "ext_proc"
+	// EnforcementExtAuthz enforces via the optional, default-off ext_authz extension.
+	EnforcementExtAuthz AuthzGatewayEnforcementExtension = "ext_authz"
 )
 
-// VerificationMode selects how the actor (agent) token is trusted by the policy.
-type VerificationMode string
+// AgentJWTVerificationMode selects how the agent (actor) JWT is trusted by the
+// policy.
+type AgentJWTVerificationMode string
 
 const (
-	// VerificationDemo trusts the actor header without signature verification —
-	// spoofable and non-production; used when no issuer is configured.
-	VerificationDemo VerificationMode = "demo"
-	// VerificationVerified requires the actor token signature to be verified
+	// VerificationSkip trusts the actor header without signature verification;
+	// used when no issuer is configured. Not for production.
+	VerificationSkip AgentJWTVerificationMode = "skip"
+	// VerificationVerified requires the actor JWT signature to be verified
 	// against the injected JWKS.
-	VerificationVerified VerificationMode = "verified"
+	VerificationVerified AgentJWTVerificationMode = "verified"
 )
 
-// PopulatorMode selects who owns the authorization policy data the operator
+// PolicyDataSource selects who authors the authorization policy data the operator
 // enforces against.
-type PopulatorMode string
+type PolicyDataSource string
 
 const (
-	// PopulatorCRD projects the policy data from KAOS CRDs (default, authoritative).
-	PopulatorCRD PopulatorMode = "crd"
-	// PopulatorBYOConfigMap points enforcement at an admin-provided ConfigMap the
-	// operator does not manage (Model 1 bring-your-own).
-	PopulatorBYOConfigMap PopulatorMode = "byo-configmap"
-	// PopulatorOperatorRego lets the operator own the rego while an admin authors
-	// the data key (Model 1 operator-rego + admin-data).
-	PopulatorOperatorRego PopulatorMode = "operator-rego"
-	// PopulatorExternal turns projection off and leaves AIB authoritative,
-	// forcing prune off while KAOS keeps identity (Model 2 off-switch).
-	PopulatorExternal PopulatorMode = "external"
+	// PolicyDataAutomated projects the policy data from KAOS CRDs (default).
+	PolicyDataAutomated PolicyDataSource = "automated"
+	// PolicyDataManual points enforcement at an admin-authored data key the
+	// operator does not project.
+	PolicyDataManual PolicyDataSource = "manual"
+	// PolicyDataExternal turns projection off and leaves the broker authoritative,
+	// forcing prune off while KAOS keeps identity.
+	PolicyDataExternal PolicyDataSource = "external"
 )
 
 const (
@@ -187,10 +191,11 @@ const (
 	envNetworkPolicyEgress    = "SECURITY_NETWORK_POLICY_EGRESS_ENABLED"
 	envGatewayHost            = "SECURITY_GATEWAY_HOST"
 	envGatewayRouting         = "SECURITY_GATEWAY_ROUTING_ENABLED"
-	envAuthorizationModel     = "SECURITY_AUTHORIZATION_MODEL"
-	envEnforcementMode        = "SECURITY_AUTHORIZATION_ENFORCEMENT"
-	envVerificationMode       = "SECURITY_AUTHORIZATION_VERIFICATION"
-	envPopulatorMode          = "SECURITY_AUTHORIZATION_POPULATOR"
+	envAuthzProvider          = "SECURITY_AUTHORIZATION_PROVIDER"
+	envGatewayEnforcementExt  = "SECURITY_AUTHORIZATION_GATEWAY_EXTENSION"
+	envAgentJWTVerification   = "SECURITY_AUTHORIZATION_AGENT_JWT_VERIFICATION"
+	envPolicyDataSource       = "SECURITY_AUTHORIZATION_POLICY_DATA_SOURCE"
+	envPolicyRegoOverride     = "SECURITY_AUTHORIZATION_POLICY_REGO_OVERRIDE"
 )
 
 // Default namespaces used by NetworkPolicy ingress rules when not configured.
@@ -206,23 +211,24 @@ func GetConfig() Config {
 		operatorNamespace = os.Getenv(envPodNamespace)
 	}
 	return Config{
-		ExtAuthzURL:            os.Getenv(envExtAuthzURL),
-		Issuer:                 os.Getenv(envIssuer),
-		CredentialSecretPrefix: os.Getenv(envCredentialSecretPrefix),
-		UserIssuer:             os.Getenv(envUserIssuer),
-		UserAudience:           os.Getenv(envUserAudience),
-		UserJWKSURIOverride:    os.Getenv(envUserJWKSURI),
-		ExtProcURL:             os.Getenv(envExtProcURL),
-		GatewayNamespace:       os.Getenv(envGatewayNamespace),
-		OperatorNamespace:      operatorNamespace,
-		NetworkPolicyDisabled:  parseBoolEnv(envNetworkPolicyDisabled),
-		NetworkPolicyEgress:    parseBoolEnv(envNetworkPolicyEgress),
-		GatewayHost:            os.Getenv(envGatewayHost),
-		GatewayRouting:         parseBoolEnv(envGatewayRouting),
-		AuthorizationModel:     AuthorizationModel(readEnumEnv(envAuthorizationModel)),
-		EnforcementMode:        EnforcementMode(readEnumEnv(envEnforcementMode)),
-		VerificationMode:       VerificationMode(readEnumEnv(envVerificationMode)),
-		PopulatorMode:          PopulatorMode(readEnumEnv(envPopulatorMode)),
+		ExtAuthzURL:                      os.Getenv(envExtAuthzURL),
+		Issuer:                           os.Getenv(envIssuer),
+		CredentialSecretPrefix:           os.Getenv(envCredentialSecretPrefix),
+		UserIssuer:                       os.Getenv(envUserIssuer),
+		UserAudience:                     os.Getenv(envUserAudience),
+		UserJWKSURIOverride:              os.Getenv(envUserJWKSURI),
+		ExtProcURL:                       os.Getenv(envExtProcURL),
+		GatewayNamespace:                 os.Getenv(envGatewayNamespace),
+		OperatorNamespace:                operatorNamespace,
+		NetworkPolicyDisabled:            parseBoolEnv(envNetworkPolicyDisabled),
+		NetworkPolicyEgress:              parseBoolEnv(envNetworkPolicyEgress),
+		GatewayHost:                      os.Getenv(envGatewayHost),
+		GatewayRouting:                   parseBoolEnv(envGatewayRouting),
+		AuthzProvider:                    AuthzProvider(readEnumEnv(envAuthzProvider)),
+		AuthzGatewayEnforcementExtension: AuthzGatewayEnforcementExtension(readEnumEnv(envGatewayEnforcementExt)),
+		AgentJWTVerificationMode:         AgentJWTVerificationMode(readEnumEnv(envAgentJWTVerification)),
+		PolicyDataSource:                 PolicyDataSource(readEnumEnv(envPolicyDataSource)),
+		PolicyRegoOverride:               parseBoolEnv(envPolicyRegoOverride),
 	}
 }
 
@@ -464,61 +470,65 @@ func parseServiceHostPort(rawURL, label string) (name, namespace string, port in
 	return name, namespace, port, nil
 }
 
-// AuthorizationModelOrDefault returns the configured authorization model,
-// defaulting to off (no projection) for unset or unrecognized values.
-func (c Config) AuthorizationModelOrDefault() AuthorizationModel {
-	return normalizeEnum(c.AuthorizationModel,
-		[]AuthorizationModel{AuthorizationModelData, AuthorizationModelBroker, AuthorizationModelBoth},
-		AuthorizationModelOff)
+// AuthzProviderOrDefault returns the configured authorization provider,
+// defaulting to none (no projection) for unset or unrecognized values.
+func (c Config) AuthzProviderOrDefault() AuthzProvider {
+	return normalizeEnum(c.AuthzProvider,
+		[]AuthzProvider{AuthzProviderNone, AuthzProviderKAOS, AuthzProviderAIB},
+		AuthzProviderNone)
 }
 
-// AuthorizationEnabled reports whether any authorization model is selected.
+// AuthorizationEnabled reports whether any authorization provider is selected.
 func (c Config) AuthorizationEnabled() bool {
-	return c.AuthorizationModelOrDefault() != AuthorizationModelOff
+	return c.AuthzProviderOrDefault() != AuthzProviderNone
 }
 
 // ExtAuthzEnabled reports whether the operator should attach the ext_authz
 // external-authorization check to protected routes. It is the optional,
-// default-off enforcement seam: it requires the enforcement mode to be set to
-// ext_authz explicitly and a backend to be configured. The default enforcement
-// path is OPA embedded in ext_proc, so this returns false unless ext_authz is
-// deliberately selected.
+// default-off enforcement extension: it requires the gateway enforcement
+// extension to be set to ext_authz explicitly and a backend to be configured.
+// The default enforcement path is OPA embedded in ext_proc, so this returns
+// false unless ext_authz is deliberately selected.
 func (c Config) ExtAuthzEnabled() bool {
-	return c.EnforcementModeOrDefault() == EnforcementExtAuthz && c.IsOperational()
+	return c.GatewayEnforcementExtensionOrDefault() == EnforcementExtAuthz && c.IsOperational()
 }
 
-// EnforcementModeOrDefault returns the configured enforcement path, defaulting to
-// OPA embedded in ext_proc.
-func (c Config) EnforcementModeOrDefault() EnforcementMode {
-	return normalizeEnum(c.EnforcementMode,
-		[]EnforcementMode{EnforcementExtProc, EnforcementExtAuthz},
+// GatewayEnforcementExtensionOrDefault returns the configured gateway
+// enforcement extension, defaulting to OPA embedded in ext_proc.
+func (c Config) GatewayEnforcementExtensionOrDefault() AuthzGatewayEnforcementExtension {
+	return normalizeEnum(c.AuthzGatewayEnforcementExtension,
+		[]AuthzGatewayEnforcementExtension{EnforcementExtProc, EnforcementExtAuthz},
 		EnforcementExtProc)
 }
 
 // AuthzJWKSURI returns the agent (actor) JWKS endpoint the operator injects into
-// the authorization policy data, but only in verified mode. In demo mode it
+// the authorization policy data, but only in verified mode. In skip mode it
 // returns an empty string so no JWKS is injected and the policy decodes the
 // actor token without verifying it.
 func (c Config) AuthzJWKSURI() string {
-	if c.VerificationModeOrDefault() != VerificationVerified {
+	if c.AgentJWTVerificationModeOrDefault() != VerificationVerified {
 		return ""
 	}
 	return c.AgentJWKSURI()
 }
-func (c Config) VerificationModeOrDefault() VerificationMode {
-	def := VerificationDemo
+
+// AgentJWTVerificationModeOrDefault returns the configured agent JWT
+// verification mode, deriving the default from the issuer: verified when an
+// issuer is configured, skip otherwise.
+func (c Config) AgentJWTVerificationModeOrDefault() AgentJWTVerificationMode {
+	def := VerificationSkip
 	if strings.TrimSpace(c.Issuer) != "" {
 		def = VerificationVerified
 	}
-	return normalizeEnum(c.VerificationMode,
-		[]VerificationMode{VerificationDemo, VerificationVerified},
+	return normalizeEnum(c.AgentJWTVerificationMode,
+		[]AgentJWTVerificationMode{VerificationSkip, VerificationVerified},
 		def)
 }
 
-// PopulatorModeOrDefault returns the configured policy-data populator, defaulting
-// to operator CRD projection.
-func (c Config) PopulatorModeOrDefault() PopulatorMode {
-	return normalizeEnum(c.PopulatorMode,
-		[]PopulatorMode{PopulatorCRD, PopulatorBYOConfigMap, PopulatorOperatorRego, PopulatorExternal},
-		PopulatorCRD)
+// PolicyDataSourceOrDefault returns the configured policy-data source, defaulting
+// to operator projection.
+func (c Config) PolicyDataSourceOrDefault() PolicyDataSource {
+	return normalizeEnum(c.PolicyDataSource,
+		[]PolicyDataSource{PolicyDataAutomated, PolicyDataManual, PolicyDataExternal},
+		PolicyDataAutomated)
 }
