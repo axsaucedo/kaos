@@ -46,7 +46,8 @@ spec:
       scope: user             # private | user | shared | session
       tools: all              # Expose memory tools: all | read | write
       failureMode: soft       # Override store default: soft | strict
-      maxSessionEvents: 500   # Max events per session
+      clientParams:
+        tokenBudget: 4096     # Verbatim short-term window cap (tokens)
   
   # Optional: Container overrides (image, env, resources)
   container:
@@ -249,6 +250,12 @@ config:
 | `failureMode` | string | store default | Override the store's write/forget failure mode: `soft` (tolerate) or `strict` (surface errors) |
 | `clientParams.tokenBudget` | int | runtime default | Cap on the verbatim short-term window replayed, in tokens |
 | `clientParams.rollingSummary` | bool | `true` | Maintain a rolling summary of evicted turns |
+
+**Memory scope (multi-tenancy):**
+- `private` (default) — memory is isolated to this single agent; each agent identity owns its own store partition.
+- `user` — memory is keyed by the calling principal, so any agent bound to the same store shares that user's memory across sessions. Requires a `memoryStore`.
+- `shared` — a single common partition read/written by every agent bound to the store. Requires a `memoryStore`.
+- `session` — memory is scoped to an individual conversation/session and not carried across sessions.
 
 **Remote memory:**
 - Set `type: remote` and reference a ready MemoryStore via `memoryStore`.
