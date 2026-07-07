@@ -13,9 +13,11 @@ import (
 )
 
 // Config holds operator-wide security configuration read from the environment.
-// Security is enabled by the presence of an agent-auth ext_authz URL: when
-// ExtAuthzURL is empty the operator generates no authorization policies and
-// existing routing behavior is unchanged.
+// Security is enabled when any gateway enforcement hook is configured — either
+// the ext_authz access-check backend or the ext_proc token-exchange/OPA backend
+// (see SecurityEnabled). Credential mounting and NetworkPolicy generation are
+// gated on that broader predicate so they stay active for ext_proc-only installs
+// rather than being tied to ext_authz alone.
 type Config struct {
 	// ExtAuthzURL is the host:port of the external authorization (ext_authz)
 	// access-check gRPC backend (agentAuth.extAuthzUrl). An empty value means
@@ -91,7 +93,84 @@ type Config struct {
 	// direct Service URLs; it is enabled together with NetworkPolicy to force the
 	// gateway to be the only application path between workloads.
 	GatewayRouting bool
+
+	// AuthorizationModel selects which coarse authorization model(s) the operator
+	// projects and enforces at the ext_proc OPA decision point
+	// (security.authorization.model). Empty means authorization projection is off.
+	AuthorizationModel AuthorizationModel
+
+	// EnforcementMode selects the gateway enforcement path
+	// (security.authorization.enforcement). Defaults to OPA embedded in ext_proc;
+	// the legacy ext_authz seam is opt-in.
+	EnforcementMode EnforcementMode
+
+	// VerificationMode selects how the actor token is trusted
+	// (security.authorization.verification). Empty derives the mode from the agent
+	// issuer: verified when an issuer is configured, demo (header-trust) otherwise.
+	VerificationMode VerificationMode
+
+	// PopulatorMode selects who owns the authorization policy data
+	// (security.authorization.populator). Defaults to operator CRD projection.
+	PopulatorMode PopulatorMode
 }
+
+// AuthorizationModel selects which coarse authorization model(s) the operator
+// projects and enforces. Both models share one OPA decision point in ext_proc;
+// they differ only in where the grant facts live.
+type AuthorizationModel string
+
+const (
+	// AuthorizationModelOff disables authorization projection (default).
+	AuthorizationModelOff AuthorizationModel = ""
+	// AuthorizationModelData enforces from KAOS-owned OPA data (data.kaos.grants)
+	// derived from CRDs — the actor-keyed "Model 1" path.
+	AuthorizationModelData AuthorizationModel = "model1"
+	// AuthorizationModelBroker enforces from broker permission sets returned by
+	// token exchange (granted_permission_sets) — the "Model 2" path.
+	AuthorizationModelBroker AuthorizationModel = "model2"
+	// AuthorizationModelBoth exposes both fact sources to the policy at once.
+	AuthorizationModelBoth AuthorizationModel = "both"
+)
+
+// EnforcementMode selects the gateway enforcement path.
+type EnforcementMode string
+
+const (
+	// EnforcementExtProc enforces via OPA embedded in the ext_proc filter (default).
+	EnforcementExtProc EnforcementMode = "extproc"
+	// EnforcementExtAuthz enforces via the optional, default-off ext_authz seam.
+	EnforcementExtAuthz EnforcementMode = "extauthz"
+)
+
+// VerificationMode selects how the actor (agent) token is trusted by the policy.
+type VerificationMode string
+
+const (
+	// VerificationDemo trusts the actor header without signature verification —
+	// spoofable and non-production; used when no issuer is configured.
+	VerificationDemo VerificationMode = "demo"
+	// VerificationVerified requires the actor token signature to be verified
+	// against the injected JWKS.
+	VerificationVerified VerificationMode = "verified"
+)
+
+// PopulatorMode selects who owns the authorization policy data the operator
+// enforces against.
+type PopulatorMode string
+
+const (
+	// PopulatorCRD projects the policy data from KAOS CRDs (default, authoritative).
+	PopulatorCRD PopulatorMode = "crd"
+	// PopulatorBYOConfigMap points enforcement at an admin-provided ConfigMap the
+	// operator does not manage (Model 1 bring-your-own).
+	PopulatorBYOConfigMap PopulatorMode = "byo-configmap"
+	// PopulatorOperatorRego lets the operator own the rego while an admin authors
+	// the data key (Model 1 operator-rego + admin-data).
+	PopulatorOperatorRego PopulatorMode = "operator-rego"
+	// PopulatorExternal turns projection off and leaves AIB authoritative,
+	// forcing prune off while KAOS keeps identity (Model 2 off-switch).
+	PopulatorExternal PopulatorMode = "external"
+)
 
 const (
 	envExtAuthzURL            = "SECURITY_AGENT_AUTH_EXT_AUTHZ_URL"
@@ -108,6 +187,10 @@ const (
 	envNetworkPolicyEgress    = "SECURITY_NETWORK_POLICY_EGRESS_ENABLED"
 	envGatewayHost            = "SECURITY_GATEWAY_HOST"
 	envGatewayRouting         = "SECURITY_GATEWAY_ROUTING_ENABLED"
+	envAuthorizationModel     = "SECURITY_AUTHORIZATION_MODEL"
+	envEnforcementMode        = "SECURITY_AUTHORIZATION_ENFORCEMENT"
+	envVerificationMode       = "SECURITY_AUTHORIZATION_VERIFICATION"
+	envPopulatorMode          = "SECURITY_AUTHORIZATION_POPULATOR"
 )
 
 // Default namespaces used by NetworkPolicy ingress rules when not configured.
@@ -136,6 +219,10 @@ func GetConfig() Config {
 		NetworkPolicyEgress:    parseBoolEnv(envNetworkPolicyEgress),
 		GatewayHost:            os.Getenv(envGatewayHost),
 		GatewayRouting:         parseBoolEnv(envGatewayRouting),
+		AuthorizationModel:     AuthorizationModel(readEnumEnv(envAuthorizationModel)),
+		EnforcementMode:        EnforcementMode(readEnumEnv(envEnforcementMode)),
+		VerificationMode:       VerificationMode(readEnumEnv(envVerificationMode)),
+		PopulatorMode:          PopulatorMode(readEnumEnv(envPopulatorMode)),
 	}
 }
 
@@ -149,17 +236,46 @@ func parseBoolEnv(key string) bool {
 	return v
 }
 
-// IsOperational reports whether gateway authorization enforcement is configured.
-// The operator only generates authorization policies when this returns true.
+// readEnumEnv reads a string environment variable, trimming whitespace and
+// lower-casing it so enum comparisons are case-insensitive. Validation and
+// defaulting happen in the typed accessors.
+func readEnumEnv(key string) string {
+	return strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+}
+
+// normalizeEnum returns v when it matches one of the allowed values, otherwise
+// def. It keeps unknown or unset configuration on a safe default.
+func normalizeEnum[T ~string](v T, allowed []T, def T) T {
+	for _, a := range allowed {
+		if v == a {
+			return v
+		}
+	}
+	return def
+}
+
+// IsOperational reports whether the legacy ext_authz access-check backend is
+// configured. It gates ext_authz SecurityPolicy generation specifically; broader
+// security behavior (credentials, NetworkPolicy) is gated on SecurityEnabled.
 func (c Config) IsOperational() bool {
 	return strings.TrimSpace(c.ExtAuthzURL) != ""
 }
 
+// SecurityEnabled reports whether any gateway enforcement hook is configured —
+// either the ext_authz access-check backend or the ext_proc token-exchange/OPA
+// backend. It is the predicate that keeps credential mounting and NetworkPolicy
+// generation active independently of ext_authz, so an ext_proc-only install
+// (OPA-in-ext_proc authorization) still provisions credentials and isolation.
+func (c Config) SecurityEnabled() bool {
+	return c.IsOperational() || c.ExtProcEnabled()
+}
+
 // CredentialMountingEnabled reports whether the operator should mount per-agent
-// AIB credentials into agent pods. This requires security to be operational and a
-// credential Secret prefix to be configured.
+// AIB credentials into agent pods. This requires security to be enabled (any
+// enforcement hook, not ext_authz specifically) and a credential Secret prefix to
+// be configured.
 func (c Config) CredentialMountingEnabled() bool {
-	return c.IsOperational() && strings.TrimSpace(c.CredentialSecretPrefix) != ""
+	return c.SecurityEnabled() && strings.TrimSpace(c.CredentialSecretPrefix) != ""
 }
 
 // CredentialSecretName returns the name of the per-agent credential Secret for the
@@ -247,12 +363,12 @@ func (c Config) ExtProcEnabled() bool {
 }
 
 // NetworkPolicyEnabled reports whether the operator should generate a
-// NetworkPolicy for each protected workload. It requires security to be
-// operational and the escape hatch not to be set. When true, direct
+// NetworkPolicy for each protected workload. It requires security to be enabled
+// (any enforcement hook) and the escape hatch not to be set. When true, direct
 // workload-to-workload application traffic is denied so the Gateway cannot be
 // bypassed.
 func (c Config) NetworkPolicyEnabled() bool {
-	return c.IsOperational() && !c.NetworkPolicyDisabled
+	return c.SecurityEnabled() && !c.NetworkPolicyDisabled
 }
 
 // NetworkPolicyEgressEnabled reports whether generated NetworkPolicies should
@@ -339,4 +455,46 @@ func parseServiceHostPort(rawURL, label string) (name, namespace string, port in
 		return "", "", 0, fmt.Errorf("%s URL %q has an empty service name", label, url)
 	}
 	return name, namespace, port, nil
+}
+
+// AuthorizationModelOrDefault returns the configured authorization model,
+// defaulting to off (no projection) for unset or unrecognized values.
+func (c Config) AuthorizationModelOrDefault() AuthorizationModel {
+	return normalizeEnum(c.AuthorizationModel,
+		[]AuthorizationModel{AuthorizationModelData, AuthorizationModelBroker, AuthorizationModelBoth},
+		AuthorizationModelOff)
+}
+
+// AuthorizationEnabled reports whether any authorization model is selected.
+func (c Config) AuthorizationEnabled() bool {
+	return c.AuthorizationModelOrDefault() != AuthorizationModelOff
+}
+
+// EnforcementModeOrDefault returns the configured enforcement path, defaulting to
+// OPA embedded in ext_proc.
+func (c Config) EnforcementModeOrDefault() EnforcementMode {
+	return normalizeEnum(c.EnforcementMode,
+		[]EnforcementMode{EnforcementExtProc, EnforcementExtAuthz},
+		EnforcementExtProc)
+}
+
+// VerificationModeOrDefault returns the configured verification mode. When unset
+// or unrecognized it is derived from the agent issuer: verified when an issuer is
+// configured, demo (header-trust) otherwise.
+func (c Config) VerificationModeOrDefault() VerificationMode {
+	def := VerificationDemo
+	if strings.TrimSpace(c.Issuer) != "" {
+		def = VerificationVerified
+	}
+	return normalizeEnum(c.VerificationMode,
+		[]VerificationMode{VerificationDemo, VerificationVerified},
+		def)
+}
+
+// PopulatorModeOrDefault returns the configured policy-data populator, defaulting
+// to operator CRD projection.
+func (c Config) PopulatorModeOrDefault() PopulatorMode {
+	return normalizeEnum(c.PopulatorMode,
+		[]PopulatorMode{PopulatorCRD, PopulatorBYOConfigMap, PopulatorOperatorRego, PopulatorExternal},
+		PopulatorCRD)
 }

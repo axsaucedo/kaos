@@ -407,3 +407,148 @@ func TestGetConfigReadsGatewayRoutingFields(t *testing.T) {
 		t.Errorf("expected GatewayRoutingEnabled true")
 	}
 }
+
+func TestSecurityEnabled(t *testing.T) {
+	cases := []struct {
+		name     string
+		extAuthz string
+		extProc  string
+		want     bool
+	}{
+		{"nothing set", "", "", false},
+		{"ext_authz only", "svc:9002", "", true},
+		{"ext_proc only", "", "svc:50051", true},
+		{"both set", "svc:9002", "svc:50051", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := Config{ExtAuthzURL: tc.extAuthz, ExtProcURL: tc.extProc}
+			if got := cfg.SecurityEnabled(); got != tc.want {
+				t.Errorf("SecurityEnabled() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCredentialMountingEnabledWithExtProcOnly(t *testing.T) {
+	cfg := Config{ExtProcURL: "svc:50051", CredentialSecretPrefix: "kaos-aib"}
+	if !cfg.CredentialMountingEnabled() {
+		t.Errorf("expected credential mounting enabled with ext_proc-only and prefix set")
+	}
+	if (Config{ExtProcURL: "svc:50051"}).CredentialMountingEnabled() {
+		t.Errorf("expected credential mounting disabled without prefix")
+	}
+}
+
+func TestNetworkPolicyEnabledWithExtProcOnly(t *testing.T) {
+	if !(Config{ExtProcURL: "svc:50051"}).NetworkPolicyEnabled() {
+		t.Errorf("expected NetworkPolicy enabled with ext_proc-only")
+	}
+	if (Config{ExtProcURL: "svc:50051", NetworkPolicyDisabled: true}).NetworkPolicyEnabled() {
+		t.Errorf("expected NetworkPolicy disabled by escape hatch")
+	}
+}
+
+func TestAuthorizationModelOrDefault(t *testing.T) {
+	cases := []struct {
+		in   AuthorizationModel
+		want AuthorizationModel
+	}{
+		{"", AuthorizationModelOff},
+		{"model1", AuthorizationModelData},
+		{"model2", AuthorizationModelBroker},
+		{"both", AuthorizationModelBoth},
+		{"bogus", AuthorizationModelOff},
+	}
+	for _, tc := range cases {
+		cfg := Config{AuthorizationModel: tc.in}
+		if got := cfg.AuthorizationModelOrDefault(); got != tc.want {
+			t.Errorf("AuthorizationModelOrDefault(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+		wantEnabled := tc.want != AuthorizationModelOff
+		if got := cfg.AuthorizationEnabled(); got != wantEnabled {
+			t.Errorf("AuthorizationEnabled(%q) = %v, want %v", tc.in, got, wantEnabled)
+		}
+	}
+}
+
+func TestEnforcementModeOrDefault(t *testing.T) {
+	cases := []struct {
+		in   EnforcementMode
+		want EnforcementMode
+	}{
+		{"", EnforcementExtProc},
+		{"extproc", EnforcementExtProc},
+		{"extauthz", EnforcementExtAuthz},
+		{"bogus", EnforcementExtProc},
+	}
+	for _, tc := range cases {
+		if got := (Config{EnforcementMode: tc.in}).EnforcementModeOrDefault(); got != tc.want {
+			t.Errorf("EnforcementModeOrDefault(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestVerificationModeOrDefault(t *testing.T) {
+	cases := []struct {
+		name   string
+		mode   VerificationMode
+		issuer string
+		want   VerificationMode
+	}{
+		{"derive demo without issuer", "", "", VerificationDemo},
+		{"derive verified with issuer", "", "http://aib:8000", VerificationVerified},
+		{"explicit demo overrides issuer", "demo", "http://aib:8000", VerificationDemo},
+		{"explicit verified without issuer", "verified", "", VerificationVerified},
+		{"bogus falls back to derived", "bogus", "http://aib:8000", VerificationVerified},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := Config{VerificationMode: tc.mode, Issuer: tc.issuer}
+			if got := cfg.VerificationModeOrDefault(); got != tc.want {
+				t.Errorf("VerificationModeOrDefault() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPopulatorModeOrDefault(t *testing.T) {
+	cases := []struct {
+		in   PopulatorMode
+		want PopulatorMode
+	}{
+		{"", PopulatorCRD},
+		{"crd", PopulatorCRD},
+		{"byo-configmap", PopulatorBYOConfigMap},
+		{"operator-rego", PopulatorOperatorRego},
+		{"external", PopulatorExternal},
+		{"bogus", PopulatorCRD},
+	}
+	for _, tc := range cases {
+		if got := (Config{PopulatorMode: tc.in}).PopulatorModeOrDefault(); got != tc.want {
+			t.Errorf("PopulatorModeOrDefault(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestGetConfigReadsAuthorizationModes(t *testing.T) {
+	t.Setenv(envAuthorizationModel, "Both")
+	t.Setenv(envEnforcementMode, "ExtAuthz")
+	t.Setenv(envVerificationMode, "Verified")
+	t.Setenv(envPopulatorMode, "Operator-Rego")
+
+	cfg := GetConfig()
+
+	if got := cfg.AuthorizationModelOrDefault(); got != AuthorizationModelBoth {
+		t.Errorf("AuthorizationModel = %q, want both", got)
+	}
+	if got := cfg.EnforcementModeOrDefault(); got != EnforcementExtAuthz {
+		t.Errorf("EnforcementMode = %q, want extauthz", got)
+	}
+	if got := cfg.VerificationModeOrDefault(); got != VerificationVerified {
+		t.Errorf("VerificationMode = %q, want verified", got)
+	}
+	if got := cfg.PopulatorModeOrDefault(); got != PopulatorOperatorRego {
+		t.Errorf("PopulatorMode = %q, want operator-rego", got)
+	}
+}
