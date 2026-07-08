@@ -583,6 +583,7 @@ def _build_auth_operator_args(
     network_policy: bool = True,
     network_policy_egress: bool = False,
     gateway_routing: bool = False,
+    gateway_api_strict: bool = False,
     gateway_host: str = "",
     tls_mode: str = "",
     tls_issuer_name: str = "",
@@ -684,6 +685,8 @@ def _build_auth_operator_args(
         args.extend(["--set", "security.networkPolicy.egress.enabled=true"])
     if gateway_routing:
         args.extend(["--set", "security.gatewayRouting.enabled=true"])
+    if gateway_api_strict:
+        args.extend(["--set", "security.strictGatewayApi.enabled=true"])
     if gateway_host:
         args.extend(["--set", f"security.gatewayHost={gateway_host}"])
     if tls_mode:
@@ -1142,6 +1145,7 @@ def install_command(
     network_policy: bool = True,
     network_policy_egress: bool = False,
     gateway_routing: bool = False,
+    gateway_api_strict: bool = False,
     gateway_host: str | None = None,
     tls_mode: str | None = None,
     tls_issuer_name: str | None = None,
@@ -1380,6 +1384,7 @@ def install_command(
                 network_policy=network_policy,
                 network_policy_egress=network_policy_egress,
                 gateway_routing=gateway_routing,
+                gateway_api_strict=gateway_api_strict,
                 gateway_host=gateway_host or "",
                 tls_mode=tls_mode or "",
                 tls_issuer_name=tls_issuer_name or "",
@@ -1394,6 +1399,11 @@ def install_command(
                 policy_configmap_namespace=policy_configmap_namespace or "",
             )
         )
+    elif gateway_api_strict:
+        # Strict gateway-only traffic is a standalone posture: it applies even
+        # without an authorization enforcement hook, so emit it directly when
+        # auth is not enabled.
+        helm_args.extend(["--set", "security.strictGatewayApi.enabled=true"])
 
     typer.echo(f"Installing chart {HELM_CHART_NAME}...")
     result = run_helm_command(helm_args)

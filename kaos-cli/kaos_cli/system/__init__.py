@@ -185,6 +185,14 @@ def install(
         "gateway authentication and authorization apply to it. Effective only with "
         "--auth-enabled.",
     ),
+    gateway_api_strict: bool = typer.Option(
+        False,
+        "--gateway-api-strict/--no-gateway-api-strict",
+        help="Enable gateway-only strict traffic: NetworkPolicy isolation and gateway "
+        "routing together, independent of authorization. Makes the Envoy Gateway the "
+        "only application path between workloads. Enforcement requires a CNI that "
+        "enforces NetworkPolicy (e.g. Calico).",
+    ),
     gateway_host: str | None = typer.Option(
         None,
         "--gateway-host",
@@ -297,6 +305,7 @@ def install(
         network_policy=network_policy,
         network_policy_egress=network_policy_egress,
         gateway_routing=gateway_routing,
+        gateway_api_strict=gateway_api_strict,
         gateway_host=gateway_host,
         tls_mode=tls_mode,
         tls_issuer_name=tls_issuer_name,

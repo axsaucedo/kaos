@@ -1187,6 +1187,28 @@ class TestAuthWiring:
         assert "security.gatewayRouting.enabled=true" not in joined
         assert "security.gatewayHost=" not in joined
 
+    def test_build_auth_operator_args_gateway_api_strict(self):
+        from kaos_cli.install import _build_auth_operator_args
+
+        args = _build_auth_operator_args(
+            "aib-access-check-grpc.aib-system:9191",
+            "http://aib.aib-system:8000",
+            "kaos-aib",
+            gateway_api_strict=True,
+        )
+        joined = " ".join(args)
+        assert "security.strictGatewayApi.enabled=true" in joined
+
+    def test_build_auth_operator_args_omits_strict_when_default(self):
+        from kaos_cli.install import _build_auth_operator_args
+
+        args = _build_auth_operator_args(
+            "aib-access-check-grpc.aib-system:9191",
+            "http://aib.aib-system:8000",
+            "kaos-aib",
+        )
+        assert "security.strictGatewayApi.enabled=true" not in " ".join(args)
+
     def test_build_auth_operator_args_tls_self_signed(self):
         from kaos_cli.install import _build_auth_operator_args
 
