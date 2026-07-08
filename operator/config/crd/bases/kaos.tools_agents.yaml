@@ -103,51 +103,91 @@ spec:
                       agent
                     type: string
                   instructions:
-                    description: Instructions are the system instructions for the
-                      agent
+                    description: |-
+                      Instructions are the system instructions for the agent. Instructions are
+                      re-evaluated on every run and are not retained in the conversation history.
                     type: string
                   memory:
                     description: Memory configures the agent's memory system
                     properties:
-                      contextLimit:
-                        default: 6
-                        description: 'ContextLimit is the number of messages to include
-                          in delegation context (default: 6)'
-                        format: int32
-                        maximum: 100
-                        minimum: 1
-                        type: integer
+                      clientParams:
+                        description: ClientParams carries the minimal per-agent runtime
+                          memory knobs.
+                        properties:
+                          rollingSummary:
+                            description: |-
+                              RollingSummary controls whether the runtime maintains a rolling summary of
+                              evicted turns (default: true in the runtime).
+                            type: boolean
+                          tokenBudget:
+                            description: |-
+                              TokenBudget caps the verbatim short-term window the runtime replays, in
+                              tokens. When unset the runtime uses its built-in default.
+                            format: int32
+                            minimum: 0
+                            type: integer
+                        type: object
                       enabled:
                         default: true
                         description: |-
-                          Enabled controls whether memory is enabled (default: true)
-                          When disabled, NullMemory is used (no-op implementation)
+                          Enabled controls whether memory is enabled (default: true).
+                          When disabled the runtime uses a no-op memory implementation.
                         type: boolean
-                      maxSessionEvents:
-                        default: 500
-                        description: 'MaxSessionEvents is the maximum events per session
-                          before eviction (default: 500)'
-                        format: int32
-                        maximum: 10000
-                        minimum: 1
-                        type: integer
-                      maxSessions:
-                        default: 1000
-                        description: 'MaxSessions is the maximum number of sessions
-                          to keep in memory (default: 1000)'
-                        format: int32
-                        maximum: 100000
-                        minimum: 1
-                        type: integer
+                      failureMode:
+                        description: |-
+                          FailureMode overrides the memory store's default write/forget failure mode
+                          for this agent. When unset the store's default_failure_mode governs.
+                        enum:
+                        - soft
+                        - strict
+                        type: string
+                      memoryStore:
+                        description: |-
+                          MemoryStore is the name of a MemoryStore in the same namespace providing the
+                          long-term tier for this agent.
+                        type: string
+                      scope:
+                        description: |-
+                          Scope selects whose memory this agent reads and writes. "user" and "shared"
+                          require a bound memoryStore.
+                        enum:
+                        - private
+                        - user
+                        - shared
+                        - session
+                        type: string
+                      tools:
+                        description: |-
+                          Tools exposes explicit memory tools to the agent on top of the automatic
+                          recall/write baseline: "all" (save + search), "read" (search), "write"
+                          (save). Requires a bound memoryStore.
+                        enum:
+                        - all
+                        - read
+                        - write
+                        type: string
                       type:
-                        default: local
-                        description: 'Type specifies the memory implementation (default:
-                          "local")'
+                        description: |-
+                          Type selects the memory backend. "remote" requires a bound memoryStore and
+                          uses the central memory service; "local" forbids a memoryStore and uses the
+                          pod-local short-term fallback. When omitted it is derived from memoryStore
+                          presence (remote if bound, local otherwise).
                         enum:
                         - local
-                        - redis
+                        - remote
                         type: string
                     type: object
+                    x-kubernetes-validations:
+                    - message: type 'remote' requires memoryStore to be set
+                      rule: '!has(self.type) || self.type != ''remote'' || has(self.memoryStore)'
+                    - message: type 'local' must not set memoryStore
+                      rule: '!has(self.type) || self.type != ''local'' || !has(self.memoryStore)'
+                    - message: scope 'user' or 'shared' requires memoryStore to be
+                        set
+                      rule: '!has(self.scope) || (self.scope != ''user'' && self.scope
+                        != ''shared'') || has(self.memoryStore)'
+                    - message: tools requires memoryStore to be set
+                      rule: '!has(self.tools) || has(self.memoryStore)'
                   reasoningLoopMaxSteps:
                     default: 5
                     description: ReasoningLoopMaxSteps is the maximum number of reasoning
@@ -156,6 +196,12 @@ spec:
                     maximum: 20
                     minimum: 1
                     type: integer
+                  systemPrompt:
+                    description: |-
+                      SystemPrompt is an optional system prompt for the agent. Unlike
+                      instructions, a system prompt is retained in the conversation history.
+                      When empty, only instructions are applied.
+                    type: string
                   taskConfig:
                     description: TaskConfig configures budget limits for A2A async
                       tasks
@@ -8929,6 +8975,69 @@ spec:
           status:
             description: AgentStatus defines the observed state of Agent
             properties:
+              conditions:
+                description: |-
+                  Conditions represent the latest available observations of the agent's state.
+                  The MemoryDegraded condition is set when a bound MemoryStore is not Ready
+                  while the agent continues serving short-term-only memory.
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
               deployment:
                 description: Deployment contains status information from the underlying
                   Deployment

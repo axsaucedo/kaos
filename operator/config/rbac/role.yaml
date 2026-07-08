@@ -8,6 +8,7 @@ rules:
   - ""
   resources:
   - configmaps
+  - persistentvolumeclaims
   - services
   verbs:
   - create
@@ -86,6 +87,7 @@ rules:
   resources:
   - agents
   - mcpservers
+  - memorystores
   - modelapis
   verbs:
   - create
@@ -108,6 +110,7 @@ rules:
   resources:
   - agents/status
   - mcpservers/status
+  - memorystores/status
   - modelapis/status
   verbs:
   - get

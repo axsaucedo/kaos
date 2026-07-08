@@ -52,6 +52,7 @@ from kaos_memory.stores import (
     Scheduler,
     ShortTermStore,
 )
+from kaos_memory.telemetry import setup_telemetry
 
 tracer = trace.get_tracer("kaos.memory")
 logger = logging.getLogger("kaos.memory.background")
@@ -324,6 +325,7 @@ def create_app(service: MemoryService, request_concurrency: int = 8) -> FastAPI:
     app = FastAPI(title="KAOS Memory Service", lifespan=lifespan)
     app.state.memory = service
     app.state.request_pool = ThreadPoolExecutor(max_workers=request_concurrency)
+    setup_telemetry(app)
 
     async def _offload(fn: Callable[[], Any]) -> Any:
         """Run a blocking store/Mem0 call on the bounded executor, off the event loop."""
@@ -391,8 +393,15 @@ def build_service(settings: MemorySettings) -> MemoryService:
         concurrency=settings.extraction_concurrency,
         max_retries=settings.extraction_max_retries,
     )
-    longterm = LongTermStore(storage, settings.summarization(), settings.embedding())
-    summarizer = ModelClient(settings.summarization()).as_summarizer()
+    longterm = LongTermStore(
+        storage,
+        settings.summarization(),
+        settings.embedding(),
+        system_prompt=settings.extraction_system_prompt or None,
+    )
+    summarizer = ModelClient(
+        settings.summarization(), system_prompt=settings.summarization_system_prompt or None
+    ).as_summarizer()
     short_term = ShortTermStore(
         settings.storage_type,
         settings.short_term_target(),

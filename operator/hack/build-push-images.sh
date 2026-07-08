@@ -51,7 +51,9 @@ docker build -t "${REGISTRY}/kaos-operator:${OPERATOR_TAG}" "${OPERATOR_ROOT}/"
 
 # Build agent runtime
 echo "Building agent runtime image..."
-docker build -t "${REGISTRY}/kaos-agent:${AGENT_TAG}" "${PROJECT_ROOT}/pydantic-ai-server/"
+docker build -t "${REGISTRY}/kaos-agent:${AGENT_TAG}" \
+    --build-context kaos-memory="${PROJECT_ROOT}/kaos-memory" \
+    "${PROJECT_ROOT}/pydantic-ai-server/"
 
 # Tag same image for MCP server (they use the same base)
 docker tag "${REGISTRY}/kaos-agent:${AGENT_TAG}" "${REGISTRY}/kaos-mcp-server:${AGENT_TAG}"
@@ -67,6 +69,10 @@ docker build -t "${REGISTRY}/kaos-mcp-pctx-codemode:${AGENT_TAG}" "${PROJECT_ROO
 # Build MCP fastmcp-codemode image
 echo "Building MCP fastmcp-codemode image..."
 docker build -t "${REGISTRY}/kaos-mcp-fastmcp-codemode:${AGENT_TAG}" "${PROJECT_ROOT}/mcp-servers/fastmcp-codemode/"
+
+# Build memory service image
+echo "Building memory service image..."
+docker build -t "${REGISTRY}/kaos-memory-service:${AGENT_TAG}" "${PROJECT_ROOT}/kaos-memory/"
 
 # Build minimal LiteLLM image (~200MB vs 1.5GB upstream)
 # Tag it as the upstream image to override for local development
@@ -86,6 +92,7 @@ kind load docker-image "${REGISTRY}/kaos-mcp-server:${AGENT_TAG}" --name "${KIND
 kind load docker-image "${REGISTRY}/kaos-mcp-python-string:${AGENT_TAG}" --name "${KIND_CLUSTER_NAME}"
 kind load docker-image "${REGISTRY}/kaos-mcp-pctx-codemode:${AGENT_TAG}" --name "${KIND_CLUSTER_NAME}"
 kind load docker-image "${REGISTRY}/kaos-mcp-fastmcp-codemode:${AGENT_TAG}" --name "${KIND_CLUSTER_NAME}"
+kind load docker-image "${REGISTRY}/kaos-memory-service:${AGENT_TAG}" --name "${KIND_CLUSTER_NAME}"
 kind load docker-image "${LITELLM_IMAGE}" --name "${KIND_CLUSTER_NAME}"
 kind load docker-image "${OLLAMA_IMAGE}" --name "${KIND_CLUSTER_NAME}"
 

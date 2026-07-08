@@ -39,6 +39,7 @@ defaultImages:
   mcpSlack: zencoderai/slack-mcp:latest
   litellm: ghcr.io/berriai/litellm:main-stable
   ollama: ollama/ollama:latest
+  memoryService: axsauze/kaos-memory-service:0.4.8-dev
 
 # MCP Runtime registry configuration
 mcpRuntimes:

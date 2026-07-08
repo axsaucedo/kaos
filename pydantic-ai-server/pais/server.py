@@ -828,6 +828,7 @@ def create_agent_server(
         pydantic_agent = PydanticAgent(
             model=model,
             instructions=settings.agent_instructions,
+            system_prompt=settings.agent_system_prompt or (),
             name=settings.agent_name,
             defer_model_check=True,
             deps_type=AgentDeps,

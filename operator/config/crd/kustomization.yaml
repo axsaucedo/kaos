@@ -5,3 +5,4 @@ resources:
 - bases/kaos.tools_agents.yaml
 - bases/kaos.tools_mcpservers.yaml
 - bases/kaos.tools_modelapis.yaml
+- bases/kaos.tools_memorystores.yaml

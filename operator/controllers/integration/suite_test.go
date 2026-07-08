@@ -103,6 +103,7 @@ runtimes:
 	os.Setenv("DEFAULT_MCP_SERVER_IMAGE", "axsauze/kaos-mcp-server:test")
 	os.Setenv("DEFAULT_LITELLM_IMAGE", "ghcr.io/berriai/litellm:test")
 	os.Setenv("DEFAULT_OLLAMA_IMAGE", "ollama/ollama:latest")
+	os.Setenv("DEFAULT_MEMORY_SERVICE_IMAGE", "axsauze/kaos-memory-service:test")
 
 	// Start controller manager with all controllers
 	k8sManager, err := ctrl.NewManager(cfg, ctrl.Options{
@@ -125,6 +126,12 @@ runtimes:
 	Expect(err).ToNot(HaveOccurred())
 
 	err = (&controllers.ModelAPIReconciler{
+		Client: k8sManager.GetClient(),
+		Scheme: k8sManager.GetScheme(),
+	}).SetupWithManager(k8sManager)
+	Expect(err).ToNot(HaveOccurred())
+
+	err = (&controllers.MemoryStoreReconciler{
 		Client: k8sManager.GetClient(),
 		Scheme: k8sManager.GetScheme(),
 	}).SetupWithManager(k8sManager)

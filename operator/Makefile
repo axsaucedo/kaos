@@ -130,6 +130,7 @@ kind-e2e-install-kaos:
 		--set defaultImages.mcpPythonString=$(REGISTRY)/kaos-mcp-python-string:$(IMAGE_TAG) \
 		--set defaultImages.mcpPctxCodemode=$(REGISTRY)/kaos-mcp-pctx-codemode:$(IMAGE_TAG) \
 		--set defaultImages.mcpFastmcpCodemode=$(REGISTRY)/kaos-mcp-fastmcp-codemode:$(IMAGE_TAG) \
+		--set defaultImages.memoryService=$(REGISTRY)/kaos-memory-service:$(IMAGE_TAG) \
 		--wait
 	@echo "=== KAOS operator installed ==="
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	. "github.com/onsi/ginkgo/v2"
@@ -18,10 +19,14 @@ import (
 	kaosv1alpha1 "github.com/axsaucedo/kaos/operator/api/v1alpha1"
 )
 
-// uniqueAgentName generates unique names to avoid conflicts between tests
+// uniqueAgentName generates unique names to avoid conflicts between tests. It
+// combines the nanosecond clock with a process-wide atomic counter so names
+// never collide even when two specs request the same base in quick succession.
 func uniqueAgentName(base string) string {
-	return fmt.Sprintf("%s-%d", base, time.Now().UnixNano()%100000)
+	return fmt.Sprintf("%s-%d-%d", base, time.Now().UnixNano()%100000, atomic.AddUint64(&nameCounter, 1))
 }
+
+var nameCounter uint64
 
 func boolPtr(b bool) *bool {
 	return &b
@@ -66,6 +71,7 @@ var _ = Describe("Agent Controller", func() {
 				Config: &kaosv1alpha1.AgentConfig{
 					Description:           "Test agent",
 					Instructions:          "You are a test agent.",
+					SystemPrompt:          "You are a persisted system prompt.",
 					ReasoningLoopMaxSteps: &maxSteps,
 				},
 			},
@@ -93,6 +99,7 @@ var _ = Describe("Agent Controller", func() {
 		Expect(envMap["AGENT_NAME"]).To(Equal(agentName))
 		Expect(envMap["AGENT_DESCRIPTION"]).To(Equal("Test agent"))
 		Expect(envMap["AGENT_INSTRUCTIONS"]).To(Equal("You are a test agent."))
+		Expect(envMap["AGENT_SYSTEM_PROMPT"]).To(Equal("You are a persisted system prompt."))
 		Expect(envMap["AGENTIC_LOOP_MAX_STEPS"]).To(Equal("10"))
 
 		// Verify Service is created (expose defaults to true)

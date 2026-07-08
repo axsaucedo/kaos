@@ -41,9 +41,11 @@ spec:
     # Memory system configuration
     memory:
       enabled: true           # Enable/disable memory (default: true)
-      type: local             # Memory type: "local" or "redis"
-      contextLimit: 6         # Messages for delegation context
-      maxSessions: 1000       # Max sessions to keep
+      type: remote            # "remote" (bound MemoryStore) or "local" (pod-local)
+      memoryStore: shared-memory  # MemoryStore in the same namespace (remote)
+      scope: user             # private | user | shared | session
+      tools: all              # Expose memory tools: all | read | write
+      failureMode: soft       # Override store default: soft | strict
       maxSessionEvents: 500   # Max events per session
   
   # Optional: Container overrides (image, env, resources)
@@ -169,7 +171,7 @@ config:
 
 #### config.instructions
 
-System prompt for the agent:
+Instructions for the agent. Instructions are re-evaluated on every run and are not retained in the conversation history:
 
 ```yaml
 config:
@@ -179,6 +181,16 @@ config:
     1. Search for relevant information
     2. Summarize findings concisely
     3. Cite your sources
+```
+
+#### config.systemPrompt
+
+Optional system prompt for the agent. Unlike `instructions`, a system prompt is retained in the conversation history. When empty, only `instructions` are applied:
+
+```yaml
+config:
+  systemPrompt: |
+    You are a helpful, concise assistant.
 ```
 
 #### config.reasoningLoopMaxSteps
@@ -211,30 +223,37 @@ Use `native` or `string` to override auto-detection when the model registry is i
 
 #### config.memory
 
-Memory system configuration:
+Memory system configuration. When `type: remote`, the agent binds to a [MemoryStore](./memorystore-crd.md) for semantic, cross-session long-term memory layered on top of the runtime's local short-term window. When `type: local` (or omitted with no `memoryStore`), the agent keeps only a pod-local short-term window.
 
 ```yaml
 config:
   memory:
-    enabled: true           # Enable/disable memory (default: true)
-    type: local             # Memory type (default: local, options: local, redis)
-    contextLimit: 6         # Messages for delegation context (default: 6)
-    maxSessions: 1000       # Max sessions to keep (default: 1000)
-    maxSessionEvents: 500   # Max events per session (default: 500)
+    enabled: true               # Enable/disable memory (default: true)
+    type: remote                # "remote" or "local" (derived from memoryStore when omitted)
+    memoryStore: shared-memory  # MemoryStore in the same namespace (required for remote)
+    scope: user                 # private | user | shared | session (default: private)
+    tools: all                  # Expose memory tools: all | read | write
+    failureMode: soft           # Override store default write/forget mode: soft | strict
+    clientParams:
+      tokenBudget: 4096         # Verbatim short-term window cap in tokens
+      rollingSummary: true      # Maintain a rolling summary of evicted turns
 ```
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `enabled` | bool | `true` | Enable memory; when `false`, uses NullMemory (no-op) |
-| `type` | string | `local` | Memory implementation: `local` (in-memory) or `redis` (distributed) |
-| `contextLimit` | int | `6` | Messages to include when delegating to sub-agents |
-| `maxSessions` | int | `1000` | Maximum sessions before oldest are evicted |
-| `maxSessionEvents` | int | `500` | Maximum events per session before eviction |
+| `enabled` | bool | `true` | Enable memory; when `false`, uses a no-op memory implementation |
+| `type` | string | derived | `remote` (bound MemoryStore) or `local` (pod-local short-term). Derived from `memoryStore` presence when omitted |
+| `memoryStore` | string | — | Name of a MemoryStore in the same namespace. Required for `remote`; forbidden for `local` |
+| `scope` | string | `private` | Whose memory the agent reads/writes: `private`, `user`, `shared`, `session`. `user` and `shared` require a `memoryStore` |
+| `tools` | string | — | Explicit memory tools on top of automatic recall/write: `all` (save + search), `read` (search), `write` (save). Requires a `memoryStore` |
+| `failureMode` | string | store default | Override the store's write/forget failure mode: `soft` (tolerate) or `strict` (surface errors) |
+| `clientParams.tokenBudget` | int | runtime default | Cap on the verbatim short-term window replayed, in tokens |
+| `clientParams.rollingSummary` | bool | `true` | Maintain a rolling summary of evicted turns |
 
-**Redis memory:**
-- Set `type: redis` and configure `agentDefaults.memory.type=redis` and `agentDefaults.memory.redisUrl` in Helm values
-- Or set `MEMORY_REDIS_URL` env var directly on the agent container (takes precedence over global config)
-- Provides distributed session storage shared across agent replicas
+**Remote memory:**
+- Set `type: remote` and reference a ready MemoryStore via `memoryStore`.
+- The operator injects `MEMORY_STORE_ENDPOINT`, `MEMORY_SCOPE`, and a qualified `AGENT_IDENTITY` (`kaos://agent/<namespace>/<name>`) into the agent container.
+- Binding is degraded-aware for a running agent: if the store later becomes missing or not-ready it does not block serving — the agent reports a `MemoryDegraded` status condition and falls back to its local short-term window. Initial creation is gated, though: with `waitForDependencies` enabled (default) the agent stays `Waiting` until the bound store is Ready, so it never starts up degraded.
 
 **When to disable memory:**
 - Stateless agents that don't need conversation history
