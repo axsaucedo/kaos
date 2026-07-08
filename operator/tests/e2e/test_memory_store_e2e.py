@@ -234,6 +234,10 @@ async def test_agent_memory_binding_recovers_when_store_appears(test_namespace: 
             "spec": {
                 "modelAPI": modelapi_name,
                 "model": "gpt-4o-mini",
+                # Opt out of dependency gating so the agent starts up immediately
+                # even though its bound store is absent, exercising the runtime
+                # degradation-and-recovery path rather than the initial-creation gate.
+                "waitForDependencies": False,
                 "config": {
                     "description": "recovering memory agent",
                     "instructions": "You are a memory-enabled agent.",
@@ -244,7 +248,8 @@ async def test_agent_memory_binding_recovers_when_store_appears(test_namespace: 
         test_namespace,
     )
 
-    # Memory never gates serving: the agent deploys even though the store is absent.
+    # With dependency gating disabled, the agent deploys degraded even though the
+    # store is absent; a missing store degrades rather than blocks serving.
     wait_for_deployment(test_namespace, f"agent-{agent_name}", timeout=120)
 
     def _degraded() -> str:
