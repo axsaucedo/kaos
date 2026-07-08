@@ -10,6 +10,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
+	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	kaosv1alpha1 "github.com/axsaucedo/kaos/operator/api/v1alpha1"
@@ -42,18 +43,20 @@ type AuthzProjectionReconciler struct {
 
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 
-// SetupWithManager registers the controller, watching the three KAOS kinds and
-// funnelling every event to the sentinel request so bursts coalesce into one full
-// reconcile.
+// SetupWithManager registers the controller. Every watched-resource change funnels
+// to the sentinel request so bursts coalesce into a single whole-world reconcile.
+// A generation-changed predicate filters out status-only updates and periodic
+// resyncs, so the projection only recomputes when a spec that feeds it changes.
 func (r *AuthzProjectionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	toSentinel := handler.EnqueueRequestsFromMapFunc(func(context.Context, client.Object) []reconcile.Request {
 		return []reconcile.Request{authzSentinel}
 	})
+	specChanged := builder.WithPredicates(predicate.GenerationChangedPredicate{})
 	return builder.ControllerManagedBy(mgr).
 		Named(authzProjectionControllerName).
-		Watches(&kaosv1alpha1.Agent{}, toSentinel).
-		Watches(&kaosv1alpha1.MCPServer{}, toSentinel).
-		Watches(&kaosv1alpha1.ModelAPI{}, toSentinel).
+		Watches(&kaosv1alpha1.Agent{}, toSentinel, specChanged).
+		Watches(&kaosv1alpha1.MCPServer{}, toSentinel, specChanged).
+		Watches(&kaosv1alpha1.ModelAPI{}, toSentinel, specChanged).
 		Complete(r)
 }
 
