@@ -307,20 +307,47 @@ func TestNetworkPolicyEnabled(t *testing.T) {
 		name       string
 		extAuthz   string
 		npDisabled bool
+		strict     bool
 		want       bool
 	}{
-		{"operational and not disabled", "svc:9191", false, true},
-		{"operational but disabled", "svc:9191", true, false},
-		{"not operational", "", false, false},
-		{"not operational and disabled", "", true, false},
+		{"operational and not disabled", "svc:9191", false, false, true},
+		{"operational but disabled", "svc:9191", true, false, false},
+		{"not operational", "", false, false, false},
+		{"not operational and disabled", "", true, false, false},
+		{"strict standalone without any hook", "", false, true, true},
+		{"strict overrides the escape hatch", "", true, true, true},
+		{"strict with operational", "svc:9191", false, true, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := Config{ExtAuthzURL: tc.extAuthz, NetworkPolicyDisabled: tc.npDisabled}
+			cfg := Config{ExtAuthzURL: tc.extAuthz, NetworkPolicyDisabled: tc.npDisabled, StrictGatewayAPI: tc.strict}
 			if got := cfg.NetworkPolicyEnabled(); got != tc.want {
 				t.Errorf("NetworkPolicyEnabled() = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestGatewayRoutingEnabledWithStrict(t *testing.T) {
+	if !(Config{StrictGatewayAPI: true}).GatewayRoutingEnabled() {
+		t.Errorf("expected strict gateway API to enable gateway routing")
+	}
+	if !(Config{StrictGatewayAPI: true}).NetworkPolicyEnabled() {
+		t.Errorf("expected strict gateway API to enable NetworkPolicy standalone")
+	}
+	if (Config{}).GatewayRoutingEnabled() {
+		t.Errorf("expected gateway routing off with no flags")
+	}
+}
+
+func TestGetConfigReadsStrictGatewayAPI(t *testing.T) {
+	t.Setenv("SECURITY_STRICT_GATEWAY_API_ENABLED", "true")
+	cfg := GetConfig()
+	if !cfg.StrictGatewayAPI {
+		t.Errorf("expected StrictGatewayAPI true")
+	}
+	if !cfg.NetworkPolicyEnabled() || !cfg.GatewayRoutingEnabled() {
+		t.Errorf("expected strict gateway API to enable NetworkPolicy and gateway routing standalone")
 	}
 }
 
