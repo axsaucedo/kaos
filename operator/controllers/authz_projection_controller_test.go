@@ -2,23 +2,18 @@ package controllers
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
 	"reflect"
-	"strings"
 	"testing"
 
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	kaosv1alpha1 "github.com/axsaucedo/kaos/operator/api/v1alpha1"
-	"github.com/axsaucedo/kaos/operator/internal/aib"
+	"github.com/axsaucedo/kaos/operator/internal/projection"
 )
 
 func TestResourceFromAgentMapsSpec(t *testing.T) {
@@ -57,27 +52,36 @@ func TestResourceFromAgentWithoutNetworkHasNoAccess(t *testing.T) {
 	}
 }
 
-// fakeAIB is an in-memory AIBAdmin recording created records and minted creds.
-type fakeAIB struct {
-	created map[string][]string
-	minted  int
+func TestProjectionReconcileDispatchesDesiredState(t *testing.T) {
+	scheme := newTestScheme(t)
+	mcp := &kaosv1alpha1.MCPServer{ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "github"}}
+	agent := &kaosv1alpha1.Agent{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "researcher"},
+		Spec:       kaosv1alpha1.AgentSpec{MCPServers: []string{"github"}},
+	}
+	projector := &fakeProjector{}
+	r := &AuthzProjectionReconciler{
+		Client:    fake.NewClientBuilder().WithScheme(scheme).WithObjects(mcp, agent).Build(),
+		Scheme:    scheme,
+		Projector: projector,
+	}
+
+	if _, err := r.Reconcile(context.Background(), authzSentinel); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if projector.calls != 1 {
+		t.Fatalf("projector calls = %d, want 1", projector.calls)
+	}
+	if len(projector.desired.Agents) != 1 || projector.desired.Agents[0].ExternalID() != "kaos://agent/demo/researcher" {
+		t.Fatalf("agents = %+v", projector.desired.Agents)
+	}
+	if len(projector.desired.Services) != 1 || projector.desired.Services[0].ClientID() != "kaos-mcpserver-demo-github" {
+		t.Fatalf("services = %+v", projector.desired.Services)
+	}
 }
 
-func newFakeAIB() *fakeAIB { return &fakeAIB{created: map[string][]string{}} }
-
-func (f *fakeAIB) List(context.Context, string) ([]map[string]any, error) { return nil, nil }
-
-func (f *fakeAIB) CreateOrGet(_ context.Context, collection, _, matchValue string, _ map[string]any) (string, error) {
-	f.created[collection] = append(f.created[collection], matchValue)
-	return collection + ":" + matchValue, nil
-}
-
-func (f *fakeAIB) Delete(context.Context, string, string) (bool, error) { return false, nil }
-
-func (f *fakeAIB) MintCredentials(context.Context, string) (aib.Credentials, error) {
-	f.minted++
-	return aib.Credentials{ClientID: "cid", ClientSecret: "secret"}, nil
-}
+var _ client.Client = fake.NewClientBuilder().Build()
+var _ reconcile.Reconciler = (*AuthzProjectionReconciler)(nil)
 
 func newTestScheme(t *testing.T) *runtime.Scheme {
 	t.Helper()
@@ -91,154 +95,13 @@ func newTestScheme(t *testing.T) *runtime.Scheme {
 	return scheme
 }
 
-func TestProjectionReconcileMintsCredentialSecret(t *testing.T) {
-	scheme := newTestScheme(t)
-	agent := &kaosv1alpha1.Agent{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "researcher"},
-		Spec:       kaosv1alpha1.AgentSpec{MCPServers: []string{"github"}, ModelAPI: "gpt"},
-	}
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(agent).Build()
-	admin := newFakeAIB()
-	r := &AuthzProjectionReconciler{Client: c, Scheme: scheme, AIB: admin, SecretPrefix: "kaos-aib", Prune: false, BrokerProjection: true}
-
-	if _, err := r.Reconcile(context.Background(), authzSentinel); err != nil {
-		t.Fatalf("reconcile: %v", err)
-	}
-
-	if admin.minted != 1 {
-		t.Fatalf("minted = %d, want 1", admin.minted)
-	}
-	secret := &corev1.Secret{}
-	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "demo", Name: "kaos-aib-researcher"}, secret); err != nil {
-		t.Fatalf("expected credential secret: %v", err)
-	}
-	if secret.StringData["client_id"] != "cid" {
-		t.Fatalf("client_id = %q", secret.StringData["client_id"])
-	}
-	// The credential Secret must be owned by its Agent so Kubernetes GC removes it
-	// on Agent deletion.
-	if len(secret.OwnerReferences) != 1 {
-		t.Fatalf("owner references = %d, want 1", len(secret.OwnerReferences))
-	}
-	owner := secret.OwnerReferences[0]
-	if owner.Kind != "Agent" || owner.Name != "researcher" || owner.Controller == nil || !*owner.Controller {
-		t.Fatalf("unexpected owner reference: %+v", owner)
-	}
-	// Second pass must not re-mint once the secret carries a client_id.
-	provisioned := secret.DeepCopy()
-	provisioned.Data = map[string][]byte{"client_id": []byte("cid")}
-	if err := c.Update(context.Background(), provisioned); err != nil {
-		t.Fatalf("seed provisioned secret: %v", err)
-	}
-	if _, err := r.Reconcile(context.Background(), authzSentinel); err != nil {
-		t.Fatalf("second reconcile: %v", err)
-	}
-	if admin.minted != 1 {
-		t.Fatalf("re-minted on second pass: minted = %d", admin.minted)
-	}
+type fakeProjector struct {
+	calls   int
+	desired projection.DesiredState
 }
 
-var _ client.Client = fake.NewClientBuilder().Build()
-
-var _ reconcile.Reconciler = (*AuthzProjectionReconciler)(nil)
-
-func TestProjectionWritesPolicyConfigMap(t *testing.T) {
-	scheme := newTestScheme(t)
-	mcp := &kaosv1alpha1.MCPServer{ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "github"}}
-	agent := &kaosv1alpha1.Agent{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "researcher"},
-		Spec:       kaosv1alpha1.AgentSpec{MCPServers: []string{"github"}},
-	}
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(mcp, agent).Build()
-	r := &AuthzProjectionReconciler{
-		Client:                   c,
-		Scheme:                   scheme,
-		AIB:                      newFakeAIB(),
-		SecretPrefix:             "kaos-aib",
-		PolicyDataProjection:     true,
-		PolicyConfigMapName:      "kaos-authz-policy",
-		PolicyConfigMapNamespace: "aib-system",
-	}
-
-	if _, err := r.Reconcile(context.Background(), authzSentinel); err != nil {
-		t.Fatalf("reconcile: %v", err)
-	}
-
-	cm := &corev1.ConfigMap{}
-	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "aib-system", Name: "kaos-authz-policy"}, cm); err != nil {
-		t.Fatalf("expected policy ConfigMap: %v", err)
-	}
-	if _, ok := cm.Data["policy.rego"]; !ok {
-		t.Fatalf("ConfigMap missing policy.rego: %v", cm.Data)
-	}
-	data, ok := cm.Data["data.json"]
-	if !ok {
-		t.Fatalf("ConfigMap missing data.json")
-	}
-	if !contains(data, "kaos://agent/demo/researcher") || !contains(data, "kaos://mcpserver/demo/github") {
-		t.Fatalf("data.json missing expected grant: %s", data)
-	}
-}
-
-func TestProjectionSkipsPolicyConfigMapWhenUnset(t *testing.T) {
-	scheme := newTestScheme(t)
-	agent := &kaosv1alpha1.Agent{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "researcher"},
-		Spec:       kaosv1alpha1.AgentSpec{MCPServers: []string{"github"}},
-	}
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(agent).Build()
-	r := &AuthzProjectionReconciler{Client: c, Scheme: scheme, AIB: newFakeAIB(), SecretPrefix: "kaos-aib", PolicyDataProjection: true}
-
-	if _, err := r.Reconcile(context.Background(), authzSentinel); err != nil {
-		t.Fatalf("reconcile: %v", err)
-	}
-	cmList := &corev1.ConfigMapList{}
-	if err := c.List(context.Background(), cmList); err != nil {
-		t.Fatalf("list: %v", err)
-	}
-	if len(cmList.Items) != 0 {
-		t.Fatalf("expected no ConfigMap written, got %d", len(cmList.Items))
-	}
-}
-
-func TestProjectionInjectsJWKSInVerifiedMode(t *testing.T) {
-	jwksBody := `{"keys":[{"kty":"RSA","kid":"k1","n":"abc","e":"AQAB"}]}`
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(jwksBody))
-	}))
-	defer srv.Close()
-
-	scheme := newTestScheme(t)
-	agent := &kaosv1alpha1.Agent{
-		ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "researcher"},
-		Spec:       kaosv1alpha1.AgentSpec{MCPServers: []string{"github"}},
-	}
-	mcp := &kaosv1alpha1.MCPServer{ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "github"}}
-	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(agent, mcp).Build()
-	r := &AuthzProjectionReconciler{
-		Client:                   c,
-		Scheme:                   scheme,
-		AIB:                      newFakeAIB(),
-		SecretPrefix:             "kaos-aib",
-		PolicyDataProjection:     true,
-		PolicyConfigMapName:      "kaos-authz-policy",
-		PolicyConfigMapNamespace: "aib-system",
-		AgentJWKSURI:             srv.URL,
-	}
-
-	if _, err := r.Reconcile(context.Background(), authzSentinel); err != nil {
-		t.Fatalf("reconcile: %v", err)
-	}
-	cm := &corev1.ConfigMap{}
-	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "aib-system", Name: "kaos-authz-policy"}, cm); err != nil {
-		t.Fatalf("expected policy ConfigMap: %v", err)
-	}
-	if !contains(cm.Data["data.json"], "\"jwks\"") || !contains(cm.Data["data.json"], "\"kid\": \"k1\"") {
-		t.Fatalf("data.json missing injected jwks: %s", cm.Data["data.json"])
-	}
-}
-
-func contains(s, sub string) bool {
-	return strings.Contains(s, sub)
+func (f *fakeProjector) Apply(_ context.Context, desired projection.DesiredState) error {
+	f.calls++
+	f.desired = desired
+	return nil
 }

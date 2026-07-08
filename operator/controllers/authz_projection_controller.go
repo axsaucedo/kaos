@@ -3,31 +3,18 @@ package controllers
 import (
 	"context"
 	"fmt"
-	"net/http"
 
-	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	kaosv1alpha1 "github.com/axsaucedo/kaos/operator/api/v1alpha1"
-	"github.com/axsaucedo/kaos/operator/internal/aib"
-	"github.com/axsaucedo/kaos/operator/internal/authz"
 	"github.com/axsaucedo/kaos/operator/internal/projection"
-	"github.com/axsaucedo/kaos/operator/pkg/security"
 )
-
-// authzManagedBy labels the credential Secrets provisioned by the projection
-// controller so they can be pruned when their agent is gone.
-const authzManagedBy = "kaos-operator-authz"
 
 // authzProjectionControllerName is the manager-registered name of the projection
 // controller.
@@ -38,51 +25,19 @@ const authzProjectionControllerName = "kaos-authz-projection"
 // controller funnels every event to one reconcile that recomputes the full state.
 var authzSentinel = reconcile.Request{NamespacedName: types.NamespacedName{Namespace: "_kaos", Name: "_authz"}}
 
-// AIBAdmin is the subset of the broker admin client the projection reconciler
-// needs. It is an interface so the reconciler can be unit tested with a fake; it
-// is satisfied directly by *aib.Client.
-type AIBAdmin interface {
-	List(ctx context.Context, collection string) ([]map[string]any, error)
-	CreateOrGet(ctx context.Context, collection, matchField, matchValue string, body map[string]any) (string, error)
-	Delete(ctx context.Context, collection, id string) (bool, error)
-	MintCredentials(ctx context.Context, agentID string) (aib.Credentials, error)
+// PolicyProjector applies the projected desired state into a provider's sink.
+type PolicyProjector interface {
+	Apply(ctx context.Context, desired projection.DesiredState) error
 }
 
 // AuthzProjectionReconciler projects KAOS resources into the configured
-// authorization provider. For the KAOS provider it writes the projected grant
-// data into a ConfigMap the enforcement engine mounts; for the broker (AIB)
-// provider it registers services, permission sets and agents and mints per-agent
-// credential Secrets. The two provider paths are independently gated, so the
-// KAOS policy-data path runs without a broker and a broker outage never blocks
-// it. Because it recomputes the whole world on every change it runs independently
-// of the workload controllers.
+// authorization provider. It recomputes the whole world on every change and
+// dispatches the projected desired state to the configured provider projector.
 type AuthzProjectionReconciler struct {
-	Client       client.Client
-	Scheme       *runtime.Scheme
-	AIB          AIBAdmin
-	Namespaces   []string
-	SecretPrefix string
-	Prune        bool
-	// BrokerProjection enables the broker (AIB) provider path: registering
-	// services/permission-sets/agents, minting credential Secrets, and (when
-	// Prune is set) pruning broker records. It requires AIB to be set.
-	BrokerProjection bool
-	// PolicyDataProjection enables the KAOS provider path: writing the projected
-	// grant data into the policy ConfigMap. It requires the policy ConfigMap name
-	// and namespace to be set.
-	PolicyDataProjection bool
-	// PolicyConfigMapName and PolicyConfigMapNamespace, when both set, name the
-	// ConfigMap the controller writes with the authorization policy and projected
-	// grant data for the enforcement engine to mount.
-	PolicyConfigMapName      string
-	PolicyConfigMapNamespace string
-	// AgentJWKSURI, when set, switches the policy to verified mode: the controller
-	// fetches the IdP JWKS from this endpoint and injects it at `data.kaos.jwks`
-	// so the policy verifies the actor token signature. Empty leaves the policy in
-	// skip mode (unverified decode).
-	AgentJWKSURI string
-	// JWKSClient optionally overrides the HTTP client used to fetch the JWKS.
-	JWKSClient *http.Client
+	Client     client.Client
+	Scheme     *runtime.Scheme
+	Namespaces []string
+	Projector  PolicyProjector
 }
 
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
@@ -103,72 +58,13 @@ func (r *AuthzProjectionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 // Reconcile runs a full projection pass: list every KAOS resource, project the
-// desired state, and apply the enabled provider paths. The KAOS policy-data path
-// runs first and independently of the broker path, so it is never blocked by a
-// broker outage. Returning an error requeues the sentinel with backoff, so
-// transient broker failures retry.
+// desired state, and apply it through the configured provider projector.
 func (r *AuthzProjectionReconciler) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
-	logger := log.FromContext(ctx)
-
 	resources, err := r.listResources(ctx)
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("listing KAOS resources: %w", err)
 	}
-	desired := projection.Project(resources)
-
-	// KAOS provider: write the projected grant data. Runs first and independently
-	// of the broker path so it never blocks on a broker outage.
-	if r.PolicyDataProjection {
-		if err := r.writePolicyConfigMap(ctx, desired); err != nil {
-			logger.Error(err, "writing authorization policy ConfigMap failed")
-		}
-	}
-
-	// Broker (AIB) provider: register services/permission-sets/agents, mint
-	// credential Secrets, and prune stale broker records.
-	if !r.BrokerProjection {
-		logger.Info("reconciled authorization projection",
-			"policyDataProjection", r.PolicyDataProjection, "brokerProjection", false)
-		return reconcile.Result{}, nil
-	}
-
-	serviceIDs, err := r.applyServices(ctx, desired)
-	if err != nil {
-		return reconcile.Result{}, err
-	}
-	permissionSetIDs, err := r.applyPermissionSets(ctx, desired, serviceIDs)
-	if err != nil {
-		return reconcile.Result{}, err
-	}
-
-	var minted, failed int
-	for _, agent := range desired.Agents {
-		did, agentErr := r.reconcileAgent(ctx, agent, permissionSetIDs)
-		if agentErr != nil {
-			failed++
-			logger.Error(agentErr, "agent reconcile failed", "agent", agent.ExternalID())
-			continue
-		}
-		if did {
-			minted++
-		}
-	}
-
-	if r.Prune {
-		if err := r.prune(ctx, serviceIDs, permissionSetIDs, desired); err != nil {
-			logger.Error(err, "prune pass failed")
-		}
-	}
-
-	logger.Info("reconciled authorization projection",
-		"services", len(serviceIDs), "permissionSets", len(permissionSetIDs),
-		"agents", len(desired.Agents), "credentialsMinted", minted,
-		"failed", failed)
-
-	if failed > 0 {
-		return reconcile.Result{}, fmt.Errorf("%d agent(s) failed to reconcile", failed)
-	}
-	return reconcile.Result{}, nil
+	return reconcile.Result{}, r.Projector.Apply(ctx, projection.Project(resources))
 }
 
 // listResources reads every watched KAOS kind via the typed client and maps each
@@ -233,204 +129,4 @@ func resourceFromAgent(a *kaosv1alpha1.Agent) projection.Resource {
 		res.Access = a.Spec.AgentNetwork.Access
 	}
 	return res
-}
-
-func (r *AuthzProjectionReconciler) applyServices(ctx context.Context, desired projection.DesiredState) (map[string]string, error) {
-	ids := map[string]string{}
-	for _, svc := range desired.Services {
-		id, err := r.AIB.CreateOrGet(ctx, "services", "client_id", svc.ClientID(), aib.ServiceBody(svc))
-		if err != nil {
-			return nil, fmt.Errorf("service %s: %w", svc.ClientID(), err)
-		}
-		ids[svc.ClientID()] = id
-	}
-	return ids, nil
-}
-
-func (r *AuthzProjectionReconciler) applyPermissionSets(ctx context.Context, desired projection.DesiredState, serviceIDs map[string]string) (map[string]string, error) {
-	ids := map[string]string{}
-	for _, ps := range desired.PermissionSets {
-		serviceID, ok := serviceIDs[ps.ServiceClientID()]
-		if !ok {
-			// Fail closed for this edge: its service could not be created.
-			continue
-		}
-		id, err := r.AIB.CreateOrGet(ctx, "permission-sets", "name", ps.Name(), aib.PermissionSetBody(ps, serviceID))
-		if err != nil {
-			return nil, fmt.Errorf("permission-set %s: %w", ps.Name(), err)
-		}
-		ids[ps.Name()] = id
-	}
-	return ids, nil
-}
-
-// reconcileAgent creates the local AIB agent and mints its credential Secret if
-// absent. An agent whose permission sets could not all be created is skipped
-// fail-closed (no credentials are minted for an unauthorized agent). The bool
-// reports whether credentials were minted on this pass.
-func (r *AuthzProjectionReconciler) reconcileAgent(ctx context.Context, agent projection.DesiredAgent, permissionSetIDs map[string]string) (bool, error) {
-	bound := make([]string, 0, len(agent.PermissionSetNames))
-	for _, name := range agent.PermissionSetNames {
-		id, ok := permissionSetIDs[name]
-		if !ok {
-			return false, fmt.Errorf("permission set unavailable: %s", name)
-		}
-		bound = append(bound, id)
-	}
-
-	agentID, err := r.AIB.CreateOrGet(ctx, "agents", "display_name", agent.ExternalID(), aib.AgentBody(agent, bound))
-	if err != nil {
-		return false, fmt.Errorf("creating agent: %w", err)
-	}
-
-	owner := &kaosv1alpha1.Agent{}
-	if err := r.Client.Get(ctx, types.NamespacedName{Namespace: agent.Namespace, Name: agent.Name}, owner); err != nil {
-		return false, fmt.Errorf("reading agent for ownership: %w", err)
-	}
-
-	secretName := security.CredentialSecretName(r.SecretPrefix, agent.Name)
-	existing := &corev1.Secret{}
-	getErr := r.Client.Get(ctx, types.NamespacedName{Namespace: agent.Namespace, Name: secretName}, existing)
-	switch {
-	case getErr == nil:
-		if len(existing.Data["client_id"]) > 0 {
-			return false, nil // already provisioned
-		}
-	case !apierrors.IsNotFound(getErr):
-		return false, fmt.Errorf("reading secret: %w", getErr)
-	}
-
-	cred, err := r.AIB.MintCredentials(ctx, agentID)
-	if err != nil {
-		return false, fmt.Errorf("minting credentials: %w", err)
-	}
-	if cred.ClientID == "" || cred.ClientSecret == "" {
-		return false, fmt.Errorf("broker returned incomplete credentials")
-	}
-	if err := r.upsertSecret(ctx, owner, secretName, cred); err != nil {
-		return false, fmt.Errorf("writing secret: %w", err)
-	}
-	return true, nil
-}
-
-func (r *AuthzProjectionReconciler) upsertSecret(ctx context.Context, owner *kaosv1alpha1.Agent, name string, cred aib.Credentials) error {
-	secret := &corev1.Secret{
-		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "Secret"},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: owner.Namespace,
-			Labels:    map[string]string{"app.kubernetes.io/managed-by": authzManagedBy},
-		},
-		Type: corev1.SecretTypeOpaque,
-		StringData: map[string]string{
-			"client_id":     cred.ClientID,
-			"client_secret": cred.ClientSecret,
-		},
-	}
-	// Own the Secret from its Agent so Kubernetes garbage-collects the credentials
-	// when the Agent is deleted; no explicit Secret prune pass is needed.
-	if err := controllerutil.SetControllerReference(owner, secret, r.Scheme); err != nil {
-		return fmt.Errorf("setting owner reference: %w", err)
-	}
-	// Server-Side Apply: the API server reconciles create-vs-update by field
-	// ownership, so there is no read-before-write or conflict branching.
-	return r.Client.Patch(ctx, secret, client.Apply, client.FieldOwner(authzManagedBy), client.ForceOwnership)
-}
-
-// writePolicyConfigMap renders the Model-1 authorization policy and projected
-// grant data and applies them to the configured ConfigMap for the enforcement
-// engine to mount. It is a no-op unless both a name and namespace are set.
-func (r *AuthzProjectionReconciler) writePolicyConfigMap(ctx context.Context, desired projection.DesiredState) error {
-	if r.PolicyConfigMapName == "" || r.PolicyConfigMapNamespace == "" {
-		return nil
-	}
-	grants := projection.GrantData(desired)
-	// Verified mode: when an agent JWKS endpoint is configured, fetch the IdP
-	// signing keys and inject them so the policy verifies the actor token
-	// signature; demo mode (no endpoint) carries grants only.
-	var jwks map[string]any
-	if r.AgentJWKSURI != "" {
-		fetched, err := authz.FetchJWKS(ctx, r.JWKSClient, r.AgentJWKSURI)
-		if err != nil {
-			return err
-		}
-		jwks = fetched
-	}
-	data, err := authz.ConfigMapData(grants, jwks)
-	if err != nil {
-		return err
-	}
-	cm := &corev1.ConfigMap{
-		TypeMeta: metav1.TypeMeta{APIVersion: "v1", Kind: "ConfigMap"},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      r.PolicyConfigMapName,
-			Namespace: r.PolicyConfigMapNamespace,
-			Labels:    map[string]string{"app.kubernetes.io/managed-by": authzManagedBy},
-		},
-		Data: data,
-	}
-	return r.Client.Patch(ctx, cm, client.Apply, client.FieldOwner(authzManagedBy), client.ForceOwnership)
-}
-
-// prune removes KAOS-managed broker records and credential Secrets that are no
-// longer in the desired state, in dependency-safe order (agents, then Secrets,
-// then permission sets, then services).
-func (r *AuthzProjectionReconciler) prune(ctx context.Context, desiredServiceIDs, desiredPermissionSetIDs map[string]string, desired projection.DesiredState) error {
-	desiredAgents := map[string]bool{}
-	for _, a := range desired.Agents {
-		desiredAgents[a.ExternalID()] = true
-	}
-	agents, err := r.AIB.List(ctx, "agents")
-	if err != nil {
-		return err
-	}
-	for _, a := range agents {
-		display, _ := a["display_name"].(string)
-		id, _ := a["id"].(string)
-		if id == "" || !projection.IsValidAgentExternalID(display) || desiredAgents[display] {
-			continue
-		}
-		if _, err := r.AIB.Delete(ctx, "agents", id); err != nil {
-			return err
-		}
-	}
-
-	desiredPSNames := map[string]bool{}
-	for name := range desiredPermissionSetIDs {
-		desiredPSNames[name] = true
-	}
-	permissionSets, err := r.AIB.List(ctx, "permission-sets")
-	if err != nil {
-		return err
-	}
-	for _, ps := range permissionSets {
-		name, _ := ps["name"].(string)
-		id, _ := ps["id"].(string)
-		if id == "" || !projection.IsKAOSPermissionSetName(name) || desiredPSNames[name] {
-			continue
-		}
-		if _, err := r.AIB.Delete(ctx, "permission-sets", id); err != nil {
-			return err
-		}
-	}
-
-	desiredClientIDs := map[string]bool{}
-	for clientID := range desiredServiceIDs {
-		desiredClientIDs[clientID] = true
-	}
-	services, err := r.AIB.List(ctx, "services")
-	if err != nil {
-		return err
-	}
-	for _, svc := range services {
-		clientID, _ := svc["client_id"].(string)
-		id, _ := svc["id"].(string)
-		if id == "" || !projection.IsKAOSServiceClientID(clientID) || desiredClientIDs[clientID] {
-			continue
-		}
-		if _, err := r.AIB.Delete(ctx, "services", id); err != nil {
-			return err
-		}
-	}
-	return nil
 }
