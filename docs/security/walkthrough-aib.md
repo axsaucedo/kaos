@@ -148,20 +148,103 @@ Every outbound URL routes through the gateway path (the `ext_proc` enforcement p
 
 **Proves:** internal calls are gateway-routed and the `ext_proc` authorization hook plus bypass-prevention NetworkPolicies are in place.
 
-## Token exchange (RFC 8693) and current status
+## Token exchange (RFC 8693)
 
-The `aib-keycloak` posture is designed to run the RFC 8693 **token-exchange** path in the broker's `ext_proc` sidecar: for a user-present request, the sidecar exchanges the user subject token for the agent's `granted_permission_sets` (and, for third-party APIs, a vaulted upstream OAuth token) before the OPA policy decides allow/deny.
+The `aib-keycloak` posture runs the RFC 8693 **token-exchange** path so an agent can call a protected third-party API on behalf of a user: the broker exchanges the user's Keycloak-issued subject token for a vaulted third-party token, gated by the user's consent grant. The broker's `ext_proc` sidecar automates this exchange inline in the Envoy data path.
 
-::: warning Token-exchange sidecar prerequisites
-The `ext_proc` token-exchange sidecar performs an OAuth2 `client_credentials` grant against the broker **at startup** to mint its own client assertion. This requires:
+### How the exchange is wired
 
-1. The broker running in **federated** or **hybrid** OAuth2 mode. The chart's `values-dev.yaml` dev preset runs in `local` mode, which mints enduser tokens in-memory and **does not accept the `client_credentials` grant** — so the token-exchange sidecar cannot bootstrap against the dev preset.
-2. A bootstrapped OAuth client for the sidecar: an agent registered with the broker admin API, a credential minted via `POST /api/agents/{agent-id}/client-credentials`, and the sidecar configured with the agent's **UUID** as its `client_id` (the broker resolves opaque `client_id` values as agent UUIDs, not display names) plus the minted secret.
+The exchange involves two Keycloak-issued JWTs, both signature-verified by the broker against Keycloak's JWKS:
 
-Automating this bootstrap end-to-end (federated broker mode wired to Keycloak, plus sidecar credential provisioning) is the remaining work for a fully self-serve token-exchange install. Until then, deploy the broker in `local` mode for identity + agent-credential minting and provision the token-exchange sidecar's OAuth client out of band, or run the broker in federated mode against Keycloak.
+- **`subject_token`** — the user's access token (minted through the agent's OAuth client). Its `sub` claim is the user principal and its `azp` claim is the agent's client_id, which the broker maps to a registered agent via `resolveAgentIdByClientId(subject_token.azp)`.
+- **`client_assertion`** — the gateway's own identity, obtained by the `ext_proc` sidecar via a `client_credentials` grant **against Keycloak** (not the broker) using the `extproc-gateway` client.
+
+The broker therefore runs in **hybrid** OAuth2 mode with Keycloak configured as the upstream issuer. Crucially, the sidecar authenticates against **Keycloak**, and the broker validates both tokens against Keycloak's JWKS — the broker never issues these tokens itself in this posture.
+
+### Broker `--aib-values` for hybrid mode against Keycloak
+
+The stock `values-dev.yaml` runs the broker in `local` mode, which mints tokens in-memory and rejects the `client_credentials` grant the sidecar needs. Supply a hybrid values file instead (adjust the Keycloak namespace/realm and keys for your install):
+
+```yaml
+storage:
+  type: memory
+broker:
+  oauth2AuthorizationServer:
+    mode: hybrid
+    proxy:
+      upstreamIssuerUri: http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos
+      upstreamAuthorizeEndpoint: http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos/protocol/openid-connect/auth
+      upstreamTokenEndpoint: http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos/protocol/openid-connect/token
+    supportedGrantTypes:
+      - authorization_code
+      - refresh_token
+      - urn:ietf:params:oauth:grant-type:token-exchange
+  tokenExchange:
+    expectedAudience: token-exchange-broker
+    claimExtraction:
+      principalExpression: "subject_token.sub"
+      agentIdExpression: "resolveAgentIdByClientId(subject_token.azp)"
+    authorization:
+      type: cel
+      cel:
+        expression: "true"
+        evaluationTimeout: "5s"
+  security:
+    skipThirdpartyHttpsValidation: true
+extProc:
+  enabled: true
+  oauth2:
+    tokenEndpoint: http://aib-agentic-identity-broker.aib-system.svc.cluster.local:8000/oauth2/token
+    issuer: http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos
+    clientId: extproc-gateway
+    clientSecret: extproc-gateway-secret
+    clientAssertionType: access_token
+    allowHttp: true
+```
+
+The broker validates that both the `subject_token` and `client_assertion` carry `aud: token-exchange-broker`. Add a custom-audience mapper to the user client (`kaos`) and create the `extproc-gateway` service-account client (with the same audience mapper) in Keycloak so both tokens carry that audience.
+
+::: warning ExtProc client-credentials endpoint against Keycloak
+When `extProc.oauth2.clientCredentialsEndpoint` is unset, the sidecar derives its token endpoint as `issuer + /oauth/token`, which is the mock-upstream path and returns `404` against Keycloak (whose path is `/protocol/openid-connect/token`). The stock chart does not template this env var, so set it directly on the sidecar Deployment:
+
+```bash
+kubectl -n aib-system set env deploy/aib-agentic-identity-broker-extproc \
+  EXTPROC_OAUTH2_CLIENT_CREDENTIALS_ENDPOINT=http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos/protocol/openid-connect/token
+```
 :::
 
-**Proves / documents:** the intended enforcement flow and the exact bootstrap prerequisites the token-exchange sidecar needs — captured so the posture can be completed without rediscovering them.
+### Verify the exchange reaches the broker
+
+Register an agent whose `client_id` matches the user token's `azp` (`kaos`), plus a third-party service, then run the exchange from inside the cluster (so the token `iss` matches the broker's configured upstream issuer):
+
+```bash
+kubectl -n aib-system run tx --rm -i --restart=Never --image=curlimages/curl -- sh -c '
+KC=http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos/protocol/openid-connect/token
+BROKER=http://aib-agentic-identity-broker.aib-system.svc.cluster.local:8000/oauth2/token
+SUBJ=$(curl -s -X POST $KC -d grant_type=password -d client_id=kaos -d client_secret=kaos-dev-secret -d username=kaos-user -d password=kaos-password | sed -n "s/.*\"access_token\":\"\([^\"]*\)\".*/\1/p")
+ASSERT=$(curl -s -X POST $KC -d grant_type=client_credentials -d client_id=extproc-gateway -d client_secret=extproc-gateway-secret | sed -n "s/.*\"access_token\":\"\([^\"]*\)\".*/\1/p")
+curl -s -w "\nHTTP %{http_code}\n" -X POST $BROKER \
+  --data-urlencode "grant_type=urn:ietf:params:oauth:grant-type:token-exchange" \
+  --data-urlencode "subject_token=$SUBJ" \
+  --data-urlencode "subject_token_type=urn:ietf:params:oauth:token-type:jwt" \
+  --data-urlencode "client_assertion=$ASSERT" \
+  --data-urlencode "client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer" \
+  --data-urlencode "resource=https://api.demo.local"'
+```
+
+A correctly wired install returns:
+
+```json
+{"error":"access_denied","error_description":"user has not granted permission for this agent to access the requested service"}
+```
+
+This `403` is the **expected** result up to the consent boundary: it proves the broker verified both Keycloak-issued JWT signatures, enforced the `token-exchange-broker` audience, resolved the agent from `azp`, and passed CEL authorization — failing only at the user-grant/vault stage. Any earlier misconfiguration (issuer mismatch, wrong audience, unresolved agent) surfaces as a `400`/`401` before this point.
+
+### What is not yet wired: consent + vault
+
+Returning an actual third-party token requires a **user consent grant** for a service with an **active third-party OAuth session** (a vaulted token). The broker enforces this: creating the grant fails with `unconnected services` until the user has completed an OAuth authorization-code flow with the third-party service. KAOS does not currently project consent grants or a real third-party vault (only agent identity + permission sets), so a fully green exchange needs the consent-based delegated-access workflow — tracked as a followup, not part of this posture.
+
+**Proves:** the `aib-keycloak` token-exchange integration end-to-end through Keycloak JWT verification, audience enforcement, agent resolution, and authorization — up to the consent/vault boundary.
 
 ## Clean up
 
