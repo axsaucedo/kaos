@@ -31,6 +31,11 @@ make lint                       # Linting (required for CI)
 cd kaos-cli && source .venv/bin/activate
 python -m pytest tests/ -v      # CLI integration tests
 
+# Memory service + library (kaos-memory)
+cd kaos-memory
+uv run pytest tests/ -v         # Tests
+make lint                       # Linting (black --check + ty)
+
 # Go (operator)
 cd operator
 make generate manifests         # After changing CRD types
@@ -61,6 +66,14 @@ mcp-servers/               # Standalone MCP server implementations
 ├── python-string/         # Python code execution runtime
 └── fastmcp-codemode/      # MCP server aggregator with CodeMode transform
 
+kaos-memory/               # Memory library + central service (kaos_memory, uv, pytest, black, ty)
+├── kaos_memory/
+│   ├── contract.py        # Scope/identity model, recall/write/forget request+response types
+│   ├── client.py          # MemoryServiceClient (soft/strict failure mode; recall degrades)
+│   ├── app.py             # MemoryService (Mem0 + FastAPI), BackgroundRunner extraction
+│   └── ...                # pydantic-ai adapters + toolset (extras: [service], [pydantic-ai])
+└── tests/                 # Unit + cross-component tests
+
 kaos-cli/                  # CLI tool
 ├── kaos_cli/system/       # System commands (install, create-rbac)
 ├── kaos_cli/mcp/          # MCP commands (init, build, deploy)
@@ -82,9 +95,10 @@ tmp/                       # Local work files (gitignored)
 ```
 
 ## CRDs Overview
-- **Agent**: AI agent with model API, MCP tools, sub-agent delegation, and autonomous (self-looping) execution
+- **Agent**: AI agent with model API, MCP tools, sub-agent delegation, autonomous (self-looping) execution, and memory binding (`config.memory`: scope, tools, failureMode, clientParams)
 - **MCPServer**: MCP tool server with runtime-based architecture (python-string, fastmcp-codemode, pctx-codemode, kubernetes, slack, custom)
 - **ModelAPI**: LLM proxy (LiteLLM) or hosted (Ollama) mode
+- **MemoryStore**: central memory service backing long-term semantic memory (local or external pgvector storage; external defaults to 2 replicas + PDB; summarization/embedding model refs; `--pgvector-memory-enabled` installs dev Postgres)
 
 ## Key Files
 - `operator/api/v1alpha1/*_types.go`: CRD schemas
@@ -94,7 +108,11 @@ tmp/                       # Local work files (gitignored)
 - `pydantic-ai-server/pais/serverutils.py`: AgentDeps, AgentCard (Pydantic BaseModel, A2A-compliant), RemoteAgent (A2A + chat delegation), AgentServerSettings
 - `pydantic-ai-server/pais/a2a.py`: TaskManager ABC, LocalTaskManager, NullTaskManager, Task data model, JSON-RPC, autonomous execution, setup_a2a_routes
 - `pydantic-ai-server/pais/tools.py`: DelegationToolset (AbstractToolset), string-mode handler
-- `pydantic-ai-server/pais/memory.py`: Memory ABC + backends + build_message_history/store_pydantic_message
+- `pydantic-ai-server/pais/memory.py`: RemoteMemory adapter over kaos-memory MemoryServiceClient (+ re-exports)
+- `kaos-memory/kaos_memory/contract.py`: scope/identity model + recall/write/forget types
+- `kaos-memory/kaos_memory/client.py`: MemoryServiceClient (soft/strict failure mode)
+- `kaos-memory/kaos_memory/app.py`: MemoryService (Mem0 + FastAPI), BackgroundRunner
+- `operator/controllers/memorystore_controller.go`: MemoryStore reconciler (Deployment/Service/PDB, replica defaulting)
 
 ## Testing Notes
 

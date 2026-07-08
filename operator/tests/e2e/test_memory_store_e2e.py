@@ -275,3 +275,63 @@ async def test_agent_memory_binding_recovers_when_store_appears(test_namespace: 
         "agent", agent_name, test_namespace, ".status.linkedResources.memorystore"
     )
     assert linked == store_name
+
+
+@pytest.mark.asyncio
+async def test_short_term_survives_a_pod_restart(test_namespace: str):
+    """Turns written to a local store survive a memory-service pod restart.
+
+    Local mode persists the short-term window to a PersistentVolume, so recreating
+    the Pod (which remounts the same PVC) must not lose durably written turns. This
+    proves the durability the HA story depends on, using the model-independent
+    verbatim path so no embedder or LLM is required.
+    """
+    store_name = "restart-store"
+    _deploy_ready_store(test_namespace, "mem-model-restart", store_name)
+
+    scope = {"level": "session", "session_id": "run-restart"}
+    turns = [
+        {"role": "user", "content": "remember the launch code is orbit-42"},
+        {"role": "assistant", "content": "stored launch code orbit-42"},
+    ]
+
+    process, base_url = _forward_memory_service(test_namespace, store_name)
+    try:
+        write = httpx.post(
+            f"{base_url}/v1/write",
+            json={"scope": scope, "turns": turns, "infer": False},
+            timeout=30.0,
+        )
+        assert write.status_code == 200, write.text
+        assert write.json()["accepted"] is True
+    finally:
+        process.terminate()
+
+    # Recreate the Pod: deleting it frees the ReadWriteOnce PVC so the Deployment's
+    # replacement Pod remounts the same durable volume.
+    kubectl(
+        "delete",
+        "pod",
+        "-l",
+        f"memorystore={store_name}",
+        "-n",
+        test_namespace,
+        "--wait=true",
+        _ok_code=[0, 1],
+    )
+    wait_for_deployment(test_namespace, f"memorystore-{store_name}", timeout=180)
+    wait_for_memorystore_ready(test_namespace, store_name, timeout=240)
+
+    process, base_url = _forward_memory_service(test_namespace, store_name)
+    try:
+        recall = httpx.post(
+            f"{base_url}/v1/recall",
+            json={"scope": scope, "query": "launch code", "include_short_term": True},
+            timeout=30.0,
+        )
+        assert recall.status_code == 200, recall.text
+        recent = [tuple(pair) for pair in recall.json()["short_term"]["recent"]]
+        assert ("user", "remember the launch code is orbit-42") in recent
+        assert ("assistant", "stored launch code orbit-42") in recent
+    finally:
+        process.terminate()

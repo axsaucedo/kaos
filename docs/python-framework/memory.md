@@ -29,11 +29,24 @@ spec:
   config:
     memory:
       enabled: true
-      type: local
-      contextLimit: 6
-      maxSessions: 1000
-      maxSessionEvents: 500
+      type: remote            # "remote" (bound MemoryStore) or "local" (pod-local)
+      memoryStore: shared-memory
+      scope: user             # private | user | shared | session
+      tools: all              # all | read | write
+      failureMode: soft       # soft | strict
 ```
+
+See the [Agent CRD](../operator/agent-crd.md#configmemory) and [MemoryStore CRD](../operator/memorystore-crd.md) references for the full memory surface (scopes, tools, client params, storage modes).
+
+### Memory tiers
+
+A `RemoteMemory` agent layers three tiers behind one client:
+
+- **Short-term** — a verbatim window of recent turns replayed for conversational continuity (also the local fallback when the store is degraded).
+- **Medium-term** — a rolling summary/digest of evicted turns (`clientParams.rollingSummary`).
+- **Long-term** — semantic, cross-session facts extracted into the bound [MemoryStore](../operator/memorystore-crd.md) and recalled by relevance.
+
+`LocalMemory` keeps only the pod-local short-term window.
 
 ## Memory-Enabled Gating
 

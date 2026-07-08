@@ -324,7 +324,7 @@ kubectl logs -l app=my-agent -n my-namespace | grep -i "step\|time"
    - Optimize tool implementations
    - Add caching if appropriate
 
-### Memory Issues
+### Memory (RAM) Usage
 
 **Diagnosis:**
 ```bash
@@ -340,3 +340,46 @@ kubectl top pods -n my-namespace
 2. **Large model in Hosted mode**
    - Increase memory limits
    - Use smaller model
+
+## Agent Memory (MemoryStore) Issues
+
+For the full model see [Memory Architecture](../operator/memory-architecture.md).
+
+### Agent reports `MemoryDegraded`
+
+**Diagnosis:**
+```bash
+kubectl get agent my-agent -n my-namespace -o jsonpath='{.status.conditions}'
+kubectl get memorystore -n my-namespace
+kubectl logs -l app=my-agent -n my-namespace | grep -i "memory\|degraded\|recall"
+```
+
+**Common Causes:**
+
+1. **Bound MemoryStore not Ready** — the agent keeps serving in short-term-only mode by design. Check the store's status and its `summarization`/`embedding` ModelAPIs are Ready.
+2. **Memory service unreachable** — verify the memory Service and pods exist and are Ready; check `MEMORY_STORE_ENDPOINT` is injected on the agent pod (`remote` type only).
+
+### Recall returns nothing / no long-term memory
+
+**Common Causes:**
+
+1. **Scope mismatch** — long-term memory is keyed by `scope`. A `private` agent only sees its own facts; use `user` or `shared` to pool memory (both require a `memoryStore`).
+2. **Extraction still pending** — long-term facts are extracted in the background off the response path, so they appear a moment after the turn, not synchronously.
+3. **`local` storage mode with no embedder configured** — semantic long-term recall needs the store's `embedding` ModelAPI; the short-term window works without it.
+
+### Agent creation stuck in `Waiting`
+
+**Cause:** with `waitForDependencies` (default), an agent is gated until its bound MemoryStore is Ready so it never starts up degraded. Bring the store (and its ModelAPIs) to Ready, or bind a different store.
+
+### External (pgvector) store not becoming Ready
+
+**Diagnosis:**
+```bash
+kubectl describe memorystore my-store -n my-namespace
+kubectl logs -l app=memorystore,memorystore=my-store -n my-namespace
+```
+
+**Common Causes:**
+
+1. **Bad/missing connection secret** — the `external.connectionSecretRef` must point at a valid Postgres DSN. For a dev cluster, install with `kaos system install --pgvector-memory-enabled` to provision one.
+2. **Postgres unreachable or missing pgvector** — the external database is bring-your-own; ensure it is reachable and the `pgvector` extension is available.

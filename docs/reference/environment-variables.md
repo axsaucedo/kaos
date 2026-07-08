@@ -29,13 +29,24 @@ Complete reference for all environment variables used by the KAOS.
 
 ### Memory Configuration
 
+Injected by the operator on memory-enabled agents. For the full model see [Memory Architecture](../operator/memory-architecture.md).
+
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `MEMORY_ENABLED` | Enable/disable memory (use NullMemory when disabled) | `true` |
-| `MEMORY_TYPE` | Memory implementation type (`local` or `remote`) | `local` |
-| `MEMORY_CONTEXT_LIMIT` | Messages to include in delegation context | `6` |
-| `MEMORY_MAX_SESSIONS` | Maximum sessions to keep in memory | `1000` |
-| `MEMORY_MAX_SESSION_EVENTS` | Maximum events per session before eviction | `500` |
+| `MEMORY_ENABLED` | Enable/disable memory (uses NullMemory when disabled) | `true` |
+| `MEMORY_TYPE` | Backend: `local` (pod-local short-term) or `remote` (bound MemoryStore) | derived |
+| `MEMORY_STORE_ENDPOINT` | Memory service URL; injected only for `remote` (selects `RemoteMemory`) | — |
+| `MEMORY_SCOPE` | Long-term scope: `private`, `user`, `shared`, `session` | `private` |
+| `MEMORY_TOOLS` | Explicit memory tools: `all`, `read`, `write` (unset = none) | — |
+| `MEMORY_FAILURE_MODE` | Write/forget failure mode: `soft` or `strict` | store default |
+| `MEMORY_SHORT_TERM_TOKEN_BUDGET` | Verbatim short-term window cap, in tokens | runtime default |
+| `MEMORY_ROLLING_SUMMARY` | Keep a medium-term rolling digest of evicted turns | `true` |
+| `AGENT_IDENTITY` | Verifiable agent principal (`kaos://agent/<ns>/<name>`) anchoring private scope | always set |
+| `MEMORY_CONTEXT_LIMIT` | Recent history events replayed / forwarded on delegation (runtime default) | `6` |
+| `MEMORY_MAX_SESSIONS` | Max sessions kept (LocalMemory runtime default) | `1000` |
+| `MEMORY_MAX_SESSION_EVENTS` | Max events per session (LocalMemory runtime default) | `500` |
+
+The first block (`MEMORY_ENABLED` … `AGENT_IDENTITY`) is injected by the operator from the Agent `config.memory` block and the bound MemoryStore. The last three are runtime defaults consumed by the LocalMemory backend and the delegation context; they are not injected from CRD fields.
 
 ### Sub-Agent Configuration
 
@@ -127,9 +138,13 @@ The operator automatically sets these variables on agent pods:
 | `config.reasoningLoopMaxSteps` | `AGENTIC_LOOP_MAX_STEPS` |
 | `config.memory.enabled` | `MEMORY_ENABLED` |
 | `config.memory.type` | `MEMORY_TYPE` |
-| `config.memory.contextLimit` | `MEMORY_CONTEXT_LIMIT` |
-| `config.memory.maxSessions` | `MEMORY_MAX_SESSIONS` |
-| `config.memory.maxSessionEvents` | `MEMORY_MAX_SESSION_EVENTS` |
+| `config.memory.scope` | `MEMORY_SCOPE` |
+| `config.memory.tools` | `MEMORY_TOOLS` |
+| `config.memory.failureMode` | `MEMORY_FAILURE_MODE` |
+| `config.memory.clientParams.tokenBudget` | `MEMORY_SHORT_TERM_TOKEN_BUDGET` |
+| `config.memory.clientParams.rollingSummary` | `MEMORY_ROLLING_SUMMARY` |
+| MemoryStore endpoint (remote only) | `MEMORY_STORE_ENDPOINT` |
+| `kaos://agent/<ns>/<name>` (always) | `AGENT_IDENTITY` |
 
 ### From Referenced Resources
 
@@ -187,8 +202,6 @@ AGENTIC_LOOP_MAX_STEPS=5
 MEMORY_ENABLED=true
 MEMORY_TYPE=local
 MEMORY_CONTEXT_LIMIT=6
-MEMORY_MAX_SESSIONS=1000
-MEMORY_MAX_SESSION_EVENTS=500
 MODEL_API_URL=http://modelapi.my-namespace.svc.cluster.local:8000
 MODEL_NAME=openai/gpt-4o
 PEER_AGENTS=worker-1,worker-2

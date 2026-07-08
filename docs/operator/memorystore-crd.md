@@ -33,8 +33,9 @@ spec:
     #     key: dsn
     #   embeddingDims: 1536      # vector dimensions (default 1536)
 
-  # Replicas (default 1). Must be 1 in local storage mode.
-  replicas: 1
+  # Replicas override. When unset, defaults by storage mode: external stores
+  # run 2 replicas for availability, local stores run 1. Must be 1 in local mode.
+  # replicas: 2
 
   # Required: models used for extraction and embedding
   models:
@@ -72,7 +73,7 @@ spec:
 
 ### External
 
-External mode connects the memory service to a managed pgvector database via a DSN stored in a Kubernetes Secret. This mode supports multiple replicas and is the production path.
+External mode connects the memory service to a managed pgvector database via a DSN stored in a Kubernetes Secret. Because the service is stateless over the shared database, this mode runs multiple replicas and is the production path.
 
 ```yaml
 spec:
@@ -84,10 +85,10 @@ spec:
         name: pgvector-dsn
         key: dsn
       embeddingDims: 1536
-  replicas: 2
+  # replicas defaults to 2 in external mode; set explicitly to override
 ```
 
-The DSN is injected into the service as `KAOS_MEMORY_EXTERNAL_DSN` via a `secretKeyRef`, and `embeddingDims` is passed as `KAOS_MEMORY_EXTERNAL_DIMS`. The referenced Secret must exist in the same namespace.
+The DSN is injected into the service as `KAOS_MEMORY_EXTERNAL_DSN` via a `secretKeyRef`, and `embeddingDims` is passed as `KAOS_MEMORY_EXTERNAL_DIMS`. The referenced Secret must exist in the same namespace. External stores default to two replicas guarded by a `PodDisruptionBudget` (see [High availability and operations](#high-availability-and-operations)).
 
 ## Models
 
@@ -111,7 +112,7 @@ Both `summarization` and `embedding` model references are required. Each points 
 | `storage.external.provider` | string | `pgvector` | External vector store provider |
 | `storage.external.connectionSecretRef` | SecretKeySelector | — | Secret + key holding the pgvector DSN (required for external) |
 | `storage.external.embeddingDims` | int | `1536` | Embedding vector dimensions |
-| `replicas` | int | `1` | Service replicas; must be `1` in local mode |
+| `replicas` | int | mode-aware | Service replicas. Defaults to 2 for external, 1 for local. Must be 1 in local mode |
 | `models.summarization` | object | — | Summarization/extraction model reference (required) |
 | `models.embedding` | object | — | Embedding model reference (required) |
 | `extraction.concurrency` | int | `4` | Concurrent extraction workers |
@@ -128,6 +129,16 @@ Both `summarization` and `embedding` model references are required. Each points 
 | `deployment` | object | Underlying Deployment status |
 
 When ready, the store exposes an endpoint of the form `http://memorystore-<name>.<namespace>.svc.cluster.local:8080`, which the operator injects into bound agents as `MEMORY_STORE_ENDPOINT`.
+
+## High availability and operations
+
+**Replicas and disruption budget.** External stores are stateless over the shared pgvector database, so they default to two replicas and are guarded by a `PodDisruptionBudget` pinning `minAvailable: 1` — voluntary disruptions (node drains, rollouts) cannot drain the fleet to zero. Local stores are single-writer over a PersistentVolume and stay at one replica with no budget. Set `replicas` explicitly to override the external default; local mode rejects any value other than 1.
+
+**Health and readiness.** The service exposes `/healthz` (liveness: the process is up) and `/readyz` (readiness: both memory tiers are reachable, returning 503 otherwise). The operator wires these as the Deployment's liveness and readiness probes, so a store only reports `Ready` once it can serve.
+
+**Failure mode and degradation.** The store's `defaultFailureMode` (`soft` by default) governs how write and forget failures surface to bound agents. Under `soft`, a memory-write failure is tolerated: the agent's turn proceeds and the write is retried in the background. Under `strict`, the failure is surfaced as an error. Recall is always best-effort regardless of mode — if the long-term tier is unavailable, recall degrades to the short-term window rather than failing the turn. An individual Agent can override the store default in its `config.memory.failureMode`.
+
+**Provisioning a development database.** For local development, `kaos system install --pgvector-memory-enabled` provisions a pgvector Postgres in the install namespace and writes a `kaos-memory-pgvector` connection Secret, ready to reference from an `external`-mode store's `connectionSecretRef`. This is a development convenience — production deployments point `connectionSecretRef` at a managed pgvector database.
 
 ## Binding an Agent
 
