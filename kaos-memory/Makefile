@@ -14,7 +14,7 @@ help:
 
 # Install dependencies
 build:
-	uv pip install -e .[service,dev]
+	uv pip install -e .[service,dev,pydantic-ai]
 
 # Build the container image
 docker-build:

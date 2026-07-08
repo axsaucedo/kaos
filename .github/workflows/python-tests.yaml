@@ -126,7 +126,7 @@ jobs:
         run: |
           uv venv
           source .venv/bin/activate
-          uv pip install -e .[service,dev]
+          uv pip install -e .[service,dev,pydantic-ai]
 
       - name: Check formatting with black
         working-directory: kaos-memory
