@@ -156,6 +156,141 @@ def install(
         help="Path to a local Keycloak Helm chart to install. When omitted, a "
         "self-contained dev deployment is applied instead (advanced).",
     ),
+    auth_enabled: bool = typer.Option(
+        False,
+        "--auth-enabled/--no-auth-enabled",
+        hidden=True,
+        help="Advanced: enable agent-auth wiring directly without a preset.",
+    ),
+    ext_authz_url: str | None = typer.Option(
+        None, "--ext-authz-url", hidden=True, help="Advanced: ext_authz backend."
+    ),
+    auth_issuer: str | None = typer.Option(
+        None, "--auth-issuer", hidden=True, help="Advanced: broker issuer URL."
+    ),
+    token_exchange: bool = typer.Option(
+        True,
+        "--token-exchange/--no-token-exchange",
+        hidden=True,
+        help="Advanced: RFC 8693 token-exchange path.",
+    ),
+    ext_proc_url: str | None = typer.Option(
+        None,
+        "--ext-proc-url",
+        hidden=True,
+        help="Advanced: token-exchange ext_proc backend.",
+    ),
+    user_auth: bool = typer.Option(
+        True,
+        "--user-auth/--no-user-auth",
+        hidden=True,
+        help="Advanced: install the user identity provider (Keycloak).",
+    ),
+    user_auth_issuer: str | None = typer.Option(
+        None, "--user-auth-issuer", hidden=True, help="Advanced: user-auth OIDC issuer."
+    ),
+    user_auth_audience: str = typer.Option(
+        "kaos",
+        "--user-auth-audience",
+        hidden=True,
+        help="Advanced: user token audience.",
+    ),
+    network_policy: bool = typer.Option(
+        True,
+        "--network-policy/--no-network-policy",
+        hidden=True,
+        help="Advanced: generate bypass-prevention NetworkPolicies.",
+    ),
+    network_policy_egress: bool = typer.Option(
+        False,
+        "--network-policy-egress/--no-network-policy-egress",
+        hidden=True,
+        help="Advanced: add egress default-deny to NetworkPolicies.",
+    ),
+    gateway_routing: bool = typer.Option(
+        False,
+        "--gateway-routing/--no-gateway-routing",
+        hidden=True,
+        help="Advanced: route internal traffic through the gateway.",
+    ),
+    gateway_host: str | None = typer.Option(
+        None,
+        "--gateway-host",
+        hidden=True,
+        help="Advanced: in-cluster gateway host[:port].",
+    ),
+    tls_mode: str | None = typer.Option(
+        None,
+        "--tls-mode",
+        hidden=True,
+        help="Advanced: gateway HTTPS termination mode.",
+    ),
+    tls_issuer_name: str | None = typer.Option(
+        None,
+        "--tls-issuer-name",
+        hidden=True,
+        help="Advanced: cert-manager issuer name.",
+    ),
+    tls_issuer_kind: str = typer.Option(
+        "ClusterIssuer",
+        "--tls-issuer-kind",
+        hidden=True,
+        help="Advanced: cert-manager issuer kind.",
+    ),
+    tls_secret_name: str | None = typer.Option(
+        None,
+        "--tls-secret-name",
+        hidden=True,
+        help="Advanced: existing TLS Secret name.",
+    ),
+    authz_provider: str | None = typer.Option(
+        None,
+        "--authz-provider",
+        hidden=True,
+        help="Advanced: authorization provider (kaos|aib).",
+    ),
+    authz_gateway_extension: str | None = typer.Option(
+        None,
+        "--authz-gateway-extension",
+        hidden=True,
+        help="Advanced: enforcement extension (ext_proc|ext_authz).",
+    ),
+    agent_jwt_verification: str | None = typer.Option(
+        None,
+        "--agent-jwt-verification",
+        hidden=True,
+        help="Advanced: agent JWT trust (skip|verified).",
+    ),
+    policy_data_source: str | None = typer.Option(
+        None,
+        "--policy-data-source",
+        hidden=True,
+        help="Advanced: policy data author (automated|manual|external).",
+    ),
+    policy_rego_override: bool = typer.Option(
+        False,
+        "--policy-rego-override",
+        hidden=True,
+        help="Advanced: operator owns policy.rego only, admin authors grant data.",
+    ),
+    admin_url: str | None = typer.Option(
+        None,
+        "--admin-url",
+        hidden=True,
+        help="Advanced: identity broker admin API URL.",
+    ),
+    policy_configmap_name: str | None = typer.Option(
+        None,
+        "--policy-configmap-name",
+        hidden=True,
+        help="Advanced: policy ConfigMap name.",
+    ),
+    policy_configmap_namespace: str | None = typer.Option(
+        None,
+        "--policy-configmap-namespace",
+        hidden=True,
+        help="Advanced: policy ConfigMap namespace.",
+    ),
 ) -> None:
     """Install the KAOS operator using Helm."""
     # Default to signoz if flag provided without value
@@ -180,7 +315,7 @@ def install(
         gateway_enabled = True
         auth_kwargs = _expand_full_auth_preset(full_auth_enabled)
 
-    install_command(
+    call_kwargs = dict(
         namespace=namespace,
         release_name=release_name,
         version=version,
@@ -198,8 +333,34 @@ def install(
         aib_values_path=aib_values_path,
         keycloak_chart_path=keycloak_chart_path,
         gateway_api_strict=gateway_api_strict,
-        **auth_kwargs,
+        auth_enabled=auth_enabled,
+        ext_authz_url=ext_authz_url,
+        auth_issuer=auth_issuer,
+        token_exchange=token_exchange,
+        ext_proc_url=ext_proc_url,
+        user_auth=user_auth,
+        user_auth_issuer=user_auth_issuer,
+        user_auth_audience=user_auth_audience,
+        network_policy=network_policy,
+        network_policy_egress=network_policy_egress,
+        gateway_routing=gateway_routing,
+        gateway_host=gateway_host,
+        tls_mode=tls_mode,
+        tls_issuer_name=tls_issuer_name,
+        tls_issuer_kind=tls_issuer_kind,
+        tls_secret_name=tls_secret_name,
+        authz_provider=authz_provider,
+        authz_gateway_extension=authz_gateway_extension,
+        agent_jwt_verification=agent_jwt_verification,
+        policy_data_source=policy_data_source,
+        policy_rego_override=policy_rego_override,
+        admin_url=admin_url,
+        policy_configmap_name=policy_configmap_name,
+        policy_configmap_namespace=policy_configmap_namespace,
     )
+    # Preset values take precedence over the advanced flag defaults.
+    call_kwargs.update(auth_kwargs)
+    install_command(**call_kwargs)
 
 
 @app.command(name="uninstall")
