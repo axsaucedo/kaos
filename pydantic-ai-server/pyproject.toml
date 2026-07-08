@@ -1,6 +1,6 @@
 [project]
 name = "pydantic-ai-server"
-version = "0.5.1.dev0"
+version = "0.6.1.dev0"
 description = "PAIS - Pydantic AI Server for Kubernetes Agent Orchestration"
 requires-python = ">=3.12"
 dependencies = [
