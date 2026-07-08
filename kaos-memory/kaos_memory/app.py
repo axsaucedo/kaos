@@ -31,127 +31,30 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from opentelemetry import trace
-from pydantic import BaseModel, Field, model_validator
 
 from kaos_memory.config import MemorySettings
+from kaos_memory.contract import (
+    FailureMode,
+    ForgetRequest,
+    ForgetResponse,
+    MediumTermContext,
+    RecallRequest,
+    RecallResponse,
+    Scope,
+    ShortTermContext,
+    Turn,
+    WriteRequest,
+    WriteResponse,
+)
 from kaos_memory.stores import (
     LongTermStore,
     ModelClient,
     Scheduler,
-    Scope,
     ShortTermStore,
 )
 
 tracer = trace.get_tracer("kaos.memory")
 logger = logging.getLogger("kaos.memory.background")
-
-
-# --------------------------------------------------------------------------- #
-# HTTP schemas — thin wrappers over the store-level value objects.
-# --------------------------------------------------------------------------- #
-
-
-class RecallRequest(BaseModel):
-    """Synchronous recall: assemble context visible at ``scope`` for ``query``."""
-
-    scope: Scope
-    query: str
-    top_k: int = 10
-    include_short_term: bool = True
-    short_term_token_budget: Optional[int] = None
-
-
-FailureMode = str  # "soft" | "strict"
-
-
-class Turn(BaseModel):
-    """A single conversational turn: a role and its content."""
-
-    role: str
-    content: str
-
-
-class WriteRequest(BaseModel):
-    """Record one or more turns: append them to the short-term window synchronously; long-term
-    extraction runs later, per fold, over the batch the appends evict.
-
-    Turns are supplied either as a ``turns`` list (the batch shape the runtime uses to persist
-    a whole interaction in one call) or as a single ``role``/``content`` pair (normalised into a
-    one-element batch). ``infer`` controls whether the engine extracts facts (vs storing raw).
-    ``failure_mode`` selects fail-soft (swallow long-term scheduling errors, return degraded) or
-    strict (surface failures as an error); when omitted it inherits the service default.
-    """
-
-    scope: Scope
-    turns: List[Turn] = Field(default_factory=list)
-    role: Optional[str] = None
-    content: Optional[str] = None
-    infer: bool = True
-    failure_mode: Optional[FailureMode] = None
-
-    @model_validator(mode="after")
-    def _normalise_turns(self) -> "WriteRequest":
-        if self.role is not None and self.content is not None:
-            self.turns = [Turn(role=self.role, content=self.content), *self.turns]
-        if not self.turns:
-            raise ValueError("write requires either turns[] or a role/content pair")
-        return self
-
-
-class WriteResponse(BaseModel):
-    """Acknowledges a write. ``scheduled`` indicates the append evicted a batch and long-term
-    extraction of that batch was queued (writes that only buffer the turn return
-    ``scheduled=False``); ``degraded`` is set when a fail-soft request swallowed a
-    scheduling error."""
-
-    accepted: bool = True
-    scheduled: bool = False
-    degraded: bool = False
-
-
-class ForgetRequest(BaseModel):
-    """Erase a scope: clear its short-term tier and delete its long-term memories."""
-
-    scope: Scope
-    failure_mode: Optional[FailureMode] = None
-
-
-class ForgetResponse(BaseModel):
-    """Acknowledges a forget. ``degraded`` is set when the long-term erasure failed
-    under fail-soft (the short-term tier was still cleared)."""
-
-    forgotten: bool = True
-    degraded: bool = False
-
-
-class ShortTermContext(BaseModel):
-    """The short-term tier slice of a recall response: the verbatim active window."""
-
-    recent: List[Tuple[str, str]] = Field(default_factory=list)
-
-
-class MediumTermContext(BaseModel):
-    """The medium-term tier slice of a recall response: the rolling conversation digest."""
-
-    summary: str = ""
-
-
-class RecallResponse(BaseModel):
-    """Assembled recall context: native long-term facts, the medium-term digest, the
-    short-term window, and a rendered block.
-
-    ``facts`` are Mem0's native result dicts (memory text, score, id, metadata),
-    passed through unmodified. ``medium_term`` carries the rolling digest and ``short_term``
-    the verbatim recent turns. ``block`` is the deterministic structured text the runtime
-    injects into the system context. ``degraded`` is set when long-term recall failed and
-    only the conversational tiers are present.
-    """
-
-    facts: List[Dict[str, Any]] = Field(default_factory=list)
-    short_term: ShortTermContext = Field(default_factory=ShortTermContext)
-    medium_term: MediumTermContext = Field(default_factory=MediumTermContext)
-    block: str = ""
-    degraded: bool = False
 
 
 # --------------------------------------------------------------------------- #
@@ -164,31 +67,20 @@ def _fact_text(fact: Dict[str, Any]) -> str:
     return fact.get("memory") or fact.get("text") or ""
 
 
-def assemble_block(
-    facts: List[Dict[str, Any]],
-    summary: str,
-    recent: List[Tuple[str, str]],
-) -> str:
-    """Render the structured memory block. Empty inputs yield an empty block.
+def assemble_block(facts: List[Dict[str, Any]]) -> str:
+    """Render the long-term memory block. Empty input yields an empty block.
 
-    The block is plain text the runtime injects into the agent's system context (not
-    as fabricated prior turns). It is always-on and cheap, rendering whatever context
-    is available — long-term facts, a rolling summary, recent verbatim turns.
+    The block is plain text the runtime injects into the agent's system context (as
+    leading context, not fabricated prior turns). It carries only long-term facts:
+    conversational continuity — the rolling summary and the recent verbatim window — is
+    replayed separately as reconstructed message history, so rendering it here too would
+    duplicate it in the prompt. The summary and recent turns are returned in their own
+    response fields for that replay.
     """
-    sections: List[str] = []
-
     fact_lines = [f"- {_fact_text(f)}" for f in facts if _fact_text(f)]
-    if fact_lines:
-        sections.append("## Relevant memory\n" + "\n".join(fact_lines))
-
-    if summary.strip():
-        sections.append("## Conversation summary\n" + summary.strip())
-
-    if recent:
-        turns = "\n".join(f"{role}: {content}" for role, content in recent)
-        sections.append("## Recent turns\n" + turns)
-
-    return "\n\n".join(sections)
+    if not fact_lines:
+        return ""
+    return "## Relevant memory\n" + "\n".join(fact_lines)
 
 
 # --------------------------------------------------------------------------- #
@@ -325,7 +217,7 @@ class MemoryService:
 
             span.set_attribute("kaos.memory.degraded", degraded)
             span.set_attribute("kaos.memory.fact_count", len(facts))
-            block = assemble_block(facts, summary, recent)
+            block = assemble_block(facts)
             return RecallResponse(
                 facts=facts,
                 short_term=ShortTermContext(recent=recent),

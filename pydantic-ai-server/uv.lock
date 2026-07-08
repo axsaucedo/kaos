@@ -936,6 +936,42 @@ wheels = [
 ]
 
 [[package]]
+name = "kaos-memory"
+version = "0.4.8.dev0"
+source = { editable = "../kaos-memory" }
+dependencies = [
+    { name = "httpx" },
+    { name = "opentelemetry-api" },
+    { name = "pydantic" },
+]
+
+[package.optional-dependencies]
+pydantic-ai = [
+    { name = "pydantic-ai" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "black", marker = "extra == 'dev'", specifier = ">=24.0.0" },
+    { name = "chromadb", marker = "extra == 'service'", specifier = ">=1.5.0" },
+    { name = "fastapi", marker = "extra == 'service'", specifier = ">=0.104.0" },
+    { name = "httpx", specifier = ">=0.25.0" },
+    { name = "mem0ai", marker = "extra == 'service'", specifier = "==2.0.10" },
+    { name = "opentelemetry-api", specifier = ">=1.20.0" },
+    { name = "opentelemetry-sdk", marker = "extra == 'dev'", specifier = ">=1.20.0" },
+    { name = "pgvector", marker = "extra == 'service'", specifier = ">=0.2.0" },
+    { name = "psycopg", extras = ["pool"], marker = "extra == 'service'", specifier = ">=3.1.0" },
+    { name = "pydantic", specifier = ">=2.0.0" },
+    { name = "pydantic-ai", marker = "extra == 'pydantic-ai'", specifier = ">=2.0.0,<3.0.0" },
+    { name = "pydantic-settings", marker = "extra == 'service'", specifier = ">=2.0.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21.0" },
+    { name = "tiktoken", marker = "extra == 'service'", specifier = ">=0.7.0" },
+    { name = "uvicorn", marker = "extra == 'service'", specifier = ">=0.24.0" },
+]
+provides-extras = ["service", "pydantic-ai", "dev"]
+
+[[package]]
 name = "keyring"
 version = "25.7.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1467,6 +1503,7 @@ source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
+    { name = "kaos-memory", extra = ["pydantic-ai"] },
     { name = "opentelemetry-api" },
     { name = "opentelemetry-exporter-otlp" },
     { name = "opentelemetry-instrumentation-fastapi" },
@@ -1503,6 +1540,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.104.0" },
     { name = "httpx", specifier = ">=0.25.0" },
     { name = "kaos-cli", marker = "extra == 'cli'" },
+    { name = "kaos-memory", extras = ["pydantic-ai"], editable = "../kaos-memory" },
     { name = "opentelemetry-api", specifier = ">=1.20.0" },
     { name = "opentelemetry-exporter-otlp", specifier = ">=1.20.0" },
     { name = "opentelemetry-instrumentation-fastapi", specifier = ">=0.41b0" },

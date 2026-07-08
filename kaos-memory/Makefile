@@ -14,7 +14,7 @@ help:
 
 # Install dependencies
 build:
-	uv pip install -e .[dev]
+	uv pip install -e .[service,dev]
 
 # Build the container image
 docker-build:

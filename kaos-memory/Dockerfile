@@ -9,9 +9,10 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # Copy only dependency files first for better layer caching
 COPY pyproject.toml ./
 
-# Install dependencies using UV with cache mount (cached unless pyproject.toml changes)
+# Install dependencies using UV with cache mount (cached unless pyproject.toml changes).
+# The service image needs the full engine: install the `service` extra.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip compile pyproject.toml -o requirements.txt && \
+    uv pip compile --extra service pyproject.toml -o requirements.txt && \
     uv pip install --system -r requirements.txt
 
 # Copy source code (changes frequently, so copied last)

@@ -52,7 +52,8 @@ def test_recall_surfaces_medium_term_digest(tmp_path):
     )
     body = resp.json()
     assert body["medium_term"]["summary"] != ""
-    assert "## Conversation summary" in body["block"]
+    # The digest is surfaced for message-history replay, not duplicated into the block.
+    assert "## Conversation summary" not in body["block"]
     # The digest is separate from the verbatim window.
     assert "summary" not in body["short_term"]
 
@@ -78,7 +79,8 @@ def test_recall_returns_facts_and_short_term_context(tmp_path):
     assert body["facts"][0]["score"] == 0.9
     assert body["short_term"]["recent"] == [["user", "hello there"], ["assistant", "hi alice"]]
     assert "alice prefers dark mode" in body["block"]
-    assert "## Recent turns" in body["block"]
+    # The verbatim window is replayed as message history, not rendered into the block.
+    assert "## Recent turns" not in body["block"]
 
 
 def test_recall_degrades_to_short_term_only_on_longterm_failure(tmp_path):
@@ -97,7 +99,10 @@ def test_recall_degrades_to_short_term_only_on_longterm_failure(tmp_path):
     body = resp.json()
     assert body["degraded"] is True
     assert body["facts"] == []
-    assert "budget is 5000" in body["block"]
+    # Long-term degraded: the block carries no facts, but the verbatim window survives
+    # for message-history replay.
+    assert body["block"] == ""
+    assert ["user", "remember the budget is 5000"] in body["short_term"]["recent"]
 
 
 def test_recall_can_exclude_short_term(tmp_path):

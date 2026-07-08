@@ -24,7 +24,7 @@ from pydantic_ai.messages import (
 from opentelemetry.propagate import inject
 
 if TYPE_CHECKING:
-    from pais.memory import Memory
+    from pais.memory import Memory, MemoryScope
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +38,8 @@ class AgentDeps:
     # Non-secret request security context (request_id/session_id/principal/actor/scopes)
     # populated from the aib SDK for audit/correlation; never carries raw bearer tokens.
     security_context: Optional[Dict[str, Any]] = None
+    # Server-derived memory scope for this run (principal/agent/session owner).
+    memory_scope: Optional["MemoryScope"] = None
 
 
 class _MockResponseState:
@@ -406,6 +408,25 @@ class AgentServerSettings(BaseSettings):
     memory_max_sessions: int = 1000
     memory_max_session_events: int = 500
     memory_redis_url: str = ""
+    # Central memory service (long-term tier). When a MemoryStore is bound the
+    # operator injects its endpoint here and the runtime uses the RemoteMemory
+    # backend; when empty the runtime falls back to the in-process short-term
+    # LocalMemory backend (no long-term tier, pod-local).
+    memory_store_endpoint: str = ""
+    memory_scope: str = "session"
+    # Additive explicit memory tools exposed to the agent on top of the automatic
+    # recall-inject/write-extract baseline: "all" (save + search), "read" (search
+    # only), "write" (save only), or empty (none). Long-term tools require a bound
+    # MemoryStore; the operator rejects a tools setting without one.
+    memory_tools: str = ""
+    # Empty means "inherit the memory store's configured default_failure_mode"; the
+    # runtime only sends an explicit failure mode (soft|strict) when set here, so the
+    # MemoryStore CRD default governs the runtime write/forget path by default.
+    memory_failure_mode: str = ""
+    memory_short_term_token_budget: int = 0
+    memory_rolling_summary: bool = True
+    # The agent's stable identity used as the owner of private/agent-scoped memory.
+    agent_identity: str = ""
 
     # Task store configuration
     task_store_type: str = "local"

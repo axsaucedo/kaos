@@ -25,12 +25,10 @@ import tempfile
 import threading
 import time
 from contextlib import contextmanager
-from enum import Enum
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
 
 import httpx
 import tiktoken
-from pydantic import BaseModel, model_validator
 
 from kaos_memory.config import (
     ExternalStorage,
@@ -39,95 +37,12 @@ from kaos_memory.config import (
     ShortTermTierConfig,
     StorageConfig,
 )
-
-# --------------------------------------------------------------------------- #
-# Scope                                                                        #
-# --------------------------------------------------------------------------- #
-
-#: Reserved owner id naming the store-wide shared namespace. It is mapped onto
-#: ``agent_id`` and is deliberately distinct from any real agent client id, so a
-#: ``shared`` operation never collides with a ``private`` (per-agent) one.
-SHARED_OWNER = "kaos:shared"
-
-
-class ScopeLevel(str, Enum):
-    """The memory scope an operation targets.
-
-    - ``PRIVATE``: only this agent (mapped to ``agent_id``).
-    - ``USER``: all agents acting for a principal (mapped to ``user_id``).
-    - ``SHARED``: every agent on the store (mapped to the reserved shared owner).
-    - ``SESSION``: a single run/conversation (mapped to ``run_id``).
-    """
-
-    PRIVATE = "private"
-    USER = "user"
-    SHARED = "shared"
-    SESSION = "session"
-
-
-class Scope(BaseModel):
-    """Identifies the owner of a memory operation.
-
-    Carries the principal, the agent's stable client id, and the session id, plus
-    the selected ``level``. Only the field required by ``level`` must be present;
-    the rest may be unset (an under-specified scope is representable here and is
-    rejected by enforcement later, not by construction).
-    """
-
-    level: ScopeLevel
-    principal: Optional[str] = None
-    agent_client_id: Optional[str] = None
-    session_id: Optional[str] = None
-
-    @model_validator(mode="after")
-    def _normalise(self) -> "Scope":
-        # Empty strings are treated as unset so they cannot be used as owner keys.
-        for field in ("principal", "agent_client_id", "session_id"):
-            value = getattr(self, field)
-            if value is not None and value.strip() == "":
-                object.__setattr__(self, field, None)
-        return self
-
-    def is_complete(self) -> bool:
-        """Whether the field required by ``level`` is present (a usable owner key exists)."""
-        if self.level is ScopeLevel.PRIVATE:
-            return self.agent_client_id is not None
-        if self.level is ScopeLevel.USER:
-            return self.principal is not None
-        if self.level is ScopeLevel.SESSION:
-            return self.session_id is not None
-        return True  # SHARED always resolves to the reserved owner.
-
-    def owner_kwargs(self) -> Dict[str, Any]:
-        """Return the Mem0 owner keyword arguments for a write/search at this scope.
-
-        Exactly one of ``user_id`` / ``agent_id`` / ``run_id`` is set. Raises if the
-        field required by ``level`` is missing, so an unusable scope never silently
-        widens to another owner.
-        """
-        if self.level is ScopeLevel.PRIVATE:
-            if self.agent_client_id is None:
-                raise ValueError("private scope requires agent_client_id")
-            return {"agent_id": self.agent_client_id}
-        if self.level is ScopeLevel.USER:
-            if self.principal is None:
-                raise ValueError("user scope requires principal")
-            return {"user_id": self.principal}
-        if self.level is ScopeLevel.SESSION:
-            if self.session_id is None:
-                raise ValueError("session scope requires session_id")
-            return {"run_id": self.session_id}
-        return {"agent_id": SHARED_OWNER}
-
-    def search_filters(self) -> Dict[str, Any]:
-        """Return the Mem0 ``filters`` dict for a search at this scope.
-
-        Identical to the owner kwargs: Mem0 2.x uses the same owner keys inside the
-        ``filters`` argument and requires at least one of them, which this always
-        provides.
-        """
-        return self.owner_kwargs()
-
+from kaos_memory.contract import (
+    SHARED_OWNER,
+    Scope,
+    ScopeLevel,
+    scope_key,
+)
 
 # --------------------------------------------------------------------------- #
 # Token counting and short-term helpers                                        #
@@ -145,12 +60,6 @@ def count_tokens(text: str) -> int:
     if not text:
         return 0
     return len(_ENCODING.encode(text))
-
-
-def scope_key(scope: Scope) -> str:
-    """Stable string key for a scope's short-term window (one owner key -> 'key:value')."""
-    ((key, value),) = scope.owner_kwargs().items()
-    return f"{key}:{value}"
 
 
 #: A summarizer folds (prior_summary, [(role, content), ...]) into a new summary.

@@ -3,12 +3,30 @@
 import json
 import uuid
 import logging
+import httpx
 from abc import ABC, abstractmethod
 from collections import deque
 from inspect import isawaitable
-from typing import Dict, Any, List, Optional, Union, Deque, Mapping
+from typing import Dict, Any, List, Optional, Tuple, Union, Deque, Mapping
 from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
+
+from kaos_memory.contract import Scope, ScopeLevel
+from kaos_memory.client import (
+    MemoryServiceClient,
+    RecalledMemory,
+    ShortTermRecall,
+    MediumTermRecall,
+)
+from kaos_memory.pydantic_ai import (
+    scope_from_deps,
+    pydantic_message_to_turns,
+    reconstruct_message_history,
+)
+
+# Back-compat alias: the runtime historically named the scope MemoryScope; it is
+# the shared contract Scope, re-exported so existing imports keep working.
+MemoryScope = Scope
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +84,59 @@ class SessionMemory:
 
 
 class Memory(ABC):
-    """Abstract interface for all memory implementations."""
+    """Abstract interface for all memory implementations.
+
+    The interface is tiered. The session/event methods below model the short-term
+    tier the message-history bridge replays. The ``recall``/``write``/``forget``
+    methods model the long-term tier served by the central memory service. A
+    short-term-only or disabled backend inherits the long-term methods as no-ops, so
+    only a service-backed implementation needs to override them.
+    """
+
+    async def recall(
+        self,
+        scope: "MemoryScope",
+        query: str,
+        *,
+        top_k: int = 10,
+        include_short_term: bool = True,
+        token_budget: Optional[int] = None,
+    ) -> "RecalledMemory":
+        """Assemble the context visible at ``scope`` for ``query``.
+
+        Best-effort: a long-term failure yields a degraded, short-term-only (or empty)
+        result rather than raising. The default implementation recalls nothing,
+        which is correct for short-term-only and disabled backends.
+        """
+        return RecalledMemory()
+
+    async def write(
+        self,
+        scope: "MemoryScope",
+        turns: List[Tuple[str, str]],
+        *,
+        infer: bool = True,
+        failure_mode: Optional[str] = None,
+    ) -> bool:
+        """Record a batch of turns into the memory tiers off the hot path.
+
+        ``turns`` is an ordered ``(role, content)`` list persisted in a single call so a
+        whole interaction lands as one write. ``failure_mode`` is optional: when ``None``
+        the memory store's own configured default governs fail-soft vs strict; pass an
+        explicit ``"soft"``/``"strict"`` only to override it. Returns ``True`` when the
+        write was accepted. The default implementation is a no-op accept for backends
+        without a long-term tier.
+        """
+        return True
+
+    async def forget(self, scope: "MemoryScope", *, failure_mode: Optional[str] = None) -> bool:
+        """Erase a scope: clear its short-term tier and delete its long-term memories.
+
+        ``failure_mode`` is optional; when ``None`` the store's configured default
+        governs fail-soft vs strict. The default implementation is a no-op accept for
+        backends without a long-term tier.
+        """
+        return True
 
     @abstractmethod
     async def create_session(
@@ -380,6 +450,101 @@ class NullMemory(Memory):
         self, app_name: str = "", user_id: str = "", session_id: Optional[str] = None
     ) -> str:
         return session_id or "null-session"
+
+    async def get_session(self, session_id: str) -> Optional[SessionMemory]:
+        return None
+
+    async def get_or_create_session(
+        self, session_id: str, app_name: str = "agent", user_id: str = "user"
+    ) -> str:
+        return session_id
+
+    async def add_event(
+        self,
+        session_id: str,
+        event_or_type: Union[MemoryEvent, str] = "",
+        content: Any = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        return True
+
+    async def get_session_events(
+        self, session_id: str, event_types: Optional[List[str]] = None
+    ) -> List[MemoryEvent]:
+        return []
+
+    async def list_sessions(self, user_id: Optional[str] = None) -> List[str]:
+        return []
+
+    async def delete_session(self, session_id: str) -> bool:
+        return True
+
+
+class RemoteMemory(Memory):
+    """Memory backend that calls the central memory service over HTTP.
+
+    Implements the long-term tier — ``recall``/``write``/``forget`` — against the
+    service's HTTP surface, and treats every call as best-effort: transport
+    failures and degraded responses never raise into the agent turn (unless the
+    caller selects ``failure_mode="strict"`` for a write/forget). The short-term tier
+    lives in the service and is returned *inside* the recall response, so the
+    legacy session/event methods are thin no-ops here; the message-history bridge
+    reads the short-term slice from ``recall`` rather than from local event storage.
+    """
+
+    def __init__(
+        self,
+        endpoint: str,
+        *,
+        timeout: float = 10.0,
+        recall_timeout: float = 5.0,
+        client: Optional[httpx.AsyncClient] = None,
+    ):
+        self._service = MemoryServiceClient(
+            endpoint, timeout=timeout, recall_timeout=recall_timeout, client=client
+        )
+        self.endpoint = self._service.endpoint
+
+    async def recall(
+        self,
+        scope: "MemoryScope",
+        query: str,
+        *,
+        top_k: int = 10,
+        include_short_term: bool = True,
+        token_budget: Optional[int] = None,
+    ) -> "RecalledMemory":
+        return await self._service.recall(
+            scope,
+            query,
+            top_k=top_k,
+            include_short_term=include_short_term,
+            token_budget=token_budget,
+        )
+
+    async def write(
+        self,
+        scope: "MemoryScope",
+        turns: List[Tuple[str, str]],
+        *,
+        infer: bool = True,
+        failure_mode: Optional[str] = None,
+    ) -> bool:
+        return await self._service.write(scope, turns, infer=infer, failure_mode=failure_mode)
+
+    async def forget(self, scope: "MemoryScope", *, failure_mode: Optional[str] = None) -> bool:
+        return await self._service.forget(scope, failure_mode=failure_mode)
+
+    async def close(self) -> None:
+        await self._service.close()
+
+    # The short-term tier lives in the service and is returned inside recall, so
+    # these satisfy the interface without holding local session state.
+
+    async def create_session(
+        self, app_name: str = "agent", user_id: str = "user", session_id: Optional[str] = None
+    ) -> str:
+        return session_id or f"session_{uuid.uuid4().hex[:12]}"
 
     async def get_session(self, session_id: str) -> Optional[SessionMemory]:
         return None
