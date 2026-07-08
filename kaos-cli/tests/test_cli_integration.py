@@ -1299,6 +1299,75 @@ class TestAuthWiring:
         # The in-cluster broker enduser endpoint is plain http, so the ExtProc
         # binary must be told to accept http:// endpoints at startup.
         assert "extProc.oauth2.allowHttp=true" in joined
+        # Issuer/tokenEndpoint are omitted unless supplied (chart defaults apply).
+        assert "extProc.oauth2.issuer" not in joined
+        assert "extProc.oauth2.tokenEndpoint" not in joined
+
+    def test_build_aib_extproc_args_with_endpoints(self):
+        from kaos_cli.install import _build_aib_extproc_args
+
+        args = _build_aib_extproc_args(
+            "extproc-gateway",
+            "secret",
+            issuer="http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos",
+            token_endpoint="http://broker.aib.svc.cluster.local:8080/oauth2/token",
+        )
+        joined = " ".join(args)
+        assert (
+            "extProc.oauth2.issuer="
+            "http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos" in joined
+        )
+        assert (
+            "extProc.oauth2.tokenEndpoint="
+            "http://broker.aib.svc.cluster.local:8080/oauth2/token" in joined
+        )
+
+    def test_build_aib_hybrid_broker_args(self):
+        from kaos_cli.install import _build_aib_hybrid_broker_args
+
+        issuer = "http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos"
+        joined = " ".join(_build_aib_hybrid_broker_args(issuer))
+        assert "broker.oauth2AuthorizationServer.mode=hybrid" in joined
+        assert (
+            f"broker.oauth2AuthorizationServer.proxy.upstreamIssuerUri={issuer}"
+            in joined
+        )
+        assert (
+            "broker.oauth2AuthorizationServer.proxy.upstreamTokenEndpoint="
+            f"{issuer}/protocol/openid-connect/token" in joined
+        )
+        assert (
+            "broker.oauth2AuthorizationServer.proxy.upstreamAuthorizeEndpoint="
+            f"{issuer}/protocol/openid-connect/auth" in joined
+        )
+        assert "urn:ietf:params:oauth:grant-type:token-exchange" in joined
+        assert "broker.tokenExchange.expectedAudience=token-exchange-broker" in joined
+
+    def test_keycloak_realm_json_registers_extproc_client(self):
+        from kaos_cli.install import (
+            AUTH_EXT_PROC_CLIENT_ID,
+            AUTH_EXT_PROC_CLIENT_SECRET,
+            AUTH_TOKEN_EXCHANGE_AUDIENCE,
+            _keycloak_realm_json,
+        )
+
+        realm = _keycloak_realm_json(
+            "kaos", "kaos", "kaos-dev-secret", "kaos", "kaos-user", "kaos-password"
+        )
+        clients = {c["clientId"]: c for c in realm["clients"]}
+        # The ExtProc gateway service-account client is registered so the
+        # token-exchange sidecar can mint its client assertion.
+        assert AUTH_EXT_PROC_CLIENT_ID in clients
+        extproc = clients[AUTH_EXT_PROC_CLIENT_ID]
+        assert extproc["secret"] == AUTH_EXT_PROC_CLIENT_SECRET
+        assert extproc["serviceAccountsEnabled"] is True
+        # Both clients carry the token-exchange broker audience the broker enforces.
+        for client_id in ("kaos", AUTH_EXT_PROC_CLIENT_ID):
+            audiences = [
+                m["config"].get("included.custom.audience")
+                for m in clients[client_id]["protocolMappers"]
+            ]
+            assert AUTH_TOKEN_EXCHANGE_AUDIENCE in audiences
 
     def test_default_user_auth_issuer(self):
         from kaos_cli.install import _default_user_auth_issuer
