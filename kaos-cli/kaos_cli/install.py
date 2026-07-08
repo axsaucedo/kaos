@@ -35,6 +35,13 @@ AUTH_EXT_PROC_CLIENT_ID = "extproc-gateway"
 AUTH_EXT_PROC_CLIENT_SECRET = "extproc-gateway-secret"
 DEFAULT_THIRD_PARTY_SERVICE_ID = "dummy-third-party"
 
+# Full-auth presets: curated end-to-end security postures selected with the
+# single --full-auth-enabled flag, replacing the fine-grained auth knobs.
+FULL_AUTH_KEYCLOAK_AIB = "keycloak-aib-enabled"
+FULL_AUTH_KAOS_DEMO = "kaos-internal-demo"
+FULL_AUTH_PRESETS = (FULL_AUTH_KEYCLOAK_AIB, FULL_AUTH_KAOS_DEMO)
+DEFAULT_FULL_AUTH_PRESET = FULL_AUTH_KEYCLOAK_AIB
+
 # User-auth (human identity provider, Keycloak by default) defaults
 DEFAULT_KEYCLOAK_NAMESPACE = "keycloak"
 DEFAULT_KEYCLOAK_RELEASE = "keycloak"
@@ -1113,6 +1120,51 @@ def _get_otel_endpoint(backend: str, namespace: str) -> str:
     if backend == "jaeger":
         return f"http://jaeger.{namespace}:4317"
     return f"http://signoz-otel-collector.{namespace}:4317"
+
+
+def _expand_full_auth_preset(preset: str) -> dict:
+    """Expand a --full-auth-enabled preset into install_command auth kwargs.
+
+    The two presets collapse the fine-grained auth knobs into curated postures:
+
+    - keycloak-aib-enabled: the full verified path. Keycloak provides human user
+      identity, the identity broker provides agent identity and RFC 8693 token
+      exchange, and authorization is enforced by OPA in the gateway ext_proc
+      using broker permission sets, with the agent (actor) JWT signature
+      verified against the IdP JWKS.
+    - kaos-internal-demo: a self-contained demo needing no external IdP or
+      broker. KAOS projects authorization policy data into a ConfigMap enforced
+      by OPA in ext_proc, with the agent JWT header-trusted (non-production).
+
+    Both presets route internal agent->ModelAPI/MCP/peer traffic through the
+    gateway and generate bypass-prevention NetworkPolicies so the enforcement
+    point cannot be sidestepped.
+    """
+    if preset == FULL_AUTH_KEYCLOAK_AIB:
+        return {
+            "auth_enabled": True,
+            "user_auth": True,
+            "token_exchange": True,
+            "network_policy": True,
+            "gateway_routing": True,
+            "authz_provider": "aib",
+            "authz_gateway_extension": "ext_proc",
+            "agent_jwt_verification": "verified",
+            "policy_data_source": "automated",
+        }
+    if preset == FULL_AUTH_KAOS_DEMO:
+        return {
+            "auth_enabled": True,
+            "user_auth": False,
+            "token_exchange": False,
+            "network_policy": True,
+            "gateway_routing": True,
+            "authz_provider": "kaos",
+            "authz_gateway_extension": "ext_proc",
+            "agent_jwt_verification": "skip",
+            "policy_data_source": "automated",
+        }
+    raise ValueError(f"unknown full-auth preset: {preset!r}")
 
 
 def install_command(

@@ -881,14 +881,32 @@ class TestSystemInstallFlags:
         result = runner.invoke(app, ["system", "install", "--help"])
         assert result.exit_code == 0
         output = strip_ansi(result.output)
-        assert "--auth-enabled" in output
-        assert "--auth-namespace" in output
-        assert "--aib-chart-path" in output
-        assert "--user-auth" in output
-        assert "--keycloak-namespace" in output
+        assert "--full-auth-enabled" in output
+        # The fine-grained auth knobs are collapsed into the preset and no longer
+        # exposed on the command surface.
+        assert "--auth-enabled" not in output
+        assert "--authz-provider" not in output
+        assert "--agent-jwt-verification" not in output
+        # Advanced dev chart paths remain available but hidden from help.
+        assert "--aib-chart-path" not in output
 
 
 class TestAuthWiring:
+    @pytest.fixture(autouse=True)
+    def _stub_gateway_install(self):
+        """Stub the gateway install/wait helpers so preset-driven installs.
+
+        The full-auth presets force --gateway-enabled, which otherwise polls the
+        cluster for GatewayClass acceptance for 60s. Tests here assert on the
+        operator --set wiring, not the gateway bootstrap, so short-circuit it.
+        """
+        from unittest.mock import patch
+
+        with patch("kaos_cli.install._install_gateway_api", return_value=True), patch(
+            "kaos_cli.install._wait_for_gateway_class", return_value=True
+        ):
+            yield
+
     def test_build_auth_operator_args(self):
         from kaos_cli.install import _build_auth_operator_args
 
@@ -925,7 +943,7 @@ class TestAuthWiring:
         )
 
     def test_auth_enabled_wires_operator_security_values(self):
-        """--auth-enabled adds the security.agentAuth.* helm --set args."""
+        """--full-auth-enabled adds the security.agentAuth.* helm --set args."""
         from unittest.mock import patch
 
         captured = {}
@@ -953,7 +971,8 @@ class TestAuthWiring:
                 [
                     "system",
                     "install",
-                    "--auth-enabled",
+                    "--full-auth-enabled",
+                    "keycloak-aib-enabled",
                     "--chart-path",
                     "operator/chart",
                 ],
@@ -1286,7 +1305,7 @@ class TestAuthWiring:
         assert issuer == "http://keycloak.kc-ns.svc.cluster.local:8080/realms/kaos"
 
     def test_auth_enabled_wires_user_auth_values(self):
-        """--auth-enabled (user-auth on by default) adds security.userAuth.* args."""
+        """keycloak-aib-enabled (user-auth on) adds security.userAuth.* args."""
         from unittest.mock import patch
         from types import SimpleNamespace
 
@@ -1310,7 +1329,8 @@ class TestAuthWiring:
                 [
                     "system",
                     "install",
-                    "--auth-enabled",
+                    "--full-auth-enabled",
+                    "keycloak-aib-enabled",
                     "--chart-path",
                     "operator/chart",
                 ],
@@ -1322,7 +1342,7 @@ class TestAuthWiring:
         assert "security.userAuth.audience=kaos" in joined
 
     def test_no_user_auth_omits_user_auth_values(self):
-        """--no-user-auth installs neither Keycloak nor the userAuth wiring."""
+        """kaos-internal-demo installs neither Keycloak nor the userAuth wiring."""
         from unittest.mock import patch
         from types import SimpleNamespace
 
@@ -1348,8 +1368,8 @@ class TestAuthWiring:
                 [
                     "system",
                     "install",
-                    "--auth-enabled",
-                    "--no-user-auth",
+                    "--full-auth-enabled",
+                    "kaos-internal-demo",
                     "--chart-path",
                     "operator/chart",
                 ],
@@ -1361,9 +1381,13 @@ class TestAuthWiring:
         assert "security.userAuth" not in joined
         # Agent-auth wiring is unaffected.
         assert "security.agentAuth.extAuthzUrl=" in joined
+        # Demo posture selects the KAOS-owned policy provider with header-trusted
+        # agent JWT.
+        assert "security.agentAuth.authorization.provider=kaos" in joined
+        assert "security.agentAuth.authorization.agentJwtVerification=skip" in joined
 
     def test_keycloak_install_applies_realm_and_deployment(self):
-        """--auth-enabled applies the realm ConfigMap and Keycloak dev deployment."""
+        """keycloak-aib-enabled applies the realm ConfigMap and Keycloak deployment."""
         from unittest.mock import patch
         from types import SimpleNamespace
 
@@ -1383,7 +1407,8 @@ class TestAuthWiring:
                 [
                     "system",
                     "install",
-                    "--auth-enabled",
+                    "--full-auth-enabled",
+                    "keycloak-aib-enabled",
                     "--chart-path",
                     "operator/chart",
                 ],
@@ -1417,7 +1442,8 @@ class TestAuthWiring:
                 [
                     "system",
                     "install",
-                    "--auth-enabled",
+                    "--full-auth-enabled",
+                    "keycloak-aib-enabled",
                     "--keycloak-chart-path",
                     "charts/keycloak",
                     "--chart-path",
@@ -1430,7 +1456,107 @@ class TestAuthWiring:
         assert "charts/keycloak" in joined
         assert "realmImport.configMapName=keycloak-realm-import" in joined
 
-    def test_install_monitoring_enabled_without_value(self):
+    def test_expand_full_auth_preset_keycloak_aib(self):
+        from kaos_cli.install import _expand_full_auth_preset
+
+        kwargs = _expand_full_auth_preset("keycloak-aib-enabled")
+        assert kwargs["auth_enabled"] is True
+        assert kwargs["user_auth"] is True
+        assert kwargs["token_exchange"] is True
+        assert kwargs["authz_provider"] == "aib"
+        assert kwargs["authz_gateway_extension"] == "ext_proc"
+        assert kwargs["agent_jwt_verification"] == "verified"
+
+    def test_expand_full_auth_preset_kaos_demo(self):
+        from kaos_cli.install import _expand_full_auth_preset
+
+        kwargs = _expand_full_auth_preset("kaos-internal-demo")
+        assert kwargs["auth_enabled"] is True
+        assert kwargs["user_auth"] is False
+        assert kwargs["token_exchange"] is False
+        assert kwargs["authz_provider"] == "kaos"
+        assert kwargs["agent_jwt_verification"] == "skip"
+
+    def test_full_auth_enabled_without_value_defaults_to_keycloak_aib(self):
+        """--full-auth-enabled with no value selects the keycloak-aib preset."""
+        from unittest.mock import patch
+        from types import SimpleNamespace
+
+        captured = {}
+
+        def fake_helm(args, check=True, **kwargs):
+            if "upgrade" in args and any(
+                "kaos-operator" in a or a.endswith("/chart") for a in args
+            ):
+                captured["args"] = args
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with patch("kaos_cli.install.check_helm_installed", return_value=True), patch(
+            "kaos_cli.install.run_helm_command", side_effect=fake_helm
+        ), patch("kaos_cli.install._run_kubectl") as mock_kubectl:
+            mock_kubectl.return_value = SimpleNamespace(
+                returncode=0, stdout="", stderr=""
+            )
+            result = runner.invoke(
+                app,
+                [
+                    "system",
+                    "install",
+                    "--full-auth-enabled",
+                    "--chart-path",
+                    "operator/chart",
+                ],
+            )
+
+        assert result.exit_code == 0, result.output
+        joined = " ".join(captured.get("args", []))
+        assert "security.agentAuth.authorization.provider=aib" in joined
+        # Preset implies the gateway is installed for enforcement.
+        assert "gatewayAPI.enabled=true" in joined
+
+    def test_full_auth_enabled_rejects_unknown_preset(self):
+        result = runner.invoke(
+            app, ["system", "install", "--full-auth-enabled", "nonsense"]
+        )
+        assert result.exit_code != 0
+        assert "Invalid full-auth preset" in strip_ansi(result.output)
+
+    def test_gateway_api_strict_standalone_without_auth(self):
+        """--gateway-api-strict alone emits the strict value without an auth preset."""
+        from unittest.mock import patch
+        from types import SimpleNamespace
+
+        captured = {}
+
+        def fake_helm(args, check=True, **kwargs):
+            if "upgrade" in args and any(
+                "kaos-operator" in a or a.endswith("/chart") for a in args
+            ):
+                captured["args"] = args
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with patch("kaos_cli.install.check_helm_installed", return_value=True), patch(
+            "kaos_cli.install.run_helm_command", side_effect=fake_helm
+        ), patch("kaos_cli.install._run_kubectl") as mock_kubectl:
+            mock_kubectl.return_value = SimpleNamespace(
+                returncode=0, stdout="", stderr=""
+            )
+            result = runner.invoke(
+                app,
+                [
+                    "system",
+                    "install",
+                    "--gateway-api-strict",
+                    "--chart-path",
+                    "operator/chart",
+                ],
+            )
+
+        assert result.exit_code == 0, result.output
+        joined = " ".join(captured.get("args", []))
+        assert "security.strictGatewayApi.enabled=true" in joined
+        # No auth preset means no agentAuth wiring.
+        assert "security.agentAuth.extAuthzUrl=" not in joined
         """--monitoring-enabled without value defaults to signoz (not an invalid backend error)."""
         from unittest.mock import patch
 
