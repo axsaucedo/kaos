@@ -208,6 +208,66 @@ Every outbound URL routes through the gateway path (the `ext_proc` enforcement p
 
 **Proves:** internal calls are gateway-routed and the `ext_proc` authorization hook plus bypass-prevention NetworkPolicies are in place.
 
+## Step 6 — Prove requests are allowed or rejected at the gateway
+
+The previous steps confirm the objects exist. This step sends real requests through the gateway and observes them being **accepted or rejected** by the `jwt_authn` identity gate. Every agent route carries the two `jwt_authn` providers from its `SecurityPolicy` — `user` (Keycloak subject token in `Authorization`) and `agent` (broker actor token in `x-agent-authorization`) — so a request that presents no valid token for either provider never reaches the workload.
+
+The gateway is a `LoadBalancer` whose MetalLB address is only reachable from inside the KIND network (not from the macOS host), so drive the requests from an in-cluster pod. Grab the gateway address and the agent's route path first:
+
+```bash
+export GW_IP=$(kubectl get gateway kaos-gateway -n "$KAOS_NS" -o jsonpath='{.status.addresses[0].value}')
+export ROUTE="/$APP_NS/agent/coordinator/"
+echo "gateway=$GW_IP route=$ROUTE"
+```
+
+Mint a fresh user token (Step 4 leaves `USER_TOKEN` set; re-run that step if your shell has expired it), then send four requests from a throwaway curl pod — three that must be **rejected** and one that must be **admitted**:
+
+```bash
+kubectl -n "$APP_NS" run authz-demo --rm -i --restart=Never --image=curlimages/curl --command -- sh -c '
+GW="http://'"$GW_IP$ROUTE"'"
+echo "1) no token          -> $(curl -s -o /dev/null -w %{http_code} $GW)"
+echo "2) malformed token   -> $(curl -s -o /dev/null -w %{http_code} -H "Authorization: Bearer not-a-jwt" $GW)"
+echo "3) wrong-issuer JWT   -> $(curl -s -o /dev/null -w %{http_code} -H "Authorization: Bearer eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJldmlsIiwiYXVkIjoia2FvcyJ9.ZmFrZQ" $GW)"
+echo "4) valid user token  -> $(curl -s -o /dev/null -w %{http_code} -H "Authorization: Bearer '"$USER_TOKEN"'" $GW)"
+'
+```
+
+Expected:
+
+```text
+1) no token          -> 401
+2) malformed token   -> 401
+3) wrong-issuer JWT   -> 401
+4) valid user token   -> 500
+```
+
+The first three are **rejected by the gateway** before any workload is touched. The fourth **passes the identity gate** (it is no longer a 401) and is handed to the AIB `ext_proc` token-exchange path — which returns `500` here because user→agent consent and the third-party token vault are not wired in this environment (see [What is not yet wired](#what-is-not-yet-wired-consent-vault)). The important signal is the transition from `401` (rejected at identity) to "past identity" for a genuine Keycloak token.
+
+Read the exact reason Envoy recorded for each request from the gateway access log:
+
+```bash
+EPOD=$(kubectl get pod -n envoy-gateway-system -l gateway.envoyproxy.io/owning-gateway-name=kaos-gateway -o name | head -1)
+kubectl logs -n envoy-gateway-system "$EPOD" --tail=4 \
+  | python3 -c 'import sys,json
+for l in sys.stdin:
+    try:
+        d=json.loads(l); print(d["response_code"], d["response_code_details"])
+    except Exception: pass'
+```
+
+Expected — the rejections name the precise validation that failed, and the admitted request shows it left `jwt_authn` and hit the `ext_proc` direct response:
+
+```text
+401 jwt_authn_access_denied{Jwt_is_missing}
+401 jwt_authn_access_denied{Jwt_is_not_in_the_form_of_Header.Payload.Signature_with_two_dots_and_3_sections}
+401 jwt_authn_access_denied{Jwt_issuer_is_not_configured}
+500 direct_response
+```
+
+You can also confirm the NetworkPolicy bypass guard: a pod trying to reach the agent workload directly (not via the gateway) simply hangs/times out, because only gateway traffic is permitted to the agent.
+
+**Proves:** the gateway cryptographically validates the caller's identity — missing, malformed, and untrusted-issuer tokens are rejected with a specific reason, and only a Keycloak-signed token is admitted past the identity gate — and the workload is unreachable except through that gate.
+
 ## Token exchange (RFC 8693)
 
 The `aib-keycloak` posture runs the RFC 8693 **token-exchange** path so an agent can call a protected third-party API on behalf of a user: the broker exchanges the user's Keycloak-issued subject token for a vaulted third-party token, gated by the user's consent grant. The broker's `ext_proc` sidecar automates this exchange inline in the Envoy data path.
