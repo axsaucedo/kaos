@@ -188,7 +188,7 @@ kind-e2e-install-aib:
 	@pip install -e ../kaos-cli -q 2>/dev/null || true
 	@kaos system install \
 		--namespace kaos-system \
-		--auth-enabled --no-user-auth --no-token-exchange \
+		--auth-enabled aib-only \
 		--gateway-enabled --metallb-enabled \
 		--chart-path chart/ \
 		--set controllerManager.manager.image.repository=$(REGISTRY)/kaos-operator \
@@ -219,14 +219,9 @@ kind-e2e-install-authz:
 	@pip install -e ../kaos-cli -q 2>/dev/null || true
 	@kaos system install \
 		--namespace kaos-system \
-		--auth-enabled --no-user-auth --no-token-exchange \
+		--auth-enabled kaos-internal \
 		--gateway-enabled --metallb-enabled \
 		--chart-path chart/ \
-		--authz-provider kaos \
-		--policy-data-source automated \
-		--agent-jwt-verification skip \
-		--policy-configmap-name $(AUTHZ_POLICY_CONFIGMAP) \
-		--policy-configmap-namespace $(AUTHZ_POLICY_NAMESPACE) \
 		--set controllerManager.manager.image.repository=$(REGISTRY)/kaos-operator \
 		--set controllerManager.manager.image.tag=$(AIB_OPERATOR_TAG) \
 		--set defaultImages.agentRuntime=$(AIB_AGENT_IMAGE) \
