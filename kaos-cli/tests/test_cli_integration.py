@@ -1296,6 +1296,9 @@ class TestAuthWiring:
         assert "extProc.enabled=true" in joined
         assert "extProc.oauth2.clientId=extproc-gateway" in joined
         assert "extProc.oauth2.clientSecret=secret" in joined
+        # The in-cluster broker enduser endpoint is plain http, so the ExtProc
+        # binary must be told to accept http:// endpoints at startup.
+        assert "extProc.oauth2.allowHttp=true" in joined
 
     def test_default_user_auth_issuer(self):
         from kaos_cli.install import _default_user_auth_issuer

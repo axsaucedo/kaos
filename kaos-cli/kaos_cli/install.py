@@ -761,7 +761,8 @@ def _build_aib_extproc_args(
 
     Returns the flat ``--set key=value`` list so it can be unit-tested without
     running Helm. The OAuth2 token endpoint and issuer are left to the chart
-    defaults (the in-cluster broker enduser service).
+    defaults (the in-cluster broker enduser service), which are plain http, so
+    ``allowHttp`` is enabled to let the ExtProc binary accept them at startup.
     """
     return [
         "--set",
@@ -772,6 +773,8 @@ def _build_aib_extproc_args(
         f"extProc.oauth2.clientSecret={ext_proc_client_secret}",
         "--set",
         f"extProc.oauth2.clientAssertionType={client_assertion_type}",
+        "--set",
+        "extProc.oauth2.allowHttp=true",
     ]
 
 
