@@ -29,16 +29,56 @@ The seam is deliberate: KAOS owns agent identity and topology, Keycloak owns use
 As with `kaos-internal`, the generated `NetworkPolicy` objects are only *enforced* by a NetworkPolicy-capable CNI (for example Calico). The default KIND CNI (kindnet) creates them without enforcing them, which is fine for exploring authorization and routing.
 :::
 
+## Reproducible variables
+
+Every command below uses these shell variables so you can copy-paste each step verbatim. The credentials are the fixed dev defaults the `aib-keycloak` preset seeds into Keycloak — they are demo-only, not for real use. Set them once in your shell:
+
+```bash
+# Namespaces
+export KAOS_NS=kaos-system
+export AIB_NS=aib-system
+export KC_NS=keycloak
+export APP_NS=kaos-walkthrough
+
+# AIB broker chart (unpublished — point at your local clone)
+export AIB_CHART=<path-to>/charts/agentic-identity-broker
+
+# Keycloak realm + demo user identity (seeded by the preset)
+export REALM=kaos
+export KC_USER=kaos-user
+export KC_PASSWORD=kaos-password
+export USER_CLIENT_ID=kaos
+export USER_CLIENT_SECRET=kaos-dev-secret
+
+# Token-exchange gateway client + broker audience (seeded by the preset)
+export EXTPROC_CLIENT_ID=extproc-gateway
+export EXTPROC_CLIENT_SECRET=extproc-gateway-secret
+export TX_AUDIENCE=token-exchange-broker
+
+# In-cluster endpoints
+export KC_ISSUER=http://keycloak.${KC_NS}.svc.cluster.local:8080/realms/${REALM}
+export BROKER_TOKEN_URL=http://aib-agentic-identity-broker.${AIB_NS}.svc.cluster.local:8000/oauth2/token
+```
+
+::: tip Where these values come from
+The realm, user, client, secret, and audience are baked into the CLI as the `aib-keycloak` preset defaults. You can confirm them at any time from the seeded realm-import ConfigMap:
+
+```bash
+kubectl get configmap aib-agentic-identity-broker-realm-import -n "$KC_NS" \
+  -o jsonpath='{.data}' | python3 -m json.tool | grep -iE 'username|value|clientId|secret'
+```
+:::
+
 ## Step 1 — Install with the `aib-keycloak` preset
 
 Install KAOS with the default `aib-keycloak` preset, pointing at the broker chart. The CLI installs the operator, the AIB broker (into `aib-system`), and Keycloak (into `keycloak`, bootstrapping the `kaos` realm). The preset auto-wires the broker into hybrid mode against Keycloak and enables the token-exchange sidecar — see [Token exchange](#token-exchange-rfc-8693) below:
 
 ```bash
 kaos system install \
-  --namespace kaos-system \
+  --namespace "$KAOS_NS" \
   --auth-enabled aib-keycloak \
   --gateway-enabled --metallb-enabled \
-  --aib-chart-path <path-to>/charts/agentic-identity-broker \
+  --aib-chart-path "$AIB_CHART" \
   --wait
 ```
 
@@ -55,7 +95,7 @@ The three presets differ only in the identity and verification layers:
 ### Verify the operator picked up the configuration
 
 ```bash
-kubectl get configmap kaos-operator-config -n kaos-system -o json \
+kubectl get configmap kaos-operator-config -n "$KAOS_NS" -o json \
   | jq -r '.data | to_entries[] | select(.key | test("SECURITY|AUTHZ|GATEWAY")) | "\(.key)=\(.value)"'
 ```
 
@@ -78,15 +118,15 @@ SECURITY_GATEWAY_ROUTING_ENABLED=true
 ## Step 2 — Confirm the identity components are running
 
 ```bash
-kubectl get pods -n aib-system      # AIB broker (+ ext_proc sidecar)
-kubectl get pods -n keycloak        # Keycloak
-kubectl get pods -n kaos-system     # operator
+kubectl get pods -n "$AIB_NS"       # AIB broker (+ ext_proc sidecar)
+kubectl get pods -n "$KC_NS"        # Keycloak
+kubectl get pods -n "$KAOS_NS"      # operator
 ```
 
 Confirm the Keycloak realm was bootstrapped:
 
 ```bash
-kubectl logs -n keycloak deploy/keycloak | grep -i "realm 'kaos'"
+kubectl logs -n "$KC_NS" deploy/keycloak | grep -i "realm '$REALM'"
 ```
 
 **Proves:** the broker (agent identity + authorization) and Keycloak (user identity) are both live and the `kaos` realm exists.
@@ -96,34 +136,55 @@ kubectl logs -n keycloak deploy/keycloak | grep -i "realm 'kaos'"
 Deploy a small topology, then confirm the operator registered each agent with the broker and minted a per-agent credential Secret:
 
 ```bash
-kubectl create namespace kaos-walkthrough
-kubectl apply -n kaos-walkthrough -f \
+kubectl create namespace "$APP_NS"
+kubectl apply -n "$APP_NS" -f \
   https://raw.githubusercontent.com/axsaucedo/kaos/main/operator/config/samples/2-multi-agent-mcp.yaml
 ```
 
-Unlike `kaos-internal` (where the agent token is header-trusted), each agent here is issued a real broker credential. Inspect the minted Secret:
+Unlike `kaos-internal` (where the agent token is header-trusted), each agent here is issued a real broker credential. The operator's projection controller labels the Secrets it manages with `app.kubernetes.io/managed-by=kaos-operator-authz`. List them and read one:
 
 ```bash
-kubectl get secret -n kaos-walkthrough -l kaos.tools/managed-by=kaos \
-  -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}'
-kubectl get secret kaos-aib-coordinator -n kaos-walkthrough \
-  -o jsonpath='{.data.AGENT_AUTH_CLIENT_ID}' | base64 -d; echo
+kubectl get secret -n "$APP_NS" -l app.kubernetes.io/managed-by=kaos-operator-authz
+kubectl get secret kaos-aib-coordinator -n "$APP_NS" \
+  -o jsonpath='{.data.client_id}' | base64 -d; echo
 ```
 
-The `AGENT_AUTH_CLIENT_ID` / `AGENT_AUTH_CLIENT_SECRET` are populated (broker-issued), not empty. The agent runtime uses them to mint a signed actor-token JWT via OAuth2 `client_credentials` against the broker.
+Each Secret holds the agent's broker `client_id` and `client_secret`. The agent runtime mounts them (as `AGENT_AUTH_CLIENT_ID` / `AGENT_AUTH_CLIENT_SECRET`) and uses them to mint a signed actor-token JWT via OAuth2 `client_credentials` against the broker.
 
 **Proves:** agent identity is broker-backed and cryptographically real, not self-asserted.
+
+::: tip No Secrets appear?
+The operator mints these Secrets only when it is running with the auth configuration. A single-shot `kaos system install --auth-enabled aib-keycloak` starts the operator with that config from the outset, and any later `helm upgrade` that changes the config now rolls the operator automatically (the pod template carries a `checksum/config` annotation). If you enabled auth on an operator that predates that annotation and see no Secrets, force one reload:
+
+```bash
+kubectl rollout restart deploy/kaos-kaos-operator-controller-manager -n "$KAOS_NS"
+kubectl rollout status  deploy/kaos-kaos-operator-controller-manager -n "$KAOS_NS"
+```
+
+Then confirm the projection ran (`failed=0`):
+
+```bash
+kubectl logs -n "$KAOS_NS" deploy/kaos-kaos-operator-controller-manager \
+  | grep "reconciled authorization projection" | tail -1
+```
+:::
 
 ## Step 4 — Mint a user token from Keycloak
 
 User identity flows from Keycloak. Port-forward Keycloak and request a subject token with the OIDC password grant:
 
 ```bash
-kubectl port-forward -n keycloak svc/keycloak 8080:8080 &
-curl -s -X POST http://localhost:8080/realms/kaos/protocol/openid-connect/token \
+kubectl port-forward -n "$KC_NS" svc/keycloak 8080:8080 >/dev/null 2>&1 &
+sleep 2
+USER_TOKEN=$(curl -s -X POST http://localhost:8080/realms/$REALM/protocol/openid-connect/token \
   -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "grant_type=password&client_id=kaos&username=<realm-user>&password=<password>" \
-  | jq -r .access_token
+  -d "grant_type=password" \
+  -d "client_id=$USER_CLIENT_ID" \
+  -d "client_secret=$USER_CLIENT_SECRET" \
+  -d "username=$KC_USER" \
+  -d "password=$KC_PASSWORD" \
+  | jq -r .access_token)
+echo "${USER_TOKEN:0:24}..."   # non-empty JWT prefix
 ```
 
 This subject token is what a user presents to KAOS. At the gateway it is validated by the `jwt_authn` provider against the Keycloak JWKS before any authorization runs.
@@ -135,12 +196,12 @@ This subject token is what a user presents to KAOS. At the gateway it is validat
 As with `kaos-internal`, agents reach other resources through the gateway, and the operator generates the enforcement objects:
 
 ```bash
-kubectl get deploy agent-coordinator -n kaos-walkthrough -o json \
+kubectl get deploy agent-coordinator -n "$APP_NS" -o json \
   | jq -r '.spec.template.spec.containers[0].env[]
       | select(.name | test("URL|AGENT_AUTH_IDENTITY"))
       | "\(.name)=\(.value)"'
 
-kubectl get securitypolicy,networkpolicy -n kaos-walkthrough
+kubectl get securitypolicy,networkpolicy -n "$APP_NS"
 ```
 
 Every outbound URL routes through the gateway path (the `ext_proc` enforcement point cannot be bypassed), and `AGENT_AUTH_IDENTITY` is the single logical identity that threads the whole system — the actor-token `sub`, the broker agent identity, and the authorization subject.
@@ -172,19 +233,58 @@ You do not need to hand-write a values file or run manual Keycloak/`kubectl` ste
 When `extProc.oauth2.clientCredentialsEndpoint` is unset, the sidecar derives its token endpoint as `issuer + /oauth/token`, which is the mock-upstream path and returns `404` against Keycloak (whose path is `/protocol/openid-connect/token`). The stock AIB chart does not template this env var yet, so the CLI applies it as a post-install patch on the sidecar Deployment:
 
 ```bash
-kubectl -n aib-system set env deploy/aib-agentic-identity-broker-extproc \
+kubectl -n "$AIB_NS" set env deploy/aib-agentic-identity-broker-extproc \
   EXTPROC_OAUTH2_CLIENT_CREDENTIALS_ENDPOINT=http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos/protocol/openid-connect/token
 ```
 
 The CLI runs this automatically. It is shown here for transparency and to reapply manually if you redeploy the sidecar. Once the endpoint is templated upstream (followup F0), this patch is dropped and the value comes from the chart.
 :::
 
-### Verify the exchange reaches the broker
+### Register the demo agent and third-party service
 
-Register an agent whose `client_id` matches the user token's `azp` (`kaos`), plus a third-party service, then run the exchange from inside the cluster (so the token `iss` matches the broker's configured upstream issuer):
+The exchange resolves the agent from the user token's `azp` (`resolveAgentIdByClientId`), so a broker agent whose `client_id` equals the user client (`kaos`) must exist, along with a third-party service to exchange for. The operator projects one broker agent per KAOS Agent (each with its own synthetic `client_id`), so for this demo register the `kaos`-client agent and a demo service directly against the broker admin API:
 
 ```bash
-kubectl -n aib-system run tx --rm -i --restart=Never --image=curlimages/curl -- sh -c '
+kubectl port-forward -n "$AIB_NS" svc/aib-agentic-identity-broker 14000:14000 >/dev/null 2>&1 &
+sleep 2
+ADMIN=http://localhost:14000/api
+
+# 1. Third-party service exposing the protected resource
+SERVICE_ID=$(curl -s -X POST $ADMIN/services -H 'Content-Type: application/json' -d '{
+  "display_name": "Demo API",
+  "client_id": "demo-thirdparty",
+  "client_secret": "demo-thirdparty-secret",
+  "issuer_uri": "http://demo-idp.local",
+  "discovery": {"enable_discovery": false},
+  "endpoints": {"token_endpoint": "http://demo-idp.local/token", "authorize_endpoint": "http://demo-idp.local/authorize"},
+  "scopes": [{"scope_value": "read", "description": "Read"}],
+  "protected_resources": ["https://api.demo.local"]
+}' | jq -r .id)
+
+# 2. Permission set granting read on that service
+PSET_ID=$(curl -s -X POST $ADMIN/permission-sets -H 'Content-Type: application/json' -d "{
+  \"name\": \"demo-read\",
+  \"description\": \"Demo read\",
+  \"service_scopes\": [{\"service_id\": \"$SERVICE_ID\", \"scopes\": [\"read\"], \"requirement_type\": \"mandatory\"}]
+}" | jq -r .id)
+
+# 3. Agent whose client_id matches the user token azp (kaos)
+curl -s -X POST $ADMIN/agents -H 'Content-Type: application/json' -d "{
+  \"client_id\": \"$USER_CLIENT_ID\",
+  \"display_name\": \"KAOS Agent\",
+  \"description\": \"KAOS agent for token exchange validation\",
+  \"permission_sets\": [{\"permission_set_id\": \"$PSET_ID\", \"requirement_type\": \"mandatory\"}]
+}" | jq -r .id
+
+echo "service=$SERVICE_ID pset=$PSET_ID"
+```
+
+### Verify the exchange reaches the broker
+
+Run the exchange from inside the cluster (so the token `iss` matches the broker's configured upstream issuer). The credentials below are the preset defaults from [Reproducible variables](#reproducible-variables):
+
+```bash
+kubectl -n "$AIB_NS" run tx --rm -i --restart=Never --image=curlimages/curl -- sh -c '
 KC=http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos/protocol/openid-connect/token
 BROKER=http://aib-agentic-identity-broker.aib-system.svc.cluster.local:8000/oauth2/token
 SUBJ=$(curl -s -X POST $KC -d grant_type=password -d client_id=kaos -d client_secret=kaos-dev-secret -d username=kaos-user -d password=kaos-password | sed -n "s/.*\"access_token\":\"\([^\"]*\)\".*/\1/p")
@@ -215,7 +315,7 @@ Returning an actual third-party token requires a **user consent grant** for a se
 ## Clean up
 
 ```bash
-kubectl delete namespace kaos-walkthrough
+kubectl delete namespace "$APP_NS"
 ```
 
 ## Where to go next
