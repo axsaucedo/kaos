@@ -186,6 +186,15 @@ security:
   # only application path between workloads.
   gatewayRouting:
     enabled: false
+  # strictGatewayApi turns on gateway-only strict traffic: it enables
+  # NetworkPolicy isolation and gateway-routed URLs together, independently of
+  # whether any authorization enforcement hook (extAuthzUrl/extProcUrl) is set.
+  # Use it to make the Envoy Gateway the only application path between workloads
+  # as a standalone posture. It overrides the networkPolicy.enabled escape hatch.
+  # Enforcement of the generated NetworkPolicy still requires a CNI that enforces
+  # it (e.g. Calico; the default kindnet does not). Off by default.
+  strictGatewayApi:
+    enabled: false
   # tls configures HTTPS termination on the Gateway's external boundary. When
   # mode is empty, only the HTTP listener is created and behavior is unchanged.
   tls:
