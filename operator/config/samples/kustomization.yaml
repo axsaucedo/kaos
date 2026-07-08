@@ -16,3 +16,4 @@ resources:
 - 4-dev-ollama-proxy-agent.yaml
 - 5-proxy-external-api.yaml
 - 6-autonomous-monitor.yaml
+- 7-memory-agent.yaml

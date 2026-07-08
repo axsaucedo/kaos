@@ -23,7 +23,7 @@ PAIS wraps [Pydantic AI](https://ai.pydantic.dev) agents with production server 
 | Feature | Description |
 |---------|-------------|
 | **OpenAI-Compatible API** | `/v1/chat/completions` endpoint (streaming + non-streaming) |
-| **Distributed Memory** | Local, Redis, or NullMemory backends with session persistence |
+| **Memory** | Local, Remote (central memory service), or NullMemory backends with session persistence |
 | **Multi-Agent Delegation** | Sub-agent orchestration via `DelegationToolset` |
 | **MCP Tool Integration** | Connect to MCP servers via Streamable HTTP |
 | **A2A Discovery** | `/.well-known/agent.json` A2A-compliant card for agent-to-agent communication |
@@ -119,7 +119,7 @@ graph TD
 
     subgraph PAIS["🥧 PAIS"]
         Server --> Agent[Pydantic AI Agent]
-        Server --> Memory[(Memory<br/>Local / Redis)]
+        Server --> Memory[(Memory<br/>Local / Remote)]
         Agent --> Delegation[DelegationToolset]
         Agent --> MCP[MCP Toolsets]
     end
@@ -136,7 +136,7 @@ graph TD
 
 - **`AgentServer`** (`server.py`): Central server — owns the Pydantic AI agent, FastAPI routes, request processing, and streaming. Created via `create_agent_server()` factory.
 - **`DelegationToolset`** (`tools.py`): Exposes sub-agents as `delegate_to_{name}` tools via Pydantic AI's `AbstractToolset`. Enables multi-agent orchestration without custom loop code.
-- **`Memory`** (`memory.py`): ABC with `LocalMemory`, `RedisMemory`, and `NullMemory` backends. Persists conversation history across sessions — Pydantic AI has no built-in persistence.
+- **`Memory`** (`memory.py`): ABC with `LocalMemory`, `RemoteMemory`, and `NullMemory` backends. Persists conversation history across sessions — Pydantic AI has no built-in persistence.
 - **`AgentCard`** (`serverutils.py`): A2A-compliant discovery card served at `/.well-known/agent.json`. Automatically discovers tools from connected MCP servers.
 - **`telemetry.py`**: OpenTelemetry setup — Pydantic AI instrumentation + KAOS delegation spans, metrics, and log correlation.
 
@@ -163,8 +163,8 @@ All settings are environment variables:
 | `AGENT_SUB_AGENTS` | | Sub-agents: `name:url,name:url` |
 | `MCP_SERVERS` | | Comma-separated MCP server names |
 | `MCP_SERVER_<NAME>_URL` | | URL for each MCP server |
-| `MEMORY_TYPE` | | `local` (default), `redis`, or `null` |
-| `MEMORY_REDIS_URL` | | Redis URL (when `MEMORY_TYPE=redis`) |
+| `MEMORY_ENABLED` | | Enable memory (default `true`; `false` for no persistence) |
+| `MEMORY_STORE_ENDPOINT` | | Central memory service URL (set by the operator when a MemoryStore is bound) |
 | `TOOL_CALL_MODE` | | `auto` (default), `native`, `string` |
 | `OTEL_ENABLED` | | Enable OpenTelemetry |
 

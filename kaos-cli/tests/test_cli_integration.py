@@ -611,7 +611,21 @@ class TestSamples:
         assert "4-dev-ollama-proxy-agent" in result.output
         assert "5-proxy-external-api" in result.output
 
-    def test_deploy_sample_dry_run(self):
+    def test_deploy_memory_sample_dry_run(self):
+        result = runner.invoke(
+            app, ["samples", "deploy", "7-memory-agent", "--dry-run"]
+        )
+        assert result.exit_code == 0
+        docs = [d for d in yaml.safe_load_all(result.output) if d]
+        kinds = {d["kind"] for d in docs}
+        assert "ModelAPI" in kinds
+        assert "MemoryStore" in kinds
+        assert "Agent" in kinds
+        store = next(d for d in docs if d["kind"] == "MemoryStore")
+        assert store["spec"]["storage"]["type"] == "local"
+        agent = next(d for d in docs if d["kind"] == "Agent")
+        assert agent["spec"]["config"]["memory"]["memoryStore"] == "shared-memory"
+        assert agent["spec"]["config"]["memory"]["scope"] == "user"
         result = runner.invoke(
             app, ["samples", "deploy", "1-simple-echo-agent", "--dry-run"]
         )
@@ -829,10 +843,11 @@ class TestPackageData:
         from kaos_cli.samples import _get_sample_files
 
         files = _get_sample_files()
-        assert len(files) == 6
+        assert len(files) == 7
         names = [f.stem for f in files]
         assert "1-simple-echo-agent" in names
         assert "5-proxy-external-api" in names
+        assert "7-memory-agent" in names
 
 
 # ─── Monitoring validation ──────────────────────────────────────────────
@@ -862,20 +877,24 @@ class TestMonitoringValidation:
 
 class TestSystemInstallFlags:
     def test_install_help_shows_gateway_flag(self):
-        result = runner.invoke(app, ["system", "install", "--help"])
+        result = runner.invoke(
+            app, ["system", "install", "--help"], env={"COLUMNS": "200"}
+        )
         assert result.exit_code == 0
         output = strip_ansi(result.output)
         assert "--gateway-enabled" in output
         assert "--metallb-enabled" in output
-        assert "--redis-enabled" in output
+        assert "--pgvector-memory-enabled" in output
 
     def test_uninstall_help_shows_gateway_flag(self):
-        result = runner.invoke(app, ["system", "uninstall", "--help"])
+        result = runner.invoke(
+            app, ["system", "uninstall", "--help"], env={"COLUMNS": "200"}
+        )
         assert result.exit_code == 0
         output = strip_ansi(result.output)
         assert "--gateway-enabled" in output
         assert "--metallb-enabled" in output
-        assert "--redis-enabled" in output
+        assert "--pgvector-memory-enabled" in output
 
     def test_install_help_shows_auth_flag(self):
         result = runner.invoke(app, ["system", "install", "--help"])
@@ -886,6 +905,50 @@ class TestSystemInstallFlags:
         assert "--sync-chart-path" in output
         assert "--user-auth" in output
         assert "--keycloak-namespace" in output
+
+
+class TestPgvectorMemoryInstall:
+    def test_dsn_format(self):
+        from kaos_cli.install import _pgvector_dsn
+
+        dsn = _pgvector_dsn("kaos-system")
+        assert dsn.startswith("postgresql://")
+        assert "kaos-memory-pgvector.kaos-system.svc.cluster.local:5432" in dsn
+        assert dsn.endswith("/kaos")
+
+    def test_manifest_contract(self):
+        from kaos_cli.install import (
+            _pgvector_manifest,
+            PGVECTOR_IMAGE,
+            PGVECTOR_SECRET_NAME,
+            PGVECTOR_SECRET_KEY,
+        )
+
+        manifest = _pgvector_manifest("kaos-system")
+        assert f"name: {PGVECTOR_SECRET_NAME}" in manifest
+        assert f"{PGVECTOR_SECRET_KEY}: postgresql://" in manifest
+        assert f"image: {PGVECTOR_IMAGE}" in manifest
+        assert "kind: Deployment" in manifest
+        assert "kind: Service" in manifest
+
+    def test_install_applies_manifest(self):
+        from unittest.mock import patch, MagicMock
+        from kaos_cli import install as install_mod
+
+        applied = {}
+
+        def fake_kubectl(args, check=False, input=None):
+            result = MagicMock()
+            result.returncode = 0
+            result.stderr = ""
+            if args[:2] == ["apply", "-f"]:
+                applied["input"] = input
+            return result
+
+        with patch.object(install_mod, "_run_kubectl", side_effect=fake_kubectl):
+            assert install_mod._install_pgvector("kaos-system") is True
+        assert "kind: Secret" in applied["input"]
+        assert "image: pgvector/pgvector" in applied["input"]
 
 
 class TestAuthWiring:

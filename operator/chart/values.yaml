@@ -181,11 +181,3 @@ telemetry:
 # - ModelAPI (Ollama): Maps to OLLAMA_DEBUG
 logLevel: INFO
 
-# Agent defaults configuration
-agentDefaults:
-  memory:
-    # type is the default memory backend: "local" or "redis"
-    type: local
-    # redisUrl is the Redis connection URL (used when type is "redis")
-    # Example: "redis://redis.kaos-system:6379"
-    redisUrl: ""

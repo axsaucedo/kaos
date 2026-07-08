@@ -32,7 +32,7 @@ Complete reference for all environment variables used by the KAOS.
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `MEMORY_ENABLED` | Enable/disable memory (use NullMemory when disabled) | `true` |
-| `MEMORY_TYPE` | Memory implementation type (only `local` supported) | `local` |
+| `MEMORY_TYPE` | Memory implementation type (`local` or `remote`) | `local` |
 | `MEMORY_CONTEXT_LIMIT` | Messages to include in delegation context | `6` |
 | `MEMORY_MAX_SESSIONS` | Maximum sessions to keep in memory | `1000` |
 | `MEMORY_MAX_SESSION_EVENTS` | Maximum events per session before eviction | `500` |

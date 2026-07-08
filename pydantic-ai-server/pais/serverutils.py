@@ -404,11 +404,9 @@ class AgentServerSettings(BaseSettings):
 
     # Memory configuration
     memory_enabled: bool = True
-    memory_type: str = "local"
     memory_context_limit: int = 6
     memory_max_sessions: int = 1000
     memory_max_session_events: int = 500
-    memory_redis_url: str = ""
     # Central memory service (long-term tier). When a MemoryStore is bound the
     # operator injects its endpoint here and the runtime uses the RemoteMemory
     # backend; when empty the runtime falls back to the in-process short-term

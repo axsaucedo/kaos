@@ -2,6 +2,12 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
+# libpq is required at runtime by psycopg (pure-Python impl) for the pgvector
+# external storage backend; the slim base image does not ship it.
+RUN --mount=type=cache,target=/var/cache/apt \
+    apt-get update && apt-get install -y --no-install-recommends libpq5 && \
+    rm -rf /var/lib/apt/lists/*
+
 # Install UV for dependency management
 RUN --mount=type=cache,target=/root/.cache/pip \
     pip install uv

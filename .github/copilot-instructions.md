@@ -54,7 +54,7 @@ pydantic-ai-server/        # Agent runtime (Pydantic AI, pytest, black, ty) — 
 │   ├── serverutils.py # AgentDeps, AgentCard (Pydantic), RemoteAgent (A2A + chat delegation), AgentServerSettings
 │   ├── a2a.py         # TaskManager ABC, LocalTaskManager, NullTaskManager, Task data model, JSON-RPC, setup_a2a_routes
 │   ├── tools.py       # DelegationToolset, string-mode handler
-│   ├── memory.py      # Memory ABC, LocalMemory, RedisMemory, NullMemory
+│   ├── memory.py      # Memory ABC, LocalMemory, RemoteMemory, NullMemory
 │   └── telemetry.py   # OpenTelemetry instrumentation
 
 mcp-servers/               # Standalone MCP server implementations

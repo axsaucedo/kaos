@@ -20,7 +20,7 @@ make format                     # Auto-format code
 - `pais/serverutils.py`: AgentDeps, AgentCard (Pydantic BaseModel), AgentCardSkill, AgentCardCapabilities, RemoteAgent (A2A + chat delegation), AgentServerSettings, _resolve_model, response builders
 - `pais/a2a.py`: TaskManager ABC, LocalTaskManager, NullTaskManager, Task/TaskState data model, JSON-RPC models/dispatcher/handlers, setup_a2a_routes()
 - `pais/tools.py`: DelegationToolset (AbstractToolset), execute_delegation, format_progress_event, build_string_mode_handler
-- `pais/memory.py`: Memory ABC, LocalMemory, RedisMemory, NullMemory + build_message_history/store_pydantic_message utilities
+- `pais/memory.py`: Memory ABC, LocalMemory, RemoteMemory, NullMemory + build_message_history/store_pydantic_message utilities
 - `pais/telemetry.py`: OpenTelemetry instrumentation (tracing, metrics, SERVICE_NAME)
 - `aib/`: AIB propagation SDK (temporary home; upstreams to the AIB project later). `aib/instrument.py` holds the request-local security context and the FastAPI/httpx instrumentation; `import aib` is the public surface.
 - `pyproject.toml`: Dependencies — `pydantic-ai`, `opentelemetry-*`
@@ -51,8 +51,8 @@ The `aib` SDK propagates two identities across agent hops (ADR-KAOS-003): the us
 | `AGENT_DESCRIPTION` | Agent description for A2A card |
 | `MCP_SERVERS` | Comma-separated MCP server names |
 | `MCP_SERVER_<NAME>_URL` | URL for each MCP server |
-| `MEMORY_TYPE` | Memory backend: `local` (default) or `redis` |
-| `MEMORY_REDIS_URL` | Redis connection URL (required when `MEMORY_TYPE=redis`) |
+| `MEMORY_ENABLED` | Enable/disable memory (default `true`) |
+| `MEMORY_STORE_ENDPOINT` | Central memory-service URL (set by the operator when a MemoryStore is bound) |
 | `DEBUG_MOCK_RESPONSES` | JSON array of mock responses (tool_calls JSON or plain text) |
 | `TOOL_CALL_MODE` | Tool calling mode: `auto` (default), `native`, `string` |
 | `OTEL_ENABLED` | Enable OpenTelemetry instrumentation |
@@ -107,7 +107,7 @@ The `aib` SDK propagates two identities across agent hops (ADR-KAOS-003): the us
 - Example: `docs/examples/custom-agent.md` (uses `kaos agent init`/`build` CLI)
 
 ### Memory (memory.py)
-- KAOS memory (Local/Redis/Null) persists across sessions — Pydantic AI has no built-in persistence
+- KAOS memory (Local/Remote/Null) persists across sessions — Pydantic AI has no built-in persistence
 - All implementations extend `Memory` ABC with `build_message_history()` and `store_pydantic_message()` as concrete methods
 - NullMemory is a no-op — always call memory methods regardless (no branching needed)
 - `build_message_history(session_id, context_limit)`: KAOS events → Pydantic AI `ModelRequest`/`ModelResponse` messages
@@ -135,7 +135,7 @@ The `aib` SDK propagates two identities across agent hops (ADR-KAOS-003): the us
 - `AgentCard`: A2A-compliant discovery card (Pydantic BaseModel with `alias_generator=to_camel`, `.to_dict()` uses `model_dump(by_alias=True)`)
 - `AgentCardSkill`: A2A skill with id, name, description, tags, inputModes, outputModes
 - `AgentCardCapabilities`: A2A capabilities (streaming, pushNotifications, stateTransitionHistory)
-- `Memory`: ABC interface for LocalMemory, RedisMemory, NullMemory (includes `close()`)
+- `Memory`: ABC interface for LocalMemory, RemoteMemory, NullMemory (includes `close()`)
 - `JsonRpcRequest`/`JsonRpcResponse`/`JsonRpcError`: JSON-RPC 2.0 envelope models (in a2a.py)
 - `_MockResponseState`: Mutable mock response state shared via closure (workaround for ContextVar + FunctionModel issue)
 

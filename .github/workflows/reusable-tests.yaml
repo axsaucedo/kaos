@@ -91,15 +91,15 @@ jobs:
           - name: examples-code-mode
             files: "e2e/test_examples_e2e.py"
             pytest_filter: "test_fastmcp_codemode_example"
-          - name: example-redis-memory
-            files: "e2e/test_examples_e2e.py"
-            pytest_filter: "test_redis_memory_example"
           - name: example-custom-agent
             files: "e2e/test_examples_e2e.py"
             pytest_filter: "test_custom_agent_example"
           - name: example-autonomous
             files: "e2e/test_examples_e2e.py"
             pytest_filter: "test_autonomous_agent_example"
+          - name: example-memory
+            files: "e2e/test_examples_e2e.py"
+            pytest_filter: "test_memory_example"
     name: E2E (${{ matrix.shard.name }})
     steps:
       - name: Checkout
@@ -174,9 +174,6 @@ jobs:
       - name: Pull Ollama image
         run: docker pull ollama/ollama:latest
 
-      - name: Pull Redis image
-        run: docker pull redis:7-alpine
-
       - name: Tag MCP server image
         run: |
           docker tag ${{ env.REGISTRY }}/kaos-agent:${{ env.AGENT_TAG }} ${{ env.REGISTRY }}/kaos-mcp-server:${{ env.AGENT_TAG }}
@@ -236,7 +233,6 @@ jobs:
           wait
           kind load docker-image ghcr.io/berriai/litellm:main-stable --name ${{ env.KIND_CLUSTER_NAME }}
           kind load docker-image ollama/ollama:latest --name ${{ env.KIND_CLUSTER_NAME }}
-          kind load docker-image redis:7-alpine --name ${{ env.KIND_CLUSTER_NAME }}
 
 
       - name: Install KAOS operator

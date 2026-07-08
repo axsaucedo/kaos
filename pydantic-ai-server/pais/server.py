@@ -708,10 +708,10 @@ def _create_memory(settings: AgentServerSettings) -> "Memory":
 
     When a central memory service endpoint is configured the runtime uses the
     service-client backend (long-term tier plus the service-hosted short-term tier).
-    Otherwise it falls back to a short-term-only backend (Redis when configured, else
-    local) so single-agent runs work without the service deployed.
+    Otherwise it falls back to a local short-term-only backend so single-agent runs
+    work without the service deployed.
     """
-    from pais.memory import LocalMemory, RedisMemory, NullMemory, RemoteMemory
+    from pais.memory import LocalMemory, NullMemory, RemoteMemory
 
     if not settings.memory_enabled:
         return NullMemory()
@@ -719,15 +719,6 @@ def _create_memory(settings: AgentServerSettings) -> "Memory":
     if settings.memory_store_endpoint:
         return RemoteMemory(settings.memory_store_endpoint)
 
-    if settings.memory_type == "redis" and settings.memory_redis_url:
-        return RedisMemory(
-            redis_url=settings.memory_redis_url,
-            max_sessions=settings.memory_max_sessions,
-            max_events_per_session=settings.memory_max_session_events,
-        )
-
-    if settings.memory_type == "redis":
-        logger.warning("MEMORY_REDIS_URL not set, falling back to LocalMemory")
     return LocalMemory(
         max_sessions=settings.memory_max_sessions,
         max_events_per_session=settings.memory_max_session_events,

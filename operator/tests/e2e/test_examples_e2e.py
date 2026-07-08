@@ -123,6 +123,24 @@ class TestExamplesViaJupytext:
         
         assert result.returncode == 0, f"Example execution failed: {result.stderr}"
 
+    def test_memory_example(self):
+        """Execute the agent memory example.
+
+        Tests: a memory-enabled Agent bound to a local MemoryStore, automatic
+        persist-after-run and recall-before-run, and cross-session accumulation
+        verified by querying the memory service API directly.
+        """
+        example_file = DOCS_EXAMPLES_PATH / "memory.md"
+        assert example_file.exists(), f"Example file not found: {example_file}"
+
+        result = run_jupytext(example_file, timeout=420)
+
+        if result.returncode != 0:
+            print(f"STDOUT:\n{result.stdout}")
+            print(f"STDERR:\n{result.stderr}")
+
+        assert result.returncode == 0, f"Example execution failed: {result.stderr}"
+
     def test_custom_agent_example(self):
         """Execute the custom agent image example.
         
@@ -130,22 +148,6 @@ class TestExamplesViaJupytext:
         container.image CRD override, tool discovery via agent card
         """
         example_file = DOCS_EXAMPLES_PATH / "custom-agent.md"
-        assert example_file.exists(), f"Example file not found: {example_file}"
-        
-        result = run_jupytext(example_file, timeout=300)
-        
-        if result.returncode != 0:
-            print(f"STDOUT:\n{result.stdout}")
-            print(f"STDERR:\n{result.stderr}")
-        
-        assert result.returncode == 0, f"Example execution failed: {result.stderr}"
-
-    def test_redis_memory_example(self):
-        """Execute the Redis distributed memory example.
-        
-        Tests: Redis memory persistence across pod restarts
-        """
-        example_file = DOCS_EXAMPLES_PATH / "redis-memory.md"
         assert example_file.exists(), f"Example file not found: {example_file}"
         
         result = run_jupytext(example_file, timeout=300)

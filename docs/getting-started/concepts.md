@@ -117,7 +117,7 @@ The operator automatically configures peer agent URLs based on `agentNetwork.acc
 
 ## Memory and Sessions
 
-Each agent maintains session storage (local in-memory or Redis):
+Each agent maintains session storage (local in-memory, or a central memory service when bound to a `MemoryStore`):
 - Sessions track conversation context
 - Events logged: user_message, agent_response, tool_call, delegation
 - Debug endpoints available for testing: `/memory/events`, `/memory/sessions`
