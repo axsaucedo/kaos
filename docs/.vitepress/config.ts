@@ -116,6 +116,7 @@ export default withMermaid(defineConfig({
       {
         text: 'Security',
         items: [
+          { text: 'Overview', link: '/security/overview' },
           { text: 'Authorization', link: '/security/authorization' }
         ]
       },
