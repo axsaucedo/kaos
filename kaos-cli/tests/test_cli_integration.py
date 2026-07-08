@@ -1343,6 +1343,18 @@ class TestAuthWiring:
         assert "urn:ietf:params:oauth:grant-type:token-exchange" in joined
         assert "broker.tokenExchange.expectedAudience=token-exchange-broker" in joined
 
+    def test_build_aib_broker_public_url_args(self):
+        from kaos_cli.install import _build_aib_broker_public_url_args
+
+        public_url = (
+            "http://aib-agentic-identity-broker.aib-system.svc.cluster.local:8000"
+        )
+        args = _build_aib_broker_public_url_args(public_url)
+        assert args == [
+            "--set",
+            f"broker.server.enduser.publicUrl={public_url}",
+        ]
+
     def test_keycloak_realm_json_registers_extproc_client(self):
         from kaos_cli.install import (
             AUTH_EXT_PROC_CLIENT_ID,

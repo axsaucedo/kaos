@@ -792,6 +792,20 @@ def _build_aib_extproc_args(
     return args
 
 
+def _build_aib_broker_public_url_args(public_url: str) -> list[str]:
+    """Set the broker enduser ``public_url`` to its in-cluster service URL.
+
+    The broker defaults ``server.enduser.public_url`` to ``http://localhost:8000``
+    and stamps that value as the ``iss`` claim on the ``client_credentials``
+    agent tokens it mints. The gateway ``agent`` JWT provider validates those
+    tokens against the broker's in-cluster issuer, so without this override the
+    ``iss`` never matches and every agent-identity request is rejected with
+    ``Jwt_issuer_is_not_configured``. ``public_url`` is the broker enduser
+    endpoint (same value propagated to agents as their auth issuer).
+    """
+    return ["--set", f"broker.server.enduser.publicUrl={public_url}"]
+
+
 def _build_aib_hybrid_broker_args(user_auth_issuer: str) -> list[str]:
     """Build the broker-chart Helm --set args wiring hybrid mode to Keycloak.
 
@@ -1331,10 +1345,10 @@ def install_command(
         # unpublished, so a chart path is required to install it here). The
         # ExtProc token-exchange component is enabled when token exchange is on.
         if aib_chart_path:
-            aib_extra_set = None
+            aib_extra_set = _build_aib_broker_public_url_args(auth_issuer)
             if token_exchange:
                 broker_token_endpoint = f"{auth_issuer}/oauth2/token"
-                aib_extra_set = _build_aib_extproc_args(
+                aib_extra_set += _build_aib_extproc_args(
                     AUTH_EXT_PROC_CLIENT_ID,
                     AUTH_EXT_PROC_CLIENT_SECRET,
                     issuer=user_auth_issuer,
