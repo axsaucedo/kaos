@@ -11,22 +11,26 @@ KAOS secures agent-to-agent and agent-to-tool traffic at the Envoy Gateway. Ever
 
 ## Install postures
 
-The `kaos system install` command bundles these layers into two curated postures selected with `--full-auth-enabled`:
+The `kaos system install` command bundles these layers into three curated postures selected with `--auth-enabled`:
 
 | Preset | Identity | Authorization | Agent token | Use when |
 |--------|----------|---------------|-------------|----------|
-| `kaos-internal-demo` | none | KAOS-projected grants (`kaos` provider) | header-trusted (spoofable) | Exploring authorization without an IdP |
-| `keycloak-aib-enabled` (default) | Keycloak + identity broker | broker permission sets (`aib` provider) | signature-verified against IdP JWKS | Production-like end-to-end security |
+| `kaos-internal` | none | KAOS-projected grants (`kaos` provider) | header-trusted (spoofable) | Exploring authorization without an IdP |
+| `aib-only` | identity broker | broker permission sets (`aib` provider) | signature-verified against IdP JWKS | Broker-issued agent identity without user login |
+| `aib-keycloak` (default) | Keycloak + identity broker | broker permission sets (`aib` provider) | signature-verified against IdP JWKS | Production-like end-to-end security with user auth + token exchange |
 
 ```bash
 # Self-contained demo — no external identity provider or broker
-kaos system install --gateway-enabled --full-auth-enabled kaos-internal-demo
+kaos system install --gateway-enabled --auth-enabled kaos-internal
 
-# Full verified path — Keycloak user identity + identity broker
-kaos system install --gateway-enabled --full-auth-enabled keycloak-aib-enabled
+# Broker-issued agent identity, no user login or token exchange
+kaos system install --gateway-enabled --auth-enabled aib-only
+
+# Full verified path — Keycloak user identity + identity broker + token exchange
+kaos system install --gateway-enabled --auth-enabled aib-keycloak
 ```
 
-Both presets imply `--gateway-enabled`, route internal traffic through the gateway, and generate bypass-prevention NetworkPolicies. Every underlying knob remains configurable via Helm `--set` for advanced compositions; see [Authorization](/security/authorization#advanced-configuration).
+All presets imply `--gateway-enabled`, route internal traffic through the gateway, and generate bypass-prevention NetworkPolicies. Every underlying knob remains configurable via Helm `--set` for advanced compositions; see [Authorization](/security/authorization#advanced-configuration).
 
 ## Enforcement model
 

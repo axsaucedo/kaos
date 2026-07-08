@@ -27,22 +27,30 @@ Select a mode with `kaos system install` flags. All modes are safe by constructi
 
 ## Installing
 
-The `kaos system install` command exposes two curated end-to-end postures through the single `--full-auth-enabled` flag. Both enable OPA-in-`ext_proc` authorization, route internal traffic through the gateway, and generate bypass-prevention NetworkPolicies.
+The `kaos system install` command exposes three curated end-to-end postures through the single `--auth-enabled` flag. All enable OPA-in-`ext_proc` authorization, route internal traffic through the gateway, and generate bypass-prevention NetworkPolicies.
 
 ### Demo posture (no identity provider)
 
-`kaos-internal-demo` uses the `kaos` provider with grants projected from your CRDs and the agent token header-trusted, so you can explore route- and agent-level authorization without Keycloak or a broker.
+`kaos-internal` uses the `kaos` provider with grants projected from your CRDs and the agent token header-trusted, so you can explore route- and agent-level authorization without Keycloak or a broker. It bakes in the `kaos-authz-policy` ConfigMap projection target, so no additional flags are required.
 
 ```bash
-kaos system install --gateway-enabled --full-auth-enabled kaos-internal-demo
+kaos system install --gateway-enabled --auth-enabled kaos-internal
+```
+
+### Broker identity posture (no user login)
+
+`aib-only` wires the identity broker so agents receive broker-issued, signature-verified actor tokens, but installs neither Keycloak user identity nor RFC 8693 token exchange. Use it when you want verified agent identity without a user-auth layer.
+
+```bash
+kaos system install --gateway-enabled --auth-enabled aib-only
 ```
 
 ### Full verified posture
 
-`keycloak-aib-enabled` (the default when `--full-auth-enabled` is passed without a value) installs Keycloak for user identity and wires the identity broker with RFC 8693 token exchange. Authorization reads the broker's permission sets and the agent token signature is verified against the IdP JWKS.
+`aib-keycloak` (the default when `--auth-enabled` is passed without a value) installs Keycloak for user identity and wires the identity broker with RFC 8693 token exchange. Authorization reads the broker's permission sets and the agent token signature is verified against the IdP JWKS.
 
 ```bash
-kaos system install --gateway-enabled --full-auth-enabled keycloak-aib-enabled
+kaos system install --gateway-enabled --auth-enabled aib-keycloak
 ```
 
 ### Advanced configuration
@@ -59,7 +67,7 @@ The presets cover the common cases. Every underlying knob remains available as a
 The relevant chart values are:
 
 ```bash
-kaos system install --gateway-enabled --full-auth-enabled kaos-internal-demo \
+kaos system install --gateway-enabled --auth-enabled kaos-internal \
   --set security.agentAuth.authorization.provider=kaos \
   --set security.agentAuth.authorization.policyDataSource=manual \
   --set security.agentAuth.authorization.policyRegoOverride=true \
@@ -70,13 +78,13 @@ kaos system install --gateway-enabled --full-auth-enabled kaos-internal-demo \
 
 ## Verification modes
 
-The subject (user) token is always verified by the gateway's JWT authentication. The actor token needs the same treatment for a production posture, controlled by `security.agentAuth.authorization.agentJwtVerification` (the `keycloak-aib-enabled` preset sets `verified`; `kaos-internal-demo` sets `skip`):
+The subject (user) token is always verified by the gateway's JWT authentication. The actor token needs the same treatment for a production posture, controlled by `security.agentAuth.authorization.agentJwtVerification` (the `aib-keycloak` and `aib-only` presets set `verified`; `kaos-internal` sets `skip`):
 
 - `verified` — the operator injects the IdP JWKS at `data.kaos.jwks` and the policy verifies the actor token signature, issuer, and expiry before trusting its `sub`. This is the real posture.
 - `skip` — **demo mode, non-production.** The policy decodes the actor token without verifying its signature, so the `x-agent-authorization` header is spoofable. Use it only to try route- and agent-level authorization without an identity provider. Move to `verified` before any real deployment.
 
 ::: warning
-Demo mode (`agentJwtVerification=skip`, the `kaos-internal-demo` preset) trusts an unverified header and is spoofable. It exists to explore authorization without an IdP and must never be used in production.
+Demo mode (`agentJwtVerification=skip`, the `kaos-internal` preset) trusts an unverified header and is spoofable. It exists to explore authorization without an IdP and must never be used in production.
 :::
 
 ## Policy data schema
