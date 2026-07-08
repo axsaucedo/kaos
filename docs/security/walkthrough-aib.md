@@ -22,7 +22,7 @@ The seam is deliberate: KAOS owns agent identity and topology, Keycloak owns use
 - A Kubernetes cluster with Gateway API and a LoadBalancer (a local KIND cluster with `--gateway-enabled --metallb-enabled` is fine).
 - The `kaos` CLI installed (`pip install kaos-cli`).
 - `kubectl` pointed at the cluster.
-- The AIB broker Helm chart and a values file available locally (the chart ships a dev preset — see the note on token exchange below).
+- The AIB broker Helm chart available locally (it is unpublished, so a chart path is required). The `aib-keycloak` preset auto-wires the broker values for token exchange — no hand-written values file is needed.
 - On KIND, the operator, agent, and broker images loaded into the cluster (`kind load docker-image ...`).
 
 ::: tip NetworkPolicy enforcement
@@ -31,7 +31,7 @@ As with `kaos-internal`, the generated `NetworkPolicy` objects are only *enforce
 
 ## Step 1 — Install with the `aib-keycloak` preset
 
-Install KAOS with the default `aib-keycloak` preset, pointing at the broker chart and values. The CLI installs the operator, the AIB broker (into `aib-system`), and Keycloak (into `keycloak`, bootstrapping the `kaos` realm):
+Install KAOS with the default `aib-keycloak` preset, pointing at the broker chart. The CLI installs the operator, the AIB broker (into `aib-system`), and Keycloak (into `keycloak`, bootstrapping the `kaos` realm). The preset auto-wires the broker into hybrid mode against Keycloak and enables the token-exchange sidecar — see [Token exchange](#token-exchange-rfc-8693) below:
 
 ```bash
 kaos system install \
@@ -39,7 +39,6 @@ kaos system install \
   --auth-enabled aib-keycloak \
   --gateway-enabled --metallb-enabled \
   --aib-chart-path <path-to>/charts/agentic-identity-broker \
-  --aib-values <path-to>/charts/agentic-identity-broker/values-dev.yaml \
   --wait
 ```
 
@@ -161,56 +160,23 @@ The exchange involves two Keycloak-issued JWTs, both signature-verified by the b
 
 The broker therefore runs in **hybrid** OAuth2 mode with Keycloak configured as the upstream issuer. Crucially, the sidecar authenticates against **Keycloak**, and the broker validates both tokens against Keycloak's JWKS — the broker never issues these tokens itself in this posture.
 
-### Broker `--aib-values` for hybrid mode against Keycloak
+### What the `aib-keycloak` preset wires automatically
 
-The stock `values-dev.yaml` runs the broker in `local` mode, which mints tokens in-memory and rejects the `client_credentials` grant the sidecar needs. Supply a hybrid values file instead (adjust the Keycloak namespace/realm and keys for your install):
+You do not need to hand-write a values file or run manual Keycloak/`kubectl` steps — the `aib-keycloak` preset provisions the entire hybrid posture:
 
-```yaml
-storage:
-  type: memory
-broker:
-  oauth2AuthorizationServer:
-    mode: hybrid
-    proxy:
-      upstreamIssuerUri: http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos
-      upstreamAuthorizeEndpoint: http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos/protocol/openid-connect/auth
-      upstreamTokenEndpoint: http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos/protocol/openid-connect/token
-    supportedGrantTypes:
-      - authorization_code
-      - refresh_token
-      - urn:ietf:params:oauth:grant-type:token-exchange
-  tokenExchange:
-    expectedAudience: token-exchange-broker
-    claimExtraction:
-      principalExpression: "subject_token.sub"
-      agentIdExpression: "resolveAgentIdByClientId(subject_token.azp)"
-    authorization:
-      type: cel
-      cel:
-        expression: "true"
-        evaluationTimeout: "5s"
-  security:
-    skipThirdpartyHttpsValidation: true
-extProc:
-  enabled: true
-  oauth2:
-    tokenEndpoint: http://aib-agentic-identity-broker.aib-system.svc.cluster.local:8000/oauth2/token
-    issuer: http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos
-    clientId: extproc-gateway
-    clientSecret: extproc-gateway-secret
-    clientAssertionType: access_token
-    allowHttp: true
-```
+- **Broker (hybrid mode):** sets `broker.oauth2AuthorizationServer.mode=hybrid` with Keycloak's authorize/token endpoints as the upstream, enables the `urn:ietf:params:oauth:grant-type:token-exchange` grant, and sets `tokenExchange.expectedAudience=token-exchange-broker`.
+- **ExtProc sidecar:** enables `extProc`, points its OAuth `issuer` at the Keycloak realm and its `tokenEndpoint` at the broker's exchange endpoint, and enables `allowHttp` for the in-cluster plain-http endpoints.
+- **Keycloak realm:** registers the `extproc-gateway` service-account client (secret `extproc-gateway-secret`) and adds a `token-exchange-broker` custom-audience mapper to **both** the user client (`kaos`) and the `extproc-gateway` client, so the `subject_token` and `client_assertion` both carry the audience the broker enforces.
 
-The broker validates that both the `subject_token` and `client_assertion` carry `aud: token-exchange-broker`. Add a custom-audience mapper to the user client (`kaos`) and create the `extproc-gateway` service-account client (with the same audience mapper) in Keycloak so both tokens carry that audience.
-
-::: warning ExtProc client-credentials endpoint against Keycloak
-When `extProc.oauth2.clientCredentialsEndpoint` is unset, the sidecar derives its token endpoint as `issuer + /oauth/token`, which is the mock-upstream path and returns `404` against Keycloak (whose path is `/protocol/openid-connect/token`). The stock chart does not template this env var, so set it directly on the sidecar Deployment:
+::: warning Temporary ExtProc client-credentials patch (followup F0)
+When `extProc.oauth2.clientCredentialsEndpoint` is unset, the sidecar derives its token endpoint as `issuer + /oauth/token`, which is the mock-upstream path and returns `404` against Keycloak (whose path is `/protocol/openid-connect/token`). The stock AIB chart does not template this env var yet, so the CLI applies it as a post-install patch on the sidecar Deployment:
 
 ```bash
 kubectl -n aib-system set env deploy/aib-agentic-identity-broker-extproc \
   EXTPROC_OAUTH2_CLIENT_CREDENTIALS_ENDPOINT=http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos/protocol/openid-connect/token
 ```
+
+The CLI runs this automatically. It is shown here for transparency and to reapply manually if you redeploy the sidecar. Once the endpoint is templated upstream (followup F0), this patch is dropped and the value comes from the chart.
 :::
 
 ### Verify the exchange reaches the broker
