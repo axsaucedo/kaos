@@ -1,17 +1,20 @@
 [project]
 name = "kaos-memory-service"
 version = "0.4.8.dev0"
-description = "KAOS memory service - long-term and working memory stores for Kubernetes agent orchestration"
+description = "KAOS memory service - long-term and short-term memory stores for Kubernetes agent orchestration"
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.0.0",
     "pydantic-settings>=2.0.0",
+    "fastapi>=0.104.0",
+    "uvicorn>=0.24.0",
     "mem0ai==2.0.10",
     "chromadb>=1.5.0",
     "psycopg[pool]>=3.1.0",
     "pgvector>=0.2.0",
     "tiktoken>=0.7.0",
     "httpx>=0.25.0",
+    "opentelemetry-api>=1.20.0",
 ]
 
 [project.optional-dependencies]
@@ -19,6 +22,7 @@ dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
     "black>=24.0.0",
+    "opentelemetry-sdk>=1.20.0",
 ]
 
 [build-system]

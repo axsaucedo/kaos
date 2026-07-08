@@ -5,6 +5,7 @@ import pytest
 from kaos_memory.config import (
     ExternalStorage,
     LocalStorage,
+    MemorySettings,
     ModelConfig,
     StorageConfig,
     ShortTermTierConfig,
@@ -81,3 +82,28 @@ def test_short_term_tier_digest_retention_default_and_bound():
     assert ShortTermTierConfig().digest_retention == 20
     with pytest.raises(ValueError):
         ShortTermTierConfig(digest_retention=0)
+
+
+def test_settings_short_term_tier_mirrors_water_mark_and_digest_knobs():
+    settings = MemorySettings(
+        token_budget=1000,
+        compaction_trigger=900,
+        compaction_target=400,
+        hard_event_cap=50,
+        digest_retention=7,
+        rolling_summary=True,
+    )
+    tier = settings.short_term_tier()
+    assert (tier.token_budget, tier.compaction_trigger, tier.compaction_target) == (1000, 900, 400)
+    assert (tier.hard_event_cap, tier.digest_retention, tier.rolling_summary) == (50, 7, True)
+
+
+def test_settings_short_term_tier_propagates_water_mark_constraint():
+    with pytest.raises(ValueError):
+        MemorySettings(
+            token_budget=1000, compaction_trigger=400, compaction_target=900
+        ).short_term_tier()
+
+
+def test_settings_request_concurrency_default():
+    assert MemorySettings().request_concurrency == 8
