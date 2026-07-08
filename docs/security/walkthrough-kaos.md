@@ -1,8 +1,8 @@
-# End-to-end security walkthrough
+# End-to-end walkthrough: `kaos-internal` preset
 
-This walkthrough stands up KAOS with a full security posture and then verifies, step by step, that agent identity, authorization, and gateway-only routing actually take effect. Every step lists what it proves, and each check can be run from the command line or observed in the KAOS UI.
+This walkthrough stands up KAOS with the self-contained `kaos-internal` security posture and then verifies, step by step, that agent identity, authorization, and gateway-only routing actually take effect. Every step lists what it proves, and each check can be run from the command line or observed in the KAOS UI.
 
-It uses the self-contained `kaos-internal` preset so the whole flow runs on a local KIND cluster with no external identity provider or broker. The same steps apply to the `aib-only` and `aib-keycloak` postures; the differences are called out where they matter.
+The `kaos-internal` preset runs the whole flow on a local KIND cluster with **no external identity provider or broker** — the operator itself is the authorization source of truth. For the broker-backed posture with Keycloak user identity and AIB agent credentials, see the [`aib-keycloak` walkthrough](./walkthrough-aib).
 
 ## What you will verify
 
