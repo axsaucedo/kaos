@@ -64,7 +64,7 @@ export BROKER_TOKEN_URL=http://aib-agentic-identity-broker.${AIB_NS}.svc.cluster
 The realm, user, client, secret, and audience are baked into the CLI as the `aib-keycloak` preset defaults. You can confirm them at any time from the seeded realm-import ConfigMap:
 
 ```bash
-kubectl get configmap aib-agentic-identity-broker-realm-import -n "$KC_NS" \
+kubectl get configmap keycloak-realm-import -n "$KC_NS" \
   -o jsonpath='{.data}' | python3 -m json.tool | grep -iE 'username|value|clientId|secret'
 ```
 :::
