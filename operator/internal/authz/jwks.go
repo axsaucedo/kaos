@@ -18,6 +18,25 @@ type IssuerKeys struct {
 	JWKS   map[string]any
 }
 
+// DiscoverIssuer returns the issuer advertised by an OIDC provider.
+func DiscoverIssuer(ctx context.Context, client *http.Client, issuer string) (string, error) {
+	if client == nil {
+		client = http.DefaultClient
+	}
+	var discovery struct {
+		Issuer string `json:"issuer"`
+	}
+	endpoint := strings.TrimRight(strings.TrimSpace(issuer), "/") + "/.well-known/openid-configuration"
+	if err := fetchJSON(ctx, client, endpoint, &discovery); err != nil {
+		return "", fmt.Errorf("discovering issuer from %s: %w", endpoint, err)
+	}
+	discovered := strings.TrimSpace(discovery.Issuer)
+	if discovered == "" {
+		return "", fmt.Errorf("OIDC discovery at %s returned an empty issuer", endpoint)
+	}
+	return discovered, nil
+}
+
 // DiscoverServiceAccountIssuer reads the API server's OIDC discovery document
 // and JWKS using the operator's Kubernetes REST transport. HTTPClientFor applies
 // the configured cluster CA and bearer credentials.

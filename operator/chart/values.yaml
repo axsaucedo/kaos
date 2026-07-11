@@ -117,7 +117,9 @@ security:
     # PDP is enabled, the chart uses kaos-pdp.<release-namespace>.svc:9191.
     # Example: opa-envoy.opa-system.svc.cluster.local:9191
     extAuthzUrl: ""
-    # issuer is the selected OIDC or AIB issuer URL.
+    # issuer is the selected OIDC or AIB issuer URL. For AIB this exact value
+    # must also configure broker.server.enduser.publicUrl; the KAOS CLI derives
+    # both installs from this single value.
     issuer: ""
     # credentialSecretPrefix is the name prefix of the per-agent credential
     # Secret provisioned by the operator's identity projection. When set (and

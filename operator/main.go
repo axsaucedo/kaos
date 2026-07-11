@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -140,7 +141,16 @@ func main() {
 	policyName := os.Getenv("AUTHZ_POLICY_CONFIGMAP_NAME")
 	policyNamespace := os.Getenv("AUTHZ_POLICY_CONFIGMAP_NAMESPACE")
 	adminURL := os.Getenv("AIB_ADMIN_URL")
+	projectionNamespaces := splitCSV(os.Getenv("AUTHZ_PROJECTION_NAMESPACES"))
 	var projectors []controllers.PolicyProjector
+	if cfg.IdentityProviderOrDefault() == security.IdentityProviderAIB && cfg.AgentIssuer() != "" {
+		projectors = append(projectors, &adapters.IssuerConsistencyProjector{
+			Client:     mgr.GetClient(),
+			HTTPClient: &http.Client{Timeout: 5 * time.Second},
+			Issuer:     cfg.AgentIssuer(),
+			Namespaces: projectionNamespaces,
+		})
+	}
 	if adminURL != "" && cfg.IdentityProviderOrDefault() == security.IdentityProviderAIB {
 		projectors = append(projectors, &adapters.BrokerProjector{
 			Client: mgr.GetClient(),
@@ -173,7 +183,7 @@ func main() {
 		if err = (&controllers.AuthzProjectionReconciler{
 			Client:     mgr.GetClient(),
 			Scheme:     mgr.GetScheme(),
-			Namespaces: splitCSV(os.Getenv("AUTHZ_PROJECTION_NAMESPACES")),
+			Namespaces: projectionNamespaces,
 			Projectors: projectors,
 		}).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create controller", "controller", "AuthzProjection")

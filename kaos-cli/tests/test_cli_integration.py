@@ -981,10 +981,52 @@ class TestAuthWiring:
             "security.agentAuth.extAuthzUrl=aib-access-check-grpc.aib-system:9191"
             in joined
         )
+        assert "security.agentAuth.identity.provider=aib" in joined
         assert "security.agentAuth.issuer=http://aib.aib-system:8000" in joined
         assert "security.agentAuth.credentialSecretPrefix=kaos-aib" in joined
         # Each value is preceded by a --set flag.
-        assert args.count("--set") == 3
+        assert args.count("--set") == 4
+
+    def test_install_uses_one_aib_issuer_for_broker_and_operator(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        from kaos_cli.install import install_command
+
+        issuer = "https://agents.example.test"
+        captured = {}
+
+        def fake_install_aib(*args, **kwargs):
+            captured["broker"] = kwargs["extra_set"]
+            return True
+
+        def fake_helm(args, check=True, **kwargs):
+            captured["operator"] = args
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with patch("kaos_cli.install.check_helm_installed", return_value=True), patch(
+            "kaos_cli.install._install_aib", side_effect=fake_install_aib
+        ), patch("kaos_cli.install.run_helm_command", side_effect=fake_helm):
+            install_command(
+                namespace="kaos-system",
+                release_name="kaos",
+                version=None,
+                set_values=[],
+                wait=False,
+                chart_path="operator/chart",
+                auth_enabled=True,
+                auth_issuer=issuer,
+                aib_chart_path="aib/chart",
+                user_auth=False,
+            )
+
+        assert captured["broker"] == [
+            "--set",
+            f"broker.server.enduser.publicUrl={issuer}",
+        ]
+        operator = " ".join(captured["operator"])
+        assert f"security.agentAuth.issuer={issuer}" in operator
+        assert "security.agentAuth.identity.provider=aib" in operator
 
     def test_default_endpoints_use_auth_namespace(self):
         from kaos_cli.install import (

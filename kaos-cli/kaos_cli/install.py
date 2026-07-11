@@ -674,6 +674,7 @@ def _build_auth_operator_args(
     args: list[str] = []
     if ext_authz_url:
         args.extend(["--set", f"security.agentAuth.extAuthzUrl={ext_authz_url}"])
+    args.extend(["--set", "security.agentAuth.identity.provider=aib"])
     args.extend(["--set", f"security.agentAuth.issuer={issuer}"])
     args.extend(
         [
@@ -1187,9 +1188,12 @@ def install_command(
                 err=True,
             )
 
-    # Resolve agent-auth endpoints (used for both component installs and operator wiring)
+    # Resolve the AIB issuer once for both token minting and every verifier.
+    resolved_auth_issuer = ""
     if auth_enabled:
-        auth_issuer = auth_issuer or _default_auth_issuer(auth_namespace, auth_release)
+        resolved_auth_issuer = auth_issuer or _default_auth_issuer(
+            auth_namespace, auth_release
+        )
         if user_auth:
             user_auth_issuer = user_auth_issuer or _default_user_auth_issuer(
                 keycloak_namespace, keycloak_release
@@ -1198,7 +1202,7 @@ def install_command(
         # Install the identity broker from a local chart when provided (it is
         # unpublished, so a chart path is required to install it here).
         if aib_chart_path:
-            aib_extra_set = _build_aib_broker_public_url_args(auth_issuer)
+            aib_extra_set = _build_aib_broker_public_url_args(resolved_auth_issuer)
             if not _install_aib(
                 auth_namespace,
                 auth_release,
@@ -1345,7 +1349,7 @@ def install_command(
         helm_args.extend(
             _build_auth_operator_args(
                 ext_authz_url or "",
-                auth_issuer or _default_auth_issuer(auth_namespace, auth_release),
+                resolved_auth_issuer,
                 credential_secret_prefix,
                 admin_url=admin_url
                 or _default_auth_admin_url(auth_namespace, auth_release),

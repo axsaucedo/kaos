@@ -40,6 +40,17 @@ refute "disabled PDP does not enable operator enforcement" "$out" 'SECURITY_PDP_
 expect "AIB identity remains default" "$out" 'SECURITY_AGENT_AUTH_IDENTITY_PROVIDER:\s*"aib"'
 
 out="$(render \
+	--set security.agentAuth.identity.provider=aib \
+	--set security.agentAuth.issuer=https://agents.example.test)"
+expect "AIB issuer reaches operator from one chart value" "$out" 'SECURITY_AGENT_AUTH_ISSUER:\s*"https://agents.example.test"'
+if [[ "$(grep -c 'SECURITY_AGENT_AUTH_ISSUER:' <<<"$out")" -eq 1 ]]; then
+	echo "ok   - AIB issuer rendered once"
+else
+	echo "FAIL - AIB issuer rendered more than once"
+	FAIL=1
+fi
+
+out="$(render \
 	--set security.agentAuth.identity.provider=serviceaccount \
 	--set security.agentAuth.issuer=http://ignored-issuer \
 	--set security.agentAuth.adminUrl=http://ignored-admin \
