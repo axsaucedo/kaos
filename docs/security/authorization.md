@@ -25,75 +25,66 @@ The operator registers agents with an external identity broker and enforcement r
 
 Select a mode with `kaos system install` flags. All modes are safe by construction: KAOS never overwrites or prunes policy data that it does not own.
 
-| Mode | Provider | `--policy-data-source` | KAOS writes | Use when |
-|------|----------|------------------------|-------------|----------|
+## Installing
+
+The `kaos system install` command exposes three curated end-to-end postures through the single `--auth-enabled` flag. All enable OPA-in-`ext_proc` authorization, route internal traffic through the gateway, and generate bypass-prevention NetworkPolicies.
+
+### Demo posture (no identity provider)
+
+`kaos-internal` uses the `kaos` provider with grants projected from your CRDs and the agent token header-trusted, so you can explore route- and agent-level authorization without Keycloak or a broker. It bakes in the `kaos-authz-policy` ConfigMap projection target, so no additional flags are required.
+
+```bash
+kaos system install --gateway-enabled --auth-enabled kaos-internal
+```
+
+### Broker identity posture (no user login)
+
+`aib-only` wires the identity broker so agents receive broker-issued, signature-verified actor tokens, but installs neither Keycloak user identity nor RFC 8693 token exchange. Use it when you want verified agent identity without a user-auth layer.
+
+```bash
+kaos system install --gateway-enabled --auth-enabled aib-only
+```
+
+### Full verified posture
+
+`aib-keycloak` (the default when `--auth-enabled` is passed without a value) installs Keycloak for user identity and wires the identity broker with RFC 8693 token exchange. Authorization reads the broker's permission sets and the agent token signature is verified against the IdP JWKS.
+
+```bash
+kaos system install --gateway-enabled --auth-enabled aib-keycloak
+```
+
+### Advanced configuration
+
+The presets cover the common cases. Every underlying knob remains available as a Helm chart value via `--set`, so you can compose any of the modes below. All modes are safe by construction: KAOS never overwrites or prunes policy data that it does not own.
+
+| Mode | Provider | `policyDataSource` | KAOS writes | Use when |
+|------|----------|--------------------|-------------|----------|
 | Automated (default) | `kaos` | `automated` | `policy.rego` + `data.json` grants | KAOS should project grants from CRDs |
 | Bring-your-own ConfigMap | `kaos` | `manual` | nothing | You author both the rego and the data in your own ConfigMap |
-| Operator-rego + admin data | `kaos` | `manual` (with `--policy-rego-override`) | `policy.rego` only | KAOS owns the policy, you author `data.kaos.grants` |
+| Operator-rego + admin data | `kaos` | `manual` (+ `policyRegoOverride`) | `policy.rego` only | KAOS owns the policy, you author `data.kaos.grants` |
 | Broker external off-switch | `aib` | `external` | identity only (no grants, no prune) | The broker owns authorization; KAOS only registers identity |
 
-### Automated (default)
-
-KAOS projects grants from your resources and keeps them in sync as agents are added or removed.
+The relevant chart values are:
 
 ```bash
-kaos system install \
-  --auth-enabled \
-  --authz-provider kaos \
-  --policy-data-source automated \
-  --agent-jwt-verification verified \
-  --policy-configmap-name kaos-authz-policy \
-  --policy-configmap-namespace kaos-system
-```
-
-### Bring-your-own ConfigMap
-
-KAOS points the enforcement engine at a ConfigMap you fully own and never modifies it. Author both `policy.rego` and `data.json` yourself.
-
-```bash
-kaos system install \
-  --auth-enabled \
-  --authz-provider kaos \
-  --policy-data-source manual \
-  --policy-configmap-name my-policy \
-  --policy-configmap-namespace kaos-system
-```
-
-### Operator-rego + admin data
-
-KAOS owns only the `policy.rego` key (via server-side-apply field ownership) and never writes `data.kaos.grants`, so you can author grants directly while still getting policy updates from KAOS.
-
-```bash
-kaos system install \
-  --auth-enabled \
-  --authz-provider kaos \
-  --policy-data-source manual \
-  --policy-rego-override \
-  --policy-configmap-name kaos-authz-policy \
-  --policy-configmap-namespace kaos-system
-```
-
-### Broker external off-switch
-
-KAOS keeps registering agent identities and minting per-agent credential Secrets, but disables authorization projection and forces prune off. The broker is authoritative; enforcement reads it live.
-
-```bash
-kaos system install \
-  --auth-enabled \
-  --authz-provider aib \
-  --policy-data-source external \
-  --admin-url http://aib.aib-system:8000/api
+kaos system install --gateway-enabled --auth-enabled kaos-internal \
+  --set security.agentAuth.authorization.provider=kaos \
+  --set security.agentAuth.authorization.policyDataSource=manual \
+  --set security.agentAuth.authorization.policyRegoOverride=true \
+  --set security.agentAuth.authorization.agentJwtVerification=verified \
+  --set security.agentAuth.projection.policyConfigMap.name=kaos-authz-policy \
+  --set security.agentAuth.projection.policyConfigMap.namespace=kaos-system
 ```
 
 ## Verification modes
 
-The subject (user) token is always verified by the gateway's JWT authentication. The actor token needs the same treatment for a production posture, controlled by `--agent-jwt-verification`:
+The subject (user) token is always verified by the gateway's JWT authentication. The actor token needs the same treatment for a production posture, controlled by `security.agentAuth.authorization.agentJwtVerification` (the `aib-keycloak` and `aib-only` presets set `verified`; `kaos-internal` sets `skip`):
 
 - `verified` — the operator injects the IdP JWKS at `data.kaos.jwks` and the policy verifies the actor token signature, issuer, and expiry before trusting its `sub`. This is the real posture.
 - `skip` — **demo mode, non-production.** The policy decodes the actor token without verifying its signature, so the `x-agent-authorization` header is spoofable. Use it only to try route- and agent-level authorization without an identity provider. Move to `verified` before any real deployment.
 
 ::: warning
-Demo mode (`--agent-jwt-verification skip`) trusts an unverified header and is spoofable. It exists to explore authorization without an IdP and must never be used in production.
+Demo mode (`agentJwtVerification=skip`, the `kaos-internal` preset) trusts an unverified header and is spoofable. It exists to explore authorization without an IdP and must never be used in production.
 :::
 
 ## Policy data schema

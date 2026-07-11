@@ -87,7 +87,7 @@ tmp/                       # Local work files (gitignored)
 - **ModelAPI**: LLM proxy (LiteLLM) or hosted (Ollama) mode
 
 ## Authorization (optional, off by default)
-Enforced at the gateway by an OPA policy in the Envoy `ext_proc` filter. `AuthzProjectionReconciler` projects a policy ConfigMap (`policy.rego` + `data.json`) from CRDs. Provider `kaos` (KAOS-owned grants) or `aib` (broker permission sets); modes automated / bring-your-own ConfigMap / operator-rego+admin-data / broker external off-switch; verification `verified` (inject JWKS, verify actor token) or `skip` (demo, non-production). `data.kaos.grants`/`data.kaos.jwks` is a published contract. Enable via `kaos system install --auth-enabled --authz-provider ...`. See `docs/security/authorization.md`.
+Enforced at the gateway by an OPA policy in the Envoy `ext_proc` filter. `AuthzProjectionReconciler` projects a policy ConfigMap (`policy.rego` + `data.json`) from CRDs. Provider `kaos` (KAOS-owned grants) or `aib` (broker permission sets); modes automated / bring-your-own ConfigMap / operator-rego+admin-data / broker external off-switch; verification `verified` (inject JWKS, verify actor token) or `skip` (demo, non-production). `data.kaos.grants`/`data.kaos.jwks` is a published contract. Enable via `kaos system install --auth-enabled <preset>` (presets: `aib-keycloak`, `aib-only`, `kaos-internal`). See `docs/security/authorization.md`.
 
 ## Key Files
 - `operator/api/v1alpha1/*_types.go`: CRD schemas

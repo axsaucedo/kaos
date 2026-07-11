@@ -114,6 +114,9 @@ data:
   {{- if and .gatewayRouting .gatewayRouting.enabled }}
   SECURITY_GATEWAY_ROUTING_ENABLED: "true"
   {{- end }}
+  {{- if and .strictGatewayApi .strictGatewayApi.enabled }}
+  SECURITY_STRICT_GATEWAY_API_ENABLED: "true"
+  {{- end }}
   {{- end }}
   # Global telemetry configuration (defaults for all components)
   {{- if .Values.telemetry.enabled }}
