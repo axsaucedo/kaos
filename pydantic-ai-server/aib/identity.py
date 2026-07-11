@@ -8,10 +8,9 @@ blocks, single-flights concurrent refreshes, backs off on broker unavailability,
 **fails closed** — it never hands back an empty or expired token as if it were valid.
 
 Configuration comes from the provider-agnostic ``AGENT_AUTH_*`` environment the operator
-injects into the agent pod: ``AGENT_AUTH_CLIENT_ID``, ``AGENT_AUTH_CLIENT_SECRET`` and
-``AGENT_AUTH_TOKEN_ENDPOINT`` (or ``AGENT_AUTH_ISSUER`` from which the token endpoint is
-derived). The minted token's subject is the agent's logical identity, which the operator
-also exports as ``AGENT_AUTH_IDENTITY``.
+injects into the agent pod. ``AGENT_AUTH_TOKEN_FILE`` selects a projected token file;
+otherwise the existing client-credentials settings are used. The token's subject maps to
+the logical identity the operator exports as ``AGENT_AUTH_IDENTITY``.
 
 When no credentials are configured the module is inert: :func:`actor_token` returns
 ``None`` and the existing static-token / simulation path is unchanged.
@@ -258,6 +257,39 @@ class ActorTokenManager:
         raise AIBUnavailable(f"could not acquire actor token: {last_exc}") from last_exc
 
 
+class FileActorTokenManager:
+    """Reads the current actor token from a kubelet-managed projected file."""
+
+    def __init__(self, token_file: str) -> None:
+        self._token_file = token_file
+
+    @property
+    def configured(self) -> bool:
+        return bool(self._token_file)
+
+    def token(self) -> str:
+        """Read the file on every use so kubelet token rotation is observed immediately."""
+        try:
+            with open(self._token_file, "r", encoding="utf-8") as fh:
+                token = fh.read().strip()
+        except OSError as exc:
+            raise AIBUnavailable(
+                f"could not read actor token file {self._token_file!r}: {exc}"
+            ) from exc
+        if not token:
+            raise AIBUnavailable(f"actor token file {self._token_file!r} is empty")
+        return token
+
+    async def token_async(self) -> str:
+        return self.token()
+
+    def force_refresh(self) -> str:
+        return self.token()
+
+    async def force_refresh_async(self) -> str:
+        return self.token()
+
+
 def _backoff(attempt: int) -> float:
     """Bounded exponential backoff for grant retries."""
     return min(_BACKOFF_BASE_SECONDS * (2**attempt), _BACKOFF_CAP_SECONDS)
@@ -265,7 +297,9 @@ def _backoff(attempt: int) -> float:
 
 # --- process-global manager + module accessors --------------------------------
 
-_manager: Optional[ActorTokenManager] = None
+ActorTokenProvider = ActorTokenManager | FileActorTokenManager
+
+_manager: Optional[ActorTokenProvider] = None
 
 
 def instrument_agent_identity(
@@ -275,20 +309,26 @@ def instrument_agent_identity(
     client_id_env: str = "AGENT_AUTH_CLIENT_ID",
     client_secret_env: str = "AGENT_AUTH_CLIENT_SECRET",
     client_secret_file_env: str = "AGENT_AUTH_CLIENT_SECRET_FILE",
+    token_file_env: str = "AGENT_AUTH_TOKEN_FILE",
     client_secret_file: Optional[str] = None,
     scope: str = "",
     refresh_fraction: float = _DEFAULT_REFRESH_FRACTION,
-) -> Optional[ActorTokenManager]:
+) -> Optional[ActorTokenProvider]:
     """Configure the process-global managed actor-token lifecycle.
 
-    Reads the broker coordinates from the provider-agnostic ``AGENT_AUTH_*`` environment
-    the operator injects. The client secret is sourced file-first from
+    ``AGENT_AUTH_TOKEN_FILE`` takes precedence and is read on every token use so projected
+    token rotation is immediate. Otherwise, reads the broker coordinates from the
+    provider-agnostic ``AGENT_AUTH_*`` environment. The client secret is sourced file-first from
     ``client_secret_file`` (or the ``AGENT_AUTH_CLIENT_SECRET_FILE`` env when not passed
     explicitly), falling back to ``AGENT_AUTH_CLIENT_SECRET``; a rotated file is reloaded
     on its next use. Returns the manager, or ``None`` when no credentials are present (the
     static-token / simulation path then remains in effect). Safe to call repeatedly.
     """
     global _manager
+    token_file = os.environ.get(token_file_env, "")
+    if token_file:
+        _manager = FileActorTokenManager(token_file)
+        return _manager
     token_endpoint = _derive_token_endpoint(
         os.environ.get(token_endpoint_env, ""), os.environ.get(issuer_env, "")
     )
@@ -309,7 +349,7 @@ def instrument_agent_identity(
     return manager
 
 
-def get_manager() -> Optional[ActorTokenManager]:
+def get_manager() -> Optional[ActorTokenProvider]:
     """Return the configured process-global manager, if any."""
     return _manager
 

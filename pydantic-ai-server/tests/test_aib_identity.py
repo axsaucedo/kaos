@@ -20,6 +20,7 @@ def _reset(monkeypatch):
         "AGENT_AUTH_ISSUER",
         "AGENT_AUTH_CLIENT_ID",
         "AGENT_AUTH_CLIENT_SECRET",
+        "AGENT_AUTH_TOKEN_FILE",
     ):
         monkeypatch.delenv(var, raising=False)
     identity.reset_manager()
@@ -64,12 +65,65 @@ def test_no_credentials_is_inert(monkeypatch):
     assert aib.actor_token() is None
 
 
+def test_file_provider_reads_projected_token(monkeypatch, tmp_path):
+    token_file = tmp_path / "token"
+    token_file.write_text("projected-token\n")
+    monkeypatch.setenv("AGENT_AUTH_TOKEN_FILE", str(token_file))
+
+    mgr = identity.instrument_agent_identity()
+
+    assert isinstance(mgr, identity.FileActorTokenManager)
+    assert aib.actor_token() == "projected-token"
+
+
+def test_file_provider_picks_up_rotation(monkeypatch, tmp_path):
+    token_file = tmp_path / "token"
+    token_file.write_text("token-v1")
+    monkeypatch.setenv("AGENT_AUTH_TOKEN_FILE", str(token_file))
+    mgr = identity.instrument_agent_identity()
+    assert mgr is not None
+    assert mgr.token() == "token-v1"
+
+    token_file.write_text("token-v2")
+
+    assert mgr.token() == "token-v2"
+
+
+def test_file_provider_takes_precedence_over_client_credentials(monkeypatch, tmp_path):
+    token_file = tmp_path / "token"
+    token_file.write_text("projected-token")
+    monkeypatch.setenv("AGENT_AUTH_TOKEN_FILE", str(token_file))
+    monkeypatch.setenv("AGENT_AUTH_TOKEN_ENDPOINT", "http://broker/oauth2/token")
+    monkeypatch.setenv("AGENT_AUTH_CLIENT_ID", "cid")
+    monkeypatch.setenv("AGENT_AUTH_CLIENT_SECRET", "secret")
+    monkeypatch.setattr(
+        httpx,
+        "post",
+        lambda *args, **kwargs: pytest.fail("client-credentials endpoint must not be used"),
+    )
+
+    mgr = identity.instrument_agent_identity()
+
+    assert isinstance(mgr, identity.FileActorTokenManager)
+    assert mgr.token() == "projected-token"
+
+
+def test_file_provider_missing_file_fails_clearly(monkeypatch, tmp_path):
+    missing = tmp_path / "missing-token"
+    monkeypatch.setenv("AGENT_AUTH_TOKEN_FILE", str(missing))
+    mgr = identity.instrument_agent_identity()
+    assert mgr is not None
+
+    with pytest.raises(identity.AIBUnavailable, match="could not read actor token file"):
+        mgr.token()
+
+
 def test_token_endpoint_derived_from_issuer(monkeypatch):
     monkeypatch.setenv("AGENT_AUTH_ISSUER", "http://broker/")
     monkeypatch.setenv("AGENT_AUTH_CLIENT_ID", "cid")
     monkeypatch.setenv("AGENT_AUTH_CLIENT_SECRET", "sec")
     mgr = identity.instrument_agent_identity()
-    assert mgr is not None
+    assert isinstance(mgr, identity.ActorTokenManager)
     assert mgr._token_endpoint == "http://broker/oauth2/token"
 
 
@@ -197,7 +251,7 @@ def test_credential_reloads_on_mtime_change(monkeypatch, tmp_path):
     mgr = identity.instrument_agent_identity(
         client_secret_file=str(secret_file), refresh_fraction=0.2
     )
-    assert mgr is not None
+    assert isinstance(mgr, identity.ActorTokenManager)
     assert mgr.token() == "tok-1"
     assert rec.calls[0]["client_secret"] == "secret-v1"
 
