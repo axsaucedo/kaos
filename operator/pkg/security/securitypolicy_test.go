@@ -87,6 +87,38 @@ func TestConstructSecurityPolicyInvalidConfig(t *testing.T) {
 	}
 }
 
+func TestConstructSecurityPolicyUsesPDPDefaultWhenEnabled(t *testing.T) {
+	cfg := Config{PDPEnabled: true, OperatorNamespace: "kaos-system"}
+	policy, err := constructSecurityPolicy(PolicyParams{Name: "a", Namespace: "ns", RouteName: "a"}, cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if policy == nil {
+		t.Fatal("expected SecurityPolicy when PDP is enabled")
+	}
+	backendRef, found, err := unstructured.NestedMap(policy.Object, "spec", "extAuth", "grpc", "backendRef")
+	if err != nil || !found {
+		t.Fatalf("expected PDP backendRef, found=%v err=%v", found, err)
+	}
+	if backendRef["name"] != "kaos-pdp" || backendRef["namespace"] != "kaos-system" || backendRef["port"] != int64(9191) {
+		t.Fatalf("unexpected PDP backendRef: %#v", backendRef)
+	}
+	failOpen, found, err := unstructured.NestedBool(policy.Object, "spec", "extAuth", "failOpen")
+	if err != nil || !found || failOpen {
+		t.Fatalf("expected explicit failOpen=false, got %v (found=%v err=%v)", failOpen, found, err)
+	}
+}
+
+func TestConstructSecurityPolicyAbsentWhenPDPDisabled(t *testing.T) {
+	policy, err := constructSecurityPolicy(PolicyParams{Name: "a", Namespace: "ns", RouteName: "a"}, Config{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if policy != nil {
+		t.Fatalf("expected no SecurityPolicy when PDP and JWT are disabled: %#v", policy.Object)
+	}
+}
+
 func TestConstructSecurityPolicyJWTOnlyWithoutExtAuthz(t *testing.T) {
 	cfg := Config{
 		UserIssuer: "http://keycloak.kaos-system.svc.cluster.local:8080/realms/kaos",

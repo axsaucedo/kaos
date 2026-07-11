@@ -104,9 +104,8 @@ security:
       # policyRegoOverride, when true, has the operator own only the policy.rego
       # key and leaves the data key to the admin. Orthogonal to policyDataSource.
       policyRegoOverride: false
-    # extAuthzUrl is the host:port of the Envoy ext_authz access-check gRPC
-    # backend (any standards-compliant gRPC ext_authz backend, e.g. opa-envoy,
-    # is a drop-in).
+    # extAuthzUrl overrides the PDP's ext_authz gRPC backend. When empty and the
+    # PDP is enabled, the chart uses kaos-pdp.<release-namespace>.svc:9191.
     # Example: opa-envoy.opa-system.svc.cluster.local:9191
     extAuthzUrl: ""
     # issuer is the agent-auth OIDC issuer (the broker that mints agent actor

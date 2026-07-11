@@ -15,9 +15,14 @@ import (
 // Config holds operator-wide security configuration read from the environment.
 // Security is enabled when the ext_authz access-check backend is configured.
 type Config struct {
+	// PDPEnabled enables the chart-managed OPA policy decision point. When true
+	// and ExtAuthzURL is empty, ext_authz uses the kaos-pdp Service in the
+	// operator namespace.
+	PDPEnabled bool
+
 	// ExtAuthzURL is the host:port of the external authorization (ext_authz)
-	// access-check gRPC backend (agentAuth.extAuthzUrl). An empty value means
-	// gateway authorization enforcement is disabled.
+	// access-check gRPC backend override (agentAuth.extAuthzUrl). An empty value
+	// uses the chart-managed PDP backend when PDPEnabled is true.
 	ExtAuthzURL string
 
 	// Issuer is the agent-auth OIDC issuer URL (agentAuth.issuer): the broker
@@ -133,7 +138,11 @@ const (
 )
 
 const (
+	defaultPDPServiceName = "kaos-pdp"
+	defaultPDPPort        = 9191
+
 	envExtAuthzURL            = "SECURITY_AGENT_AUTH_EXT_AUTHZ_URL"
+	envPDPEnabled             = "SECURITY_PDP_ENABLED"
 	envIssuer                 = "SECURITY_AGENT_AUTH_ISSUER"
 	envCredentialSecretPrefix = "SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX"
 	envUserIssuer             = "SECURITY_USER_AUTH_ISSUER"
@@ -165,6 +174,7 @@ func GetConfig() Config {
 		operatorNamespace = os.Getenv(envPodNamespace)
 	}
 	return Config{
+		PDPEnabled:               parseBoolEnv(envPDPEnabled),
 		ExtAuthzURL:              os.Getenv(envExtAuthzURL),
 		Issuer:                   os.Getenv(envIssuer),
 		CredentialSecretPrefix:   os.Getenv(envCredentialSecretPrefix),
@@ -212,11 +222,10 @@ func normalizeEnum[T ~string](v T, allowed []T, def T) T {
 	return def
 }
 
-// IsOperational reports whether the legacy ext_authz access-check backend is
-// configured. It gates ext_authz SecurityPolicy generation specifically; broader
-// security behavior (credentials, NetworkPolicy) is gated on SecurityEnabled.
+// IsOperational reports whether ext_authz enforcement is enabled through the
+// chart-managed PDP or an explicit backend override.
 func (c Config) IsOperational() bool {
-	return strings.TrimSpace(c.ExtAuthzURL) != ""
+	return c.PDPEnabled || strings.TrimSpace(c.ExtAuthzURL) != ""
 }
 
 // SecurityEnabled reports whether gateway authorization enforcement is configured.
@@ -369,7 +378,19 @@ func (c Config) GatewayRoutingEnabled() bool {
 // gRPC backendRef. The host is expected as a Service DNS name in the form
 // "name[.namespace[.svc.cluster.local]]"; the namespace is empty when not present.
 func (c Config) ExtAuthzBackendRef() (name, namespace string, port int, err error) {
-	return parseServiceHostPort(c.ExtAuthzURL, "ext_authz")
+	return parseServiceHostPort(c.ExtAuthzURLOrDefault(), "ext_authz")
+}
+
+// ExtAuthzURLOrDefault returns the explicit backend override when configured,
+// otherwise the chart-managed PDP Service when PDP enforcement is enabled.
+func (c Config) ExtAuthzURLOrDefault() string {
+	if override := strings.TrimSpace(c.ExtAuthzURL); override != "" {
+		return override
+	}
+	if !c.PDPEnabled {
+		return ""
+	}
+	return fmt.Sprintf("%s.%s.svc:%d", defaultPDPServiceName, c.OperatorNamespaceOrDefault(), defaultPDPPort)
 }
 
 // parseServiceHostPort parses a "host:port" Service DNS URL into name, namespace,

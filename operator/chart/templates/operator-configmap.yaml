@@ -26,8 +26,10 @@ data:
   GATEWAY_DEFAULT_AGENT_TIMEOUT: {{ .Values.gateway.defaultTimeouts.agent | quote }}
   GATEWAY_DEFAULT_MODELAPI_TIMEOUT: {{ .Values.gateway.defaultTimeouts.modelAPI | quote }}
   GATEWAY_DEFAULT_MCP_TIMEOUT: {{ .Values.gateway.defaultTimeouts.mcp | quote }}
-  # Operator-wide security configuration. Authorization through ext_authz is
-  # default-off; leaving the backend URL unset disables enforcement.
+  # Operator-wide security configuration.
+  {{- if .Values.security.pdp.enabled }}
+  SECURITY_PDP_ENABLED: "true"
+  {{- end }}
   {{- with .Values.security }}
   {{- with .agentAuth }}
   {{- with .authorization }}
@@ -43,6 +45,8 @@ data:
   {{- end }}
   {{- if .extAuthzUrl }}
   SECURITY_AGENT_AUTH_EXT_AUTHZ_URL: {{ .extAuthzUrl | quote }}
+  {{- else if $.Values.security.pdp.enabled }}
+  SECURITY_AGENT_AUTH_EXT_AUTHZ_URL: {{ printf "kaos-pdp.%s.svc:9191" $.Release.Namespace | quote }}
   {{- end }}
   {{- if .issuer }}
   SECURITY_AGENT_AUTH_ISSUER: {{ .issuer | quote }}

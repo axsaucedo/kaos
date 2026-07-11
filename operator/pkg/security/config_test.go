@@ -6,11 +6,50 @@ import (
 
 func TestGetConfigDisabledByDefault(t *testing.T) {
 	t.Setenv(envExtAuthzURL, "")
+	t.Setenv(envPDPEnabled, "")
 
 	cfg := GetConfig()
 
 	if cfg.IsOperational() {
 		t.Errorf("expected not operational when ext_authz URL is unset")
+	}
+}
+
+func TestGetConfigOperationalWhenPDPEnabled(t *testing.T) {
+	t.Setenv(envPDPEnabled, "true")
+	t.Setenv(envOperatorNamespace, "kaos-system")
+
+	cfg := GetConfig()
+	if !cfg.IsOperational() {
+		t.Fatal("expected PDP to enable ext_authz enforcement")
+	}
+	if got := cfg.ExtAuthzURLOrDefault(); got != "kaos-pdp.kaos-system.svc:9191" {
+		t.Fatalf("ExtAuthzURLOrDefault() = %q", got)
+	}
+	name, namespace, port, err := cfg.ExtAuthzBackendRef()
+	if err != nil {
+		t.Fatalf("ExtAuthzBackendRef(): %v", err)
+	}
+	if name != "kaos-pdp" || namespace != "kaos-system" || port != 9191 {
+		t.Fatalf("backend = %s/%s:%d", namespace, name, port)
+	}
+}
+
+func TestExtAuthzURLOverrideTakesPrecedenceOverPDPDefault(t *testing.T) {
+	cfg := Config{
+		PDPEnabled:        true,
+		OperatorNamespace: "kaos-system",
+		ExtAuthzURL:       "custom-authz.custom-system.svc:9002",
+	}
+	if got := cfg.ExtAuthzURLOrDefault(); got != cfg.ExtAuthzURL {
+		t.Fatalf("ExtAuthzURLOrDefault() = %q, want override %q", got, cfg.ExtAuthzURL)
+	}
+	name, namespace, port, err := cfg.ExtAuthzBackendRef()
+	if err != nil {
+		t.Fatalf("ExtAuthzBackendRef(): %v", err)
+	}
+	if name != "custom-authz" || namespace != "custom-system" || port != 9002 {
+		t.Fatalf("backend = %s/%s:%d", namespace, name, port)
 	}
 }
 
@@ -399,14 +438,16 @@ func TestSecurityEnabled(t *testing.T) {
 	cases := []struct {
 		name     string
 		extAuthz string
+		pdp      bool
 		want     bool
 	}{
-		{"nothing set", "", false},
-		{"ext_authz set", "svc:9002", true},
+		{"nothing set", "", false, false},
+		{"ext_authz set", "svc:9002", false, true},
+		{"PDP enabled", "", true, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := Config{ExtAuthzURL: tc.extAuthz}
+			cfg := Config{ExtAuthzURL: tc.extAuthz, PDPEnabled: tc.pdp}
 			if got := cfg.SecurityEnabled(); got != tc.want {
 				t.Errorf("SecurityEnabled() = %v, want %v", got, tc.want)
 			}
@@ -422,6 +463,7 @@ func TestExtAuthzEnabled(t *testing.T) {
 		want bool
 	}{
 		{"url on", Config{ExtAuthzURL: url}, true},
+		{"PDP on", Config{PDPEnabled: true}, true},
 		{"without url off", Config{}, false},
 	}
 	for _, tc := range cases {

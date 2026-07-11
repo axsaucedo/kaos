@@ -36,6 +36,7 @@ refute() {
 out="$(render)"
 refute "authorization provider selector removed" "$out" 'SECURITY_AUTHORIZATION_PROVIDER'
 refute "PDP disabled by default" "$out" 'name: kaos-pdp'
+refute "disabled PDP does not enable operator enforcement" "$out" 'SECURITY_PDP_ENABLED'
 
 # PDP renders stock OPA, its gRPC Service, policy mount, and HA budget.
 out="$(render \
@@ -50,6 +51,8 @@ expect "PDP gRPC port" "$out" 'port: 9191'
 expect "PDP decision path" "$out" 'plugins.envoy_ext_authz_grpc.path=aib/extproc/authz/result'
 expect "PDP watches mounted policy" "$out" -- '--watch'
 expect "PDP policy ConfigMap mounted" "$out" 'name: kaos-authz-policy'
+expect "PDP enablement reaches operator" "$out" 'SECURITY_PDP_ENABLED:\s*"true"'
+expect "PDP ext_authz URL defaults to Service" "$out" 'SECURITY_AGENT_AUTH_EXT_AUTHZ_URL:\s*"kaos-pdp.kaos-system.svc:9191"'
 expect "PDP disruption budget rendered" "$out" 'kind: PodDisruptionBudget'
 expect "PDP disruption budget keeps one replica" "$out" 'minAvailable: 1'
 
@@ -60,6 +63,15 @@ out="$(render \
 	--set security.agentAuth.projection.policyConfigMap.name=kaos-authz-policy \
 	--set security.agentAuth.projection.policyConfigMap.namespace=kaos-system)"
 refute "single-replica PDP omits disruption budget" "$out" 'kind: PodDisruptionBudget'
+
+out="$(render \
+	--namespace kaos-system \
+	--set security.pdp.enabled=true \
+	--set security.agentAuth.extAuthzUrl=custom-authz.custom-system.svc:9002 \
+	--set security.agentAuth.projection.policyConfigMap.name=kaos-authz-policy \
+	--set security.agentAuth.projection.policyConfigMap.namespace=kaos-system)"
+expect "explicit ext_authz URL overrides PDP default" "$out" 'SECURITY_AGENT_AUTH_EXT_AUTHZ_URL:\s*"custom-authz.custom-system.svc:9002"'
+refute "PDP default omitted when override set" "$out" 'SECURITY_AGENT_AUTH_EXT_AUTHZ_URL:\s*"kaos-pdp.kaos-system.svc:9191"'
 
 if mismatch="$(helm template t "$CHART_DIR" \
 	--namespace kaos-system \
