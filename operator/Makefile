@@ -1,4 +1,4 @@
-.PHONY: help build docker-build deploy generate manifests test test-unit clean envtest helm kind-create kind-delete kind-load-images kind-e2e-install-kaos kind-e2e-run-tests e2e-test e2e-test-seq e2e-clean kind-load-aib-images kind-e2e-install-aib e2e-test-aib kind-e2e-aib
+.PHONY: help build docker-build deploy generate manifests test test-unit test-chart clean envtest helm kind-create kind-delete kind-load-images kind-e2e-install-kaos kind-e2e-run-tests e2e-test e2e-test-seq e2e-clean kind-load-aib-images kind-e2e-install-aib e2e-test-aib kind-e2e-aib kind-e2e-install-authz e2e-test-authz kind-e2e-authz
 
 # Configuration
 IMG ?= axsauze/kaos-operator:latest
@@ -70,6 +70,10 @@ test-unit: generate manifests envtest
 
 # Alias for backward compatibility
 test: test-unit
+
+# Render the operator chart across the authorization mode combinations
+test-chart:
+	./chart/tests/render_authz_modes.sh
 
 # Generate Helm chart from kustomize manifests
 # CRDs are moved to crds/ dir so --skip-crds works properly during install
@@ -158,34 +162,34 @@ e2e-clean:
 	-kubectl get ns -o name | grep e2e | xargs -I{} kubectl delete {} --wait=false 2>/dev/null || true
 	@sleep 3
 
-# --- Agent-auth E2E (identity broker + Go sync service) ----------------------
-# Opt-in, local-only suite that stands up the identity broker and the sync
-# service alongside the operator and verifies per-agent credential Secrets are
-# minted and mounted into agent pods. Requires the (gitignored) identity-broker
-# clone checked out next to this repository and its images built locally.
+# --- Agent-auth E2E (identity broker + operator identity projection) ---------
+# Opt-in, local-only suite that stands up the identity broker alongside the
+# operator and verifies per-agent credential Secrets are minted (by the
+# operator's identity projection controller) and mounted into agent pods.
+# Requires the (gitignored) identity-broker clone checked out next to this
+# repository and its images built locally.
 AIB_CHART_PATH ?= $(PWD)/../agentic-identity-broker/charts/agentic-identity-broker
 AIB_VALUES_PATH ?= $(AIB_CHART_PATH)/values-dev.yaml
 AIB_IMAGE ?= agentic-identity-broker:0.1.0
-SYNC_IMAGE ?= axsauze/kaos-sync:dev
 AIB_OPERATOR_TAG ?= aib-e2e
 AIB_AGENT_IMAGE ?= axsauze/kaos-agent:0.4.8-dev
 
-# Load the operator, agent, sync, broker, and LiteLLM images into KIND.
+# Load the operator, agent, broker, and LiteLLM images into KIND.
 kind-load-aib-images:
 	@kind load docker-image \
 		$(REGISTRY)/kaos-operator:$(AIB_OPERATOR_TAG) \
 		$(AIB_AGENT_IMAGE) \
-		$(SYNC_IMAGE) \
 		$(AIB_IMAGE) \
 		$(LITELLM_IMAGE) \
 		--name $(KIND_CLUSTER_NAME)
 
-# Install KAOS with agent auth, the identity broker, and the Go sync service.
+# Install KAOS with agent auth and the identity broker. The operator's identity
+# projection controller registers agents and mints credentials directly.
 kind-e2e-install-aib:
 	@pip install -e ../kaos-cli -q 2>/dev/null || true
 	@kaos system install \
 		--namespace kaos-system \
-		--auth-enabled --no-user-auth --no-token-exchange \
+		--auth-enabled aib-only \
 		--gateway-enabled --metallb-enabled \
 		--chart-path chart/ \
 		--set controllerManager.manager.image.repository=$(REGISTRY)/kaos-operator \
@@ -193,14 +197,43 @@ kind-e2e-install-aib:
 		--set defaultImages.agentRuntime=$(AIB_AGENT_IMAGE) \
 		--aib-chart-path $(AIB_CHART_PATH) \
 		--aib-values $(AIB_VALUES_PATH) \
-		--sync-chart-path ../sync-service/chart \
-		--sync-image-repository $(REGISTRY)/kaos-sync \
-		--sync-image-tag $(word 2,$(subst :, ,$(SYNC_IMAGE))) \
 		--wait
 
 # Run only the agent-auth credential test against an installed cluster.
 e2e-test-aib:
-	@cd tests && KAOS_AIB_E2E=1 uv run pytest e2e/test_aib_sync_e2e.py -v -s
+	@cd tests && KAOS_AIB_E2E=1 uv run pytest e2e/test_aib_credential_e2e.py -v -s
 
 # Full local agent-auth E2E: load images, install, run the test.
 kind-e2e-aib: kind-load-aib-images kind-e2e-install-aib e2e-test-aib
+
+# --- Authorization projection E2E (KAOS-owned Model-1 policy ConfigMap) -------
+# Opt-in, local-only suite that installs the operator with the KAOS
+# authorization provider and a policy ConfigMap projection target, then verifies
+# the operator renders the static rego and a grant graph and keeps grants stable
+# across reconciles. Model-1 is KAOS-owned so it needs no identity broker.
+AUTHZ_POLICY_CONFIGMAP ?= kaos-authz-policy
+AUTHZ_POLICY_NAMESPACE ?= kaos-system
+
+# Install KAOS with the KAOS authorization provider and automated policy-data
+# projection into the policy ConfigMap the enforcement engine mounts.
+kind-e2e-install-authz:
+	@pip install -e ../kaos-cli -q 2>/dev/null || true
+	@kaos system install \
+		--namespace kaos-system \
+		--auth-enabled kaos-internal \
+		--gateway-enabled --metallb-enabled \
+		--chart-path chart/ \
+		--set controllerManager.manager.image.repository=$(REGISTRY)/kaos-operator \
+		--set controllerManager.manager.image.tag=$(AIB_OPERATOR_TAG) \
+		--set defaultImages.agentRuntime=$(AIB_AGENT_IMAGE) \
+		--wait
+
+# Run only the authorization projection test against an installed cluster.
+e2e-test-authz:
+	@cd tests && KAOS_AUTHZ_E2E=1 \
+		KAOS_AUTHZ_POLICY_CONFIGMAP=$(AUTHZ_POLICY_CONFIGMAP) \
+		KAOS_AUTHZ_POLICY_NAMESPACE=$(AUTHZ_POLICY_NAMESPACE) \
+		uv run pytest e2e/test_authz_policy_projection_e2e.py -v -s
+
+# Full local authorization E2E: load images, install, run the test.
+kind-e2e-authz: kind-load-aib-images kind-e2e-install-authz e2e-test-authz

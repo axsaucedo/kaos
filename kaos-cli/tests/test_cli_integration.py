@@ -901,10 +901,12 @@ class TestSystemInstallFlags:
         assert result.exit_code == 0
         output = strip_ansi(result.output)
         assert "--auth-enabled" in output
-        assert "--auth-namespace" in output
-        assert "--sync-chart-path" in output
-        assert "--user-auth" in output
-        assert "--keycloak-namespace" in output
+        # The fine-grained auth knobs are collapsed into the preset and no longer
+        # exposed on the command surface.
+        assert "--authz-provider" not in output
+        assert "--agent-jwt-verification" not in output
+        # Advanced dev chart paths remain available but hidden from help.
+        assert "--aib-chart-path" not in output
 
 
 class TestPgvectorMemoryInstall:
@@ -952,6 +954,21 @@ class TestPgvectorMemoryInstall:
 
 
 class TestAuthWiring:
+    @pytest.fixture(autouse=True)
+    def _stub_gateway_install(self):
+        """Stub the gateway install/wait helpers so preset-driven installs.
+
+        The auth presets force --gateway-enabled, which otherwise polls the
+        cluster for GatewayClass acceptance for 60s. Tests here assert on the
+        operator --set wiring, not the gateway bootstrap, so short-circuit it.
+        """
+        from unittest.mock import patch
+
+        with patch("kaos_cli.install._install_gateway_api", return_value=True), patch(
+            "kaos_cli.install._wait_for_gateway_class", return_value=True
+        ):
+            yield
+
     def test_build_auth_operator_args(self):
         from kaos_cli.install import _build_auth_operator_args
 
@@ -1017,6 +1034,7 @@ class TestAuthWiring:
                     "system",
                     "install",
                     "--auth-enabled",
+                    "aib-keycloak",
                     "--chart-path",
                     "operator/chart",
                 ],
@@ -1026,6 +1044,29 @@ class TestAuthWiring:
         joined = " ".join(captured.get("args", []))
         assert "security.agentAuth.extAuthzUrl=" in joined
         assert "security.agentAuth.credentialSecretPrefix=kaos-aib" in joined
+        assert "security.agentAuth.adminUrl=" in joined
+
+    def test_build_auth_operator_args_includes_admin_url(self):
+        from kaos_cli.install import _build_auth_operator_args
+
+        args = _build_auth_operator_args(
+            "aib-access-check-grpc.aib-system:9191",
+            "http://aib.aib-system:8000",
+            "kaos-aib",
+            admin_url="http://aib.aib-system:8000/api",
+        )
+        joined = " ".join(args)
+        assert "security.agentAuth.adminUrl=http://aib.aib-system:8000/api" in joined
+
+    def test_build_auth_operator_args_omits_admin_url_when_unset(self):
+        from kaos_cli.install import _build_auth_operator_args
+
+        args = _build_auth_operator_args(
+            "aib-access-check-grpc.aib-system:9191",
+            "http://aib.aib-system:8000",
+            "kaos-aib",
+        )
+        assert "security.agentAuth.adminUrl" not in " ".join(args)
 
     def test_build_auth_operator_args_includes_user_auth(self):
         from kaos_cli.install import _build_auth_operator_args
@@ -1084,6 +1125,79 @@ class TestAuthWiring:
             "kaos-aib",
         )
         assert "security.agentAuth.extProcUrl=" not in " ".join(args)
+
+    def test_build_auth_operator_args_kaos_authorization(self):
+        from kaos_cli.install import _build_auth_operator_args
+
+        args = _build_auth_operator_args(
+            "aib-access-check-grpc.aib-system:9191",
+            "http://aib.aib-system:8000",
+            "kaos-aib",
+            authz_provider="kaos",
+            policy_data_source="automated",
+            agent_jwt_verification="verified",
+            policy_configmap_name="kaos-authz-policy",
+            policy_configmap_namespace="aib-system",
+        )
+        joined = " ".join(args)
+        assert "security.agentAuth.authorization.provider=kaos" in joined
+        assert "security.agentAuth.authorization.policyDataSource=automated" in joined
+        assert (
+            "security.agentAuth.authorization.agentJwtVerification=verified" in joined
+        )
+        assert (
+            "security.agentAuth.projection.policyConfigMap.name=kaos-authz-policy"
+            in joined
+        )
+        assert (
+            "security.agentAuth.projection.policyConfigMap.namespace=aib-system"
+            in joined
+        )
+
+    def test_build_auth_operator_args_rego_override(self):
+        from kaos_cli.install import _build_auth_operator_args
+
+        args = _build_auth_operator_args(
+            "aib-access-check-grpc.aib-system:9191",
+            "http://aib.aib-system:8000",
+            "kaos-aib",
+            authz_provider="kaos",
+            policy_data_source="manual",
+            policy_rego_override=True,
+        )
+        joined = " ".join(args)
+        assert "security.agentAuth.authorization.policyRegoOverride=true" in joined
+        assert "security.agentAuth.authorization.policyDataSource=manual" in joined
+
+    def test_build_auth_operator_args_broker_external_off_switch(self):
+        from kaos_cli.install import _build_auth_operator_args
+
+        args = _build_auth_operator_args(
+            "aib-access-check-grpc.aib-system:9191",
+            "http://aib.aib-system:8000",
+            "kaos-aib",
+            admin_url="http://aib.aib-system:8000/api",
+            authz_provider="aib",
+            policy_data_source="external",
+            authz_gateway_extension="ext_authz",
+        )
+        joined = " ".join(args)
+        assert "security.agentAuth.authorization.provider=aib" in joined
+        assert "security.agentAuth.authorization.policyDataSource=external" in joined
+        assert "security.agentAuth.authorization.gatewayExtension=ext_authz" in joined
+        assert "security.agentAuth.adminUrl=http://aib.aib-system:8000/api" in joined
+
+    def test_build_auth_operator_args_omits_authorization_when_unset(self):
+        from kaos_cli.install import _build_auth_operator_args
+
+        args = _build_auth_operator_args(
+            "aib-access-check-grpc.aib-system:9191",
+            "http://aib.aib-system:8000",
+            "kaos-aib",
+        )
+        joined = " ".join(args)
+        assert "security.agentAuth.authorization" not in joined
+        assert "security.agentAuth.projection.policyConfigMap" not in joined
 
     def test_build_auth_operator_args_network_policy_default_on(self):
         from kaos_cli.install import _build_auth_operator_args
@@ -1154,6 +1268,28 @@ class TestAuthWiring:
         assert "security.gatewayRouting.enabled=true" not in joined
         assert "security.gatewayHost=" not in joined
 
+    def test_build_auth_operator_args_gateway_api_strict(self):
+        from kaos_cli.install import _build_auth_operator_args
+
+        args = _build_auth_operator_args(
+            "aib-access-check-grpc.aib-system:9191",
+            "http://aib.aib-system:8000",
+            "kaos-aib",
+            gateway_api_strict=True,
+        )
+        joined = " ".join(args)
+        assert "security.strictGatewayApi.enabled=true" in joined
+
+    def test_build_auth_operator_args_omits_strict_when_default(self):
+        from kaos_cli.install import _build_auth_operator_args
+
+        args = _build_auth_operator_args(
+            "aib-access-check-grpc.aib-system:9191",
+            "http://aib.aib-system:8000",
+            "kaos-aib",
+        )
+        assert "security.strictGatewayApi.enabled=true" not in " ".join(args)
+
     def test_build_auth_operator_args_tls_self_signed(self):
         from kaos_cli.install import _build_auth_operator_args
 
@@ -1223,6 +1359,90 @@ class TestAuthWiring:
         assert "extProc.enabled=true" in joined
         assert "extProc.oauth2.clientId=extproc-gateway" in joined
         assert "extProc.oauth2.clientSecret=secret" in joined
+        # The in-cluster broker enduser endpoint is plain http, so the ExtProc
+        # binary must be told to accept http:// endpoints at startup.
+        assert "extProc.oauth2.allowHttp=true" in joined
+        # Issuer/tokenEndpoint are omitted unless supplied (chart defaults apply).
+        assert "extProc.oauth2.issuer" not in joined
+        assert "extProc.oauth2.tokenEndpoint" not in joined
+
+    def test_build_aib_extproc_args_with_endpoints(self):
+        from kaos_cli.install import _build_aib_extproc_args
+
+        args = _build_aib_extproc_args(
+            "extproc-gateway",
+            "secret",
+            issuer="http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos",
+            token_endpoint="http://broker.aib.svc.cluster.local:8080/oauth2/token",
+        )
+        joined = " ".join(args)
+        assert (
+            "extProc.oauth2.issuer="
+            "http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos" in joined
+        )
+        assert (
+            "extProc.oauth2.tokenEndpoint="
+            "http://broker.aib.svc.cluster.local:8080/oauth2/token" in joined
+        )
+
+    def test_build_aib_hybrid_broker_args(self):
+        from kaos_cli.install import _build_aib_hybrid_broker_args
+
+        issuer = "http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos"
+        joined = " ".join(_build_aib_hybrid_broker_args(issuer))
+        assert "broker.oauth2AuthorizationServer.mode=hybrid" in joined
+        assert (
+            f"broker.oauth2AuthorizationServer.proxy.upstreamIssuerUri={issuer}"
+            in joined
+        )
+        assert (
+            "broker.oauth2AuthorizationServer.proxy.upstreamTokenEndpoint="
+            f"{issuer}/protocol/openid-connect/token" in joined
+        )
+        assert (
+            "broker.oauth2AuthorizationServer.proxy.upstreamAuthorizeEndpoint="
+            f"{issuer}/protocol/openid-connect/auth" in joined
+        )
+        assert "urn:ietf:params:oauth:grant-type:token-exchange" in joined
+        assert "broker.tokenExchange.expectedAudience=token-exchange-broker" in joined
+
+    def test_build_aib_broker_public_url_args(self):
+        from kaos_cli.install import _build_aib_broker_public_url_args
+
+        public_url = (
+            "http://aib-agentic-identity-broker.aib-system.svc.cluster.local:8000"
+        )
+        args = _build_aib_broker_public_url_args(public_url)
+        assert args == [
+            "--set",
+            f"broker.server.enduser.publicUrl={public_url}",
+        ]
+
+    def test_keycloak_realm_json_registers_extproc_client(self):
+        from kaos_cli.install import (
+            AUTH_EXT_PROC_CLIENT_ID,
+            AUTH_EXT_PROC_CLIENT_SECRET,
+            AUTH_TOKEN_EXCHANGE_AUDIENCE,
+            _keycloak_realm_json,
+        )
+
+        realm = _keycloak_realm_json(
+            "kaos", "kaos", "kaos-dev-secret", "kaos", "kaos-user", "kaos-password"
+        )
+        clients = {c["clientId"]: c for c in realm["clients"]}
+        # The ExtProc gateway service-account client is registered so the
+        # token-exchange sidecar can mint its client assertion.
+        assert AUTH_EXT_PROC_CLIENT_ID in clients
+        extproc = clients[AUTH_EXT_PROC_CLIENT_ID]
+        assert extproc["secret"] == AUTH_EXT_PROC_CLIENT_SECRET
+        assert extproc["serviceAccountsEnabled"] is True
+        # Both clients carry the token-exchange broker audience the broker enforces.
+        for client_id in ("kaos", AUTH_EXT_PROC_CLIENT_ID):
+            audiences = [
+                m["config"].get("included.custom.audience")
+                for m in clients[client_id]["protocolMappers"]
+            ]
+            assert AUTH_TOKEN_EXCHANGE_AUDIENCE in audiences
 
     def test_default_user_auth_issuer(self):
         from kaos_cli.install import _default_user_auth_issuer
@@ -1231,7 +1451,7 @@ class TestAuthWiring:
         assert issuer == "http://keycloak.kc-ns.svc.cluster.local:8080/realms/kaos"
 
     def test_auth_enabled_wires_user_auth_values(self):
-        """--auth-enabled (user-auth on by default) adds security.userAuth.* args."""
+        """aib-keycloak (user-auth on) adds security.userAuth.* args."""
         from unittest.mock import patch
         from types import SimpleNamespace
 
@@ -1256,6 +1476,7 @@ class TestAuthWiring:
                     "system",
                     "install",
                     "--auth-enabled",
+                    "aib-keycloak",
                     "--chart-path",
                     "operator/chart",
                 ],
@@ -1267,7 +1488,7 @@ class TestAuthWiring:
         assert "security.userAuth.audience=kaos" in joined
 
     def test_no_user_auth_omits_user_auth_values(self):
-        """--no-user-auth installs neither Keycloak nor the userAuth wiring."""
+        """kaos-internal installs neither Keycloak nor the userAuth wiring."""
         from unittest.mock import patch
         from types import SimpleNamespace
 
@@ -1294,7 +1515,7 @@ class TestAuthWiring:
                     "system",
                     "install",
                     "--auth-enabled",
-                    "--no-user-auth",
+                    "kaos-internal",
                     "--chart-path",
                     "operator/chart",
                 ],
@@ -1306,9 +1527,18 @@ class TestAuthWiring:
         assert "security.userAuth" not in joined
         # Agent-auth wiring is unaffected.
         assert "security.agentAuth.extAuthzUrl=" in joined
+        # Demo posture selects the KAOS-owned policy provider with header-trusted
+        # agent JWT.
+        assert "security.agentAuth.authorization.provider=kaos" in joined
+        assert "security.agentAuth.authorization.agentJwtVerification=skip" in joined
+        # The demo preset bakes in the policy ConfigMap projection target.
+        assert (
+            "security.agentAuth.projection.policyConfigMap.name=kaos-authz-policy"
+            in joined
+        )
 
     def test_keycloak_install_applies_realm_and_deployment(self):
-        """--auth-enabled applies the realm ConfigMap and Keycloak dev deployment."""
+        """aib-keycloak applies the realm ConfigMap and Keycloak deployment."""
         from unittest.mock import patch
         from types import SimpleNamespace
 
@@ -1329,6 +1559,7 @@ class TestAuthWiring:
                     "system",
                     "install",
                     "--auth-enabled",
+                    "aib-keycloak",
                     "--chart-path",
                     "operator/chart",
                 ],
@@ -1363,6 +1594,7 @@ class TestAuthWiring:
                     "system",
                     "install",
                     "--auth-enabled",
+                    "aib-keycloak",
                     "--keycloak-chart-path",
                     "charts/keycloak",
                     "--chart-path",
@@ -1375,7 +1607,119 @@ class TestAuthWiring:
         assert "charts/keycloak" in joined
         assert "realmImport.configMapName=keycloak-realm-import" in joined
 
-    def test_install_monitoring_enabled_without_value(self):
+    def test_expand_auth_preset_keycloak_aib(self):
+        from kaos_cli.install import _expand_auth_preset
+
+        kwargs = _expand_auth_preset("aib-keycloak", "kaos-system")
+        assert kwargs["auth_enabled"] is True
+        assert kwargs["user_auth"] is True
+        assert kwargs["token_exchange"] is True
+        assert kwargs["authz_provider"] == "aib"
+        assert kwargs["authz_gateway_extension"] == "ext_proc"
+        assert kwargs["agent_jwt_verification"] == "verified"
+
+    def test_expand_auth_preset_kaos_internal(self):
+        from kaos_cli.install import _expand_auth_preset
+
+        kwargs = _expand_auth_preset("kaos-internal", "kaos-system")
+        assert kwargs["auth_enabled"] is True
+        assert kwargs["user_auth"] is False
+        assert kwargs["token_exchange"] is False
+        assert kwargs["authz_provider"] == "kaos"
+        assert kwargs["agent_jwt_verification"] == "skip"
+        # The demo preset bakes in the policy ConfigMap projection target so no
+        # extra flags are needed for the operator to project policy data.
+        assert kwargs["policy_configmap_name"] == "kaos-authz-policy"
+        assert kwargs["policy_configmap_namespace"] == "kaos-system"
+
+    def test_expand_auth_preset_aib_only(self):
+        from kaos_cli.install import _expand_auth_preset
+
+        kwargs = _expand_auth_preset("aib-only", "kaos-system")
+        assert kwargs["auth_enabled"] is True
+        assert kwargs["user_auth"] is False
+        assert kwargs["token_exchange"] is False
+        assert kwargs["authz_provider"] == "aib"
+        assert kwargs["agent_jwt_verification"] == "verified"
+
+    def test_auth_enabled_without_value_defaults_to_aib_keycloak(self):
+        """--auth-enabled with no value selects the keycloak-aib preset."""
+        from unittest.mock import patch
+        from types import SimpleNamespace
+
+        captured = {}
+
+        def fake_helm(args, check=True, **kwargs):
+            if "upgrade" in args and any(
+                "kaos-operator" in a or a.endswith("/chart") for a in args
+            ):
+                captured["args"] = args
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with patch("kaos_cli.install.check_helm_installed", return_value=True), patch(
+            "kaos_cli.install.run_helm_command", side_effect=fake_helm
+        ), patch("kaos_cli.install._run_kubectl") as mock_kubectl:
+            mock_kubectl.return_value = SimpleNamespace(
+                returncode=0, stdout="", stderr=""
+            )
+            result = runner.invoke(
+                app,
+                [
+                    "system",
+                    "install",
+                    "--auth-enabled",
+                    "--chart-path",
+                    "operator/chart",
+                ],
+            )
+
+        assert result.exit_code == 0, result.output
+        joined = " ".join(captured.get("args", []))
+        assert "security.agentAuth.authorization.provider=aib" in joined
+        # Preset implies the gateway is installed for enforcement.
+        assert "gatewayAPI.enabled=true" in joined
+
+    def test_auth_enabled_rejects_unknown_preset(self):
+        result = runner.invoke(app, ["system", "install", "--auth-enabled", "nonsense"])
+        assert result.exit_code != 0
+        assert "Invalid auth preset" in strip_ansi(result.output)
+
+    def test_gateway_api_strict_standalone_without_auth(self):
+        """--gateway-api-strict alone emits the strict value without an auth preset."""
+        from unittest.mock import patch
+        from types import SimpleNamespace
+
+        captured = {}
+
+        def fake_helm(args, check=True, **kwargs):
+            if "upgrade" in args and any(
+                "kaos-operator" in a or a.endswith("/chart") for a in args
+            ):
+                captured["args"] = args
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with patch("kaos_cli.install.check_helm_installed", return_value=True), patch(
+            "kaos_cli.install.run_helm_command", side_effect=fake_helm
+        ), patch("kaos_cli.install._run_kubectl") as mock_kubectl:
+            mock_kubectl.return_value = SimpleNamespace(
+                returncode=0, stdout="", stderr=""
+            )
+            result = runner.invoke(
+                app,
+                [
+                    "system",
+                    "install",
+                    "--gateway-api-strict",
+                    "--chart-path",
+                    "operator/chart",
+                ],
+            )
+
+        assert result.exit_code == 0, result.output
+        joined = " ".join(captured.get("args", []))
+        assert "security.strictGatewayApi.enabled=true" in joined
+        # No auth preset means no agentAuth wiring.
+        assert "security.agentAuth.extAuthzUrl=" not in joined
         """--monitoring-enabled without value defaults to signoz (not an invalid backend error)."""
         from unittest.mock import patch
 

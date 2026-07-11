@@ -14,6 +14,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 COPY main.go main.go
 COPY api/ api/
 COPY controllers/ controllers/
+COPY internal/ internal/
 COPY pkg/ pkg/
 
 # Build with cache mount for faster rebuilds

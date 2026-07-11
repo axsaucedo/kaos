@@ -152,57 +152,6 @@ func TestDefaultResourcesNamespaceScoped(t *testing.T) {
 	}
 }
 
-func TestAdminBodiesShape(t *testing.T) {
-	state := Project([]Resource{mcpserver("github"), agent("researcher", []string{"github"}, "")})
-	svc := state.Services[0].AdminBody()
-	if svc["client_id"] != "kaos-mcpserver-demo-github" {
-		t.Fatalf("svc client_id = %v", svc["client_id"])
-	}
-	ps := state.PermissionSets[0].AdminBody("svc-123")
-	scopes := ps["service_scopes"].([]any)[0].(map[string]any)
-	if scopes["service_id"] != "svc-123" {
-		t.Fatalf("service_id = %v", scopes["service_id"])
-	}
-	agentBody := state.Agents[0].AdminBody([]string{"ps-1"})
-	if _, leaks := agentBody["client_id"]; leaks {
-		t.Fatalf("agent body leaks client_id: %v", agentBody)
-	}
-	bindings := agentBody["permission_sets"].([]any)
-	entry := bindings[0].(map[string]any)
-	if entry["permission_set_id"] != "ps-1" || entry["requirement_type"] != "mandatory" {
-		t.Fatalf("binding = %v", entry)
-	}
-}
-
-func TestAdminBodiesCarryNoApprovalStatus(t *testing.T) {
-	approvalKeys := map[string]bool{"approved": true, "approval": true, "status": true, "state": true, "decision": true, "granted": true}
-	state := Project([]Resource{mcpserver("github"), modelapi("gpt"), agent("researcher", []string{"github"}, "gpt")})
-
-	check := func(body map[string]any, where string) {
-		for k := range body {
-			if approvalKeys[k] {
-				t.Fatalf("%s leaks approval key %q", where, k)
-			}
-		}
-	}
-	for _, svc := range state.Services {
-		check(svc.AdminBody(), "service body")
-	}
-	for _, ps := range state.PermissionSets {
-		check(ps.AdminBody("svc-id"), "permission-set body")
-	}
-	for _, a := range state.Agents {
-		body := a.AdminBody([]string{"ps-id"})
-		check(body, "agent body")
-		for _, e := range body["permission_sets"].([]any) {
-			entry := e.(map[string]any)
-			if len(entry) != 2 || entry["requirement_type"] != "mandatory" {
-				t.Fatalf("binding entry = %v", entry)
-			}
-		}
-	}
-}
-
 func hasService(s DesiredState, clientID string) bool {
 	for _, svc := range s.Services {
 		if svc.ClientID() == clientID {
@@ -219,4 +168,99 @@ func hasPS(s DesiredState, name string) bool {
 		}
 	}
 	return false
+}
+
+func peerAgent(name string, access []string) Resource {
+	return Resource{Kind: "Agent", Namespace: "demo", Name: name, Access: access}
+}
+
+func TestAgentEncodingConventions(t *testing.T) {
+	if got := edgeServiceClientID(Agent, "demo", "planner"); got != "kaos-agent-demo-planner" {
+		t.Fatalf("agent service client_id = %q", got)
+	}
+	if got := edgePermissionSetName(Agent, "demo", "planner"); got != "kaos:agent:demo:planner:call" {
+		t.Fatalf("agent permission set name = %q", got)
+	}
+}
+
+func TestAgentAccessEdgeProjected(t *testing.T) {
+	state := Project([]Resource{peerAgent("a", []string{"b"}), peerAgent("b", nil)})
+	if !hasService(state, "kaos-agent-demo-b") {
+		t.Fatalf("missing peer service: %v", clientIDs(state))
+	}
+	if !hasPS(state, "kaos:agent:demo:b:call") {
+		t.Fatalf("missing peer permission set: %v", psNames(state))
+	}
+	if len(state.Agents) != 1 || state.Agents[0].ExternalID() != "kaos://agent/demo/a" {
+		t.Fatalf("agents = %+v, want only a bound", state.Agents)
+	}
+	if !reflect.DeepEqual(state.Agents[0].PermissionSetNames, []string{"kaos:agent:demo:b:call"}) {
+		t.Fatalf("a grants = %v", state.Agents[0].PermissionSetNames)
+	}
+}
+
+func TestAgentAccessSelfEdgeSkipped(t *testing.T) {
+	state := Project([]Resource{peerAgent("a", []string{"a"})})
+	if len(state.Services) != 0 || len(state.PermissionSets) != 0 || len(state.Agents) != 0 {
+		t.Fatalf("self edge produced svc=%d ps=%d agents=%d, want 0/0/0",
+			len(state.Services), len(state.PermissionSets), len(state.Agents))
+	}
+}
+
+func TestAgentAccessEmptyEdgeSkipped(t *testing.T) {
+	state := Project([]Resource{peerAgent("a", []string{""})})
+	if len(state.Agents) != 0 {
+		t.Fatalf("empty edge produced agents = %+v, want none", state.Agents)
+	}
+}
+
+func TestAgentAccessDeduplicatesSharedPeer(t *testing.T) {
+	state := Project([]Resource{
+		peerAgent("a", []string{"shared"}),
+		peerAgent("b", []string{"shared"}),
+		peerAgent("shared", nil),
+	})
+	if !hasService(state, "kaos-agent-demo-shared") {
+		t.Fatalf("missing shared service: %v", clientIDs(state))
+	}
+	svcCount := 0
+	for _, svc := range state.Services {
+		if svc.ClientID() == "kaos-agent-demo-shared" {
+			svcCount++
+		}
+	}
+	if svcCount != 1 {
+		t.Fatalf("shared peer service count = %d, want 1", svcCount)
+	}
+	if len(state.Agents) != 2 {
+		t.Fatalf("agents = %d, want 2 (a and b)", len(state.Agents))
+	}
+}
+
+func TestAgentAccessCombinesWithMCPAndModelEdges(t *testing.T) {
+	state := Project([]Resource{
+		mcpserver("github"),
+		modelapi("gpt"),
+		{Kind: "Agent", Namespace: "demo", Name: "a", MCPServers: []string{"github"}, ModelAPI: "gpt", Access: []string{"b"}},
+		peerAgent("b", nil),
+	})
+	want := []string{"kaos:agent:demo:b:call", "kaos:mcpserver:demo:github:call", "kaos:modelapi:demo:gpt:call"}
+	if len(state.Agents) != 1 {
+		t.Fatalf("agents = %d, want 1", len(state.Agents))
+	}
+	got := append([]string(nil), state.Agents[0].PermissionSetNames...)
+	sort.Strings(got)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("a grants = %v, want %v", got, want)
+	}
+}
+
+func TestAgentAccessToUndeclaredPeerStillYieldsService(t *testing.T) {
+	state := Project([]Resource{peerAgent("a", []string{"ghost"})})
+	if !hasService(state, "kaos-agent-demo-ghost") {
+		t.Fatalf("missing ghost peer service: %v", clientIDs(state))
+	}
+	if !hasPS(state, "kaos:agent:demo:ghost:call") {
+		t.Fatalf("missing ghost permission set: %v", psNames(state))
+	}
 }

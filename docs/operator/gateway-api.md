@@ -270,3 +270,30 @@ kubectl get clusterrole kaos-operator-kaos-operator -o yaml | grep -A10 gateway
 ## Internal Routing (Future)
 
 When Gateway API is enabled, agents can optionally use Gateway URLs for inter-agent communication instead of direct service DNS. This feature is planned for future releases.
+
+## Strict Gateway-Only Traffic
+
+By default agents reach other KAOS resources (MCP servers, model APIs, peer agents) directly over their in-cluster Service DNS. Strict gateway-only traffic makes the Envoy Gateway the single application path between workloads: it generates a `NetworkPolicy` for each protected workload that denies direct workload-to-workload traffic, and injects gateway-routed URLs into agents so their internal calls flow through the gateway (where JWT authentication, authorization, and TLS apply).
+
+This is a defence-in-depth posture that is useful on its own — it does **not** require any authorization backend (ext_authz or ext_proc). Enable it with a single switch:
+
+```bash
+kaos system install --gateway-enabled --gateway-api-strict
+```
+
+Or via Helm:
+
+```bash
+helm upgrade kaos kaos/kaos-operator \
+  --set security.strictGatewayApi.enabled=true
+```
+
+The switch bundles NetworkPolicy isolation and gateway routing together because they are only useful as a pair: isolation without routing breaks connectivity, and routing without isolation is trivially bypassed. When it is on, it overrides the `security.networkPolicy.enabled` disable hatch.
+
+::: warning CNI requirement
+`NetworkPolicy` is only enforced by CNIs that implement it. The default KIND CNI (kindnet) does **not** enforce NetworkPolicy, so the generated policies are inert there and direct traffic is not actually blocked. To validate strict enforcement, use a NetworkPolicy-enforcing CNI such as Calico.
+:::
+
+::: warning Direct workload access
+Under strict gateway-only traffic, anything that reached workloads directly (for example a UI that talks to a workload Service rather than through the gateway) must move onto the gateway path first, or it will lose connectivity.
+:::

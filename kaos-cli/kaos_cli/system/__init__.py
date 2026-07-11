@@ -9,7 +9,16 @@ from typer.core import TyperGroup
 from kaos_cli.system.install import install_command, uninstall_command
 from kaos_cli.system.create_rbac import create_rbac_command
 from kaos_cli.system.status import status_command
-from kaos_cli.install import DEFAULT_RELEASE_NAME, MONITORING_BACKENDS
+from kaos_cli.install import (
+    AUTH_PRESET_AIB_KEYCLOAK,
+    AUTH_PRESET_AIB_ONLY,
+    AUTH_PRESET_KAOS_INTERNAL,
+    AUTH_PRESETS,
+    DEFAULT_AUTH_PRESET,
+    DEFAULT_RELEASE_NAME,
+    MONITORING_BACKENDS,
+    _expand_auth_preset,
+)
 from kaos_cli.system.runtimes import runtimes_command
 from kaos_cli.utils import DEFAULT_MONITORING_BACKEND, preprocess_optional_value_flag
 
@@ -25,6 +34,9 @@ class _SystemGroup(TyperGroup):
             def patched_parse(ctx, args):
                 args = preprocess_optional_value_flag(
                     args, "--monitoring-enabled", DEFAULT_MONITORING_BACKEND
+                )
+                args = preprocess_optional_value_flag(
+                    args, "--auth-enabled", DEFAULT_AUTH_PRESET
                 )
                 return original_parse(ctx, args)
 
@@ -60,7 +72,9 @@ def install(
     set_values: list[str] = typer.Option(
         [],
         "--set",
-        help="Set Helm values (can be used multiple times).",
+        help="Set Helm values directly (repeatable). Escape hatch for any chart "
+        "value not exposed as a dedicated flag, e.g. advanced security overrides "
+        "under security.agentAuth.*",
     ),
     wait: bool = typer.Option(
         False,
@@ -75,7 +89,8 @@ def install(
     gateway_enabled: bool = typer.Option(
         False,
         "--gateway-enabled",
-        help="Install Gateway API (Envoy Gateway) and configure routing.",
+        help="Install Gateway API (Envoy Gateway) and configure routing. Implied by "
+        "--auth-enabled.",
     ),
     metallb_enabled: bool = typer.Option(
         False,
@@ -87,156 +102,89 @@ def install(
         "--pgvector-memory-enabled",
         help="Provision a development pgvector Postgres for external-mode MemoryStores (dev-only).",
     ),
+    auth_enabled: str | None = typer.Option(
+        None,
+        "--auth-enabled",
+        help="Enable an end-to-end security posture by preset. Options: "
+        f"'{AUTH_PRESET_AIB_KEYCLOAK}' (default; Keycloak user identity + identity "
+        "broker agent identity with RFC 8693 token exchange + verified OPA "
+        f"authorization), '{AUTH_PRESET_KAOS_INTERNAL}' (self-contained demo; "
+        "KAOS-projected policy ConfigMap, header-trusted agent JWT, no external "
+        f"IdP/broker), or '{AUTH_PRESET_AIB_ONLY}' (broker agent identity, no "
+        "user layer, no token exchange). May be passed without a value to select "
+        "the default. Implies --gateway-enabled. Advanced overrides go through "
+        "--set security.agentAuth.*",
+    ),
+    gateway_api_strict: bool = typer.Option(
+        False,
+        "--gateway-api-strict/--no-gateway-api-strict",
+        help="Enable gateway-only strict traffic: NetworkPolicy isolation and gateway "
+        "routing together, independent of authorization. Makes the Envoy Gateway the "
+        "only application path between workloads. Enforcement requires a CNI that "
+        "enforces NetworkPolicy (e.g. Calico).",
+    ),
     chart_path: str | None = typer.Option(
         None,
         "--chart-path",
-        help="Path to local Helm chart directory (for development). Uses published chart if not set.",
-    ),
-    auth_enabled: bool = typer.Option(
-        False,
-        "--auth-enabled",
-        help="Enable agent authentication: wire the operator to the identity broker, "
-        "mount per-agent credentials, and optionally install the broker and sync service.",
+        help="Path to local operator Helm chart directory (for development).",
     ),
     auth_namespace: str = typer.Option(
         "aib-system",
         "--auth-namespace",
-        help="Namespace for the identity broker and sync service.",
-    ),
-    ext_authz_url: str | None = typer.Option(
-        None,
-        "--ext-authz-url",
-        help="Override the access-check gRPC backend host:port. Defaults to the "
-        "conventional service in the auth namespace.",
-    ),
-    auth_issuer: str | None = typer.Option(
-        None,
-        "--auth-issuer",
-        help="Override the broker issuer URL propagated to agent pods. Defaults to the "
-        "broker enduser service in the auth namespace.",
-    ),
-    token_exchange: bool = typer.Option(
-        True,
-        "--token-exchange/--no-token-exchange",
-        help="Enable the RFC 8693 token-exchange path: deploy the broker ExtProc "
-        "component and wire the gateway ext_proc backend. Effective only with "
-        "--auth-enabled.",
-    ),
-    ext_proc_url: str | None = typer.Option(
-        None,
-        "--ext-proc-url",
-        help="Override the token-exchange ext_proc gRPC backend host:port. Defaults "
-        "to the broker ExtProc service in the auth namespace.",
-    ),
-    aib_chart_path: str | None = typer.Option(
-        None,
-        "--aib-chart-path",
-        help="Path to a local identity broker Helm chart to install (unpublished/dev path).",
-    ),
-    aib_values_path: str | None = typer.Option(
-        None,
-        "--aib-values",
-        help="Values file for the identity broker chart (e.g. the dev preset).",
-    ),
-    sync_chart_path: str | None = typer.Option(
-        None,
-        "--sync-chart-path",
-        help="Path to the sync service Helm chart to deploy.",
-    ),
-    sync_image_repository: str | None = typer.Option(
-        None,
-        "--sync-image-repository",
-        help="Override the sync service image repository (for local/dev images).",
-    ),
-    sync_image_tag: str | None = typer.Option(
-        None,
-        "--sync-image-tag",
-        help="Override the sync service image tag (for local/dev images).",
-    ),
-    user_auth: bool = typer.Option(
-        True,
-        "--user-auth/--no-user-auth",
-        help="Install the human user identity provider (Keycloak) and wire user "
-        "subject-token validation at the gateway. Effective only with --auth-enabled.",
+        hidden=True,
+        help="Namespace for the identity broker (advanced/dev).",
     ),
     keycloak_namespace: str = typer.Option(
         "keycloak",
         "--keycloak-namespace",
-        help="Namespace for the user identity provider (Keycloak).",
+        hidden=True,
+        help="Namespace for the user identity provider (advanced/dev).",
+    ),
+    aib_chart_path: str | None = typer.Option(
+        None,
+        "--aib-chart-path",
+        hidden=True,
+        help="Path to a local identity broker Helm chart to install (unpublished/dev "
+        f"path). Required to install the broker for the {AUTH_PRESET_AIB_KEYCLOAK} "
+        f"and {AUTH_PRESET_AIB_ONLY} presets.",
+    ),
+    aib_values_path: str | None = typer.Option(
+        None,
+        "--aib-values",
+        hidden=True,
+        help="Values file for the identity broker chart (advanced/dev).",
     ),
     keycloak_chart_path: str | None = typer.Option(
         None,
         "--keycloak-chart-path",
+        hidden=True,
         help="Path to a local Keycloak Helm chart to install. When omitted, a "
-        "self-contained dev deployment is applied instead.",
-    ),
-    user_auth_issuer: str | None = typer.Option(
-        None,
-        "--user-auth-issuer",
-        help="Override the user-auth OIDC issuer URL. Defaults to the bootstrapped "
-        "Keycloak realm in the keycloak namespace.",
-    ),
-    user_auth_audience: str = typer.Option(
-        "kaos",
-        "--user-auth-audience",
-        help="Expected audience claim for user subject tokens.",
-    ),
-    network_policy: bool = typer.Option(
-        True,
-        "--network-policy/--no-network-policy",
-        help="Generate NetworkPolicies that deny direct workload-to-workload traffic "
-        "so the Envoy Gateway cannot be bypassed. Effective only with --auth-enabled.",
-    ),
-    network_policy_egress: bool = typer.Option(
-        False,
-        "--network-policy-egress/--no-network-policy-egress",
-        help="Add egress default-deny rules to generated NetworkPolicies. Effective "
-        "only with --auth-enabled and --network-policy.",
-    ),
-    gateway_routing: bool = typer.Option(
-        False,
-        "--gateway-routing/--no-gateway-routing",
-        help="Route internal agent->ModelAPI/MCP/peer traffic through the gateway so "
-        "gateway authentication and authorization apply to it. Effective only with "
-        "--auth-enabled.",
-    ),
-    gateway_host: str | None = typer.Option(
-        None,
-        "--gateway-host",
-        help="In-cluster host[:port] of the Envoy Gateway used for gateway routing. "
-        "Defaults to the Gateway resource's status address.",
-    ),
-    tls_mode: str | None = typer.Option(
-        None,
-        "--tls-mode",
-        help="Enable HTTPS termination on the gateway. One of: selfSigned, "
-        "certManager, provided.",
-    ),
-    tls_issuer_name: str | None = typer.Option(
-        None,
-        "--tls-issuer-name",
-        help="cert-manager Issuer/ClusterIssuer name (with --tls-mode certManager).",
-    ),
-    tls_issuer_kind: str = typer.Option(
-        "ClusterIssuer",
-        "--tls-issuer-kind",
-        help="cert-manager issuer kind: Issuer or ClusterIssuer.",
-    ),
-    tls_secret_name: str | None = typer.Option(
-        None,
-        "--tls-secret-name",
-        help="Existing kubernetes.io/tls Secret name (with --tls-mode provided).",
+        "self-contained dev deployment is applied instead (advanced/dev).",
     ),
 ) -> None:
     """Install the KAOS operator using Helm."""
-    # Default to signoz if flag provided without value
     if monitoring_enabled is not None and monitoring_enabled not in MONITORING_BACKENDS:
         typer.echo(
             f"Error: Invalid monitoring backend '{monitoring_enabled}'. Options: {', '.join(MONITORING_BACKENDS)}",
             err=True,
         )
         raise typer.Exit(1)
-    install_command(
+
+    auth_kwargs: dict = {}
+    if auth_enabled is not None:
+        if auth_enabled not in AUTH_PRESETS:
+            typer.echo(
+                f"Error: Invalid auth preset '{auth_enabled}'. Options: "
+                f"{', '.join(AUTH_PRESETS)}",
+                err=True,
+            )
+            raise typer.Exit(1)
+        # The gateway is the enforcement point for every auth posture, so ensure
+        # it is installed even if --gateway-enabled was not passed explicitly.
+        gateway_enabled = True
+        auth_kwargs = _expand_auth_preset(auth_enabled, namespace)
+
+    call_kwargs = dict(
         namespace=namespace,
         release_name=release_name,
         version=version,
@@ -247,32 +195,16 @@ def install(
         metallb_enabled=metallb_enabled,
         pgvector_memory_enabled=pgvector_memory_enabled,
         chart_path=chart_path,
-        auth_enabled=auth_enabled,
         auth_namespace=auth_namespace,
-        ext_authz_url=ext_authz_url,
-        auth_issuer=auth_issuer,
-        token_exchange=token_exchange,
-        ext_proc_url=ext_proc_url,
-        aib_chart_path=aib_chart_path,
-        aib_values_path=aib_values_path,
-        sync_chart_path=sync_chart_path,
-        sync_image_repository=sync_image_repository,
-        sync_image_tag=sync_image_tag,
-        user_auth=user_auth,
         keycloak_namespace=keycloak_namespace,
         keycloak_release="keycloak",
+        aib_chart_path=aib_chart_path,
+        aib_values_path=aib_values_path,
         keycloak_chart_path=keycloak_chart_path,
-        user_auth_issuer=user_auth_issuer,
-        user_auth_audience=user_auth_audience,
-        network_policy=network_policy,
-        network_policy_egress=network_policy_egress,
-        gateway_routing=gateway_routing,
-        gateway_host=gateway_host,
-        tls_mode=tls_mode,
-        tls_issuer_name=tls_issuer_name,
-        tls_issuer_kind=tls_issuer_kind,
-        tls_secret_name=tls_secret_name,
+        gateway_api_strict=gateway_api_strict,
     )
+    call_kwargs.update(auth_kwargs)
+    install_command(**call_kwargs)
 
 
 @app.command(name="uninstall")

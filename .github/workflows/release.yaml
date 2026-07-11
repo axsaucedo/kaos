@@ -91,9 +91,6 @@ jobs:
           sed -i "s|axsauze/kaos-mcp-pctx-codemode:[0-9]*\.[0-9]*\.[0-9]*[^\"]*|axsauze/kaos-mcp-pctx-codemode:$VERSION|g" operator/chart/values.yaml
           sed -i "s|axsauze/kaos-mcp-fastmcp-codemode:[0-9]*\.[0-9]*\.[0-9]*[^\"]*|axsauze/kaos-mcp-fastmcp-codemode:$VERSION|g" operator/chart/values.yaml
 
-          # Sync service chart tracks the release version (image tag defaults to appVersion)
-          sed -i "s/^version: .*/version: $VERSION/" sync-service/chart/Chart.yaml
-          sed -i "s/^appVersion: .*/appVersion: \"$VERSION\"/" sync-service/chart/Chart.yaml
 
           echo "Updated chart image tags to $VERSION:"
           grep -E "tag:|kaos-(agent|mcp)" operator/chart/values.yaml
@@ -430,9 +427,6 @@ jobs:
           sed -i "s/^version: .*/version: $NEXT_DEV/" operator/chart/Chart.yaml
           sed -i "s/^appVersion: .*/appVersion: \"$NEXT_DEV\"/" operator/chart/Chart.yaml
 
-          # Update sync service chart version (image tag defaults to appVersion)
-          sed -i "s/^version: .*/version: $NEXT_DEV/" sync-service/chart/Chart.yaml
-          sed -i "s/^appVersion: .*/appVersion: \"$NEXT_DEV\"/" sync-service/chart/Chart.yaml
 
           # Update Helm values.yaml image tags (must match VERSION file format without v prefix)
           # Operator uses separate repository/tag fields

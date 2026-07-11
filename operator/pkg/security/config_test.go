@@ -185,6 +185,28 @@ func TestAgentJWKSURI(t *testing.T) {
 	}
 }
 
+func TestAuthzJWKSURI(t *testing.T) {
+	cases := []struct {
+		name             string
+		issuer           string
+		verificationMode AgentJWTVerificationMode
+		want             string
+	}{
+		{"skip default without issuer", "", "", ""},
+		{"verified default with issuer", "http://aib:8000", "", "http://aib:8000/oauth2/jwks.json"},
+		{"forced skip suppresses jwks", "http://aib:8000", VerificationSkip, ""},
+		{"forced verified without issuer", "", VerificationVerified, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			c := Config{Issuer: tc.issuer, AgentJWTVerificationMode: tc.verificationMode}
+			if got := c.AuthzJWKSURI(); got != tc.want {
+				t.Errorf("AuthzJWKSURI() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestUserJWKSURI(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -285,20 +307,47 @@ func TestNetworkPolicyEnabled(t *testing.T) {
 		name       string
 		extAuthz   string
 		npDisabled bool
+		strict     bool
 		want       bool
 	}{
-		{"operational and not disabled", "svc:9191", false, true},
-		{"operational but disabled", "svc:9191", true, false},
-		{"not operational", "", false, false},
-		{"not operational and disabled", "", true, false},
+		{"operational and not disabled", "svc:9191", false, false, true},
+		{"operational but disabled", "svc:9191", true, false, false},
+		{"not operational", "", false, false, false},
+		{"not operational and disabled", "", true, false, false},
+		{"strict standalone without any hook", "", false, true, true},
+		{"strict overrides the escape hatch", "", true, true, true},
+		{"strict with operational", "svc:9191", false, true, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := Config{ExtAuthzURL: tc.extAuthz, NetworkPolicyDisabled: tc.npDisabled}
+			cfg := Config{ExtAuthzURL: tc.extAuthz, NetworkPolicyDisabled: tc.npDisabled, StrictGatewayAPI: tc.strict}
 			if got := cfg.NetworkPolicyEnabled(); got != tc.want {
 				t.Errorf("NetworkPolicyEnabled() = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestGatewayRoutingEnabledWithStrict(t *testing.T) {
+	if !(Config{StrictGatewayAPI: true}).GatewayRoutingEnabled() {
+		t.Errorf("expected strict gateway API to enable gateway routing")
+	}
+	if !(Config{StrictGatewayAPI: true}).NetworkPolicyEnabled() {
+		t.Errorf("expected strict gateway API to enable NetworkPolicy standalone")
+	}
+	if (Config{}).GatewayRoutingEnabled() {
+		t.Errorf("expected gateway routing off with no flags")
+	}
+}
+
+func TestGetConfigReadsStrictGatewayAPI(t *testing.T) {
+	t.Setenv("SECURITY_STRICT_GATEWAY_API_ENABLED", "true")
+	cfg := GetConfig()
+	if !cfg.StrictGatewayAPI {
+		t.Errorf("expected StrictGatewayAPI true")
+	}
+	if !cfg.NetworkPolicyEnabled() || !cfg.GatewayRoutingEnabled() {
+		t.Errorf("expected strict gateway API to enable NetworkPolicy and gateway routing standalone")
 	}
 }
 
@@ -405,5 +454,174 @@ func TestGetConfigReadsGatewayRoutingFields(t *testing.T) {
 	}
 	if !cfg.GatewayRoutingEnabled() {
 		t.Errorf("expected GatewayRoutingEnabled true")
+	}
+}
+
+func TestSecurityEnabled(t *testing.T) {
+	cases := []struct {
+		name     string
+		extAuthz string
+		extProc  string
+		want     bool
+	}{
+		{"nothing set", "", "", false},
+		{"ext_authz only", "svc:9002", "", true},
+		{"ext_proc only", "", "svc:50051", true},
+		{"both set", "svc:9002", "svc:50051", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := Config{ExtAuthzURL: tc.extAuthz, ExtProcURL: tc.extProc}
+			if got := cfg.SecurityEnabled(); got != tc.want {
+				t.Errorf("SecurityEnabled() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCredentialMountingEnabledWithExtProcOnly(t *testing.T) {
+	cfg := Config{ExtProcURL: "svc:50051", CredentialSecretPrefix: "kaos-aib"}
+	if !cfg.CredentialMountingEnabled() {
+		t.Errorf("expected credential mounting enabled with ext_proc-only and prefix set")
+	}
+	if (Config{ExtProcURL: "svc:50051"}).CredentialMountingEnabled() {
+		t.Errorf("expected credential mounting disabled without prefix")
+	}
+}
+
+func TestNetworkPolicyEnabledWithExtProcOnly(t *testing.T) {
+	if !(Config{ExtProcURL: "svc:50051"}).NetworkPolicyEnabled() {
+		t.Errorf("expected NetworkPolicy enabled with ext_proc-only")
+	}
+	if (Config{ExtProcURL: "svc:50051", NetworkPolicyDisabled: true}).NetworkPolicyEnabled() {
+		t.Errorf("expected NetworkPolicy disabled by escape hatch")
+	}
+}
+
+func TestAuthzProviderOrDefault(t *testing.T) {
+	cases := []struct {
+		in   AuthzProvider
+		want AuthzProvider
+	}{
+		{"", AuthzProviderNone},
+		{"none", AuthzProviderNone},
+		{"kaos", AuthzProviderKAOS},
+		{"aib", AuthzProviderAIB},
+		{"bogus", AuthzProviderNone},
+	}
+	for _, tc := range cases {
+		cfg := Config{AuthzProvider: tc.in}
+		if got := cfg.AuthzProviderOrDefault(); got != tc.want {
+			t.Errorf("AuthzProviderOrDefault(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+		wantEnabled := tc.want != AuthzProviderNone
+		if got := cfg.AuthorizationEnabled(); got != wantEnabled {
+			t.Errorf("AuthorizationEnabled(%q) = %v, want %v", tc.in, got, wantEnabled)
+		}
+	}
+}
+
+func TestGatewayEnforcementExtensionOrDefault(t *testing.T) {
+	cases := []struct {
+		in   AuthzGatewayEnforcementExtension
+		want AuthzGatewayEnforcementExtension
+	}{
+		{"", EnforcementExtProc},
+		{"ext_proc", EnforcementExtProc},
+		{"ext_authz", EnforcementExtAuthz},
+		{"bogus", EnforcementExtProc},
+	}
+	for _, tc := range cases {
+		if got := (Config{AuthzGatewayEnforcementExtension: tc.in}).GatewayEnforcementExtensionOrDefault(); got != tc.want {
+			t.Errorf("GatewayEnforcementExtensionOrDefault(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestExtAuthzEnabled(t *testing.T) {
+	url := "aib-access-check.kaos-system.svc.cluster.local:9191"
+	cases := []struct {
+		name string
+		cfg  Config
+		want bool
+	}{
+		{"default ext_proc mode with url off", Config{ExtAuthzURL: url}, false},
+		{"ext_authz mode with url on", Config{ExtAuthzURL: url, AuthzGatewayEnforcementExtension: EnforcementExtAuthz}, true},
+		{"ext_authz mode without url off", Config{AuthzGatewayEnforcementExtension: EnforcementExtAuthz}, false},
+		{"explicit ext_proc mode off", Config{ExtAuthzURL: url, AuthzGatewayEnforcementExtension: EnforcementExtProc}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.cfg.ExtAuthzEnabled(); got != tc.want {
+				t.Errorf("ExtAuthzEnabled() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAgentJWTVerificationModeOrDefault(t *testing.T) {
+	cases := []struct {
+		name   string
+		mode   AgentJWTVerificationMode
+		issuer string
+		want   AgentJWTVerificationMode
+	}{
+		{"derive skip without issuer", "", "", VerificationSkip},
+		{"derive verified with issuer", "", "http://aib:8000", VerificationVerified},
+		{"explicit skip overrides issuer", "skip", "http://aib:8000", VerificationSkip},
+		{"explicit verified without issuer", "verified", "", VerificationVerified},
+		{"bogus falls back to derived", "bogus", "http://aib:8000", VerificationVerified},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := Config{AgentJWTVerificationMode: tc.mode, Issuer: tc.issuer}
+			if got := cfg.AgentJWTVerificationModeOrDefault(); got != tc.want {
+				t.Errorf("AgentJWTVerificationModeOrDefault() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPolicyDataSourceOrDefault(t *testing.T) {
+	cases := []struct {
+		in   PolicyDataSource
+		want PolicyDataSource
+	}{
+		{"", PolicyDataAutomated},
+		{"automated", PolicyDataAutomated},
+		{"manual", PolicyDataManual},
+		{"external", PolicyDataExternal},
+		{"bogus", PolicyDataAutomated},
+	}
+	for _, tc := range cases {
+		if got := (Config{PolicyDataSource: tc.in}).PolicyDataSourceOrDefault(); got != tc.want {
+			t.Errorf("PolicyDataSourceOrDefault(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestGetConfigReadsAuthorizationModes(t *testing.T) {
+	t.Setenv(envAuthzProvider, "AIB")
+	t.Setenv(envGatewayEnforcementExt, "Ext_Authz")
+	t.Setenv(envAgentJWTVerification, "Verified")
+	t.Setenv(envPolicyDataSource, "External")
+	t.Setenv(envPolicyRegoOverride, "true")
+
+	cfg := GetConfig()
+
+	if got := cfg.AuthzProviderOrDefault(); got != AuthzProviderAIB {
+		t.Errorf("AuthzProvider = %q, want aib", got)
+	}
+	if got := cfg.GatewayEnforcementExtensionOrDefault(); got != EnforcementExtAuthz {
+		t.Errorf("AuthzGatewayEnforcementExtension = %q, want ext_authz", got)
+	}
+	if got := cfg.AgentJWTVerificationModeOrDefault(); got != VerificationVerified {
+		t.Errorf("AgentJWTVerificationMode = %q, want verified", got)
+	}
+	if got := cfg.PolicyDataSourceOrDefault(); got != PolicyDataExternal {
+		t.Errorf("PolicyDataSource = %q, want external", got)
+	}
+	if !cfg.PolicyRegoOverride {
+		t.Errorf("PolicyRegoOverride = false, want true")
 	}
 }

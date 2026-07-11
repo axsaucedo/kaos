@@ -377,6 +377,12 @@ The operator automatically:
 3. Sets `PEER_AGENT_WORKER_1_CARD_URL=http://agent-worker-1...`
 4. Sets `PEER_AGENT_WORKER_2_CARD_URL=http://agent-worker-2...`
 
+When the security stack is enabled, `agentNetwork.access` is also the
+authorization grant for peer delegation: the KAOS↔AIB sync projects each listed
+peer as an allowed A2A call for this agent, and the gateway authorizes delegation
+against the calling agent's own identity. An agent can only reach peers it lists
+here; calls to unlisted peers are denied.
+
 ### podSpec (optional)
 
 Override the generated pod spec using Kubernetes strategic merge patch.

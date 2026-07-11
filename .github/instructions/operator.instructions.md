@@ -34,6 +34,10 @@ View each respective file in case of making modifications to the respective modu
 
 If any changes are introduced, this documentation must be updated accordingly.
 
+## Authorization
+
+Agent authorization is optional (off by default) and enforced at the gateway by an OPA policy inside the Envoy `ext_proc` filter. `AuthzProjectionReconciler` (`operator/controllers/authz_projection_controller.go`) projects a policy ConfigMap (`policy.rego` + `data.json`) from CRDs. Provider is `kaos` (KAOS-owned grants) or `aib` (broker permission sets). Modes: automated (project `policy.rego` + grants), bring-your-own ConfigMap (write nothing), operator-rego + admin data (`policy.rego` only), and broker external off-switch (identity only, no grants, prune forced off). Verification is `verified` (inject IdP JWKS at `data.kaos.jwks`, verify actor token) or `skip` (demo, spoofable, non-production). The `data.kaos.grants`/`data.kaos.jwks` schema is a published contract — see `operator/internal/authz/data-schema.md` and `docs/security/authorization.md`. Never write or prune policy data KAOS does not own.
+
 ## Key Commands
 ```bash
 # After changing *_types.go files:

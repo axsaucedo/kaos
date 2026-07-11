@@ -239,6 +239,29 @@ func TestReconcileNetworkPolicyCreatesWhenOperational(t *testing.T) {
 	}
 }
 
+func TestReconcileNetworkPolicyCreatesWhenStrictStandalone(t *testing.T) {
+	scheme := reconcileScheme(t)
+	owner := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{Name: "mcp-github", Namespace: "default", UID: "owner-uid"},
+	}
+	cl := fake.NewClientBuilder().WithScheme(scheme).WithObjects(owner).Build()
+
+	// No enforcement hook is configured; the strict switch alone must still
+	// generate the bypass-prevention NetworkPolicy.
+	cfg := Config{StrictGatewayAPI: true}
+	params := NetworkPolicyParams{
+		Name: "mcp-github", Namespace: "default", PodSelector: mcpPodSelector(),
+	}
+	if err := ReconcileNetworkPolicy(context.Background(), cl, scheme, owner, params, cfg, logr.Discard()); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+
+	got := &networkingv1.NetworkPolicy{}
+	if err := cl.Get(context.Background(), types.NamespacedName{Name: "mcp-github", Namespace: "default"}, got); err != nil {
+		t.Fatalf("expected NetworkPolicy to be created under strict standalone config: %v", err)
+	}
+}
+
 func TestReconcileNetworkPolicyNoopWhenNotEnabled(t *testing.T) {
 	scheme := reconcileScheme(t)
 	owner := &corev1.ConfigMap{
