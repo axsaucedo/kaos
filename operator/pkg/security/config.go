@@ -94,6 +94,15 @@ type Config struct {
 	// gateway to be the only application path between workloads.
 	GatewayRouting bool
 
+	// StrictGatewayAPI turns on gateway-only strict traffic
+	// (security.strictGatewayApi.enabled): NetworkPolicy isolation plus
+	// gateway-routed URLs, independent of whether any authorization enforcement
+	// hook is configured. It bundles the two because they are only useful
+	// together — isolation without routing breaks connectivity, routing without
+	// isolation is trivially bypassed. Default off; enforcement of the generated
+	// NetworkPolicy still requires a CNI that enforces it (e.g. Calico).
+	StrictGatewayAPI bool
+
 	// AuthzProvider selects which authorization provider the operator projects
 	// and enforces at the ext_proc OPA decision point
 	// (security.authorization.provider). "none" (default) means authorization
@@ -191,6 +200,7 @@ const (
 	envNetworkPolicyEgress    = "SECURITY_NETWORK_POLICY_EGRESS_ENABLED"
 	envGatewayHost            = "SECURITY_GATEWAY_HOST"
 	envGatewayRouting         = "SECURITY_GATEWAY_ROUTING_ENABLED"
+	envStrictGatewayAPI       = "SECURITY_STRICT_GATEWAY_API_ENABLED"
 	envAuthzProvider          = "SECURITY_AUTHORIZATION_PROVIDER"
 	envGatewayEnforcementExt  = "SECURITY_AUTHORIZATION_GATEWAY_EXTENSION"
 	envAgentJWTVerification   = "SECURITY_AUTHORIZATION_AGENT_JWT_VERIFICATION"
@@ -224,6 +234,7 @@ func GetConfig() Config {
 		NetworkPolicyEgress:              parseBoolEnv(envNetworkPolicyEgress),
 		GatewayHost:                      os.Getenv(envGatewayHost),
 		GatewayRouting:                   parseBoolEnv(envGatewayRouting),
+		StrictGatewayAPI:                 parseBoolEnv(envStrictGatewayAPI),
 		AuthzProvider:                    AuthzProvider(readEnumEnv(envAuthzProvider)),
 		AuthzGatewayEnforcementExtension: AuthzGatewayEnforcementExtension(readEnumEnv(envGatewayEnforcementExt)),
 		AgentJWTVerificationMode:         AgentJWTVerificationMode(readEnumEnv(envAgentJWTVerification)),
@@ -376,12 +387,13 @@ func (c Config) ExtProcEnabled() bool {
 }
 
 // NetworkPolicyEnabled reports whether the operator should generate a
-// NetworkPolicy for each protected workload. It requires security to be enabled
-// (any enforcement hook) and the escape hatch not to be set. When true, direct
-// workload-to-workload application traffic is denied so the Gateway cannot be
-// bypassed.
+// NetworkPolicy for each protected workload. It is true when strict gateway-only
+// traffic is requested (independent of any enforcement hook), or when security is
+// enabled (any enforcement hook) and the escape hatch is not set. When true,
+// direct workload-to-workload application traffic is denied so the Gateway cannot
+// be bypassed.
 func (c Config) NetworkPolicyEnabled() bool {
-	return c.SecurityEnabled() && !c.NetworkPolicyDisabled
+	return c.StrictGatewayAPI || (c.SecurityEnabled() && !c.NetworkPolicyDisabled)
 }
 
 // NetworkPolicyEgressEnabled reports whether generated NetworkPolicies should
@@ -415,12 +427,13 @@ func (c Config) OperatorNamespaceOrDefault() string {
 
 // GatewayRoutingEnabled reports whether the operator should inject gateway-routed
 // endpoint URLs into agents so internal agent->MCP/ModelAPI/peer traffic flows
-// through the gateway. It is off unless explicitly enabled. The actual gateway
-// host is resolved separately (explicit GatewayHost or the Gateway status
-// address); when no host can be resolved the controller falls back to direct
-// Service URLs so connectivity is never silently broken.
+// through the gateway. It is on when gateway routing is explicitly enabled or when
+// strict gateway-only traffic is requested (which bundles routing with isolation).
+// The actual gateway host is resolved separately (explicit GatewayHost or the
+// Gateway status address); when no host can be resolved the controller falls back
+// to direct Service URLs so connectivity is never silently broken.
 func (c Config) GatewayRoutingEnabled() bool {
-	return c.GatewayRouting
+	return c.GatewayRouting || c.StrictGatewayAPI
 }
 
 // ExtAuthzBackendRef parses the configured ext_authz host:port URL into the

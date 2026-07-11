@@ -109,14 +109,29 @@ func main() {
 	// The authorization projection controller applies the configured provider.
 	// Provider "none" (default) leaves the operator without any projection.
 	if provider := security.GetConfig().AuthzProviderOrDefault(); provider != security.AuthzProviderNone {
+		cfg := security.GetConfig()
+		policyDataSource := cfg.PolicyDataSourceOrDefault()
+		regoOverride := cfg.PolicyRegoOverride
+
+		brokerProjection := provider == security.AuthzProviderAIB
+		brokerAuthorizationProjection := brokerProjection && policyDataSource != security.PolicyDataExternal
+		policyDataProjection := provider == security.AuthzProviderKAOS &&
+			(policyDataSource == security.PolicyDataAutomated || regoOverride)
+		writeGrantData := provider == security.AuthzProviderKAOS &&
+			policyDataSource == security.PolicyDataAutomated && !regoOverride
+		prune := getBoolWithDefault("AUTHZ_PROJECTION_PRUNE_ENABLED", true) && brokerAuthorizationProjection
+
 		var projector controllers.PolicyProjector
 		switch provider {
 		case security.AuthzProviderKAOS:
-			projector = &adapters.ConfigMapProjector{
-				Client:    mgr.GetClient(),
-				Name:      os.Getenv("AUTHZ_POLICY_CONFIGMAP_NAME"),
-				Namespace: os.Getenv("AUTHZ_POLICY_CONFIGMAP_NAMESPACE"),
-				JWKSURI:   security.GetConfig().AuthzJWKSURI(),
+			if policyDataProjection {
+				projector = &adapters.ConfigMapProjector{
+					Client:         mgr.GetClient(),
+					Name:           os.Getenv("AUTHZ_POLICY_CONFIGMAP_NAME"),
+					Namespace:      os.Getenv("AUTHZ_POLICY_CONFIGMAP_NAMESPACE"),
+					JWKSURI:        cfg.AuthzJWKSURI(),
+					WriteGrantData: writeGrantData,
+				}
 			}
 		case security.AuthzProviderAIB:
 			projector = &adapters.BrokerProjector{
@@ -128,8 +143,9 @@ func main() {
 					getEnvWithDefault("AIB_PRINCIPAL_HEADER", "X-Remote-User"),
 					getDurationWithDefault("AIB_REQUEST_TIMEOUT", 10*time.Second),
 				),
-				SecretPrefix: getEnvWithDefault("SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX", "kaos-aib"),
-				Prune:        getBoolWithDefault("AUTHZ_PROJECTION_PRUNE_ENABLED", true),
+				SecretPrefix:       getEnvWithDefault("SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX", "kaos-aib"),
+				Prune:              prune,
+				BindPermissionSets: brokerAuthorizationProjection,
 			}
 		}
 		if err = (&controllers.AuthzProjectionReconciler{

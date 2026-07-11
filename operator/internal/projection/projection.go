@@ -1,12 +1,13 @@
-// Package projection turns KAOS resources into the desired Agentic Identity
-// Broker (AIB) state. It is pure (no I/O) so it can be unit tested without a
-// cluster or a broker.
+// Package projection turns KAOS resources into a provider-agnostic authorization
+// graph. It is pure (no I/O) so it can be unit tested without a cluster, and the
+// same graph feeds both projection sinks: the KAOS policy-data path (grant map
+// for OPA) and the broker path (services, permission sets and agents).
 //
-// Each edge target <ns>/<name> of kind <slug> becomes a synthetic AIB service
-// whose client_id is kaos-<slug>-<ns>-<name> exposing a single "call" scope.
-// Each requested edge Agent -> target becomes a permission set granting that
-// scope, and each Agent becomes a local AIB agent bound to the permission sets
-// for its requested edges. The resource an agent is authorized against is
+// Each edge target <ns>/<name> of kind <slug> becomes a synthetic service whose
+// client_id is kaos-<slug>-<ns>-<name> exposing a single "call" scope. Each
+// requested edge Agent -> target becomes a permission set granting that scope,
+// and each Agent becomes a projected agent bound to the permission sets for its
+// requested edges. The resource an agent is authorized against is
 // kaos://<slug>/<ns>/<name>, which is unique by construction.
 package projection
 
@@ -27,7 +28,8 @@ const (
 	permissionSetPrefix = "kaos:"
 )
 
-// EdgeKind is an edge target kind and the vocabulary used to encode it into AIB.
+// EdgeKind is an edge target kind and the vocabulary used to encode it into the
+// projected authorization graph.
 type EdgeKind struct {
 	Slug             string // identifier segment, e.g. "mcpserver" / "modelapi"
 	ResourceKind     string // KAOS resource kind, e.g. "MCPServer" / "ModelAPI"
@@ -77,7 +79,8 @@ func edgePermissionSetName(kind EdgeKind, namespace, name string) string {
 	return fmt.Sprintf("kaos:%s:%s:%s", kind.Slug, segment, CallScope)
 }
 
-// AgentExternalID is the stable external identity for a KAOS agent in AIB.
+// AgentExternalID is the stable external identity for a KAOS agent in the
+// projected authorization graph.
 func AgentExternalID(namespace, name string) string {
 	return ResolveLogicalID(AgentSlug, namespace, name)
 }
@@ -117,14 +120,14 @@ func IsValidAgentExternalID(externalID string) bool {
 	return true
 }
 
-// DesiredService is a synthetic AIB service projected from an edge target.
+// DesiredService is a synthetic service projected from an edge target.
 type DesiredService struct {
 	Namespace string
 	Name      string
 	Kind      EdgeKind
 }
 
-// ClientID is the synthetic broker client_id for the service.
+// ClientID is the synthetic client_id for the service.
 func (s DesiredService) ClientID() string {
 	return edgeServiceClientID(s.Kind, s.Namespace, s.Name)
 }
@@ -136,7 +139,7 @@ type DesiredPermissionSet struct {
 	Kind      EdgeKind
 }
 
-// Name is the broker permission-set name.
+// Name is the permission-set name.
 func (p DesiredPermissionSet) Name() string {
 	return edgePermissionSetName(p.Kind, p.Namespace, p.Target)
 }
@@ -154,29 +157,30 @@ func (p DesiredPermissionSet) ResourceID() string {
 	return ResolveLogicalID(p.Kind.Slug, p.Namespace, p.Target)
 }
 
-// DesiredAgent is a local AIB agent projected from a KAOS Agent and its edges.
+// DesiredAgent is a projected agent derived from a KAOS Agent and its edges.
 type DesiredAgent struct {
 	Namespace          string
 	Name               string
 	PermissionSetNames []string
 }
 
-// ExternalID is the stable external identity for the agent in AIB.
+// ExternalID is the stable external identity for the agent in the projected
+// authorization graph.
 func (a DesiredAgent) ExternalID() string {
 	return AgentExternalID(a.Namespace, a.Name)
 }
 
-// DesiredState is the full desired AIB state projected from KAOS resources.
+// DesiredState is the full authorization graph projected from KAOS resources.
 type DesiredState struct {
 	Services       []DesiredService
 	PermissionSets []DesiredPermissionSet
 	Agents         []DesiredAgent
 }
 
-// Project turns a list of KAOS resources into the desired AIB state. MCP server
-// edges, the model API edge and agent->agent access edges are all projected so
-// an agent is authorized against every external dependency and peer it declares.
-// Agents with no edges are skipped. Logical identity is always
+// Project turns a list of KAOS resources into the desired authorization graph.
+// MCP server edges, the model API edge and agent->agent access edges are all
+// projected so an agent is authorized against every external dependency and peer
+// it declares. Agents with no edges are skipped. Logical identity is always
 // kaos://<slug>/<ns>/<name>, so identities are unique by construction and need
 // no conflict resolution.
 func Project(resources []Resource) DesiredState {

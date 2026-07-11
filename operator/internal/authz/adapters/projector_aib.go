@@ -76,28 +76,33 @@ type AIBAdmin interface {
 
 // BrokerProjector applies authorization state to the identity broker.
 type BrokerProjector struct {
-	Client       client.Client
-	Scheme       *runtime.Scheme
-	AIB          AIBAdmin
-	SecretPrefix string
-	Prune        bool
+	Client             client.Client
+	Scheme             *runtime.Scheme
+	AIB                AIBAdmin
+	SecretPrefix       string
+	Prune              bool
+	BindPermissionSets bool
 }
 
 // Apply registers services, permission sets, agents and credential Secrets.
 func (p *BrokerProjector) Apply(ctx context.Context, desired projection.DesiredState) error {
 	logger := log.FromContext(ctx)
-	serviceIDs, err := p.applyServices(ctx, desired)
-	if err != nil {
-		return err
-	}
-	permissionSetIDs, err := p.applyPermissionSets(ctx, desired, serviceIDs)
-	if err != nil {
-		return err
+	var serviceIDs, permissionSetIDs map[string]string
+	var err error
+	if p.BindPermissionSets {
+		serviceIDs, err = p.applyServices(ctx, desired)
+		if err != nil {
+			return err
+		}
+		permissionSetIDs, err = p.applyPermissionSets(ctx, desired, serviceIDs)
+		if err != nil {
+			return err
+		}
 	}
 
 	var minted, failed int
 	for _, agent := range desired.Agents {
-		did, agentErr := p.reconcileAgent(ctx, agent, permissionSetIDs)
+		did, agentErr := p.reconcileAgent(ctx, agent, permissionSetIDs, p.BindPermissionSets)
 		if agentErr != nil {
 			failed++
 			logger.Error(agentErr, "agent reconcile failed", "agent", agent.ExternalID())
@@ -108,7 +113,7 @@ func (p *BrokerProjector) Apply(ctx context.Context, desired projection.DesiredS
 		}
 	}
 
-	if p.Prune {
+	if p.Prune && p.BindPermissionSets {
 		if err := p.prune(ctx, serviceIDs, permissionSetIDs, desired); err != nil {
 			logger.Error(err, "prune pass failed")
 		}
@@ -153,14 +158,16 @@ func (p *BrokerProjector) applyPermissionSets(ctx context.Context, desired proje
 	return ids, nil
 }
 
-func (p *BrokerProjector) reconcileAgent(ctx context.Context, agent projection.DesiredAgent, permissionSetIDs map[string]string) (bool, error) {
+func (p *BrokerProjector) reconcileAgent(ctx context.Context, agent projection.DesiredAgent, permissionSetIDs map[string]string, bindSets bool) (bool, error) {
 	bound := make([]string, 0, len(agent.PermissionSetNames))
-	for _, name := range agent.PermissionSetNames {
-		id, ok := permissionSetIDs[name]
-		if !ok {
-			return false, fmt.Errorf("permission set unavailable: %s", name)
+	if bindSets {
+		for _, name := range agent.PermissionSetNames {
+			id, ok := permissionSetIDs[name]
+			if !ok {
+				return false, fmt.Errorf("permission set unavailable: %s", name)
+			}
+			bound = append(bound, id)
 		}
-		bound = append(bound, id)
 	}
 
 	agentID, err := p.AIB.CreateOrGet(ctx, "agents", "display_name", agent.ExternalID(), AgentBody(agent, bound))

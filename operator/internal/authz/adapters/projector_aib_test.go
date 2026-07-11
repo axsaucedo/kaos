@@ -19,19 +19,28 @@ import (
 // fakeAIB is an in-memory AIBAdmin recording created records and minted creds.
 type fakeAIB struct {
 	created map[string][]string
+	listed  map[string][]map[string]any
 	minted  int
+	deleted int
 }
 
-func newFakeAIB() *fakeAIB { return &fakeAIB{created: map[string][]string{}} }
+func newFakeAIB() *fakeAIB {
+	return &fakeAIB{created: map[string][]string{}, listed: map[string][]map[string]any{}}
+}
 
-func (f *fakeAIB) List(context.Context, string) ([]map[string]any, error) { return nil, nil }
+func (f *fakeAIB) List(_ context.Context, collection string) ([]map[string]any, error) {
+	return f.listed[collection], nil
+}
 
 func (f *fakeAIB) CreateOrGet(_ context.Context, collection, _, matchValue string, _ map[string]any) (string, error) {
 	f.created[collection] = append(f.created[collection], matchValue)
 	return collection + ":" + matchValue, nil
 }
 
-func (f *fakeAIB) Delete(context.Context, string, string) (bool, error) { return false, nil }
+func (f *fakeAIB) Delete(context.Context, string, string) (bool, error) {
+	f.deleted++
+	return true, nil
+}
 
 func (f *fakeAIB) MintCredentials(context.Context, string) (aib.Credentials, error) {
 	f.minted++
@@ -46,7 +55,7 @@ func TestBrokerProjectorMintsCredentialSecret(t *testing.T) {
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(agent).Build()
 	admin := newFakeAIB()
-	p := &BrokerProjector{Client: c, Scheme: scheme, AIB: admin, SecretPrefix: "kaos-aib", Prune: false}
+	p := &BrokerProjector{Client: c, Scheme: scheme, AIB: admin, SecretPrefix: "kaos-aib", Prune: false, BindPermissionSets: true}
 	desired := projection.Project([]projection.Resource{resourceFromAgent(agent)})
 
 	if err := p.Apply(context.Background(), desired); err != nil {
@@ -175,4 +184,78 @@ func TestAdminBodiesCarryNoApprovalStatus(t *testing.T) {
 			t.Fatalf("binding entry = %v", entry)
 		}
 	}
+}
+
+func TestBrokerProjectorExternalOffSwitchProjectsIdentityOnly(t *testing.T) {
+	scheme := newTestScheme(t)
+	agent := &kaosv1alpha1.Agent{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "researcher"},
+		Spec:       kaosv1alpha1.AgentSpec{MCPServers: []string{"github"}, ModelAPI: "gpt"},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(agent).Build()
+	admin := newFakeAIB()
+	p := &BrokerProjector{Client: c, Scheme: scheme, AIB: admin, SecretPrefix: "kaos-aib", Prune: true, BindPermissionSets: false}
+	desired := projection.Project([]projection.Resource{resourceFromAgent(agent), {
+		Kind: projection.MCPServer.ResourceKind, Namespace: "demo", Name: "github",
+	}})
+
+	if err := p.Apply(context.Background(), desired); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	if admin.minted != 1 {
+		t.Fatalf("minted = %d, want 1", admin.minted)
+	}
+	if len(admin.created["agents"]) != 1 {
+		t.Fatalf("agents created = %v, want 1", admin.created["agents"])
+	}
+	secret := &corev1.Secret{}
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "demo", Name: "kaos-aib-researcher"}, secret); err != nil {
+		t.Fatalf("expected credential secret: %v", err)
+	}
+	if len(admin.created["services"]) != 0 || len(admin.created["permission-sets"]) != 0 {
+		t.Fatalf("authorization projected in off-switch: services=%v permission-sets=%v",
+			admin.created["services"], admin.created["permission-sets"])
+	}
+	if admin.deleted != 0 {
+		t.Fatalf("prune deleted %d records in off-switch mode", admin.deleted)
+	}
+}
+
+func TestBrokerProjectorPruneIsGatedByAuthorizationProjection(t *testing.T) {
+	staleService := map[string]any{"id": "svc-stale", "client_id": "kaos-mcpserver-demo-stale"}
+
+	t.Run("automated broker mode prunes stale records", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		admin := newFakeAIB()
+		admin.listed["services"] = []map[string]any{staleService}
+		p := &BrokerProjector{
+			Client: fake.NewClientBuilder().WithScheme(scheme).Build(), Scheme: scheme, AIB: admin,
+			SecretPrefix: "kaos-aib", Prune: true, BindPermissionSets: true,
+		}
+
+		if err := p.Apply(context.Background(), projection.DesiredState{}); err != nil {
+			t.Fatalf("apply: %v", err)
+		}
+		if admin.deleted == 0 {
+			t.Fatal("expected prune to delete the stale record in automated mode")
+		}
+	})
+
+	t.Run("external off-switch never prunes even with prune enabled", func(t *testing.T) {
+		scheme := newTestScheme(t)
+		admin := newFakeAIB()
+		admin.listed["services"] = []map[string]any{staleService}
+		p := &BrokerProjector{
+			Client: fake.NewClientBuilder().WithScheme(scheme).Build(), Scheme: scheme, AIB: admin,
+			SecretPrefix: "kaos-aib", Prune: true, BindPermissionSets: false,
+		}
+
+		if err := p.Apply(context.Background(), projection.DesiredState{}); err != nil {
+			t.Fatalf("apply: %v", err)
+		}
+		if admin.deleted != 0 {
+			t.Fatalf("prune deleted %d records despite the off-switch", admin.deleted)
+		}
+	})
 }

@@ -1,4 +1,4 @@
-.PHONY: help build docker-build deploy generate manifests test test-unit clean envtest helm kind-create kind-delete kind-load-images kind-e2e-install-kaos kind-e2e-run-tests e2e-test e2e-test-seq e2e-clean kind-load-aib-images kind-e2e-install-aib e2e-test-aib kind-e2e-aib
+.PHONY: help build docker-build deploy generate manifests test test-unit test-chart clean envtest helm kind-create kind-delete kind-load-images kind-e2e-install-kaos kind-e2e-run-tests e2e-test e2e-test-seq e2e-clean kind-load-aib-images kind-e2e-install-aib e2e-test-aib kind-e2e-aib kind-e2e-install-authz e2e-test-authz kind-e2e-authz
 
 # Configuration
 IMG ?= axsauze/kaos-operator:latest
@@ -70,6 +70,10 @@ test-unit: generate manifests envtest
 
 # Alias for backward compatibility
 test: test-unit
+
+# Render the operator chart across the authorization mode combinations
+test-chart:
+	./chart/tests/render_authz_modes.sh
 
 # Generate Helm chart from kustomize manifests
 # CRDs are moved to crds/ dir so --skip-crds works properly during install
@@ -184,7 +188,7 @@ kind-e2e-install-aib:
 	@pip install -e ../kaos-cli -q 2>/dev/null || true
 	@kaos system install \
 		--namespace kaos-system \
-		--auth-enabled --no-user-auth --no-token-exchange \
+		--auth-enabled aib-only \
 		--gateway-enabled --metallb-enabled \
 		--chart-path chart/ \
 		--set controllerManager.manager.image.repository=$(REGISTRY)/kaos-operator \
@@ -200,3 +204,35 @@ e2e-test-aib:
 
 # Full local agent-auth E2E: load images, install, run the test.
 kind-e2e-aib: kind-load-aib-images kind-e2e-install-aib e2e-test-aib
+
+# --- Authorization projection E2E (KAOS-owned Model-1 policy ConfigMap) -------
+# Opt-in, local-only suite that installs the operator with the KAOS
+# authorization provider and a policy ConfigMap projection target, then verifies
+# the operator renders the static rego and a grant graph and keeps grants stable
+# across reconciles. Model-1 is KAOS-owned so it needs no identity broker.
+AUTHZ_POLICY_CONFIGMAP ?= kaos-authz-policy
+AUTHZ_POLICY_NAMESPACE ?= kaos-system
+
+# Install KAOS with the KAOS authorization provider and automated policy-data
+# projection into the policy ConfigMap the enforcement engine mounts.
+kind-e2e-install-authz:
+	@pip install -e ../kaos-cli -q 2>/dev/null || true
+	@kaos system install \
+		--namespace kaos-system \
+		--auth-enabled kaos-internal \
+		--gateway-enabled --metallb-enabled \
+		--chart-path chart/ \
+		--set controllerManager.manager.image.repository=$(REGISTRY)/kaos-operator \
+		--set controllerManager.manager.image.tag=$(AIB_OPERATOR_TAG) \
+		--set defaultImages.agentRuntime=$(AIB_AGENT_IMAGE) \
+		--wait
+
+# Run only the authorization projection test against an installed cluster.
+e2e-test-authz:
+	@cd tests && KAOS_AUTHZ_E2E=1 \
+		KAOS_AUTHZ_POLICY_CONFIGMAP=$(AUTHZ_POLICY_CONFIGMAP) \
+		KAOS_AUTHZ_POLICY_NAMESPACE=$(AUTHZ_POLICY_NAMESPACE) \
+		uv run pytest e2e/test_authz_policy_projection_e2e.py -v -s
+
+# Full local authorization E2E: load images, install, run the test.
+kind-e2e-authz: kind-load-aib-images kind-e2e-install-authz e2e-test-authz
