@@ -35,16 +35,8 @@ PGVECTOR_PASSWORD = "kaos"
 DEFAULT_AUTH_NAMESPACE = "aib-system"
 DEFAULT_AUTH_RELEASE = "aib"
 DEFAULT_CREDENTIAL_SECRET_PREFIX = "kaos-aib"
-# Conventional in-cluster service names exposed by the broker stack.
-AUTH_EXT_AUTHZ_PORT = 9191
 AUTH_ENDUSER_PORT = 8000
 AUTH_ADMIN_PORT = 14000
-AUTH_EXT_PROC_PORT = 50051
-AUTH_EXT_PROC_CLIENT_ID = "extproc-gateway"
-AUTH_EXT_PROC_CLIENT_SECRET = "extproc-gateway-secret"
-# RFC 8693 broker audience the token-exchange path enforces on both the
-# subject_token and the client_assertion (see AIB tokenExchange.expectedAudience).
-AUTH_TOKEN_EXCHANGE_AUDIENCE = "token-exchange-broker"
 
 
 # Full-auth presets: curated end-to-end security postures selected with the
@@ -619,21 +611,6 @@ def _auth_broker_fullname(auth_release: str) -> str:
     return f"{auth_release}-agentic-identity-broker"
 
 
-def _default_ext_authz_url(auth_namespace: str) -> str:
-    """Default host:port of the broker access-check gRPC backend."""
-    return f"aib-access-check-grpc.{auth_namespace}.svc.cluster.local:{AUTH_EXT_AUTHZ_PORT}"
-
-
-def _default_ext_proc_url(auth_namespace: str, auth_release: str) -> str:
-    """Default host:port of the broker ExtProc token-exchange gRPC backend.
-
-    Matches the Service rendered by the broker chart's optional ExtProc
-    component (``<release>-agentic-identity-broker-extproc``).
-    """
-    host = f"{_auth_broker_fullname(auth_release)}-extproc.{auth_namespace}.svc.cluster.local"
-    return f"{host}:{AUTH_EXT_PROC_PORT}"
-
-
 def _default_auth_issuer(auth_namespace: str, auth_release: str) -> str:
     """Default issuer (broker enduser endpoint) propagated to agent pods."""
     host = f"{_auth_broker_fullname(auth_release)}.{auth_namespace}.svc.cluster.local"
@@ -695,7 +672,8 @@ def _build_auth_operator_args(
     install leaves authorization projection off.
     """
     args: list[str] = []
-    args.extend(["--set", f"security.agentAuth.extAuthzUrl={ext_authz_url}"])
+    if ext_authz_url:
+        args.extend(["--set", f"security.agentAuth.extAuthzUrl={ext_authz_url}"])
     args.extend(["--set", f"security.agentAuth.issuer={issuer}"])
     args.extend(
         [
@@ -803,43 +781,6 @@ def _install_aib(
     return True
 
 
-def _build_aib_extproc_args(
-    ext_proc_client_id: str,
-    ext_proc_client_secret: str,
-    client_assertion_type: str = "access_token",
-    issuer: str | None = None,
-    token_endpoint: str | None = None,
-) -> list[str]:
-    """Build the broker-chart Helm --set args enabling the ExtProc component.
-
-    Returns the flat ``--set key=value`` list so it can be unit-tested without
-    running Helm. All in-cluster endpoints are plain http, so ``allowHttp`` is
-    enabled to let the ExtProc binary accept them at startup.
-
-    ``issuer`` is the OAuth2 authorization server the ExtProc mints its client
-    assertion against (the Keycloak realm in the ``aib-keycloak`` posture, not
-    the broker). ``token_endpoint`` is the broker's RFC 8693 exchange endpoint.
-    When omitted, the chart defaults (the broker enduser service) apply.
-    """
-    args = [
-        "--set",
-        "extProc.enabled=true",
-        "--set",
-        f"extProc.oauth2.clientId={ext_proc_client_id}",
-        "--set",
-        f"extProc.oauth2.clientSecret={ext_proc_client_secret}",
-        "--set",
-        f"extProc.oauth2.clientAssertionType={client_assertion_type}",
-        "--set",
-        "extProc.oauth2.allowHttp=true",
-    ]
-    if issuer:
-        args += ["--set", f"extProc.oauth2.issuer={issuer}"]
-    if token_endpoint:
-        args += ["--set", f"extProc.oauth2.tokenEndpoint={token_endpoint}"]
-    return args
-
-
 def _build_aib_broker_public_url_args(public_url: str) -> list[str]:
     """Set the broker enduser ``public_url`` to its in-cluster service URL.
 
@@ -852,72 +793,6 @@ def _build_aib_broker_public_url_args(public_url: str) -> list[str]:
     endpoint (same value propagated to agents as their auth issuer).
     """
     return ["--set", f"broker.server.enduser.publicUrl={public_url}"]
-
-
-def _build_aib_hybrid_broker_args(user_auth_issuer: str) -> list[str]:
-    """Build the broker-chart Helm --set args wiring hybrid mode to Keycloak.
-
-    In the ``aib-keycloak`` posture the broker validates the RFC 8693
-    ``subject_token`` and ``client_assertion`` against the upstream (Keycloak)
-    JWKS, so it must run in ``hybrid`` mode with Keycloak configured as the
-    upstream issuer and the token-exchange grant enabled. ``user_auth_issuer``
-    is the Keycloak realm URL (e.g. ``http://keycloak...:8080/realms/kaos``).
-    """
-    grant_types = (
-        "{authorization_code,refresh_token,"
-        "urn:ietf:params:oauth:grant-type:token-exchange}"
-    )
-    return [
-        "--set",
-        "broker.oauth2AuthorizationServer.mode=hybrid",
-        "--set",
-        f"broker.oauth2AuthorizationServer.proxy.upstreamIssuerUri={user_auth_issuer}",
-        "--set",
-        "broker.oauth2AuthorizationServer.proxy.upstreamAuthorizeEndpoint="
-        f"{user_auth_issuer}/protocol/openid-connect/auth",
-        "--set",
-        "broker.oauth2AuthorizationServer.proxy.upstreamTokenEndpoint="
-        f"{user_auth_issuer}/protocol/openid-connect/token",
-        "--set",
-        f"broker.oauth2AuthorizationServer.supportedGrantTypes={grant_types}",
-        "--set",
-        f"broker.tokenExchange.expectedAudience={AUTH_TOKEN_EXCHANGE_AUDIENCE}",
-    ]
-
-
-def _patch_aib_extproc_client_credentials_endpoint(
-    namespace: str,
-    release: str,
-    token_endpoint: str,
-) -> bool:
-    """Set the ExtProc client-credentials endpoint to the Keycloak token URL.
-
-    The ExtProc binary derives its client-credentials endpoint as
-    ``issuer + "/oauth/token"`` when unset — a mock-upstream path that returns
-    404 against Keycloak (whose path is ``/protocol/openid-connect/token``). The
-    AIB chart does not template ``EXTPROC_OAUTH2_CLIENT_CREDENTIALS_ENDPOINT``,
-    so it is applied here as a post-install patch. This is a temporary bridge
-    until the chart exposes the value (tracked as followup F0).
-    """
-    deployment = f"{_auth_broker_fullname(release)}-extproc"
-    result = _run_kubectl(
-        [
-            "set",
-            "env",
-            f"deployment/{deployment}",
-            "-n",
-            namespace,
-            f"EXTPROC_OAUTH2_CLIENT_CREDENTIALS_ENDPOINT={token_endpoint}",
-        ],
-        check=False,
-    )
-    if result.returncode != 0:
-        typer.echo(
-            f"Warning: could not set ExtProc client-credentials endpoint: {result.stderr}",
-            err=True,
-        )
-        return False
-    return True
 
 
 def _keycloak_realm_json(
@@ -933,23 +808,7 @@ def _keycloak_realm_json(
     The realm exposes a confidential client with the direct-access-grant flow so a
     user access token can be minted programmatically (password grant), and an
     audience mapper so the issued token carries the audience the gateway verifies.
-    It also registers the ExtProc gateway service-account client so the
-    token-exchange sidecar can mint its client assertion via ``client_credentials``.
-    Both clients carry the token-exchange broker audience the broker enforces on
-    the ``subject_token`` and ``client_assertion``.
     """
-
-    def _audience_mapper(name: str, custom_audience: str) -> dict:
-        return {
-            "name": name,
-            "protocol": "openid-connect",
-            "protocolMapper": "oidc-audience-mapper",
-            "config": {
-                "included.custom.audience": custom_audience,
-                "id.token.claim": "false",
-                "access.token.claim": "true",
-            },
-        }
 
     return {
         "realm": realm,
@@ -974,24 +833,7 @@ def _keycloak_realm_json(
                             "id.token.claim": "false",
                             "access.token.claim": "true",
                         },
-                    },
-                    _audience_mapper(
-                        "token-exchange-audience", AUTH_TOKEN_EXCHANGE_AUDIENCE
-                    ),
-                ],
-            },
-            {
-                "clientId": AUTH_EXT_PROC_CLIENT_ID,
-                "enabled": True,
-                "publicClient": False,
-                "secret": AUTH_EXT_PROC_CLIENT_SECRET,
-                "directAccessGrantsEnabled": False,
-                "standardFlowEnabled": False,
-                "serviceAccountsEnabled": True,
-                "protocolMappers": [
-                    _audience_mapper(
-                        "token-exchange-audience", AUTH_TOKEN_EXCHANGE_AUDIENCE
-                    ),
+                    }
                 ],
             },
         ],
@@ -1242,45 +1084,23 @@ def _get_otel_endpoint(backend: str, namespace: str) -> str:
 def _expand_auth_preset(preset: str, namespace: str) -> dict:
     """Expand an --auth-enabled preset into install_command auth kwargs.
 
-    Three presets are the whole security surface; each names a real deployment
-    posture and bakes in the curated defaults so no fine-grained flags are
-    needed:
-
-    - aib-keycloak (default): the full verified path. Keycloak provides human
-      user identity, the identity broker provides agent identity and RFC 8693
-      token exchange, and authorization is enforced by OPA in the gateway
-      ext_proc using broker permission sets, with the agent (actor) JWT
-      signature verified against the IdP JWKS.
-    - kaos-internal: a self-contained demo needing no external IdP or broker.
-      KAOS projects authorization policy data into a ConfigMap enforced by OPA
-      in ext_proc, with the agent JWT header-trusted (non-production). The
-      policy ConfigMap name/namespace are baked in.
-    - aib-only: agent identity via the broker with no human-user layer and no
-      token exchange -- autonomous/agent-only deployments that still get real
-      broker-minted agent credentials.
-
-    All presets route internal agent->ModelAPI/MCP/peer traffic through the
-    gateway and generate bypass-prevention NetworkPolicies so the enforcement
-    point cannot be sidestepped.
+    Presets install identity providers and retain policy projection wiring. They
+    do not configure an authorization backend or token exchange.
     """
     if preset == AUTH_PRESET_AIB_KEYCLOAK:
         return {
             "auth_enabled": True,
             "user_auth": True,
-            "token_exchange": True,
             "network_policy": True,
             "gateway_routing": True,
-            "agent_jwt_verification": "verified",
             "policy_data_source": "automated",
         }
     if preset == AUTH_PRESET_KAOS_INTERNAL:
         return {
             "auth_enabled": True,
             "user_auth": False,
-            "token_exchange": False,
             "network_policy": True,
             "gateway_routing": True,
-            "agent_jwt_verification": "skip",
             "policy_data_source": "automated",
             "policy_configmap_name": DEFAULT_POLICY_CONFIGMAP_NAME,
             "policy_configmap_namespace": namespace,
@@ -1289,10 +1109,8 @@ def _expand_auth_preset(preset: str, namespace: str) -> dict:
         return {
             "auth_enabled": True,
             "user_auth": False,
-            "token_exchange": False,
             "network_policy": True,
             "gateway_routing": True,
-            "agent_jwt_verification": "verified",
             "policy_data_source": "automated",
         }
     raise ValueError(f"unknown auth preset: {preset!r}")
@@ -1315,7 +1133,6 @@ def install_command(
     ext_authz_url: str | None = None,
     auth_issuer: str | None = None,
     credential_secret_prefix: str = DEFAULT_CREDENTIAL_SECRET_PREFIX,
-    token_exchange: bool = True,
     aib_chart_path: str | None = None,
     aib_values_path: str | None = None,
     user_auth: bool = True,
@@ -1372,26 +1189,16 @@ def install_command(
 
     # Resolve agent-auth endpoints (used for both component installs and operator wiring)
     if auth_enabled:
-        ext_authz_url = ext_authz_url or _default_ext_authz_url(auth_namespace)
         auth_issuer = auth_issuer or _default_auth_issuer(auth_namespace, auth_release)
-        if user_auth or token_exchange:
+        if user_auth:
             user_auth_issuer = user_auth_issuer or _default_user_auth_issuer(
                 keycloak_namespace, keycloak_release
             )
 
         # Install the identity broker from a local chart when provided (it is
-        # unpublished, so a chart path is required to install it here). The
-        # ExtProc token-exchange component is enabled when token exchange is on.
+        # unpublished, so a chart path is required to install it here).
         if aib_chart_path:
             aib_extra_set = _build_aib_broker_public_url_args(auth_issuer)
-            if token_exchange:
-                broker_token_endpoint = f"{auth_issuer}/oauth2/token"
-                aib_extra_set += _build_aib_extproc_args(
-                    AUTH_EXT_PROC_CLIENT_ID,
-                    AUTH_EXT_PROC_CLIENT_SECRET,
-                    issuer=user_auth_issuer,
-                    token_endpoint=broker_token_endpoint,
-                ) + _build_aib_hybrid_broker_args(user_auth_issuer)
             if not _install_aib(
                 auth_namespace,
                 auth_release,
@@ -1403,16 +1210,6 @@ def install_command(
                 typer.echo(
                     "Warning: identity broker installation failed, continuing...",
                     err=True,
-                )
-            elif token_exchange:
-                # Temporary bridge until the AIB chart templates the ExtProc
-                # client-credentials endpoint (followup F0): point it at the
-                # Keycloak token URL so the sidecar mints its client assertion
-                # against Keycloak rather than the mock upstream default.
-                _patch_aib_extproc_client_credentials_endpoint(
-                    auth_namespace,
-                    auth_release,
-                    f"{user_auth_issuer}/protocol/openid-connect/token",
                 )
         else:
             typer.echo(
@@ -1547,7 +1344,7 @@ def install_command(
         )
         helm_args.extend(
             _build_auth_operator_args(
-                ext_authz_url or _default_ext_authz_url(auth_namespace),
+                ext_authz_url or "",
                 auth_issuer or _default_auth_issuer(auth_namespace, auth_release),
                 credential_secret_prefix,
                 admin_url=admin_url

@@ -105,15 +105,11 @@ def install(
     auth_enabled: str | None = typer.Option(
         None,
         "--auth-enabled",
-        help="Enable an end-to-end security posture by preset. Options: "
-        f"'{AUTH_PRESET_AIB_KEYCLOAK}' (default; Keycloak user identity + identity "
-        "broker agent identity with RFC 8693 token exchange + verified OPA "
-        f"authorization), '{AUTH_PRESET_KAOS_INTERNAL}' (self-contained demo; "
-        "KAOS-projected policy ConfigMap, header-trusted agent JWT, no external "
-        f"IdP/broker), or '{AUTH_PRESET_AIB_ONLY}' (broker agent identity, no "
-        "user layer, no token exchange). May be passed without a value to select "
-        "the default. Implies --gateway-enabled. Advanced overrides go through "
-        "--set security.agentAuth.*",
+        help="Install identity and policy-projection prerequisites by preset. Options: "
+        f"'{AUTH_PRESET_AIB_KEYCLOAK}' (default; Keycloak + AIB), "
+        f"'{AUTH_PRESET_KAOS_INTERNAL}' (internal policy projection), or "
+        f"'{AUTH_PRESET_AIB_ONLY}' (AIB only). Does not enable enforcement. May "
+        "be passed without a value to select the default.",
     ),
     gateway_api_strict: bool = typer.Option(
         False,
@@ -161,6 +157,12 @@ def install(
         help="Path to a local Keycloak Helm chart to install. When omitted, a "
         "self-contained dev deployment is applied instead (advanced/dev).",
     ),
+    agent_jwt_verification: str | None = typer.Option(
+        None,
+        "--agent-jwt-verification",
+        hidden=True,
+        help="Override agent JWT verification mode (advanced/dev).",
+    ),
 ) -> None:
     """Install the KAOS operator using Helm."""
     if monitoring_enabled is not None and monitoring_enabled not in MONITORING_BACKENDS:
@@ -179,9 +181,6 @@ def install(
                 err=True,
             )
             raise typer.Exit(1)
-        # The gateway is the enforcement point for every auth posture, so ensure
-        # it is installed even if --gateway-enabled was not passed explicitly.
-        gateway_enabled = True
         auth_kwargs = _expand_auth_preset(auth_enabled, namespace)
 
     call_kwargs = dict(
@@ -202,6 +201,7 @@ def install(
         aib_values_path=aib_values_path,
         keycloak_chart_path=keycloak_chart_path,
         gateway_api_strict=gateway_api_strict,
+        agent_jwt_verification=agent_jwt_verification,
     )
     call_kwargs.update(auth_kwargs)
     install_command(**call_kwargs)
