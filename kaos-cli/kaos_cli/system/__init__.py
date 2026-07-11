@@ -105,10 +105,10 @@ def install(
     auth_enabled: str | None = typer.Option(
         None,
         "--auth-enabled",
-        help="Install identity and policy-projection prerequisites by preset. Options: "
-        f"'{AUTH_PRESET_AIB_KEYCLOAK}' (default; Keycloak + AIB), "
-        f"'{AUTH_PRESET_KAOS_INTERNAL}' (internal policy projection), or "
-        f"'{AUTH_PRESET_AIB_ONLY}' (AIB only). Does not enable enforcement. May "
+        help="Enable gateway policy enforcement by preset. Options: "
+        f"'{AUTH_PRESET_AIB_KEYCLOAK}' (default; AIB + Keycloak identity), "
+        f"'{AUTH_PRESET_KAOS_INTERNAL}' (cluster-issued agent identity), or "
+        f"'{AUTH_PRESET_AIB_ONLY}' (AIB agent identity). May "
         "be passed without a value to select the default.",
     ),
     gateway_api_strict: bool = typer.Option(

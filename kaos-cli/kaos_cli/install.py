@@ -39,8 +39,7 @@ AUTH_ENDUSER_PORT = 8000
 AUTH_ADMIN_PORT = 14000
 
 
-# Full-auth presets: curated end-to-end security postures selected with the
-# single --full-auth-enabled flag, replacing the fine-grained auth knobs.
+# Curated identity and gateway-policy postures selected with --auth-enabled.
 AUTH_PRESET_AIB_KEYCLOAK = "aib-keycloak"
 AUTH_PRESET_KAOS_INTERNAL = "kaos-internal"
 AUTH_PRESET_AIB_ONLY = "aib-only"
@@ -633,6 +632,8 @@ def _build_auth_operator_args(
     ext_authz_url: str,
     issuer: str,
     credential_secret_prefix: str,
+    identity_provider: str = "aib",
+    pdp_enabled: bool = False,
     admin_url: str = "",
     user_issuer: str = "",
     user_audience: str = "",
@@ -674,15 +675,19 @@ def _build_auth_operator_args(
     args: list[str] = []
     if ext_authz_url:
         args.extend(["--set", f"security.agentAuth.extAuthzUrl={ext_authz_url}"])
-    args.extend(["--set", "security.agentAuth.identity.provider=aib"])
-    args.extend(["--set", f"security.agentAuth.issuer={issuer}"])
-    args.extend(
-        [
-            "--set",
-            f"security.agentAuth.credentialSecretPrefix={credential_secret_prefix}",
-        ]
-    )
-    if admin_url:
+    args.extend(["--set", f"security.agentAuth.identity.provider={identity_provider}"])
+    if pdp_enabled:
+        args.extend(["--set", "security.pdp.enabled=true"])
+    if identity_provider != "serviceaccount" and issuer:
+        args.extend(["--set", f"security.agentAuth.issuer={issuer}"])
+    if identity_provider == "aib":
+        args.extend(
+            [
+                "--set",
+                f"security.agentAuth.credentialSecretPrefix={credential_secret_prefix}",
+            ]
+        )
+    if identity_provider == "aib" and admin_url:
         args.extend(["--set", f"security.agentAuth.adminUrl={admin_url}"])
     if agent_jwt_verification:
         args.extend(
@@ -1085,35 +1090,24 @@ def _get_otel_endpoint(backend: str, namespace: str) -> str:
 def _expand_auth_preset(preset: str, namespace: str) -> dict:
     """Expand an --auth-enabled preset into install_command auth kwargs.
 
-    Presets install identity providers and retain policy projection wiring. They
-    do not configure an authorization backend or token exchange.
+    Every preset enables the in-chart PDP and automated policy projection.
     """
+    base = {
+        "auth_enabled": True,
+        "gateway_enabled": True,
+        "pdp_enabled": True,
+        "network_policy": True,
+        "gateway_routing": True,
+        "policy_data_source": "automated",
+        "policy_configmap_name": DEFAULT_POLICY_CONFIGMAP_NAME,
+        "policy_configmap_namespace": namespace,
+    }
     if preset == AUTH_PRESET_AIB_KEYCLOAK:
-        return {
-            "auth_enabled": True,
-            "user_auth": True,
-            "network_policy": True,
-            "gateway_routing": True,
-            "policy_data_source": "automated",
-        }
+        return {**base, "identity_provider": "aib", "user_auth": True}
     if preset == AUTH_PRESET_KAOS_INTERNAL:
-        return {
-            "auth_enabled": True,
-            "user_auth": False,
-            "network_policy": True,
-            "gateway_routing": True,
-            "policy_data_source": "automated",
-            "policy_configmap_name": DEFAULT_POLICY_CONFIGMAP_NAME,
-            "policy_configmap_namespace": namespace,
-        }
+        return {**base, "identity_provider": "serviceaccount", "user_auth": False}
     if preset == AUTH_PRESET_AIB_ONLY:
-        return {
-            "auth_enabled": True,
-            "user_auth": False,
-            "network_policy": True,
-            "gateway_routing": True,
-            "policy_data_source": "automated",
-        }
+        return {**base, "identity_provider": "aib", "user_auth": False}
     raise ValueError(f"unknown auth preset: {preset!r}")
 
 
@@ -1131,6 +1125,8 @@ def install_command(
     auth_enabled: bool = False,
     auth_namespace: str = DEFAULT_AUTH_NAMESPACE,
     auth_release: str = DEFAULT_AUTH_RELEASE,
+    identity_provider: str = "aib",
+    pdp_enabled: bool = False,
     ext_authz_url: str | None = None,
     auth_issuer: str | None = None,
     credential_secret_prefix: str = DEFAULT_CREDENTIAL_SECRET_PREFIX,
@@ -1191,9 +1187,10 @@ def install_command(
     # Resolve the AIB issuer once for both token minting and every verifier.
     resolved_auth_issuer = ""
     if auth_enabled:
-        resolved_auth_issuer = auth_issuer or _default_auth_issuer(
-            auth_namespace, auth_release
-        )
+        if identity_provider == "aib":
+            resolved_auth_issuer = auth_issuer or _default_auth_issuer(
+                auth_namespace, auth_release
+            )
         if user_auth:
             user_auth_issuer = user_auth_issuer or _default_user_auth_issuer(
                 keycloak_namespace, keycloak_release
@@ -1201,7 +1198,7 @@ def install_command(
 
         # Install the identity broker from a local chart when provided (it is
         # unpublished, so a chart path is required to install it here).
-        if aib_chart_path:
+        if identity_provider == "aib" and aib_chart_path:
             aib_extra_set = _build_aib_broker_public_url_args(resolved_auth_issuer)
             if not _install_aib(
                 auth_namespace,
@@ -1215,16 +1212,14 @@ def install_command(
                     "Warning: identity broker installation failed, continuing...",
                     err=True,
                 )
-        else:
+        elif identity_provider == "aib":
             typer.echo(
                 "Note: --aib-chart-path not provided; assuming the identity broker "
                 f"is already installed in namespace '{auth_namespace}'.",
             )
 
-        # The operator's identity projection controller (enabled via
-        # security.agentAuth.adminUrl on the operator chart) registers agents and
-        # mints their per-agent credential Secrets directly; no separate
-        # deployable is required.
+        # In AIB mode the operator registers agents and provisions credentials;
+        # ServiceAccount mode needs no external identity component.
 
         # Install Keycloak as the human user identity provider and bootstrap its
         # realm so the gateway can verify user subject tokens alongside agent
@@ -1351,8 +1346,13 @@ def install_command(
                 ext_authz_url or "",
                 resolved_auth_issuer,
                 credential_secret_prefix,
-                admin_url=admin_url
-                or _default_auth_admin_url(auth_namespace, auth_release),
+                identity_provider=identity_provider,
+                pdp_enabled=pdp_enabled,
+                admin_url=(
+                    (admin_url or _default_auth_admin_url(auth_namespace, auth_release))
+                    if identity_provider == "aib"
+                    else ""
+                ),
                 user_issuer=resolved_user_issuer,
                 user_audience=user_auth_audience if user_auth else "",
                 network_policy=network_policy,

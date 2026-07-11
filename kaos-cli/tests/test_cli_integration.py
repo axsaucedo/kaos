@@ -1450,7 +1450,7 @@ class TestAuthWiring:
         assert "security.userAuth" not in joined
         assert "security.agentAuth.extAuthzUrl=" not in joined
         assert "security.agentAuth.authorization.agentJwtVerification" not in joined
-        # The demo preset bakes in the policy ConfigMap projection target.
+        # The cluster-identity preset bakes in the policy ConfigMap target.
         assert (
             "security.agentAuth.projection.policyConfigMap.name=kaos-authz-policy"
             in joined
@@ -1530,29 +1530,158 @@ class TestAuthWiring:
         from kaos_cli.install import _expand_auth_preset
 
         kwargs = _expand_auth_preset("aib-keycloak", "kaos-system")
-        assert kwargs["auth_enabled"] is True
-        assert kwargs["user_auth"] is True
-        assert "agent_jwt_verification" not in kwargs
+        assert kwargs == {
+            "auth_enabled": True,
+            "gateway_enabled": True,
+            "pdp_enabled": True,
+            "network_policy": True,
+            "gateway_routing": True,
+            "policy_data_source": "automated",
+            "policy_configmap_name": "kaos-authz-policy",
+            "policy_configmap_namespace": "kaos-system",
+            "identity_provider": "aib",
+            "user_auth": True,
+        }
 
     def test_expand_auth_preset_kaos_internal(self):
         from kaos_cli.install import _expand_auth_preset
 
         kwargs = _expand_auth_preset("kaos-internal", "kaos-system")
-        assert kwargs["auth_enabled"] is True
-        assert kwargs["user_auth"] is False
-        assert "agent_jwt_verification" not in kwargs
-        # The demo preset bakes in the policy ConfigMap projection target so no
-        # extra flags are needed for the operator to project policy data.
-        assert kwargs["policy_configmap_name"] == "kaos-authz-policy"
-        assert kwargs["policy_configmap_namespace"] == "kaos-system"
+        assert kwargs == {
+            "auth_enabled": True,
+            "gateway_enabled": True,
+            "pdp_enabled": True,
+            "network_policy": True,
+            "gateway_routing": True,
+            "policy_data_source": "automated",
+            "policy_configmap_name": "kaos-authz-policy",
+            "policy_configmap_namespace": "kaos-system",
+            "identity_provider": "serviceaccount",
+            "user_auth": False,
+        }
 
     def test_expand_auth_preset_aib_only(self):
         from kaos_cli.install import _expand_auth_preset
 
         kwargs = _expand_auth_preset("aib-only", "kaos-system")
-        assert kwargs["auth_enabled"] is True
-        assert kwargs["user_auth"] is False
-        assert "agent_jwt_verification" not in kwargs
+        assert kwargs == {
+            "auth_enabled": True,
+            "gateway_enabled": True,
+            "pdp_enabled": True,
+            "network_policy": True,
+            "gateway_routing": True,
+            "policy_data_source": "automated",
+            "policy_configmap_name": "kaos-authz-policy",
+            "policy_configmap_namespace": "kaos-system",
+            "identity_provider": "aib",
+            "user_auth": False,
+        }
+
+    @pytest.mark.parametrize(
+        "preset,expected,installs_aib,installs_keycloak",
+        [
+            (
+                "kaos-internal",
+                {
+                    "security.agentAuth.identity.provider=serviceaccount",
+                    "security.pdp.enabled=true",
+                    "gatewayAPI.enabled=true",
+                    "gatewayAPI.createGateway=true",
+                    "gatewayAPI.gatewayClassName=envoy-gateway",
+                    "security.agentAuth.authorization.policyDataSource=automated",
+                    "security.agentAuth.projection.policyConfigMap.name=kaos-authz-policy",
+                    "security.agentAuth.projection.policyConfigMap.namespace=kaos-system",
+                    "security.gatewayRouting.enabled=true",
+                },
+                False,
+                False,
+            ),
+            (
+                "aib-only",
+                {
+                    "security.agentAuth.identity.provider=aib",
+                    "security.pdp.enabled=true",
+                    "gatewayAPI.enabled=true",
+                    "gatewayAPI.createGateway=true",
+                    "gatewayAPI.gatewayClassName=envoy-gateway",
+                    "security.agentAuth.issuer=http://aib-agentic-identity-broker.aib-system.svc.cluster.local:8000",
+                    "security.agentAuth.credentialSecretPrefix=kaos-aib",
+                    "security.agentAuth.adminUrl=http://aib-agentic-identity-broker.aib-system.svc.cluster.local:14000/api",
+                    "security.agentAuth.authorization.policyDataSource=automated",
+                    "security.agentAuth.projection.policyConfigMap.name=kaos-authz-policy",
+                    "security.agentAuth.projection.policyConfigMap.namespace=kaos-system",
+                    "security.gatewayRouting.enabled=true",
+                },
+                True,
+                False,
+            ),
+            (
+                "aib-keycloak",
+                {
+                    "security.agentAuth.identity.provider=aib",
+                    "security.pdp.enabled=true",
+                    "gatewayAPI.enabled=true",
+                    "gatewayAPI.createGateway=true",
+                    "gatewayAPI.gatewayClassName=envoy-gateway",
+                    "security.agentAuth.issuer=http://aib-agentic-identity-broker.aib-system.svc.cluster.local:8000",
+                    "security.agentAuth.credentialSecretPrefix=kaos-aib",
+                    "security.agentAuth.adminUrl=http://aib-agentic-identity-broker.aib-system.svc.cluster.local:14000/api",
+                    "security.agentAuth.authorization.policyDataSource=automated",
+                    "security.agentAuth.projection.policyConfigMap.name=kaos-authz-policy",
+                    "security.agentAuth.projection.policyConfigMap.namespace=kaos-system",
+                    "security.userAuth.issuer=http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos",
+                    "security.userAuth.audience=kaos",
+                    "security.gatewayRouting.enabled=true",
+                },
+                True,
+                True,
+            ),
+        ],
+    )
+    def test_auth_preset_exact_helm_values(
+        self, preset, expected, installs_aib, installs_keycloak
+    ):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        captured = {}
+
+        def fake_helm(args, check=True, **kwargs):
+            captured["operator"] = args
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with patch("kaos_cli.install.check_helm_installed", return_value=True), patch(
+            "kaos_cli.install.run_helm_command", side_effect=fake_helm
+        ), patch("kaos_cli.install._install_aib", return_value=True) as mock_aib, patch(
+            "kaos_cli.install._install_keycloak", return_value=True
+        ) as mock_keycloak:
+            result = runner.invoke(
+                app,
+                [
+                    "system",
+                    "install",
+                    "--auth-enabled",
+                    preset,
+                    "--aib-chart-path",
+                    "aib/chart",
+                    "--chart-path",
+                    "operator/chart",
+                ],
+            )
+
+        assert result.exit_code == 0, result.output
+        if installs_aib:
+            mock_aib.assert_called_once()
+        else:
+            mock_aib.assert_not_called()
+        if installs_keycloak:
+            mock_keycloak.assert_called_once()
+        else:
+            mock_keycloak.assert_not_called()
+        args = captured["operator"]
+        rendered = {args[i + 1] for i, arg in enumerate(args) if arg == "--set"}
+        assert rendered == expected
+        assert not any("agentJwtVerification" in value for value in rendered)
 
     def test_auth_enabled_without_value_defaults_to_aib_keycloak(self):
         """--auth-enabled with no value selects the keycloak-aib preset."""
@@ -1588,7 +1717,7 @@ class TestAuthWiring:
         assert result.exit_code == 0, result.output
         joined = " ".join(captured.get("args", []))
         assert "security.agentAuth.authorization.provider" not in joined
-        assert "gatewayAPI.enabled=true" not in joined
+        assert "gatewayAPI.enabled=true" in joined
 
     def test_auth_enabled_rejects_unknown_preset(self):
         result = runner.invoke(app, ["system", "install", "--auth-enabled", "nonsense"])
