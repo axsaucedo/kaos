@@ -14,14 +14,35 @@ import rego.v1
 # its `sub` is trusted; when no JWKS is present (demo mode) the token is decoded
 # without verification, which is spoofable and non-production.
 
-actor_token := t if {
-	t := input.attributes.request.http.headers["x-agent-authorization"]
+actor_token := token if {
+	raw := input.attributes.request.http.headers["x-agent-authorization"]
+	[scheme, token] := split(raw, " ")
+	lower(scheme) == "bearer"
+}
+
+actor_token := raw if {
+	raw := input.attributes.request.http.headers["x-agent-authorization"]
+	count(split(raw, " ")) == 1
 }
 
 # The resource the request targets, as the KAOS logical identity
 # (kaos://<slug>/<ns>/<name>) stamped onto the request by the gateway route.
 target_resource := r if {
 	r := input.attributes.request.http.headers["x-kaos-target-resource"]
+}
+
+resource_slug("mcp") := "mcpserver"
+
+resource_slug(slug) := slug if {
+	slug != "mcp"
+}
+
+# Route request-header modifiers run after ext_authz in Envoy, so derive the
+# same logical identity from the operator-owned path when the header is absent.
+target_resource := sprintf("kaos://%v/%v/%v", [slug, input.parsed_path[0], input.parsed_path[2]]) if {
+	not input.attributes.request.http.headers["x-kaos-target-resource"]
+	count(input.parsed_path) >= 3
+	slug := resource_slug(input.parsed_path[1])
 }
 
 jwks_configured if {
@@ -32,12 +53,36 @@ unverified_actor_claims := payload if {
 	[_, payload, _] := io.jwt.decode(actor_token)
 }
 
+unverified_actor_header := header if {
+	[header, _, _] := io.jwt.decode(actor_token)
+}
+
 # Verified mode: a JWKS is configured, so the actor token signature must verify
 # against it before the subject is trusted.
 actor_sub := sub if {
 	jwks_configured
 	keys := data.kaos.jwks[unverified_actor_claims.iss]
-	result := io.jwt.decode_verify(actor_token, {"cert": json.marshal(keys)})
+	result := io.jwt.decode_verify(actor_token, {
+		"alg": unverified_actor_header.alg,
+		"cert": json.marshal(keys),
+		"iss": unverified_actor_claims.iss,
+	})
+	result[0] == true
+	sub := result[2].sub
+}
+
+# Kubernetes projected tokens carry the fixed gateway audience. OPA requires
+# that audience to be supplied when decode_verify evaluates a token with aud.
+actor_sub := sub if {
+	jwks_configured
+	"kaos-gateway" in unverified_actor_claims.aud
+	keys := data.kaos.jwks[unverified_actor_claims.iss]
+	result := io.jwt.decode_verify(actor_token, {
+		"alg": unverified_actor_header.alg,
+		"aud": "kaos-gateway",
+		"cert": json.marshal(keys),
+		"iss": unverified_actor_claims.iss,
+	})
 	result[0] == true
 	sub := result[2].sub
 }
@@ -81,15 +126,15 @@ deny contains {"reason": sprintf("actor %v is not granted %v", [actor_id, target
 	not target_resource in data.kaos.grants[actor_id]
 }
 
-result := {"action": "deny", "reasons": reasons} if {
+result := {"allowed": false, "action": "deny", "reasons": reasons} if {
 	count(deny) > 0
 	reasons := [entry.reason | some entry in deny]
 }
 
-result := {"action": "allow", "reasons": reasons} if {
+result := {"allowed": true, "action": "allow", "reasons": reasons} if {
 	count(deny) == 0
 	count(allow) > 0
 	reasons := [entry.reason | some entry in allow]
 }
 
-default result := {"action": "deny", "reasons": ["no policy rule matched"]}
+default result := {"allowed": false, "action": "deny", "reasons": ["no policy rule matched"]}

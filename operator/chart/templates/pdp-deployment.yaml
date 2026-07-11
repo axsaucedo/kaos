@@ -42,7 +42,8 @@ spec:
         - --diagnostic-addr=0.0.0.0:8282
         - --set=plugins.envoy_ext_authz_grpc.addr=:9191
         - --set=plugins.envoy_ext_authz_grpc.path=aib/extproc/authz/result
-        - /policy
+        - /policy/policy.rego
+        - /policy/data.json
         ports:
         - name: grpc
           containerPort: 9191

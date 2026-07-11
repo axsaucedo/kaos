@@ -33,7 +33,7 @@ serviceaccount_actor_jwt := io.jwt.encode_sign(
 
 request_input(resource) := {"attributes": {"request": {"http": {"headers": {
 	"authorization": sprintf("Bearer %v", [subject_jwt]),
-	"x-agent-authorization": actor_jwt,
+	"x-agent-authorization": sprintf("Bearer %v", [actor_jwt]),
 	"x-kaos-target-resource": resource,
 }}}}}
 
@@ -44,6 +44,7 @@ test_allows_when_actor_granted_resource if {
 	out := result with input as request_input("kaos://mcpserver/demo/github")
 		with data.kaos.grants as grants
 	out.action == "allow"
+	out.allowed == true
 }
 
 test_denies_when_actor_not_granted_resource if {
@@ -72,11 +73,23 @@ test_denies_when_no_actor_token if {
 
 test_allows_serviceaccount_subject_via_agent_mapping if {
 	serviceaccount_input := {"attributes": {"request": {"http": {"headers": {
-		"x-agent-authorization": serviceaccount_actor_jwt,
+		"x-agent-authorization": sprintf("Bearer %v", [serviceaccount_actor_jwt]),
 		"x-kaos-target-resource": "kaos://mcpserver/demo/github",
 	}}}}}
 	out := result with input as serviceaccount_input
 		with data.kaos.grants as grants
 		with data.kaos.agents as agents
 	out.action == "allow"
+}
+
+test_derives_target_resource_from_gateway_path if {
+	path_input := {
+		"attributes": {"request": {"http": {"headers": {
+			"x-agent-authorization": sprintf("Bearer %v", [actor_jwt]),
+		}}}},
+		"parsed_path": ["demo", "mcp", "github", "tools", "call"],
+	}
+	out := result with input as path_input
+		with data.kaos.grants as grants
+	out.allowed == true
 }

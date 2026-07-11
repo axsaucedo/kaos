@@ -78,7 +78,7 @@ security:
   # until gateway enforcement is enabled separately.
   pdp:
     enabled: false
-    image: openpolicyagent/opa:latest-envoy
+    image: openpolicyagent/opa:1.18.1-envoy-static
     replicas: 2
     resources:
       requests:

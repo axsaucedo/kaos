@@ -2,6 +2,7 @@ package security
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -24,6 +25,9 @@ const (
 	securityPolicyKind    = "SecurityPolicy"
 	httpRouteGroup        = "gateway.networking.k8s.io"
 	httpRouteKind         = "HTTPRoute"
+	referenceGrantGroup   = "gateway.networking.k8s.io"
+	referenceGrantVersion = "v1beta1"
+	referenceGrantKind    = "ReferenceGrant"
 )
 
 // SecurityPolicyGVK is the GroupVersionKind of the generated SecurityPolicy.
@@ -31,6 +35,12 @@ var SecurityPolicyGVK = schema.GroupVersionKind{
 	Group:   securityPolicyGroup,
 	Version: securityPolicyVersion,
 	Kind:    securityPolicyKind,
+}
+
+var referenceGrantGVK = schema.GroupVersionKind{
+	Group:   referenceGrantGroup,
+	Version: referenceGrantVersion,
+	Kind:    referenceGrantKind,
 }
 
 // PolicyParams describes the protected route a SecurityPolicy should guard.
@@ -92,6 +102,7 @@ func constructSecurityPolicy(params PolicyParams, cfg Config) (*unstructured.Uns
 			"headersToExtAuth": []interface{}{
 				"authorization",
 				"x-agent-authorization",
+				"x-kaos-target-resource",
 			},
 			"grpc": map[string]interface{}{
 				"backendRef": backendRef,
@@ -112,6 +123,55 @@ func constructSecurityPolicy(params PolicyParams, cfg Config) (*unstructured.Uns
 	}
 
 	return policy, nil
+}
+
+func constructExtAuthReferenceGrant(sourceNamespace, backendNamespace, serviceName string) *unstructured.Unstructured {
+	nameHash := sha256.Sum256([]byte(sourceNamespace + "\x00" + serviceName))
+	grant := &unstructured.Unstructured{}
+	grant.SetGroupVersionKind(referenceGrantGVK)
+	grant.SetName(fmt.Sprintf("kaos-ext-auth-%x", nameHash[:6]))
+	grant.SetNamespace(backendNamespace)
+	grant.Object["spec"] = map[string]interface{}{
+		"from": []interface{}{
+			map[string]interface{}{
+				"group":     securityPolicyGroup,
+				"kind":      securityPolicyKind,
+				"namespace": sourceNamespace,
+			},
+		},
+		"to": []interface{}{
+			map[string]interface{}{
+				"group": "",
+				"kind":  "Service",
+				"name":  serviceName,
+			},
+		},
+	}
+	return grant
+}
+
+func reconcileExtAuthReferenceGrant(
+	ctx context.Context,
+	c client.Client,
+	sourceNamespace, backendNamespace, serviceName string,
+	log logr.Logger,
+) error {
+	desired := constructExtAuthReferenceGrant(sourceNamespace, backendNamespace, serviceName)
+	existing := &unstructured.Unstructured{}
+	existing.SetGroupVersionKind(referenceGrantGVK)
+	key := types.NamespacedName{Name: desired.GetName(), Namespace: backendNamespace}
+	if err := c.Get(ctx, key, existing); apierrors.IsNotFound(err) {
+		log.Info("Creating ext_authz ReferenceGrant", "name", desired.GetName(), "namespace", backendNamespace, "sourceNamespace", sourceNamespace)
+		return c.Create(ctx, desired)
+	} else if err != nil {
+		return err
+	}
+
+	spec, _, _ := unstructured.NestedMap(desired.Object, "spec")
+	if err := unstructured.SetNestedMap(existing.Object, spec, "spec"); err != nil {
+		return fmt.Errorf("update ReferenceGrant spec: %w", err)
+	}
+	return c.Update(ctx, existing)
 }
 
 // constructJWTProviders builds the Envoy Gateway SecurityPolicy spec.jwt.providers
@@ -197,6 +257,17 @@ func ReconcileSecurityPolicy(
 	}
 	if desired == nil {
 		return nil
+	}
+	if cfg.ExtAuthzEnabled() {
+		serviceName, backendNamespace, _, err := cfg.ExtAuthzBackendRef()
+		if err != nil {
+			return fmt.Errorf("resolve ext_authz backend: %w", err)
+		}
+		if backendNamespace != "" && backendNamespace != params.Namespace {
+			if err := reconcileExtAuthReferenceGrant(ctx, c, params.Namespace, backendNamespace, serviceName, log); err != nil {
+				return fmt.Errorf("reconcile ext_authz ReferenceGrant: %w", err)
+			}
+		}
 	}
 
 	existing := &unstructured.Unstructured{}

@@ -54,7 +54,7 @@ func TestConstructSecurityPolicyShape(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("expected headersToExtAuth, found=%v err=%v", found, err)
 	}
-	if len(headers) != 2 || headers[0] != "authorization" || headers[1] != "x-agent-authorization" {
+	if len(headers) != 3 || headers[0] != "authorization" || headers[1] != "x-agent-authorization" || headers[2] != "x-kaos-target-resource" {
 		t.Errorf("unexpected headersToExtAuth %#v", headers)
 	}
 
@@ -68,6 +68,31 @@ func TestConstructSecurityPolicyShape(t *testing.T) {
 	}
 	if port, ok := backendRef["port"].(int64); !ok || port != 9191 {
 		t.Errorf("expected port int64(9191), got %#v", backendRef["port"])
+	}
+}
+
+func TestConstructExtAuthReferenceGrant(t *testing.T) {
+	grant := constructExtAuthReferenceGrant("agents", "kaos-system", "kaos-pdp")
+	if grant.GetNamespace() != "kaos-system" || !strings.HasPrefix(grant.GetName(), "kaos-ext-auth-") {
+		t.Fatalf("unexpected ReferenceGrant identity %s/%s", grant.GetNamespace(), grant.GetName())
+	}
+	from, found, err := unstructured.NestedSlice(grant.Object, "spec", "from")
+	if err != nil || !found || len(from) != 1 {
+		t.Fatalf("from = %#v found=%v err=%v", from, found, err)
+	}
+	wantFrom := map[string]interface{}{
+		"group": securityPolicyGroup, "kind": securityPolicyKind, "namespace": "agents",
+	}
+	if got := from[0].(map[string]interface{}); got["group"] != wantFrom["group"] || got["kind"] != wantFrom["kind"] || got["namespace"] != wantFrom["namespace"] {
+		t.Fatalf("from = %#v", got)
+	}
+	to, found, err := unstructured.NestedSlice(grant.Object, "spec", "to")
+	if err != nil || !found || len(to) != 1 {
+		t.Fatalf("to = %#v found=%v err=%v", to, found, err)
+	}
+	gotTo := to[0].(map[string]interface{})
+	if gotTo["group"] != "" || gotTo["kind"] != "Service" || gotTo["name"] != "kaos-pdp" {
+		t.Fatalf("to = %#v", gotTo)
 	}
 }
 
