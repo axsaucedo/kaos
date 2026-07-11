@@ -18,7 +18,7 @@ func TestPolicyEmbedsRego(t *testing.T) {
 
 func TestDataDocumentDemoModeOmitsJWKS(t *testing.T) {
 	grants := map[string][]string{"kaos://agent/demo/researcher": {"kaos://mcpserver/demo/github"}}
-	raw, err := DataDocument(grants, nil)
+	raw, err := DataDocument(grants, "", nil, nil)
 	if err != nil {
 		t.Fatalf("DataDocument: %v", err)
 	}
@@ -38,7 +38,7 @@ func TestDataDocumentDemoModeOmitsJWKS(t *testing.T) {
 
 func TestDataDocumentVerifiedModeCarriesJWKS(t *testing.T) {
 	jwks := map[string]any{"keys": []any{map[string]any{"kty": "RSA", "kid": "x"}}}
-	raw, err := DataDocument(map[string][]string{}, jwks)
+	raw, err := DataDocument(map[string][]string{}, "https://issuer.example", jwks, nil)
 	if err != nil {
 		t.Fatalf("DataDocument: %v", err)
 	}
@@ -46,13 +46,32 @@ func TestDataDocumentVerifiedModeCarriesJWKS(t *testing.T) {
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if _, ok := doc["kaos"].(map[string]any)["jwks"]; !ok {
+	issuerJWKS := doc["kaos"].(map[string]any)["jwks"].(map[string]any)
+	if _, ok := issuerJWKS["https://issuer.example"]; !ok {
 		t.Fatalf("verified mode must carry jwks: %v", doc)
 	}
 }
 
+func TestDataDocumentCarriesAgentIssuerSubjectMapping(t *testing.T) {
+	agents := map[string]map[string]string{
+		"kaos://agent/demo/researcher": {"issuer_sub": "system:serviceaccount:demo:kaos-agent-researcher"},
+	}
+	raw, err := DataDocument(map[string][]string{}, "", nil, agents)
+	if err != nil {
+		t.Fatalf("DataDocument: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	got := doc["kaos"].(map[string]any)["agents"].(map[string]any)["kaos://agent/demo/researcher"].(map[string]any)["issuer_sub"]
+	if got != "system:serviceaccount:demo:kaos-agent-researcher" {
+		t.Fatalf("issuer_sub = %v", got)
+	}
+}
+
 func TestConfigMapDataCarriesPolicyAndData(t *testing.T) {
-	cm, err := ConfigMapData(map[string][]string{"a": {"b"}}, nil)
+	cm, err := ConfigMapData(map[string][]string{"a": {"b"}}, "", nil, nil)
 	if err != nil {
 		t.Fatalf("ConfigMapData: %v", err)
 	}

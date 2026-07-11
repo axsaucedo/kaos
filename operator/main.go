@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"flag"
 	"os"
 	"strconv"
@@ -21,6 +23,7 @@ import (
 	kaosv1alpha1 "github.com/axsaucedo/kaos/operator/api/v1alpha1"
 	"github.com/axsaucedo/kaos/operator/controllers"
 	"github.com/axsaucedo/kaos/operator/internal/aib"
+	"github.com/axsaucedo/kaos/operator/internal/authz"
 	"github.com/axsaucedo/kaos/operator/internal/authz/adapters"
 	"github.com/axsaucedo/kaos/operator/pkg/security"
 )
@@ -66,7 +69,23 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	restConfig := ctrl.GetConfigOrDie()
+	if security.GetConfig().ServiceAccountIdentityEnabled() {
+		issuerKeys, discoveryErr := authz.DiscoverServiceAccountIssuer(context.Background(), restConfig)
+		if discoveryErr != nil {
+			setupLog.Error(discoveryErr, "unable to discover Kubernetes ServiceAccount issuer")
+			os.Exit(1)
+		}
+		jwks, marshalErr := json.Marshal(issuerKeys.JWKS)
+		if marshalErr != nil {
+			setupLog.Error(marshalErr, "unable to encode Kubernetes ServiceAccount JWKS")
+			os.Exit(1)
+		}
+		_ = os.Setenv("SECURITY_AGENT_AUTH_SERVICE_ACCOUNT_ISSUER", issuerKeys.Issuer)
+		_ = os.Setenv("SECURITY_AGENT_AUTH_SERVICE_ACCOUNT_JWKS", string(jwks))
+	}
+
+	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
 		Scheme:                 scheme,
 		HealthProbeBindAddress: probeAddr,
 		LeaderElection:         enableLeaderElection,
@@ -122,7 +141,7 @@ func main() {
 	policyNamespace := os.Getenv("AUTHZ_POLICY_CONFIGMAP_NAMESPACE")
 	adminURL := os.Getenv("AIB_ADMIN_URL")
 	var projectors []controllers.PolicyProjector
-	if adminURL != "" {
+	if adminURL != "" && cfg.IdentityProviderOrDefault() == security.IdentityProviderAIB {
 		projectors = append(projectors, &adapters.BrokerProjector{
 			Client: mgr.GetClient(),
 			Scheme: mgr.GetScheme(),
@@ -139,12 +158,15 @@ func main() {
 	if policyName != "" && policyNamespace != "" {
 		policyDataSource := cfg.PolicyDataSourceOrDefault()
 		projectors = append(projectors, &adapters.ConfigMapProjector{
-			Client:         mgr.GetClient(),
-			Name:           policyName,
-			Namespace:      policyNamespace,
-			JWKSURI:        cfg.AuthzJWKSURI(),
-			WriteGrantData: policyDataSource == security.PolicyDataAutomated && !cfg.PolicyRegoOverride,
-			Disabled:       policyDataSource == security.PolicyDataManual && !cfg.PolicyRegoOverride,
+			Client:             mgr.GetClient(),
+			Name:               policyName,
+			Namespace:          policyNamespace,
+			JWKSURI:            cfg.AuthzJWKSURI(),
+			Issuer:             cfg.AgentIssuer(),
+			StaticJWKS:         cfg.AgentLocalJWKS(),
+			MapServiceAccounts: cfg.ServiceAccountIdentityEnabled(),
+			WriteGrantData:     policyDataSource == security.PolicyDataAutomated && !cfg.PolicyRegoOverride,
+			Disabled:           policyDataSource == security.PolicyDataManual && !cfg.PolicyRegoOverride,
 		})
 	}
 	if len(projectors) > 0 {

@@ -156,6 +156,55 @@ func TestGetConfigReadsAllFields(t *testing.T) {
 	}
 }
 
+func TestIdentityProviderSelection(t *testing.T) {
+	cases := []struct {
+		configured string
+		want       IdentityProvider
+	}{
+		{"", IdentityProviderAIB},
+		{"aib", IdentityProviderAIB},
+		{"oidc", IdentityProviderOIDC},
+		{"serviceaccount", IdentityProviderServiceAccount},
+		{"invalid", IdentityProviderAIB},
+	}
+	for _, tc := range cases {
+		t.Run(tc.configured, func(t *testing.T) {
+			cfg := Config{IdentityProvider: IdentityProvider(tc.configured)}
+			if got := cfg.IdentityProviderOrDefault(); got != tc.want {
+				t.Fatalf("IdentityProviderOrDefault() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestServiceAccountIdentityDefaults(t *testing.T) {
+	t.Setenv(envIdentityProvider, "serviceaccount")
+	t.Setenv(envServiceAccountAudience, "")
+	t.Setenv(envServiceAccountExpiration, "")
+	t.Setenv(envServiceAccountTokenPath, "")
+	cfg := GetConfig()
+	if !cfg.ServiceAccountIdentityEnabled() {
+		t.Fatal("expected ServiceAccount identity")
+	}
+	if cfg.ServiceAccountAudience != "kaos-gateway" || cfg.ServiceAccountTokenExpirationSeconds != 3600 {
+		t.Fatalf("unexpected token projection defaults: %+v", cfg)
+	}
+	if cfg.ServiceAccountTokenPath != "/var/run/secrets/kaos-agent/token" {
+		t.Fatalf("token path = %q", cfg.ServiceAccountTokenPath)
+	}
+}
+
+func TestServiceAccountModeDisablesAIBCredentialMounting(t *testing.T) {
+	cfg := Config{
+		IdentityProvider:       IdentityProviderServiceAccount,
+		PDPEnabled:             true,
+		CredentialSecretPrefix: "kaos-aib",
+	}
+	if cfg.CredentialMountingEnabled() {
+		t.Fatal("ServiceAccount identity must not mount AIB credentials")
+	}
+}
+
 func TestJWTEnabled(t *testing.T) {
 	cases := []struct {
 		name       string

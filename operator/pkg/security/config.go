@@ -6,8 +6,10 @@
 package security
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 )
@@ -19,6 +21,23 @@ type Config struct {
 	// and ExtAuthzURL is empty, ext_authz uses the kaos-pdp Service in the
 	// operator namespace.
 	PDPEnabled bool
+
+	// IdentityProvider selects the single active agent identity issuer.
+	IdentityProvider IdentityProvider
+
+	// ServiceAccountAudience is the audience of projected agent tokens.
+	ServiceAccountAudience string
+
+	// ServiceAccountTokenExpirationSeconds controls projected token lifetime.
+	ServiceAccountTokenExpirationSeconds int64
+
+	// ServiceAccountTokenPath is the file exposed to the agent runtime.
+	ServiceAccountTokenPath string
+
+	// ServiceAccountIssuer and ServiceAccountJWKS are discovered from the
+	// Kubernetes API server at operator startup.
+	ServiceAccountIssuer string
+	ServiceAccountJWKS   map[string]any
 
 	// ExtAuthzURL is the host:port of the external authorization (ext_authz)
 	// access-check gRPC backend override (agentAuth.extAuthzUrl). An empty value
@@ -116,6 +135,15 @@ type Config struct {
 // policy.
 type AgentJWTVerificationMode string
 
+// IdentityProvider selects the active agent identity issuer.
+type IdentityProvider string
+
+const (
+	IdentityProviderServiceAccount IdentityProvider = "serviceaccount"
+	IdentityProviderOIDC           IdentityProvider = "oidc"
+	IdentityProviderAIB            IdentityProvider = "aib"
+)
+
 const (
 	// VerificationSkip trusts the actor header without signature verification;
 	// used when no issuer is configured. Not for production.
@@ -138,27 +166,36 @@ const (
 )
 
 const (
-	defaultPDPServiceName = "kaos-pdp"
-	defaultPDPPort        = 9191
+	defaultPDPServiceName                    = "kaos-pdp"
+	defaultPDPPort                           = 9191
+	defaultAgentTokenAudience                = "kaos-gateway"
+	defaultAgentTokenExpirationSeconds int64 = 3600
+	defaultAgentTokenPath                    = "/var/run/secrets/kaos-agent/token"
 
-	envExtAuthzURL            = "SECURITY_AGENT_AUTH_EXT_AUTHZ_URL"
-	envPDPEnabled             = "SECURITY_PDP_ENABLED"
-	envIssuer                 = "SECURITY_AGENT_AUTH_ISSUER"
-	envCredentialSecretPrefix = "SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX"
-	envUserIssuer             = "SECURITY_USER_AUTH_ISSUER"
-	envUserAudience           = "SECURITY_USER_AUTH_AUDIENCE"
-	envUserJWKSURI            = "SECURITY_USER_AUTH_JWKS_URI"
-	envGatewayNamespace       = "SECURITY_GATEWAY_NAMESPACE"
-	envOperatorNamespace      = "SECURITY_OPERATOR_NAMESPACE"
-	envPodNamespace           = "POD_NAMESPACE"
-	envNetworkPolicyDisabled  = "SECURITY_NETWORK_POLICY_DISABLED"
-	envNetworkPolicyEgress    = "SECURITY_NETWORK_POLICY_EGRESS_ENABLED"
-	envGatewayHost            = "SECURITY_GATEWAY_HOST"
-	envGatewayRouting         = "SECURITY_GATEWAY_ROUTING_ENABLED"
-	envStrictGatewayAPI       = "SECURITY_STRICT_GATEWAY_API_ENABLED"
-	envAgentJWTVerification   = "SECURITY_AUTHORIZATION_AGENT_JWT_VERIFICATION"
-	envPolicyDataSource       = "SECURITY_AUTHORIZATION_POLICY_DATA_SOURCE"
-	envPolicyRegoOverride     = "SECURITY_AUTHORIZATION_POLICY_REGO_OVERRIDE"
+	envExtAuthzURL              = "SECURITY_AGENT_AUTH_EXT_AUTHZ_URL"
+	envPDPEnabled               = "SECURITY_PDP_ENABLED"
+	envIdentityProvider         = "SECURITY_AGENT_AUTH_IDENTITY_PROVIDER"
+	envServiceAccountAudience   = "SECURITY_AGENT_AUTH_SERVICE_ACCOUNT_AUDIENCE"
+	envServiceAccountExpiration = "SECURITY_AGENT_AUTH_SERVICE_ACCOUNT_EXPIRATION_SECONDS"
+	envServiceAccountTokenPath  = "SECURITY_AGENT_AUTH_SERVICE_ACCOUNT_TOKEN_PATH"
+	envServiceAccountIssuer     = "SECURITY_AGENT_AUTH_SERVICE_ACCOUNT_ISSUER"
+	envServiceAccountJWKS       = "SECURITY_AGENT_AUTH_SERVICE_ACCOUNT_JWKS"
+	envIssuer                   = "SECURITY_AGENT_AUTH_ISSUER"
+	envCredentialSecretPrefix   = "SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX"
+	envUserIssuer               = "SECURITY_USER_AUTH_ISSUER"
+	envUserAudience             = "SECURITY_USER_AUTH_AUDIENCE"
+	envUserJWKSURI              = "SECURITY_USER_AUTH_JWKS_URI"
+	envGatewayNamespace         = "SECURITY_GATEWAY_NAMESPACE"
+	envOperatorNamespace        = "SECURITY_OPERATOR_NAMESPACE"
+	envPodNamespace             = "POD_NAMESPACE"
+	envNetworkPolicyDisabled    = "SECURITY_NETWORK_POLICY_DISABLED"
+	envNetworkPolicyEgress      = "SECURITY_NETWORK_POLICY_EGRESS_ENABLED"
+	envGatewayHost              = "SECURITY_GATEWAY_HOST"
+	envGatewayRouting           = "SECURITY_GATEWAY_ROUTING_ENABLED"
+	envStrictGatewayAPI         = "SECURITY_STRICT_GATEWAY_API_ENABLED"
+	envAgentJWTVerification     = "SECURITY_AUTHORIZATION_AGENT_JWT_VERIFICATION"
+	envPolicyDataSource         = "SECURITY_AUTHORIZATION_POLICY_DATA_SOURCE"
+	envPolicyRegoOverride       = "SECURITY_AUTHORIZATION_POLICY_REGO_OVERRIDE"
 )
 
 // Default namespaces used by NetworkPolicy ingress rules when not configured.
@@ -173,24 +210,44 @@ func GetConfig() Config {
 	if strings.TrimSpace(operatorNamespace) == "" {
 		operatorNamespace = os.Getenv(envPodNamespace)
 	}
+	serviceAccountExpiration := defaultAgentTokenExpirationSeconds
+	if parsed, err := strconv.ParseInt(strings.TrimSpace(os.Getenv(envServiceAccountExpiration)), 10, 64); err == nil && parsed > 0 {
+		serviceAccountExpiration = parsed
+	}
+	serviceAccountAudience := strings.TrimSpace(os.Getenv(envServiceAccountAudience))
+	if serviceAccountAudience == "" {
+		serviceAccountAudience = defaultAgentTokenAudience
+	}
+	serviceAccountTokenPath := strings.TrimSpace(os.Getenv(envServiceAccountTokenPath))
+	if serviceAccountTokenPath == "" {
+		serviceAccountTokenPath = defaultAgentTokenPath
+	}
+	var serviceAccountJWKS map[string]any
+	_ = json.Unmarshal([]byte(os.Getenv(envServiceAccountJWKS)), &serviceAccountJWKS)
 	return Config{
-		PDPEnabled:               parseBoolEnv(envPDPEnabled),
-		ExtAuthzURL:              os.Getenv(envExtAuthzURL),
-		Issuer:                   os.Getenv(envIssuer),
-		CredentialSecretPrefix:   os.Getenv(envCredentialSecretPrefix),
-		UserIssuer:               os.Getenv(envUserIssuer),
-		UserAudience:             os.Getenv(envUserAudience),
-		UserJWKSURIOverride:      os.Getenv(envUserJWKSURI),
-		GatewayNamespace:         os.Getenv(envGatewayNamespace),
-		OperatorNamespace:        operatorNamespace,
-		NetworkPolicyDisabled:    parseBoolEnv(envNetworkPolicyDisabled),
-		NetworkPolicyEgress:      parseBoolEnv(envNetworkPolicyEgress),
-		GatewayHost:              os.Getenv(envGatewayHost),
-		GatewayRouting:           parseBoolEnv(envGatewayRouting),
-		StrictGatewayAPI:         parseBoolEnv(envStrictGatewayAPI),
-		AgentJWTVerificationMode: AgentJWTVerificationMode(readEnumEnv(envAgentJWTVerification)),
-		PolicyDataSource:         PolicyDataSource(readEnumEnv(envPolicyDataSource)),
-		PolicyRegoOverride:       parseBoolEnv(envPolicyRegoOverride),
+		PDPEnabled:                           parseBoolEnv(envPDPEnabled),
+		IdentityProvider:                     IdentityProvider(readEnumEnv(envIdentityProvider)),
+		ServiceAccountAudience:               serviceAccountAudience,
+		ServiceAccountTokenExpirationSeconds: serviceAccountExpiration,
+		ServiceAccountTokenPath:              serviceAccountTokenPath,
+		ServiceAccountIssuer:                 strings.TrimSpace(os.Getenv(envServiceAccountIssuer)),
+		ServiceAccountJWKS:                   serviceAccountJWKS,
+		ExtAuthzURL:                          os.Getenv(envExtAuthzURL),
+		Issuer:                               os.Getenv(envIssuer),
+		CredentialSecretPrefix:               os.Getenv(envCredentialSecretPrefix),
+		UserIssuer:                           os.Getenv(envUserIssuer),
+		UserAudience:                         os.Getenv(envUserAudience),
+		UserJWKSURIOverride:                  os.Getenv(envUserJWKSURI),
+		GatewayNamespace:                     os.Getenv(envGatewayNamespace),
+		OperatorNamespace:                    operatorNamespace,
+		NetworkPolicyDisabled:                parseBoolEnv(envNetworkPolicyDisabled),
+		NetworkPolicyEgress:                  parseBoolEnv(envNetworkPolicyEgress),
+		GatewayHost:                          os.Getenv(envGatewayHost),
+		GatewayRouting:                       parseBoolEnv(envGatewayRouting),
+		StrictGatewayAPI:                     parseBoolEnv(envStrictGatewayAPI),
+		AgentJWTVerificationMode:             AgentJWTVerificationMode(readEnumEnv(envAgentJWTVerification)),
+		PolicyDataSource:                     PolicyDataSource(readEnumEnv(envPolicyDataSource)),
+		PolicyRegoOverride:                   parseBoolEnv(envPolicyRegoOverride),
 	}
 }
 
@@ -237,7 +294,35 @@ func (c Config) SecurityEnabled() bool {
 // AIB credentials into agent pods. This requires security to be enabled and a
 // credential Secret prefix to be configured.
 func (c Config) CredentialMountingEnabled() bool {
-	return c.SecurityEnabled() && strings.TrimSpace(c.CredentialSecretPrefix) != ""
+	return c.IdentityProviderOrDefault() == IdentityProviderAIB && c.SecurityEnabled() && strings.TrimSpace(c.CredentialSecretPrefix) != ""
+}
+
+// IdentityProviderOrDefault returns the single configured issuer, preserving
+// the existing AIB behavior when the setting is omitted or invalid.
+func (c Config) IdentityProviderOrDefault() IdentityProvider {
+	return normalizeEnum(c.IdentityProvider,
+		[]IdentityProvider{IdentityProviderServiceAccount, IdentityProviderOIDC, IdentityProviderAIB},
+		IdentityProviderAIB)
+}
+
+func (c Config) ServiceAccountIdentityEnabled() bool {
+	return c.IdentityProviderOrDefault() == IdentityProviderServiceAccount
+}
+
+// AgentIssuer returns the issuer used by the gateway agent JWT provider.
+func (c Config) AgentIssuer() string {
+	if c.ServiceAccountIdentityEnabled() {
+		return strings.TrimSpace(c.ServiceAccountIssuer)
+	}
+	return strings.TrimSpace(c.Issuer)
+}
+
+// AgentLocalJWKS returns the discovered cluster JWKS for ServiceAccount identity.
+func (c Config) AgentLocalJWKS() map[string]any {
+	if !c.ServiceAccountIdentityEnabled() {
+		return nil
+	}
+	return c.ServiceAccountJWKS
 }
 
 // CredentialSecretName returns the per-agent credential Secret name for the given
@@ -245,6 +330,19 @@ func (c Config) CredentialMountingEnabled() bool {
 // controller that writes the Secret and the mounting path that consumes it.
 func CredentialSecretName(prefix, agentName string) string {
 	return fmt.Sprintf("%s-%s", strings.TrimSpace(prefix), agentName)
+}
+
+// AgentServiceAccountName returns the per-agent Kubernetes identity name.
+func AgentServiceAccountName(agentName string) string {
+	return "kaos-agent-" + agentName
+}
+
+func (c Config) ServiceAccountTokenMountDir() string {
+	return path.Dir(c.ServiceAccountTokenPath)
+}
+
+func (c Config) ServiceAccountTokenFilename() string {
+	return path.Base(c.ServiceAccountTokenPath)
 }
 
 // CredentialSecretName returns the name of the per-agent credential Secret for the
@@ -293,13 +391,16 @@ func (c Config) CredentialSecretFilePath() string {
 // is configured. This is independent of IsOperational (which gates ext_authz):
 // the jwt block is only rendered when at least one issuer is known.
 func (c Config) JWTEnabled() bool {
-	return strings.TrimSpace(c.Issuer) != "" || strings.TrimSpace(c.UserIssuer) != ""
+	return c.AgentIssuer() != "" || strings.TrimSpace(c.UserIssuer) != ""
 }
 
 // AgentJWKSURI returns the JWKS endpoint for the agent (actor) provider, derived
 // from the agent-auth issuer. The broker publishes its signing keys at
 // "<issuer>/oauth2/jwks.json". It returns an empty string when no issuer is set.
 func (c Config) AgentJWKSURI() string {
+	if c.ServiceAccountIdentityEnabled() {
+		return ""
+	}
 	issuer := strings.TrimRight(strings.TrimSpace(c.Issuer), "/")
 	if issuer == "" {
 		return ""
@@ -446,7 +547,7 @@ func (c Config) AuthzJWKSURI() string {
 // issuer is configured, skip otherwise.
 func (c Config) AgentJWTVerificationModeOrDefault() AgentJWTVerificationMode {
 	def := VerificationSkip
-	if strings.TrimSpace(c.Issuer) != "" {
+	if c.AgentIssuer() != "" {
 		def = VerificationVerified
 	}
 	return normalizeEnum(c.AgentJWTVerificationMode,

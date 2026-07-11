@@ -25,6 +25,12 @@ subject_jwt := io.jwt.encode_sign(
 	{"kty": "oct", "k": "c2VjcmV0"},
 )
 
+serviceaccount_actor_jwt := io.jwt.encode_sign(
+	{"alg": "HS256"},
+	{"sub": "system:serviceaccount:demo:kaos-agent-researcher"},
+	{"kty": "oct", "k": "c2VjcmV0"},
+)
+
 request_input(resource) := {"attributes": {"request": {"http": {"headers": {
 	"authorization": sprintf("Bearer %v", [subject_jwt]),
 	"x-agent-authorization": actor_jwt,
@@ -32,6 +38,7 @@ request_input(resource) := {"attributes": {"request": {"http": {"headers": {
 }}}}}
 
 grants := {"kaos://agent/demo/researcher": ["kaos://mcpserver/demo/github"]}
+agents := {"kaos://agent/demo/researcher": {"issuer_sub": "system:serviceaccount:demo:kaos-agent-researcher"}}
 
 test_allows_when_actor_granted_resource if {
 	out := result with input as request_input("kaos://mcpserver/demo/github")
@@ -61,4 +68,15 @@ test_denies_when_no_actor_token if {
 	}}}}}
 		with data.kaos.grants as grants
 	out.action == "deny"
+}
+
+test_allows_serviceaccount_subject_via_agent_mapping if {
+	serviceaccount_input := {"attributes": {"request": {"http": {"headers": {
+		"x-agent-authorization": serviceaccount_actor_jwt,
+		"x-kaos-target-resource": "kaos://mcpserver/demo/github",
+	}}}}}
+	out := result with input as serviceaccount_input
+		with data.kaos.grants as grants
+		with data.kaos.agents as agents
+	out.action == "allow"
 }

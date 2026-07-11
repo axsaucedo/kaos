@@ -1,6 +1,7 @@
 package security
 
 import (
+	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -250,6 +251,41 @@ func TestConstructSecurityPolicyAgentOnlyWhenNoUserIssuer(t *testing.T) {
 	}
 	if providerByName(providers, "user") != nil {
 		t.Errorf("did not expect a user provider without a user issuer")
+	}
+}
+
+func TestConstructSecurityPolicyServiceAccountUsesLocalJWKS(t *testing.T) {
+	cfg := Config{
+		PDPEnabled:             true,
+		IdentityProvider:       IdentityProviderServiceAccount,
+		ServiceAccountAudience: "kaos-gateway",
+		ServiceAccountIssuer:   "https://kubernetes.default.svc",
+		ServiceAccountJWKS: map[string]any{
+			"keys": []any{map[string]any{"kty": "RSA", "kid": "sa-key"}},
+		},
+	}
+	policy, err := constructSecurityPolicy(PolicyParams{Name: "a", Namespace: "ns", RouteName: "a"}, cfg)
+	if err != nil {
+		t.Fatalf("constructSecurityPolicy: %v", err)
+	}
+	agent := providerByName(jwtProviders(t, policy), "agent")
+	if agent == nil || agent["issuer"] != "https://kubernetes.default.svc" {
+		t.Fatalf("agent provider = %#v", agent)
+	}
+	local, found, err := unstructured.NestedMap(agent, "localJWKS")
+	if err != nil || !found || local["type"] != "Inline" {
+		t.Fatalf("localJWKS = %#v found=%v err=%v", local, found, err)
+	}
+	inline, _ := local["inline"].(string)
+	if !strings.Contains(inline, `"kid":"sa-key"`) {
+		t.Fatalf("inline JWKS = %q", inline)
+	}
+	if _, remote := agent["remoteJWKS"]; remote {
+		t.Fatal("ServiceAccount provider must not use remoteJWKS")
+	}
+	audiences, found, err := unstructured.NestedSlice(agent, "audiences")
+	if err != nil || !found || len(audiences) != 1 || audiences[0] != "kaos-gateway" {
+		t.Fatalf("audiences = %#v found=%v err=%v", audiences, found, err)
 	}
 }
 

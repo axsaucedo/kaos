@@ -2,6 +2,7 @@ package security
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -123,13 +124,10 @@ func constructSecurityPolicy(params PolicyParams, cfg Config) (*unstructured.Uns
 func constructJWTProviders(cfg Config) []interface{} {
 	providers := make([]interface{}, 0, 2)
 
-	if agentJWKS := cfg.AgentJWKSURI(); agentJWKS != "" {
-		providers = append(providers, map[string]interface{}{
+	if issuer := cfg.AgentIssuer(); issuer != "" {
+		agentProvider := map[string]interface{}{
 			"name":   "agent",
-			"issuer": strings.TrimSpace(cfg.Issuer),
-			"remoteJWKS": map[string]interface{}{
-				"uri": agentJWKS,
-			},
+			"issuer": issuer,
 			"extractFrom": map[string]interface{}{
 				"headers": []interface{}{
 					map[string]interface{}{
@@ -141,7 +139,18 @@ func constructJWTProviders(cfg Config) []interface{} {
 			"claimToHeaders": []interface{}{
 				map[string]interface{}{"claim": "sub", "header": "x-agent-claim-sub"},
 			},
-		})
+		}
+		if localJWKS := cfg.AgentLocalJWKS(); localJWKS != nil {
+			if raw, err := json.Marshal(localJWKS); err == nil {
+				agentProvider["localJWKS"] = map[string]interface{}{"type": "Inline", "inline": string(raw)}
+				agentProvider["audiences"] = []interface{}{cfg.ServiceAccountAudience}
+			}
+		} else if agentJWKS := cfg.AgentJWKSURI(); agentJWKS != "" {
+			agentProvider["remoteJWKS"] = map[string]interface{}{"uri": agentJWKS}
+		}
+		if _, local := agentProvider["localJWKS"]; local || agentProvider["remoteJWKS"] != nil {
+			providers = append(providers, agentProvider)
+		}
 	}
 
 	if userJWKS := cfg.UserJWKSURI(); userJWKS != "" {

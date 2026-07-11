@@ -12,7 +12,12 @@ automated mode. Both produce the same shape.
       "<actor-id>": ["<resource-id>", "..."]
     },
     "jwks": {
-      "keys": [ { "kty": "RSA", "kid": "...", "n": "...", "e": "AQAB" } ]
+      "<issuer>": {
+        "keys": [ { "kty": "RSA", "kid": "...", "n": "...", "e": "AQAB" } ]
+      }
+    },
+    "agents": {
+      "<actor-id>": { "issuer_sub": "<token-subject>" }
     }
   }
 }
@@ -35,7 +40,13 @@ granting array for the request's actor id.
 
 ## `kaos.jwks` (optional)
 
-The IdP JSON Web Key Set used to verify the actor token signature. Its presence
+The issuer-keyed IdP JSON Web Key Set used to verify the actor token signature. Its presence
 switches the policy from demo mode (decode without verifying, spoofable,
 non-production) to verified mode (`io.jwt.decode_verify` against these keys before
 trusting the `sub`). Omit it only in demo/non-production installs.
+
+## `kaos.agents` (optional)
+
+Maps logical agent identities to issuer subjects when the token subject is not
+the logical KAOS id. ServiceAccount identity uses subjects of the form
+`system:serviceaccount:<namespace>:<serviceaccount>`.

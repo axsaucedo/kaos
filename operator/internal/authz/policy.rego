@@ -28,11 +28,16 @@ jwks_configured if {
 	data.kaos.jwks
 }
 
+unverified_actor_claims := payload if {
+	[_, payload, _] := io.jwt.decode(actor_token)
+}
+
 # Verified mode: a JWKS is configured, so the actor token signature must verify
 # against it before the subject is trusted.
 actor_sub := sub if {
 	jwks_configured
-	result := io.jwt.decode_verify(actor_token, {"cert": json.marshal(data.kaos.jwks)})
+	keys := data.kaos.jwks[unverified_actor_claims.iss]
+	result := io.jwt.decode_verify(actor_token, {"cert": json.marshal(keys)})
 	result[0] == true
 	sub := result[2].sub
 }
@@ -40,27 +45,40 @@ actor_sub := sub if {
 # Demo mode: no JWKS configured, decode without verifying (spoofable).
 actor_sub := sub if {
 	not jwks_configured
-	[_, payload, _] := io.jwt.decode(actor_token)
-	sub := payload.sub
+	sub := unverified_actor_claims.sub
 }
 
-allow contains {"reason": sprintf("actor %v may reach %v", [actor_sub, target_resource])} if {
-	target_resource in data.kaos.grants[actor_sub]
+mapped_actor_id := id if {
+	some id
+	data.kaos.agents[id].issuer_sub == actor_sub
+}
+
+actor_id := mapped_actor_id if {
+	mapped_actor_id
+}
+
+actor_id := actor_sub if {
+	actor_sub
+	not data.kaos.agents
+}
+
+allow contains {"reason": sprintf("actor %v may reach %v", [actor_id, target_resource])} if {
+	target_resource in data.kaos.grants[actor_id]
 }
 
 deny contains {"reason": "missing or invalid actor token"} if {
-	not actor_sub
+	not actor_id
 }
 
 deny contains {"reason": "request declares no target resource"} if {
-	actor_sub
+	actor_id
 	not target_resource
 }
 
-deny contains {"reason": sprintf("actor %v is not granted %v", [actor_sub, target_resource])} if {
-	actor_sub
+deny contains {"reason": sprintf("actor %v is not granted %v", [actor_id, target_resource])} if {
+	actor_id
 	target_resource
-	not target_resource in data.kaos.grants[actor_sub]
+	not target_resource in data.kaos.grants[actor_id]
 }
 
 result := {"action": "deny", "reasons": reasons} if {

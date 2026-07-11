@@ -91,6 +91,15 @@ security:
   # an agent-auth ext_authz URL; when unset, the operator generates no
   # authorization policies and routing behavior is unchanged.
   agentAuth:
+    # identity selects exactly one agent token issuer.
+    identity:
+      # provider is serviceaccount, oidc, or aib. AIB preserves the existing
+      # client-credential Secret behavior.
+      provider: aib
+      serviceAccount:
+        audience: kaos-gateway
+        expirationSeconds: 3600
+        tokenPath: /var/run/secrets/kaos-agent/token
     # authorization groups the coarse authorization knobs.
     authorization:
       # agentJwtVerification selects how the agent (actor) JWT is trusted:
@@ -108,9 +117,7 @@ security:
     # PDP is enabled, the chart uses kaos-pdp.<release-namespace>.svc:9191.
     # Example: opa-envoy.opa-system.svc.cluster.local:9191
     extAuthzUrl: ""
-    # issuer is the agent-auth OIDC issuer (the broker that mints agent actor
-    # tokens). It is propagated to agent pods, which derive the token endpoint
-    # from it. Example: http://aib-enduser.aib-system.svc.cluster.local:8000
+    # issuer is the selected OIDC or AIB issuer URL.
     issuer: ""
     # credentialSecretPrefix is the name prefix of the per-agent credential
     # Secret provisioned by the operator's identity projection. When set (and

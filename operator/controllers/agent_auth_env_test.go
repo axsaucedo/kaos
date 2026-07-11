@@ -129,3 +129,33 @@ func TestBuildAgentAuthEnvVarsWithoutIssuer(t *testing.T) {
 		t.Errorf("credentials must still be mounted without an issuer")
 	}
 }
+
+func TestBuildAgentAuthEnvVarsServiceAccount(t *testing.T) {
+	t.Setenv("SECURITY_AGENT_AUTH_IDENTITY_PROVIDER", "serviceaccount")
+	t.Setenv("SECURITY_AGENT_AUTH_SERVICE_ACCOUNT_TOKEN_PATH", "/var/run/secrets/kaos-agent/token")
+	env := buildAgentAuthEnvVars(newAgent("demo", "researcher"))
+	tokenFile, ok := envByName(env, "AGENT_AUTH_TOKEN_FILE")
+	if !ok || tokenFile.Value != "/var/run/secrets/kaos-agent/token" {
+		t.Fatalf("AGENT_AUTH_TOKEN_FILE = %q (found=%v)", tokenFile.Value, ok)
+	}
+	if _, ok := envByName(env, "AGENT_AUTH_CLIENT_ID"); ok {
+		t.Fatal("ServiceAccount identity must not expose AIB client credentials")
+	}
+}
+
+func TestBuildAgentAuthVolumeServiceAccount(t *testing.T) {
+	t.Setenv("SECURITY_AGENT_AUTH_IDENTITY_PROVIDER", "serviceaccount")
+	t.Setenv("SECURITY_AGENT_AUTH_SERVICE_ACCOUNT_AUDIENCE", "kaos-gateway")
+	t.Setenv("SECURITY_AGENT_AUTH_SERVICE_ACCOUNT_EXPIRATION_SECONDS", "3600")
+	volume, mount := buildAgentAuthVolume(newAgent("demo", "researcher"))
+	if volume == nil || volume.Projected == nil || len(volume.Projected.Sources) != 1 {
+		t.Fatalf("expected projected token volume: %#v", volume)
+	}
+	projection := volume.Projected.Sources[0].ServiceAccountToken
+	if projection == nil || projection.Audience != "kaos-gateway" || projection.ExpirationSeconds == nil || *projection.ExpirationSeconds != 3600 || projection.Path != "token" {
+		t.Fatalf("unexpected token projection: %#v", projection)
+	}
+	if mount == nil || mount.MountPath != "/var/run/secrets/kaos-agent" || !mount.ReadOnly {
+		t.Fatalf("unexpected token mount: %#v", mount)
+	}
+}

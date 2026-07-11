@@ -2,6 +2,7 @@ package adapters
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 
 	corev1 "k8s.io/api/core/v1"
@@ -10,19 +11,23 @@ import (
 
 	"github.com/axsaucedo/kaos/operator/internal/authz"
 	"github.com/axsaucedo/kaos/operator/internal/projection"
+	"github.com/axsaucedo/kaos/operator/pkg/security"
 )
 
 const authzManagedBy = "kaos-operator-authz"
 
 // ConfigMapProjector applies authorization policy and grant data to a ConfigMap.
 type ConfigMapProjector struct {
-	Client         client.Client
-	Name           string
-	Namespace      string
-	JWKSURI        string
-	JWKSClient     *http.Client
-	WriteGrantData bool
-	Disabled       bool
+	Client             client.Client
+	Name               string
+	Namespace          string
+	JWKSURI            string
+	JWKSClient         *http.Client
+	Issuer             string
+	StaticJWKS         map[string]any
+	MapServiceAccounts bool
+	WriteGrantData     bool
+	Disabled           bool
 }
 
 // Apply renders the authorization policy and projected grant data and applies
@@ -34,7 +39,7 @@ func (p *ConfigMapProjector) Apply(ctx context.Context, desired projection.Desir
 	data := map[string]string{authz.PolicyKey: authz.Policy()}
 	if p.WriteGrantData {
 		grants := projection.GrantData(desired)
-		var jwks map[string]any
+		jwks := p.StaticJWKS
 		if p.JWKSURI != "" {
 			fetched, err := authz.FetchJWKS(ctx, p.JWKSClient, p.JWKSURI)
 			if err != nil {
@@ -42,7 +47,16 @@ func (p *ConfigMapProjector) Apply(ctx context.Context, desired projection.Desir
 			}
 			jwks = fetched
 		}
-		dataDoc, err := authz.DataDocument(grants, jwks)
+		var agents map[string]map[string]string
+		if p.MapServiceAccounts {
+			agents = map[string]map[string]string{}
+			for _, agent := range desired.Agents {
+				agents[agent.ExternalID()] = map[string]string{
+					"issuer_sub": fmt.Sprintf("system:serviceaccount:%s:%s", agent.Namespace, security.AgentServiceAccountName(agent.Name)),
+				}
+			}
+		}
+		dataDoc, err := authz.DataDocument(grants, p.Issuer, jwks, agents)
 		if err != nil {
 			return err
 		}

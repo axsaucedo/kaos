@@ -37,6 +37,40 @@ out="$(render)"
 refute "authorization provider selector removed" "$out" 'SECURITY_AUTHORIZATION_PROVIDER'
 refute "PDP disabled by default" "$out" 'name: kaos-pdp'
 refute "disabled PDP does not enable operator enforcement" "$out" 'SECURITY_PDP_ENABLED'
+expect "AIB identity remains default" "$out" 'SECURITY_AGENT_AUTH_IDENTITY_PROVIDER:\s*"aib"'
+
+out="$(render \
+	--set security.agentAuth.identity.provider=serviceaccount \
+	--set security.agentAuth.issuer=http://ignored-issuer \
+	--set security.agentAuth.adminUrl=http://ignored-admin \
+	--set security.agentAuth.credentialSecretPrefix=ignored-secret)"
+expect "ServiceAccount identity selected" "$out" 'SECURITY_AGENT_AUTH_IDENTITY_PROVIDER:\s*"serviceaccount"'
+expect "ServiceAccount audience rendered" "$out" 'SECURITY_AGENT_AUTH_SERVICE_ACCOUNT_AUDIENCE:\s*"kaos-gateway"'
+expect "ServiceAccount expiration rendered" "$out" 'SECURITY_AGENT_AUTH_SERVICE_ACCOUNT_EXPIRATION_SECONDS:\s*"3600"'
+expect "ServiceAccount token path rendered" "$out" 'SECURITY_AGENT_AUTH_SERVICE_ACCOUNT_TOKEN_PATH:\s*"/var/run/secrets/kaos-agent/token"'
+refute "ServiceAccount identity omits AIB issuer" "$out" 'SECURITY_AGENT_AUTH_ISSUER'
+refute "ServiceAccount identity omits AIB admin" "$out" 'AIB_ADMIN_URL'
+refute "ServiceAccount identity omits credential Secret prefix" "$out" 'SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX'
+
+out="$(render \
+	--set security.agentAuth.identity.provider=oidc \
+	--set security.agentAuth.issuer=https://issuer.example \
+	--set security.agentAuth.adminUrl=http://ignored-admin \
+	--set security.agentAuth.credentialSecretPrefix=ignored-secret)"
+expect "OIDC identity selected" "$out" 'SECURITY_AGENT_AUTH_IDENTITY_PROVIDER:\s*"oidc"'
+expect "OIDC issuer rendered" "$out" 'SECURITY_AGENT_AUTH_ISSUER:\s*"https://issuer.example"'
+refute "OIDC identity omits AIB admin" "$out" 'AIB_ADMIN_URL'
+refute "OIDC identity omits credential Secret prefix" "$out" 'SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX'
+
+if invalid_identity="$(helm template t "$CHART_DIR" --set security.agentAuth.identity.provider=invalid 2>&1)"; then
+	echo "FAIL - invalid identity provider was accepted"
+	FAIL=1
+elif grep -q 'must be one of: serviceaccount, oidc, aib' <<<"$invalid_identity"; then
+	echo "ok   - invalid identity provider rejected clearly"
+else
+	echo "FAIL - invalid identity provider error was unclear"
+	FAIL=1
+fi
 
 # PDP renders stock OPA, its gRPC Service, policy mount, and HA budget.
 out="$(render \
