@@ -102,7 +102,6 @@ func TestConstructNetworkPolicyDefaultNamespaces(t *testing.T) {
 func TestConstructNetworkPolicyEgressRules(t *testing.T) {
 	cfg := Config{
 		ExtAuthzURL:         "aib-ext-authz.aib-system.svc.cluster.local:9191",
-		ExtProcURL:          "aib-extproc.aib-system.svc.cluster.local:50051",
 		Issuer:              "http://aib-enduser.aib-system.svc.cluster.local:8000",
 		GatewayNamespace:    "envoy-gateway-system",
 		OperatorNamespace:   "kaos-system",

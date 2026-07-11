@@ -297,7 +297,7 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	// When gateway routing is enabled, repoint internal endpoints at the gateway so
-	// agent->ModelAPI/MCP/peer traffic traverses jwt_authn/ext_authz/ext_proc rather
+	// agent->ModelAPI/MCP/peer traffic traverses jwt_authn/ext_authz rather
 	// than reaching the workload Service directly (which NetworkPolicy denies).
 	r.applyGatewayRouting(ctx, agent, modelapi, mcpServers, peerAgents, memoryStoreName, &memoryEndpoint, log)
 
@@ -423,9 +423,6 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			}
 			if err := security.ReconcileSecurityPolicy(ctx, r.Client, r.Scheme, agent, policyParams, secCfg, log); err != nil {
 				log.Error(err, "failed to reconcile SecurityPolicy")
-			}
-			if err := security.ReconcileEnvoyExtensionPolicy(ctx, r.Client, r.Scheme, agent, policyParams, secCfg, log); err != nil {
-				log.Error(err, "failed to reconcile EnvoyExtensionPolicy")
 			}
 			if err := security.ReconcileNetworkPolicy(ctx, r.Client, r.Scheme, agent, security.NetworkPolicyParams{
 				Name:        routeName,

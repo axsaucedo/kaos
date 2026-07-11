@@ -2,7 +2,7 @@
 
 Validates the Model-1 authorization path where the operator projects KAOS
 resources into a single policy ConfigMap that the enforcement engine (OPA in
-ext_proc) mounts:
+external authorization engine) mounts:
 
 1. The operator's authorization projection controller renders a static
    ``policy.rego`` and, in the default ``automated`` policy-data source, a

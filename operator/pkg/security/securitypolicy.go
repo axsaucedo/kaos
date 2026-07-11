@@ -48,8 +48,8 @@ type PolicyParams struct {
 // unstructured object) attaching JWT authentication and, when the optional
 // ext_authz enforcement seam is enabled, a fail-closed gRPC external
 // authorization check to the target HTTPRoute. The ext_authz block is emitted
-// only in ext_authz enforcement mode (the default is OPA-in-ext_proc); JWT
-// providers are emitted whenever an issuer is configured. It returns a nil policy
+// whenever an ext_authz backend is configured; JWT providers are emitted whenever
+// an issuer is configured. It returns a nil policy
 // when neither block applies, so no SecurityPolicy is created. It returns an
 // error only when the ext_authz backend is enabled but cannot be resolved.
 func constructSecurityPolicy(params PolicyParams, cfg Config) (*unstructured.Unstructured, error) {
@@ -168,9 +168,7 @@ func constructJWTProviders(cfg Config) []interface{} {
 // ReconcileSecurityPolicy creates or updates the SecurityPolicy that guards a
 // protected route with JWT authentication and, when the ext_authz enforcement
 // seam is enabled, an external authorization check. It is a no-op when security
-// is disabled or when neither JWT authn nor ext_authz applies (for example an
-// ext_proc-only install with no issuer), leaving enforcement entirely to the
-// ext_proc OPA path.
+// is disabled or when neither JWT authn nor ext_authz applies.
 func ReconcileSecurityPolicy(
 	ctx context.Context,
 	c client.Client,

@@ -660,7 +660,6 @@ def _build_auth_operator_args(
     user_issuer: str = "",
     user_audience: str = "",
     user_jwks_uri: str = "",
-    ext_proc_url: str = "",
     network_policy: bool = True,
     network_policy_egress: bool = False,
     gateway_routing: bool = False,
@@ -671,7 +670,6 @@ def _build_auth_operator_args(
     tls_issuer_kind: str = "ClusterIssuer",
     tls_secret_name: str = "",
     authz_provider: str = "",
-    authz_gateway_extension: str = "",
     agent_jwt_verification: str = "",
     policy_data_source: str = "",
     policy_rego_override: bool = False,
@@ -683,9 +681,8 @@ def _build_auth_operator_args(
     Returns the flat ``--set key=value`` argument list so it can be unit-tested
     independently of running Helm. User-auth (``security.userAuth.*``) arguments
     are appended only when a user issuer is supplied, keeping agent-only and
-    autonomous-only installs unchanged. The token-exchange ext_proc backend
-    (``security.agentAuth.extProcUrl``) is appended only when supplied. When an
-    admin URL is supplied, the operator's identity projection controller is
+    autonomous-only installs unchanged. When an admin URL is supplied, the
+    operator's identity projection controller is
     enabled via ``security.agentAuth.adminUrl`` so it registers agents and mints
     their per-agent credential Secrets directly.
 
@@ -707,20 +704,11 @@ def _build_auth_operator_args(
             f"security.agentAuth.credentialSecretPrefix={credential_secret_prefix}",
         ]
     )
-    if ext_proc_url:
-        args.extend(["--set", f"security.agentAuth.extProcUrl={ext_proc_url}"])
     if admin_url:
         args.extend(["--set", f"security.agentAuth.adminUrl={admin_url}"])
     if authz_provider:
         args.extend(
             ["--set", f"security.agentAuth.authorization.provider={authz_provider}"]
-        )
-    if authz_gateway_extension:
-        args.extend(
-            [
-                "--set",
-                f"security.agentAuth.authorization.gatewayExtension={authz_gateway_extension}",
-            ]
         )
     if agent_jwt_verification:
         args.extend(
@@ -1288,7 +1276,6 @@ def _expand_auth_preset(preset: str, namespace: str) -> dict:
             "network_policy": True,
             "gateway_routing": True,
             "authz_provider": "aib",
-            "authz_gateway_extension": "ext_proc",
             "agent_jwt_verification": "verified",
             "policy_data_source": "automated",
         }
@@ -1300,7 +1287,6 @@ def _expand_auth_preset(preset: str, namespace: str) -> dict:
             "network_policy": True,
             "gateway_routing": True,
             "authz_provider": "kaos",
-            "authz_gateway_extension": "ext_proc",
             "agent_jwt_verification": "skip",
             "policy_data_source": "automated",
             "policy_configmap_name": DEFAULT_POLICY_CONFIGMAP_NAME,
@@ -1314,7 +1300,6 @@ def _expand_auth_preset(preset: str, namespace: str) -> dict:
             "network_policy": True,
             "gateway_routing": True,
             "authz_provider": "aib",
-            "authz_gateway_extension": "ext_proc",
             "agent_jwt_verification": "verified",
             "policy_data_source": "automated",
         }
@@ -1339,7 +1324,6 @@ def install_command(
     auth_issuer: str | None = None,
     credential_secret_prefix: str = DEFAULT_CREDENTIAL_SECRET_PREFIX,
     token_exchange: bool = True,
-    ext_proc_url: str | None = None,
     aib_chart_path: str | None = None,
     aib_values_path: str | None = None,
     user_auth: bool = True,
@@ -1358,7 +1342,6 @@ def install_command(
     tls_issuer_kind: str = "ClusterIssuer",
     tls_secret_name: str | None = None,
     authz_provider: str | None = None,
-    authz_gateway_extension: str | None = None,
     agent_jwt_verification: str | None = None,
     policy_data_source: str | None = None,
     policy_rego_override: bool = False,
@@ -1400,10 +1383,6 @@ def install_command(
     if auth_enabled:
         ext_authz_url = ext_authz_url or _default_ext_authz_url(auth_namespace)
         auth_issuer = auth_issuer or _default_auth_issuer(auth_namespace, auth_release)
-        if token_exchange:
-            ext_proc_url = ext_proc_url or _default_ext_proc_url(
-                auth_namespace, auth_release
-            )
         if user_auth or token_exchange:
             user_auth_issuer = user_auth_issuer or _default_user_auth_issuer(
                 keycloak_namespace, keycloak_release
@@ -1584,11 +1563,6 @@ def install_command(
                 or _default_auth_admin_url(auth_namespace, auth_release),
                 user_issuer=resolved_user_issuer,
                 user_audience=user_auth_audience if user_auth else "",
-                ext_proc_url=(
-                    ext_proc_url or _default_ext_proc_url(auth_namespace, auth_release)
-                    if token_exchange
-                    else ""
-                ),
                 network_policy=network_policy,
                 network_policy_egress=network_policy_egress,
                 gateway_routing=gateway_routing,
@@ -1599,7 +1573,6 @@ def install_command(
                 tls_issuer_kind=tls_issuer_kind,
                 tls_secret_name=tls_secret_name or "",
                 authz_provider=authz_provider or "",
-                authz_gateway_extension=authz_gateway_extension or "",
                 agent_jwt_verification=agent_jwt_verification or "",
                 policy_data_source=policy_data_source or "",
                 policy_rego_override=policy_rego_override,

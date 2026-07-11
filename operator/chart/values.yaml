@@ -84,11 +84,6 @@ security:
       # provider selects the authorization provider: "none" (default), "kaos"
       # (OPA data from CRDs), or "aib" (broker permission sets).
       provider: ""
-      # gatewayExtension selects which Envoy gateway extension enforces authz.
-      # "ext_proc" (default) enforces via OPA embedded in the ext_proc filter;
-      # "ext_authz" enables the optional, default-off external-authorization
-      # extension and requires extAuthzUrl to point at a gRPC ext_authz backend.
-      gatewayExtension: ""
       # agentJwtVerification selects how the agent (actor) JWT is trusted:
       # "skip" (header-trust, non-production) or "verified" (signature-checked).
       # Empty derives it from the issuer.
@@ -101,17 +96,10 @@ security:
       # key and leaves the data key to the admin. Orthogonal to policyDataSource.
       policyRegoOverride: false
     # extAuthzUrl is the host:port of the Envoy ext_authz access-check gRPC
-    # backend used only when gatewayExtension is "ext_authz" (any standards-
-    # compliant gRPC ext_authz backend, e.g. opa-envoy, is a drop-in).
+    # backend (any standards-compliant gRPC ext_authz backend, e.g. opa-envoy,
+    # is a drop-in).
     # Example: opa-envoy.opa-system.svc.cluster.local:9191
     extAuthzUrl: ""
-    # extProcUrl is the host:port of the Envoy ext_proc token-exchange gRPC
-    # backend (AIB ExtProc by default). When set, the operator generates an
-    # EnvoyExtensionPolicy on protected routes so the backend can exchange the
-    # inbound user subject token for a delegated upstream token. Leaving it empty
-    # disables token exchange and leaves routing behavior unchanged.
-    # Example: aib-ext-proc.aib-system.svc.cluster.local:50051
-    extProcUrl: ""
     # issuer is the agent-auth OIDC issuer (the broker that mints agent actor
     # tokens). It is propagated to agent pods, which derive the token endpoint
     # from it. Example: http://aib-enduser.aib-system.svc.cluster.local:8000
@@ -182,14 +170,14 @@ security:
       enabled: false
   # gatewayRouting injects gateway-routed endpoint URLs into agents so internal
   # agent->ModelAPI/MCP/peer traffic flows through the gateway (where jwt_authn,
-  # ext_authz and ext_proc apply) rather than directly to the workload Service.
+  # ext_authz applies) rather than directly to the workload Service.
   # Off by default; enable together with networkPolicy to make the gateway the
   # only application path between workloads.
   gatewayRouting:
     enabled: false
   # strictGatewayApi turns on gateway-only strict traffic: it enables
   # NetworkPolicy isolation and gateway-routed URLs together, independently of
-  # whether any authorization enforcement hook (extAuthzUrl/extProcUrl) is set.
+  # whether the authorization enforcement hook (extAuthzUrl) is set.
   # Use it to make the Envoy Gateway the only application path between workloads
   # as a standalone posture. It overrides the networkPolicy.enabled escape hatch.
   # Enforcement of the generated NetworkPolicy still requires a CNI that enforces
@@ -238,4 +226,3 @@ telemetry:
 # - ModelAPI (LiteLLM): Maps to LITELLM_LOG
 # - ModelAPI (Ollama): Maps to OLLAMA_DEBUG
 logLevel: INFO
-

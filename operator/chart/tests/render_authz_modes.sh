@@ -70,12 +70,12 @@ out="$(render \
 	--set security.agentAuth.authorization.agentJwtVerification=verified)"
 expect "verified jwt mode" "$out" 'SECURITY_AUTHORIZATION_AGENT_JWT_VERIFICATION:\s*"verified"'
 
-# ext_authz enforcement extension.
+# ext_authz enforcement backend.
 out="$(render \
-	--set security.agentAuth.authorization.gatewayExtension=ext_authz \
 	--set security.agentAuth.extAuthzUrl=http://authz:9000)"
-expect "ext_authz extension" "$out" 'SECURITY_AUTHORIZATION_GATEWAY_EXTENSION:\s*"ext_authz"'
 expect "ext_authz url" "$out" 'SECURITY_AGENT_AUTH_EXT_AUTHZ_URL:\s*"http://authz:9000"'
+refute "gateway extension selector removed" "$out" 'SECURITY_AUTHORIZATION_GATEWAY_EXTENSION'
+refute "ext_proc backend removed" "$out" 'SECURITY_AGENT_AUTH_EXT_PROC_URL'
 
 # The controller-manager pod carries a config checksum so that changes to the
 # operator ConfigMap (e.g. enabling agent auth) roll the pod automatically.

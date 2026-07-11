@@ -1101,31 +1101,6 @@ class TestAuthWiring:
         joined = " ".join(args)
         assert "security.userAuth" not in joined
 
-    def test_build_auth_operator_args_includes_ext_proc_url(self):
-        from kaos_cli.install import _build_auth_operator_args
-
-        args = _build_auth_operator_args(
-            "aib-access-check-grpc.aib-system:9191",
-            "http://aib.aib-system:8000",
-            "kaos-aib",
-            ext_proc_url="aib-agentic-identity-broker-extproc.aib-system:50051",
-        )
-        joined = " ".join(args)
-        assert (
-            "security.agentAuth.extProcUrl="
-            "aib-agentic-identity-broker-extproc.aib-system:50051" in joined
-        )
-
-    def test_build_auth_operator_args_omits_ext_proc_url_when_unset(self):
-        from kaos_cli.install import _build_auth_operator_args
-
-        args = _build_auth_operator_args(
-            "aib-access-check-grpc.aib-system:9191",
-            "http://aib.aib-system:8000",
-            "kaos-aib",
-        )
-        assert "security.agentAuth.extProcUrl=" not in " ".join(args)
-
     def test_build_auth_operator_args_kaos_authorization(self):
         from kaos_cli.install import _build_auth_operator_args
 
@@ -1179,12 +1154,10 @@ class TestAuthWiring:
             admin_url="http://aib.aib-system:8000/api",
             authz_provider="aib",
             policy_data_source="external",
-            authz_gateway_extension="ext_authz",
         )
         joined = " ".join(args)
         assert "security.agentAuth.authorization.provider=aib" in joined
         assert "security.agentAuth.authorization.policyDataSource=external" in joined
-        assert "security.agentAuth.authorization.gatewayExtension=ext_authz" in joined
         assert "security.agentAuth.adminUrl=http://aib.aib-system:8000/api" in joined
 
     def test_build_auth_operator_args_omits_authorization_when_unset(self):
@@ -1615,7 +1588,6 @@ class TestAuthWiring:
         assert kwargs["user_auth"] is True
         assert kwargs["token_exchange"] is True
         assert kwargs["authz_provider"] == "aib"
-        assert kwargs["authz_gateway_extension"] == "ext_proc"
         assert kwargs["agent_jwt_verification"] == "verified"
 
     def test_expand_auth_preset_kaos_internal(self):

@@ -1,6 +1,6 @@
 // Package authz renders the static KAOS Model-1 authorization policy and the
-// per-cluster grant data the enforcement engine (OPA embedded in the AIB
-// ext_proc) reads. The policy is a compiled-in constant; only the data changes
+// per-cluster grant data the external authorization engine reads. The policy is
+// a compiled-in constant; only the data changes
 // as KAOS resources change.
 package authz
 

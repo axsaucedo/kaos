@@ -26,19 +26,13 @@ data:
   GATEWAY_DEFAULT_AGENT_TIMEOUT: {{ .Values.gateway.defaultTimeouts.agent | quote }}
   GATEWAY_DEFAULT_MODELAPI_TIMEOUT: {{ .Values.gateway.defaultTimeouts.modelAPI | quote }}
   GATEWAY_DEFAULT_MCP_TIMEOUT: {{ .Values.gateway.defaultTimeouts.mcp | quote }}
-  # Operator-wide security configuration. Authorization is enforced by OPA
-  # embedded in the ext_proc filter by default; the ext_authz extension is
-  # optional and default-off, enabled only when gatewayExtension is "ext_authz"
-  # with an ext_authz backend URL. Leaving all hooks unset disables enforcement
-  # and leaves existing routing behavior unchanged.
+  # Operator-wide security configuration. Authorization through ext_authz is
+  # default-off; leaving the backend URL unset disables enforcement.
   {{- with .Values.security }}
   {{- with .agentAuth }}
   {{- with .authorization }}
   {{- if .provider }}
   SECURITY_AUTHORIZATION_PROVIDER: {{ .provider | quote }}
-  {{- end }}
-  {{- if .gatewayExtension }}
-  SECURITY_AUTHORIZATION_GATEWAY_EXTENSION: {{ .gatewayExtension | quote }}
   {{- end }}
   {{- if .agentJwtVerification }}
   SECURITY_AUTHORIZATION_AGENT_JWT_VERIFICATION: {{ .agentJwtVerification | quote }}
@@ -52,9 +46,6 @@ data:
   {{- end }}
   {{- if .extAuthzUrl }}
   SECURITY_AGENT_AUTH_EXT_AUTHZ_URL: {{ .extAuthzUrl | quote }}
-  {{- end }}
-  {{- if .extProcUrl }}
-  SECURITY_AGENT_AUTH_EXT_PROC_URL: {{ .extProcUrl | quote }}
   {{- end }}
   {{- if .issuer }}
   SECURITY_AGENT_AUTH_ISSUER: {{ .issuer | quote }}

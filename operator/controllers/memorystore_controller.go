@@ -497,7 +497,7 @@ func (r *MemoryStoreReconciler) reconcileGatewayAndSecurity(ctx context.Context,
 	}
 
 	secCfg := security.GetConfig()
-	if !secCfg.IsOperational() && !secCfg.ExtProcEnabled() {
+	if !secCfg.IsOperational() {
 		return
 	}
 	routeName := gateway.HTTPRouteName(gateway.ResourceTypeMemoryStore, store.Name)
@@ -509,9 +509,6 @@ func (r *MemoryStoreReconciler) reconcileGatewayAndSecurity(ctx context.Context,
 	}
 	if err := security.ReconcileSecurityPolicy(ctx, r.Client, r.Scheme, store, policyParams, secCfg, log); err != nil {
 		log.Error(err, "failed to reconcile SecurityPolicy")
-	}
-	if err := security.ReconcileEnvoyExtensionPolicy(ctx, r.Client, r.Scheme, store, policyParams, secCfg, log); err != nil {
-		log.Error(err, "failed to reconcile EnvoyExtensionPolicy")
 	}
 	// Memory has no external clients, so egress stays namespace-restricted (no
 	// AllowExternalEgress) unlike ModelAPI proxies.
