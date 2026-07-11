@@ -8,6 +8,7 @@ rules:
   - ""
   resources:
   - configmaps
+  - persistentvolumeclaims
   - secrets
   - services
   verbs:
@@ -87,6 +88,7 @@ rules:
   resources:
   - agents
   - mcpservers
+  - memorystores
   - modelapis
   verbs:
   - create
@@ -109,6 +111,7 @@ rules:
   resources:
   - agents/status
   - mcpservers/status
+  - memorystores/status
   - modelapis/status
   verbs:
   - get
@@ -118,6 +121,18 @@ rules:
   - networking.k8s.io
   resources:
   - networkpolicies
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - policy
+  resources:
+  - poddisruptionbudgets
   verbs:
   - create
   - delete

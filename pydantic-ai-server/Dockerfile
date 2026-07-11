@@ -9,6 +9,10 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # Copy only dependency files first for better layer caching
 COPY pyproject.toml ./
 
+# Bring in the shared memory library so uv resolves it from source (../kaos-memory
+# relative to /app), matching the [tool.uv.sources] path used in dev and CI.
+COPY --from=kaos-memory . /kaos-memory
+
 # Install dependencies using UV with cache mount
 # This layer is cached unless pyproject.toml changes
 RUN --mount=type=cache,target=/root/.cache/uv \

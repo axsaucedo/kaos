@@ -21,7 +21,7 @@ pydantic-ai-server/
 │   ├── server.py       # AgentServer, create_agent_server(), HTTP routes
 │   ├── serverutils.py  # AgentDeps, AgentCard, RemoteAgent, AgentServerSettings
 │   ├── tools.py        # DelegationToolset, string-mode handler
-│   ├── memory.py       # LocalMemory, RedisMemory, NullMemory
+│   ├── memory.py       # LocalMemory, RemoteMemory, NullMemory
 │   └── telemetry.py    # OpenTelemetry tracing, metrics, context propagation
 ├── tests/              # Test suite (96+ unit tests)
 └── Dockerfile          # Container image
@@ -40,7 +40,7 @@ flowchart TB
 
     subgraph agent["KAOS Agent (wraps pydantic_ai.Agent)"]
         pydantic["pydantic_ai.Agent<br/>• Native tool calling<br/>• Agentic loop<br/>• Streaming"]
-        memory["Memory Bridge<br/>• KAOS events ↔ Pydantic AI messages<br/>• LocalMemory / RedisMemory / NullMemory"]
+        memory["Memory Bridge<br/>• KAOS events ↔ Pydantic AI messages<br/>• LocalMemory / RemoteMemory / NullMemory"]
         delegation["Delegation Tools<br/>• delegate_to_{name}<br/>• Context forwarding"]
         mcp["MCP Toolsets<br/>• MCPServerStreamableHTTP"]
     end
@@ -72,8 +72,8 @@ flowchart TB
 | `MCP_SERVER_<NAME>_URL` | No | URL for each MCP server |
 | `PEER_AGENTS` | No | Comma-separated peer agent names |
 | `PEER_AGENT_<NAME>_CARD_URL` | No | URL for each peer agent |
-| `MEMORY_TYPE` | No | `local` (default) or `redis` |
 | `MEMORY_ENABLED` | No | Enable/disable memory (default: true) |
+| `MEMORY_STORE_ENDPOINT` | No | Central memory-service URL (set by the operator when a MemoryStore is bound) |
 | `MEMORY_CONTEXT_LIMIT` | No | Max history events (default: 6) |
 | `DEBUG_MOCK_RESPONSES` | No | JSON array for mock testing |
 

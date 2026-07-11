@@ -6,6 +6,7 @@ on:
     paths:
       - 'pydantic-ai-server/**'
       - 'kaos-cli/**'
+      - 'kaos-memory/**'
       - 'operator/config/samples/**'
       - '.github/workflows/python-tests.yaml'
   push:
@@ -13,6 +14,7 @@ on:
     paths:
       - 'pydantic-ai-server/**'
       - 'kaos-cli/**'
+      - 'kaos-memory/**'
       - 'operator/config/samples/**'
       - '.github/workflows/python-tests.yaml'
   workflow_dispatch:
@@ -38,7 +40,7 @@ jobs:
         run: |
           uv venv
           source .venv/bin/activate
-          uv pip install -e .[dev]
+          uv pip install -e ../kaos-memory[pydantic-ai] -e .[dev]
 
       - name: Check formatting with black
         working-directory: pydantic-ai-server
@@ -70,7 +72,7 @@ jobs:
         run: |
           uv venv
           source .venv/bin/activate
-          uv pip install -e .[dev]
+          uv pip install -e ../kaos-memory[pydantic-ai] -e .[dev]
           uv run pytest tests/ -v --cov=. --cov-report=xml
 
       - name: Upload coverage
@@ -103,3 +105,75 @@ jobs:
           uv pip install -e .
           uv pip install pytest pyyaml
           python -m pytest tests/ -v
+
+  memory-service-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install dependencies
+        working-directory: kaos-memory
+        run: |
+          uv venv
+          source .venv/bin/activate
+          uv pip install -e .[service,dev,pydantic-ai]
+
+      - name: Check formatting with black
+        working-directory: kaos-memory
+        run: |
+          source .venv/bin/activate
+          black --check .
+
+      - name: Run type checking
+        working-directory: kaos-memory
+        run: uvx ty@0.0.55 check
+
+  memory-service-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      pgvector:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: pw
+          POSTGRES_DB: memdb
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      KAOS_TEST_PGVECTOR_DSN: postgresql://postgres:pw@localhost:55432/memdb
+      OPENAI_API_KEY: dummy
+      MEM0_TELEMETRY: "False"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Run memory-service tests
+        working-directory: kaos-memory
+        run: |
+          uv venv
+          source .venv/bin/activate
+          uv pip install -e .[service,dev]
+          uv run pytest tests/ -v

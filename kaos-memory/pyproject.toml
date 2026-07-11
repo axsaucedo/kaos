@@ -1,0 +1,63 @@
+[project]
+name = "kaos-memory"
+version = "0.6.1.dev0"
+description = "KAOS production-grade agent memory - tiered stores, memory service, and client for Kubernetes agent orchestration"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+dependencies = [
+    "pydantic>=2.0.0",
+    "httpx>=0.25.0",
+    "opentelemetry-api>=1.20.0",
+]
+
+[project.optional-dependencies]
+# The full memory service: the storage engine (Mem0 + Chroma/pgvector), the
+# short-term relational tier, and the FastAPI surface. Consumers that only speak
+# the wire contract or use the client do not pull these heavy dependencies.
+service = [
+    "pydantic-settings>=2.0.0",
+    "fastapi>=0.104.0",
+    "uvicorn>=0.24.0",
+    "mem0ai==2.0.10",
+    "chromadb>=1.5.0",
+    "psycopg[pool]>=3.1.0",
+    "pgvector>=0.2.0",
+    "tiktoken>=0.7.0",
+    "opentelemetry-sdk>=1.20.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.20.0",
+    "opentelemetry-instrumentation-fastapi>=0.41b0",
+    "opentelemetry-instrumentation-logging>=0.41b0",
+    "opentelemetry-instrumentation-httpx>=0.41b0",
+]
+# Direct Pydantic AI integration: message/turn adapters and the memory toolset.
+pydantic-ai = [
+    "pydantic-ai>=2.0.0,<3.0.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=24.0.0",
+    "opentelemetry-sdk>=1.20.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["kaos_memory"]
+
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+
+[tool.pytest.ini_options]
+markers = [
+    "pgvector: tests that require a local pgvector/Postgres container",
+]
+
+# Deprecation notices from upstream libraries are informational and must not
+# fail type checking; library migrations are handled as deliberate changes.
+[tool.ty.rules]
+deprecated = "ignore"

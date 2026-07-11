@@ -22,6 +22,15 @@ GATEWAY_CLASS_NAME = "envoy-gateway"
 # MetalLB defaults
 METALLB_VERSION = "v0.14.9"
 
+# Development pgvector Postgres (opt-in, dev-only) for external-mode MemoryStores
+PGVECTOR_IMAGE = "pgvector/pgvector:pg16"
+PGVECTOR_NAME = "kaos-memory-pgvector"
+PGVECTOR_SECRET_NAME = "kaos-memory-pgvector"
+PGVECTOR_SECRET_KEY = "dsn"
+PGVECTOR_DB = "kaos"
+PGVECTOR_USER = "kaos"
+PGVECTOR_PASSWORD = "kaos"
+
 # Agent-auth (identity broker) defaults
 DEFAULT_AUTH_NAMESPACE = "aib-system"
 DEFAULT_AUTH_RELEASE = "aib"
@@ -486,67 +495,123 @@ def _install_monitoring(backend: str, namespace: str) -> bool:
     return _install_signoz(namespace)
 
 
-def _install_redis(namespace: str) -> bool:
-    """Install Redis for distributed agent memory."""
-    typer.echo("Installing Redis...")
+def _pgvector_dsn(namespace: str) -> str:
+    """DSN for the in-cluster development pgvector Postgres."""
+    host = f"{PGVECTOR_NAME}.{namespace}.svc.cluster.local"
+    return f"postgresql://{PGVECTOR_USER}:{PGVECTOR_PASSWORD}@{host}:5432/{PGVECTOR_DB}"
 
-    result = run_helm_command(
-        [
-            "repo",
-            "add",
-            "bitnami",
-            "https://charts.bitnami.com/bitnami",
-            "--force-update",
-        ],
-        check=False,
-    )
-    if result.returncode != 0 and "already exists" not in result.stderr:
-        typer.echo(f"Warning adding Bitnami repo: {result.stderr}", err=True)
 
-    run_helm_command(["repo", "update"], check=False)
+def _pgvector_manifest(namespace: str) -> str:
+    """Render the Secret, Deployment, and Service for the dev pgvector Postgres."""
+    dsn = _pgvector_dsn(namespace)
+    return f"""apiVersion: v1
+kind: Secret
+metadata:
+  name: {PGVECTOR_SECRET_NAME}
+  namespace: {namespace}
+stringData:
+  {PGVECTOR_SECRET_KEY}: {dsn}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {PGVECTOR_NAME}
+  namespace: {namespace}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {PGVECTOR_NAME}
+  template:
+    metadata:
+      labels:
+        app: {PGVECTOR_NAME}
+    spec:
+      containers:
+      - name: postgres
+        image: {PGVECTOR_IMAGE}
+        env:
+        - name: POSTGRES_USER
+          value: {PGVECTOR_USER}
+        - name: POSTGRES_PASSWORD
+          value: {PGVECTOR_PASSWORD}
+        - name: POSTGRES_DB
+          value: {PGVECTOR_DB}
+        ports:
+        - containerPort: 5432
+        readinessProbe:
+          exec:
+            command: ["pg_isready", "-U", "{PGVECTOR_USER}", "-d", "{PGVECTOR_DB}"]
+          initialDelaySeconds: 5
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {PGVECTOR_NAME}
+  namespace: {namespace}
+spec:
+  selector:
+    app: {PGVECTOR_NAME}
+  ports:
+  - port: 5432
+    targetPort: 5432
+"""
 
-    result = run_helm_command(
-        [
-            "upgrade",
-            "--install",
-            "redis",
-            "bitnami/redis",
-            "--namespace",
-            namespace,
-            "--create-namespace",
-            "--set",
-            "architecture=standalone",
-            "--set",
-            "auth.enabled=false",
-        ],
-        check=False,
+
+def _install_pgvector(namespace: str) -> bool:
+    """Provision a development pgvector Postgres for external-mode MemoryStores.
+
+    This is an opt-in, dev-only datastore (single replica, no persistence,
+    default credentials). It writes a Secret holding the connection DSN that an
+    ``external`` MemoryStore references via connectionSecretRef.
+    """
+    typer.echo("Installing development pgvector Postgres...")
+
+    ns_result = _run_kubectl(["create", "namespace", namespace], check=False)
+    if ns_result.returncode != 0 and "already exists" not in ns_result.stderr:
+        typer.echo(f"Warning creating namespace: {ns_result.stderr}", err=True)
+
+    result = _run_kubectl(
+        ["apply", "-f", "-"], check=False, input=_pgvector_manifest(namespace)
     )
     if result.returncode != 0:
-        typer.echo(f"Error installing Redis: {result.stderr}", err=True)
+        typer.echo(f"Error installing pgvector Postgres: {result.stderr}", err=True)
         return False
 
-    typer.echo(f"✅ Redis installed in '{namespace}' namespace")
+    _run_kubectl(
+        [
+            "rollout",
+            "status",
+            f"deployment/{PGVECTOR_NAME}",
+            "--namespace",
+            namespace,
+            "--timeout=120s",
+        ],
+        check=False,
+    )
+
+    typer.echo(
+        f"✅ pgvector Postgres installed in '{namespace}' "
+        f"(dev-only; DSN in secret '{PGVECTOR_SECRET_NAME}' key '{PGVECTOR_SECRET_KEY}')"
+    )
     return True
 
 
-def _uninstall_redis(namespace: str) -> bool:
-    """Uninstall Redis."""
-    typer.echo("Uninstalling Redis...")
-
-    result = run_helm_command(
-        ["uninstall", "redis", "--namespace", namespace],
-        check=False,
-    )
-
-    if result.returncode == 0:
-        typer.echo(f"✅ Redis uninstalled from '{namespace}'")
-        return True
-    elif "not found" in result.stderr.lower():
-        typer.echo(f"Redis release not found in namespace '{namespace}'.")
-        return True
-    else:
-        typer.echo(f"Error uninstalling Redis: {result.stderr}", err=True)
-        return False
+def _uninstall_pgvector(namespace: str) -> bool:
+    """Remove the development pgvector Postgres and its connection secret."""
+    typer.echo("Uninstalling development pgvector Postgres...")
+    for kind, name in (
+        ("deployment", PGVECTOR_NAME),
+        ("service", PGVECTOR_NAME),
+        ("secret", PGVECTOR_SECRET_NAME),
+    ):
+        _run_kubectl(
+            ["delete", kind, name, "--namespace", namespace, "--ignore-not-found"],
+            check=False,
+        )
+    typer.echo(f"✅ pgvector Postgres uninstalled from '{namespace}'")
+    return True
 
 
 def _auth_broker_fullname(auth_release: str) -> str:
@@ -1265,7 +1330,7 @@ def install_command(
     monitoring_enabled: str | None = None,
     gateway_enabled: bool = False,
     metallb_enabled: bool = False,
-    redis_enabled: bool = False,
+    pgvector_memory_enabled: bool = False,
     chart_path: str | None = None,
     auth_enabled: bool = False,
     auth_namespace: str = DEFAULT_AUTH_NAMESPACE,
@@ -1324,9 +1389,12 @@ def install_command(
                 "Warning: Monitoring installation failed, continuing...", err=True
             )
 
-    if redis_enabled:
-        if not _install_redis(namespace):
-            typer.echo("Warning: Redis installation failed, continuing...", err=True)
+    if pgvector_memory_enabled:
+        if not _install_pgvector(namespace):
+            typer.echo(
+                "Warning: pgvector Postgres installation failed, continuing...",
+                err=True,
+            )
 
     # Resolve agent-auth endpoints (used for both component installs and operator wiring)
     if auth_enabled:
@@ -1500,11 +1568,6 @@ def install_command(
         helm_args.extend(["--set", "gatewayAPI.createGateway=true"])
         helm_args.extend(["--set", f"gatewayAPI.gatewayClassName={GATEWAY_CLASS_NAME}"])
 
-    if redis_enabled:
-        helm_args.extend(["--set", "agentDefaults.memory.type=redis"])
-        redis_url = f"redis://redis-master.{namespace}:6379"
-        helm_args.extend(["--set", f"agentDefaults.memory.redisUrl={redis_url}"])
-
     if auth_enabled:
         resolved_user_issuer = (
             user_auth_issuer
@@ -1572,7 +1635,7 @@ def uninstall_command(
     monitoring_enabled: str | None = None,
     gateway_enabled: bool = False,
     metallb_enabled: bool = False,
-    redis_enabled: bool = False,
+    pgvector_memory_enabled: bool = False,
 ) -> None:
     """Uninstall the KAOS operator using Helm."""
     if not check_helm_installed():
@@ -1583,9 +1646,8 @@ def uninstall_command(
     if monitoring_enabled:
         _uninstall_monitoring(monitoring_enabled, namespace)
 
-    # Uninstall Redis if requested
-    if redis_enabled:
-        _uninstall_redis(namespace)
+    if pgvector_memory_enabled:
+        _uninstall_pgvector(namespace)
 
     # Delete all KAOS custom resources so operator can process finalizers
     typer.echo("Deleting KAOS custom resources...")

@@ -95,9 +95,9 @@ export default withMermaid(defineConfig({
         items: [
           { text: 'Custom MCP Server', link: '/examples/custom-mcp-server' },
           { text: 'Custom Agent Image', link: '/examples/custom-agent' },
+          { text: 'Agent Memory', link: '/examples/memory' },
           { text: 'KAOS Monkey', link: '/examples/kaos-monkey' },
           { text: 'Autonomous Agent', link: '/examples/autonomous-agent' },
-          { text: 'Redis Distributed Memory', link: '/examples/redis-memory' },
           { text: 'Pctx MCP Code Mode', link: '/examples/unified-mcp-gateway' },
           { text: 'FastMCP MCP Code Mode', link: '/examples/fastmcp-codemode' },
           { text: 'Multi-Agent Telemetry', link: '/examples/multi-agent-telemetry' }
@@ -109,6 +109,8 @@ export default withMermaid(defineConfig({
           { text: 'Agent CRD', link: '/operator/agent-crd' },
           { text: 'ModelAPI CRD', link: '/operator/modelapi-crd' },
           { text: 'MCPServer CRD', link: '/operator/mcpserver-crd' },
+          { text: 'MemoryStore CRD', link: '/operator/memorystore-crd' },
+          { text: 'Memory Architecture', link: '/operator/memory-architecture' },
           { text: 'Gateway API', link: '/operator/gateway-api' },
           { text: 'OpenTelemetry', link: '/operator/telemetry' }
         ]

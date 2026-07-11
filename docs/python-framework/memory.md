@@ -7,7 +7,7 @@ The memory system provides session management and event storage for agents. It t
 | Class | Description | Use Case |
 |-------|-------------|----------|
 | `LocalMemory` | In-memory storage with limits | Default, single-pod |
-| `RedisMemory` | Redis-backed distributed storage | Multi-replica, persistent |
+| `RemoteMemory` | Central memory-service client (short + long-term tiers) | MemoryStore-bound agents |
 | `NullMemory` | No-op implementation | Disabled memory |
 
 ## Configuration
@@ -17,11 +17,10 @@ The memory system provides session management and event storage for agents. It t
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MEMORY_ENABLED` | `true` | Enable/disable all memory operations |
-| `MEMORY_TYPE` | `local` | Memory backend: `local` or `redis` |
 | `MEMORY_CONTEXT_LIMIT` | `6` | Max history events for context window |
 | `MEMORY_MAX_SESSIONS` | `1000` | Max sessions (LocalMemory) |
 | `MEMORY_MAX_SESSION_EVENTS` | `500` | Max events per session (LocalMemory) |
-| `MEMORY_REDIS_URL` | - | Redis URL (required when `MEMORY_TYPE=redis`) |
+| `MEMORY_STORE_ENDPOINT` | - | Central memory-service URL (set by the operator when a MemoryStore is bound; selects `RemoteMemory`) |
 
 ### Via Agent CRD
 
@@ -30,11 +29,24 @@ spec:
   config:
     memory:
       enabled: true
-      type: local
-      contextLimit: 6
-      maxSessions: 1000
-      maxSessionEvents: 500
+      type: remote            # "remote" (bound MemoryStore) or "local" (pod-local)
+      memoryStore: shared-memory
+      scope: user             # private | user | shared | session
+      tools: all              # all | read | write
+      failureMode: soft       # soft | strict
 ```
+
+See the [Agent CRD](../operator/agent-crd.md#configmemory) and [MemoryStore CRD](../operator/memorystore-crd.md) references for the full memory surface (scopes, tools, client params, storage modes).
+
+### Memory tiers
+
+A `RemoteMemory` agent layers three tiers behind one client:
+
+- **Short-term** — a verbatim window of recent turns replayed for conversational continuity (also the local fallback when the store is degraded).
+- **Medium-term** — a rolling summary/digest of evicted turns (`clientParams.rollingSummary`).
+- **Long-term** — semantic, cross-session facts extracted into the bound [MemoryStore](../operator/memorystore-crd.md) and recalled by relevance.
+
+`LocalMemory` keeps only the pod-local short-term window.
 
 ## Memory-Enabled Gating
 
@@ -137,17 +149,17 @@ curl http://localhost:8000/memory/events?session_id=abc&limit=50
 curl http://localhost:8000/memory/sessions
 ```
 
-## RedisMemory
+## RemoteMemory
 
-Distributed memory backend for multi-replica deployments:
+Central memory-service client used when an agent is bound to a `MemoryStore`. The operator injects `MEMORY_STORE_ENDPOINT` and the runtime routes short- and long-term memory through the service:
 
 ```python
-from pais.memory import RedisMemory
+from pais.memory import RemoteMemory
 
-memory = RedisMemory(redis_url="redis://localhost:6379")
+memory = RemoteMemory("http://memory-service.namespace:8080")
 ```
 
-Uses the same API as `LocalMemory`. Sessions and events are stored in Redis with key prefixes.
+Uses the same API as `LocalMemory`; persistence and cross-session recall are handled by the memory service.
 
 ## Cleanup
 

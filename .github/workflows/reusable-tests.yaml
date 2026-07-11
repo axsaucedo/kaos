@@ -76,6 +76,8 @@ jobs:
         shard:
           - name: core
             files: "e2e/test_base_func_e2e.py e2e/test_modelapi_e2e.py e2e/test_a2a_e2e.py e2e/test_autonomous_e2e.py"
+          - name: memory
+            files: "e2e/test_memory_store_e2e.py"
           - name: mcp
             files: "e2e/test_mcp_tools_e2e.py"
           - name: multi-agent
@@ -89,15 +91,15 @@ jobs:
           - name: examples-code-mode
             files: "e2e/test_examples_e2e.py"
             pytest_filter: "test_fastmcp_codemode_example"
-          - name: example-redis-memory
-            files: "e2e/test_examples_e2e.py"
-            pytest_filter: "test_redis_memory_example"
           - name: example-custom-agent
             files: "e2e/test_examples_e2e.py"
             pytest_filter: "test_custom_agent_example"
           - name: example-autonomous
             files: "e2e/test_examples_e2e.py"
             pytest_filter: "test_autonomous_agent_example"
+          - name: example-memory
+            files: "e2e/test_examples_e2e.py"
+            pytest_filter: "test_memory_example"
     name: E2E (${{ matrix.shard.name }})
     steps:
       - name: Checkout
@@ -143,6 +145,8 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: ./pydantic-ai-server
+          build-contexts: |
+            kaos-memory=./kaos-memory
           load: true
           tags: ${{ env.REGISTRY }}/kaos-agent:${{ env.AGENT_TAG }}
           cache-from: type=gha,scope=agent-e2e
@@ -169,9 +173,6 @@ jobs:
 
       - name: Pull Ollama image
         run: docker pull ollama/ollama:latest
-
-      - name: Pull Redis image
-        run: docker pull redis:7-alpine
 
       - name: Tag MCP server image
         run: |
@@ -207,6 +208,16 @@ jobs:
           cache-to: type=gha,scope=mcp-fastmcp-codemode-e2e,mode=max
           github-token: ${{ github.token }}
 
+      - name: Build memory-service image
+        uses: docker/build-push-action@v7
+        with:
+          context: ./kaos-memory
+          load: true
+          tags: ${{ env.REGISTRY }}/kaos-memory-service:${{ env.AGENT_TAG }}
+          cache-from: type=gha,scope=memory-service-e2e
+          cache-to: type=gha,scope=memory-service-e2e,mode=max
+          github-token: ${{ github.token }}
+
 
       - name: Load images into KIND
         run: |
@@ -218,10 +229,10 @@ jobs:
           kind load docker-image ${{ env.REGISTRY }}/kaos-mcp-python-string:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }} &
           kind load docker-image ${{ env.REGISTRY }}/kaos-mcp-pctx-codemode:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }} &
           kind load docker-image ${{ env.REGISTRY }}/kaos-mcp-fastmcp-codemode:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }} &
+          kind load docker-image ${{ env.REGISTRY }}/kaos-memory-service:${{ env.AGENT_TAG }} --name ${{ env.KIND_CLUSTER_NAME }} &
           wait
           kind load docker-image ghcr.io/berriai/litellm:main-stable --name ${{ env.KIND_CLUSTER_NAME }}
           kind load docker-image ollama/ollama:latest --name ${{ env.KIND_CLUSTER_NAME }}
-          kind load docker-image redis:7-alpine --name ${{ env.KIND_CLUSTER_NAME }}
 
 
       - name: Install KAOS operator

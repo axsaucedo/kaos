@@ -48,35 +48,72 @@ type AgentNetworkConfig struct {
 
 // +kubebuilder:object:generate=true
 
-// MemoryConfig defines memory settings for the agent
+// MemoryClientParams carries the per-agent runtime knobs forwarded to the memory
+// client. It is deliberately minimal: shared-window, digest, sweeper, and
+// extraction knobs are service-global and live on the MemoryStore, because the
+// working window is keyed by scope and shared across agents.
+type MemoryClientParams struct {
+	// TokenBudget caps the verbatim short-term window the runtime replays, in
+	// tokens. When unset the runtime uses its built-in default.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Optional
+	TokenBudget *int32 `json:"tokenBudget,omitempty"`
+
+	// RollingSummary controls whether the runtime maintains a rolling summary of
+	// evicted turns (default: true in the runtime).
+	// +kubebuilder:validation:Optional
+	RollingSummary *bool `json:"rollingSummary,omitempty"`
+}
+
+// +kubebuilder:object:generate=true
+
+// MemoryConfig defines the agent's memory behaviour. It binds the agent to a
+// MemoryStore for the long-term tier and configures the runtime memory client.
+// +kubebuilder:validation:XValidation:rule="!has(self.type) || self.type != 'remote' || has(self.memoryStore)",message="type 'remote' requires memoryStore to be set"
+// +kubebuilder:validation:XValidation:rule="!has(self.type) || self.type != 'local' || !has(self.memoryStore)",message="type 'local' must not set memoryStore"
+// +kubebuilder:validation:XValidation:rule="!has(self.scope) || (self.scope != 'user' && self.scope != 'shared') || has(self.memoryStore)",message="scope 'user' or 'shared' requires memoryStore to be set"
+// +kubebuilder:validation:XValidation:rule="!has(self.tools) || has(self.memoryStore)",message="tools requires memoryStore to be set"
 type MemoryConfig struct {
-	// Enabled controls whether memory is enabled (default: true)
-	// When disabled, NullMemory is used (no-op implementation)
+	// Enabled controls whether memory is enabled (default: true).
+	// When disabled the runtime uses a no-op memory implementation.
 	// +kubebuilder:default=true
 	Enabled *bool `json:"enabled,omitempty"`
 
-	// Type specifies the memory implementation (default: "local")
-	// +kubebuilder:default="local"
-	// +kubebuilder:validation:Enum=local;redis
+	// Type selects the memory backend. "remote" requires a bound memoryStore and
+	// uses the central memory service; "local" forbids a memoryStore and uses the
+	// pod-local short-term fallback. When omitted it is derived from memoryStore
+	// presence (remote if bound, local otherwise).
+	// +kubebuilder:validation:Enum=local;remote
+	// +kubebuilder:validation:Optional
 	Type string `json:"type,omitempty"`
 
-	// ContextLimit is the number of messages to include in delegation context (default: 6)
-	// +kubebuilder:validation:Minimum=1
-	// +kubebuilder:validation:Maximum=100
-	// +kubebuilder:default=6
-	ContextLimit *int32 `json:"contextLimit,omitempty"`
+	// MemoryStore is the name of a MemoryStore in the same namespace providing the
+	// long-term tier for this agent.
+	// +kubebuilder:validation:Optional
+	MemoryStore string `json:"memoryStore,omitempty"`
 
-	// MaxSessions is the maximum number of sessions to keep in memory (default: 1000)
-	// +kubebuilder:validation:Minimum=1
-	// +kubebuilder:validation:Maximum=100000
-	// +kubebuilder:default=1000
-	MaxSessions *int32 `json:"maxSessions,omitempty"`
+	// Scope selects whose memory this agent reads and writes. "user" and "shared"
+	// require a bound memoryStore.
+	// +kubebuilder:validation:Enum=private;user;shared;session
+	// +kubebuilder:validation:Optional
+	Scope string `json:"scope,omitempty"`
 
-	// MaxSessionEvents is the maximum events per session before eviction (default: 500)
-	// +kubebuilder:validation:Minimum=1
-	// +kubebuilder:validation:Maximum=10000
-	// +kubebuilder:default=500
-	MaxSessionEvents *int32 `json:"maxSessionEvents,omitempty"`
+	// ClientParams carries the minimal per-agent runtime memory knobs.
+	// +kubebuilder:validation:Optional
+	ClientParams *MemoryClientParams `json:"clientParams,omitempty"`
+
+	// Tools exposes explicit memory tools to the agent on top of the automatic
+	// recall/write baseline: "all" (save + search), "read" (search), "write"
+	// (save). Requires a bound memoryStore.
+	// +kubebuilder:validation:Enum=all;read;write
+	// +kubebuilder:validation:Optional
+	Tools string `json:"tools,omitempty"`
+
+	// FailureMode overrides the memory store's default write/forget failure mode
+	// for this agent. When unset the store's default_failure_mode governs.
+	// +kubebuilder:validation:Enum=soft;strict
+	// +kubebuilder:validation:Optional
+	FailureMode string `json:"failureMode,omitempty"`
 }
 
 // +kubebuilder:object:generate=true
@@ -104,9 +141,16 @@ type AgentConfig struct {
 	// +kubebuilder:validation:Optional
 	Description string `json:"description,omitempty"`
 
-	// Instructions are the system instructions for the agent
+	// Instructions are the system instructions for the agent. Instructions are
+	// re-evaluated on every run and are not retained in the conversation history.
 	// +kubebuilder:validation:Optional
 	Instructions string `json:"instructions,omitempty"`
+
+	// SystemPrompt is an optional system prompt for the agent. Unlike
+	// instructions, a system prompt is retained in the conversation history.
+	// When empty, only instructions are applied.
+	// +kubebuilder:validation:Optional
+	SystemPrompt string `json:"systemPrompt,omitempty"`
 
 	// ReasoningLoopMaxSteps is the maximum number of reasoning steps before stopping
 	// +kubebuilder:validation:Minimum=1
@@ -250,6 +294,14 @@ type AgentStatus struct {
 
 	// Message provides additional status information
 	Message string `json:"message,omitempty"`
+
+	// Conditions represent the latest available observations of the agent's state.
+	// The MemoryDegraded condition is set when a bound MemoryStore is not Ready
+	// while the agent continues serving short-term-only memory.
+	// +kubebuilder:validation:Optional
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 
 	// Deployment contains status information from the underlying Deployment
 	// +kubebuilder:validation:Optional

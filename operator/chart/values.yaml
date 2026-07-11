@@ -10,7 +10,7 @@ controllerManager:
       readOnlyRootFilesystem: true
     image:
       repository: axsauze/kaos-operator
-      tag: 0.4.8-dev
+      tag: 0.6.1-dev
     imagePullPolicy: IfNotPresent
     resources:
       limits:
@@ -30,15 +30,16 @@ kubernetesClusterDomain: cluster.local
 
 # Default images for agent runtime and MCP servers
 defaultImages:
-  agentRuntime: axsauze/kaos-agent:0.4.8-dev
-  mcpServer: axsauze/kaos-mcp-server:0.4.8-dev
-  mcpPythonString: axsauze/kaos-mcp-python-string:0.4.8-dev
-  mcpPctxCodemode: axsauze/kaos-mcp-pctx-codemode:0.4.8-dev
-  mcpFastmcpCodemode: axsauze/kaos-mcp-fastmcp-codemode:0.4.8-dev
+  agentRuntime: axsauze/kaos-agent:0.6.1-dev
+  mcpServer: axsauze/kaos-mcp-server:0.6.1-dev
+  mcpPythonString: axsauze/kaos-mcp-python-string:0.6.1-dev
+  mcpPctxCodemode: axsauze/kaos-mcp-pctx-codemode:0.6.1-dev
+  mcpFastmcpCodemode: axsauze/kaos-mcp-fastmcp-codemode:0.6.1-dev
   mcpKubernetes: quay.io/containers/kubernetes_mcp_server:latest
   mcpSlack: zencoderai/slack-mcp:latest
   litellm: ghcr.io/berriai/litellm:main-stable
   ollama: ollama/ollama:latest
+  memoryService: axsauze/kaos-memory-service:0.4.8-dev
 
 # MCP Runtime registry configuration
 mcpRuntimes:
@@ -238,11 +239,3 @@ telemetry:
 # - ModelAPI (Ollama): Maps to OLLAMA_DEBUG
 logLevel: INFO
 
-# Agent defaults configuration
-agentDefaults:
-  memory:
-    # type is the default memory backend: "local" or "redis"
-    type: local
-    # redisUrl is the Redis connection URL (used when type is "redis")
-    # Example: "redis://redis.kaos-system:6379"
-    redisUrl: ""

@@ -97,10 +97,10 @@ def install(
         "--metallb-enabled",
         help="Install MetalLB for LoadBalancer support (KIND/bare-metal clusters).",
     ),
-    redis_enabled: bool = typer.Option(
+    pgvector_memory_enabled: bool = typer.Option(
         False,
-        "--redis-enabled",
-        help="Enable Redis for distributed agent memory.",
+        "--pgvector-memory-enabled",
+        help="Provision a development pgvector Postgres for external-mode MemoryStores (dev-only).",
     ),
     auth_enabled: str | None = typer.Option(
         None,
@@ -193,7 +193,7 @@ def install(
         monitoring_enabled=monitoring_enabled,
         gateway_enabled=gateway_enabled,
         metallb_enabled=metallb_enabled,
-        redis_enabled=redis_enabled,
+        pgvector_memory_enabled=pgvector_memory_enabled,
         chart_path=chart_path,
         auth_namespace=auth_namespace,
         keycloak_namespace=keycloak_namespace,
@@ -235,10 +235,10 @@ def uninstall(
         "--metallb-enabled",
         help="Also uninstall MetalLB.",
     ),
-    redis_enabled: bool = typer.Option(
+    pgvector_memory_enabled: bool = typer.Option(
         False,
-        "--redis-enabled",
-        help="Also uninstall Redis.",
+        "--pgvector-memory-enabled",
+        help="Also uninstall the development pgvector Postgres.",
     ),
 ) -> None:
     """Uninstall the KAOS operator."""
@@ -254,7 +254,7 @@ def uninstall(
         monitoring_enabled=monitoring_enabled,
         gateway_enabled=gateway_enabled,
         metallb_enabled=metallb_enabled,
-        redis_enabled=redis_enabled,
+        pgvector_memory_enabled=pgvector_memory_enabled,
     )
 
 
