@@ -32,41 +32,33 @@ refute() {
 	fi
 }
 
-# Default install: no authorization provider is rendered.
+# Default install: the removed provider selector is not rendered.
 out="$(render)"
-refute "default omits authorization provider" "$out" 'SECURITY_AUTHORIZATION_PROVIDER'
+refute "authorization provider selector removed" "$out" 'SECURITY_AUTHORIZATION_PROVIDER'
 
-# KAOS provider, automated policy data source, with a policy ConfigMap target.
+# Automated policy data source with a policy ConfigMap target.
 out="$(render \
-	--set security.agentAuth.authorization.provider=kaos \
 	--set security.agentAuth.authorization.policyDataSource=automated \
 	--set security.agentAuth.projection.policyConfigMap.name=kaos-authz-policy \
 	--set security.agentAuth.projection.policyConfigMap.namespace=aib-system)"
-expect "kaos provider set" "$out" 'SECURITY_AUTHORIZATION_PROVIDER:\s*"kaos"'
 expect "automated data source" "$out" 'SECURITY_AUTHORIZATION_POLICY_DATA_SOURCE:\s*"automated"'
 expect "policy configmap name" "$out" 'AUTHZ_POLICY_CONFIGMAP_NAME:\s*"kaos-authz-policy"'
 expect "policy configmap namespace" "$out" 'AUTHZ_POLICY_CONFIGMAP_NAMESPACE:\s*"aib-system"'
 
-# KAOS provider, operator-rego override (admin authors the grant data).
+# Operator-rego override (admin authors the grant data).
 out="$(render \
-	--set security.agentAuth.authorization.provider=kaos \
 	--set security.agentAuth.authorization.policyDataSource=manual \
 	--set security.agentAuth.authorization.policyRegoOverride=true)"
 expect "rego override set" "$out" 'SECURITY_AUTHORIZATION_POLICY_REGO_OVERRIDE:\s*"true"'
 expect "manual data source" "$out" 'SECURITY_AUTHORIZATION_POLICY_DATA_SOURCE:\s*"manual"'
 
-# Broker provider, external off-switch.
+# Broker identity provisioning is independent of policy compilation.
 out="$(render \
-	--set security.agentAuth.authorization.provider=aib \
-	--set security.agentAuth.authorization.policyDataSource=external \
 	--set security.agentAuth.adminUrl=http://aib:8000/api)"
-expect "aib provider set" "$out" 'SECURITY_AUTHORIZATION_PROVIDER:\s*"aib"'
-expect "external data source" "$out" 'SECURITY_AUTHORIZATION_POLICY_DATA_SOURCE:\s*"external"'
 expect "broker admin url" "$out" 'AIB_ADMIN_URL:\s*"http://aib:8000/api"'
 
 # Verified agent JWT verification mode.
 out="$(render \
-	--set security.agentAuth.authorization.provider=kaos \
 	--set security.agentAuth.authorization.agentJwtVerification=verified)"
 expect "verified jwt mode" "$out" 'SECURITY_AUTHORIZATION_AGENT_JWT_VERIFICATION:\s*"verified"'
 

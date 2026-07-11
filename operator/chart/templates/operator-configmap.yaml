@@ -31,9 +31,6 @@ data:
   {{- with .Values.security }}
   {{- with .agentAuth }}
   {{- with .authorization }}
-  {{- if .provider }}
-  SECURITY_AUTHORIZATION_PROVIDER: {{ .provider | quote }}
-  {{- end }}
   {{- if .agentJwtVerification }}
   SECURITY_AUTHORIZATION_AGENT_JWT_VERIFICATION: {{ .agentJwtVerification | quote }}
   {{- end }}
@@ -55,9 +52,7 @@ data:
   {{- end }}
   {{- if .adminUrl }}
   # Broker identity projection: when an admin URL is set the operator registers
-  # agents, mints per-agent credential Secrets, and (unless the external
-  # off-switch is selected) projects services/permission sets into the broker
-  # admin API.
+  # agents and mints per-agent credential Secrets through the broker admin API.
   AIB_ADMIN_URL: {{ .adminUrl | quote }}
   AIB_PRINCIPAL: {{ .adminPrincipal | default "kaos-operator" | quote }}
   AIB_PRINCIPAL_HEADER: {{ .adminPrincipalHeader | default "X-Remote-User" | quote }}

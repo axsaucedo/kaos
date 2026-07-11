@@ -414,29 +414,6 @@ func TestSecurityEnabled(t *testing.T) {
 	}
 }
 
-func TestAuthzProviderOrDefault(t *testing.T) {
-	cases := []struct {
-		in   AuthzProvider
-		want AuthzProvider
-	}{
-		{"", AuthzProviderNone},
-		{"none", AuthzProviderNone},
-		{"kaos", AuthzProviderKAOS},
-		{"aib", AuthzProviderAIB},
-		{"bogus", AuthzProviderNone},
-	}
-	for _, tc := range cases {
-		cfg := Config{AuthzProvider: tc.in}
-		if got := cfg.AuthzProviderOrDefault(); got != tc.want {
-			t.Errorf("AuthzProviderOrDefault(%q) = %q, want %q", tc.in, got, tc.want)
-		}
-		wantEnabled := tc.want != AuthzProviderNone
-		if got := cfg.AuthorizationEnabled(); got != wantEnabled {
-			t.Errorf("AuthorizationEnabled(%q) = %v, want %v", tc.in, got, wantEnabled)
-		}
-	}
-}
-
 func TestExtAuthzEnabled(t *testing.T) {
 	url := "aib-access-check.kaos-system.svc.cluster.local:9191"
 	cases := []struct {
@@ -487,7 +464,7 @@ func TestPolicyDataSourceOrDefault(t *testing.T) {
 		{"", PolicyDataAutomated},
 		{"automated", PolicyDataAutomated},
 		{"manual", PolicyDataManual},
-		{"external", PolicyDataExternal},
+		{"external", PolicyDataAutomated},
 		{"bogus", PolicyDataAutomated},
 	}
 	for _, tc := range cases {
@@ -498,21 +475,17 @@ func TestPolicyDataSourceOrDefault(t *testing.T) {
 }
 
 func TestGetConfigReadsAuthorizationModes(t *testing.T) {
-	t.Setenv(envAuthzProvider, "AIB")
 	t.Setenv(envAgentJWTVerification, "Verified")
 	t.Setenv(envPolicyDataSource, "External")
 	t.Setenv(envPolicyRegoOverride, "true")
 
 	cfg := GetConfig()
 
-	if got := cfg.AuthzProviderOrDefault(); got != AuthzProviderAIB {
-		t.Errorf("AuthzProvider = %q, want aib", got)
-	}
 	if got := cfg.AgentJWTVerificationModeOrDefault(); got != VerificationVerified {
 		t.Errorf("AgentJWTVerificationMode = %q, want verified", got)
 	}
-	if got := cfg.PolicyDataSourceOrDefault(); got != PolicyDataExternal {
-		t.Errorf("PolicyDataSource = %q, want external", got)
+	if got := cfg.PolicyDataSourceOrDefault(); got != PolicyDataAutomated {
+		t.Errorf("PolicyDataSource = %q, want automated", got)
 	}
 	if !cfg.PolicyRegoOverride {
 		t.Errorf("PolicyRegoOverride = false, want true")

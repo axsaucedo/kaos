@@ -12,7 +12,7 @@ external authorization engine) mounts:
    grants as new agents appear.
 
 This test is opt-in: it requires a cluster installed with the KAOS
-authorization provider and the policy ConfigMap projection target
+policy ConfigMap projection target
 (``--authz-provider kaos --policy-data-source automated
 --policy-configmap-name ... --policy-configmap-namespace ...``); see the
 ``kind-e2e-authz`` make target. It is skipped unless ``KAOS_AUTHZ_E2E`` is set

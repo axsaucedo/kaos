@@ -208,13 +208,13 @@ kind-e2e-aib: kind-load-aib-images kind-e2e-install-aib e2e-test-aib
 
 # --- Authorization projection E2E (KAOS-owned Model-1 policy ConfigMap) -------
 # Opt-in, local-only suite that installs the operator with the KAOS
-# authorization provider and a policy ConfigMap projection target, then verifies
+# policy ConfigMap projection target, then verifies
 # the operator renders the static rego and a grant graph and keeps grants stable
 # across reconciles. Model-1 is KAOS-owned so it needs no identity broker.
 AUTHZ_POLICY_CONFIGMAP ?= kaos-authz-policy
 AUTHZ_POLICY_NAMESPACE ?= kaos-system
 
-# Install KAOS with the KAOS authorization provider and automated policy-data
+# Install KAOS with automated policy-data
 # projection into the policy ConfigMap the enforcement engine mounts.
 kind-e2e-install-authz:
 	@pip install -e ../kaos-cli -q 2>/dev/null || true

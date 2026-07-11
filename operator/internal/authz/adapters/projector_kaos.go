@@ -22,12 +22,13 @@ type ConfigMapProjector struct {
 	JWKSURI        string
 	JWKSClient     *http.Client
 	WriteGrantData bool
+	Disabled       bool
 }
 
 // Apply renders the authorization policy and projected grant data and applies
 // them to the configured ConfigMap. It is a no-op unless name and namespace are set.
 func (p *ConfigMapProjector) Apply(ctx context.Context, desired projection.DesiredState) error {
-	if p.Name == "" || p.Namespace == "" {
+	if p.Disabled || p.Name == "" || p.Namespace == "" {
 		return nil
 	}
 	data := map[string]string{authz.PolicyKey: authz.Policy()}

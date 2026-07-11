@@ -115,53 +115,44 @@ func main() {
 		os.Exit(1)
 	}
 
-	// The authorization projection controller applies the configured provider.
-	// Provider "none" (default) leaves the operator without any projection.
-	if provider := security.GetConfig().AuthzProviderOrDefault(); provider != security.AuthzProviderNone {
-		cfg := security.GetConfig()
+	// Identity provisioning and policy compilation are independent projection
+	// sinks. The controller runs whenever either sink is configured.
+	cfg := security.GetConfig()
+	policyName := os.Getenv("AUTHZ_POLICY_CONFIGMAP_NAME")
+	policyNamespace := os.Getenv("AUTHZ_POLICY_CONFIGMAP_NAMESPACE")
+	adminURL := os.Getenv("AIB_ADMIN_URL")
+	var projectors []controllers.PolicyProjector
+	if adminURL != "" {
+		projectors = append(projectors, &adapters.BrokerProjector{
+			Client: mgr.GetClient(),
+			Scheme: mgr.GetScheme(),
+			AIB: aib.New(
+				adminURL,
+				getEnvWithDefault("AIB_PRINCIPAL", "kaos-operator"),
+				getEnvWithDefault("AIB_PRINCIPAL_HEADER", "X-Remote-User"),
+				getDurationWithDefault("AIB_REQUEST_TIMEOUT", 10*time.Second),
+			),
+			SecretPrefix: getEnvWithDefault("SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX", "kaos-aib"),
+			Prune:        getBoolWithDefault("AUTHZ_PROJECTION_PRUNE_ENABLED", true),
+		})
+	}
+	if policyName != "" && policyNamespace != "" {
 		policyDataSource := cfg.PolicyDataSourceOrDefault()
-		regoOverride := cfg.PolicyRegoOverride
-
-		brokerProjection := provider == security.AuthzProviderAIB
-		brokerAuthorizationProjection := brokerProjection && policyDataSource != security.PolicyDataExternal
-		policyDataProjection := provider == security.AuthzProviderKAOS &&
-			(policyDataSource == security.PolicyDataAutomated || regoOverride)
-		writeGrantData := provider == security.AuthzProviderKAOS &&
-			policyDataSource == security.PolicyDataAutomated && !regoOverride
-		prune := getBoolWithDefault("AUTHZ_PROJECTION_PRUNE_ENABLED", true) && brokerAuthorizationProjection
-
-		var projector controllers.PolicyProjector
-		switch provider {
-		case security.AuthzProviderKAOS:
-			if policyDataProjection {
-				projector = &adapters.ConfigMapProjector{
-					Client:         mgr.GetClient(),
-					Name:           os.Getenv("AUTHZ_POLICY_CONFIGMAP_NAME"),
-					Namespace:      os.Getenv("AUTHZ_POLICY_CONFIGMAP_NAMESPACE"),
-					JWKSURI:        cfg.AuthzJWKSURI(),
-					WriteGrantData: writeGrantData,
-				}
-			}
-		case security.AuthzProviderAIB:
-			projector = &adapters.BrokerProjector{
-				Client: mgr.GetClient(),
-				Scheme: mgr.GetScheme(),
-				AIB: aib.New(
-					os.Getenv("AIB_ADMIN_URL"),
-					getEnvWithDefault("AIB_PRINCIPAL", "kaos-operator"),
-					getEnvWithDefault("AIB_PRINCIPAL_HEADER", "X-Remote-User"),
-					getDurationWithDefault("AIB_REQUEST_TIMEOUT", 10*time.Second),
-				),
-				SecretPrefix:       getEnvWithDefault("SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX", "kaos-aib"),
-				Prune:              prune,
-				BindPermissionSets: brokerAuthorizationProjection,
-			}
-		}
+		projectors = append(projectors, &adapters.ConfigMapProjector{
+			Client:         mgr.GetClient(),
+			Name:           policyName,
+			Namespace:      policyNamespace,
+			JWKSURI:        cfg.AuthzJWKSURI(),
+			WriteGrantData: policyDataSource == security.PolicyDataAutomated && !cfg.PolicyRegoOverride,
+			Disabled:       policyDataSource == security.PolicyDataManual && !cfg.PolicyRegoOverride,
+		})
+	}
+	if len(projectors) > 0 {
 		if err = (&controllers.AuthzProjectionReconciler{
 			Client:     mgr.GetClient(),
 			Scheme:     mgr.GetScheme(),
 			Namespaces: splitCSV(os.Getenv("AUTHZ_PROJECTION_NAMESPACES")),
-			Projector:  projector,
+			Projectors: projectors,
 		}).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create controller", "controller", "AuthzProjection")
 			os.Exit(1)

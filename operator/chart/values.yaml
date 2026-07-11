@@ -78,19 +78,15 @@ security:
   # an agent-auth ext_authz URL; when unset, the operator generates no
   # authorization policies and routing behavior is unchanged.
   agentAuth:
-    # authorization groups the coarse authorization knobs. All are optional with
-    # safe defaults: provider "none" leaves authorization projection off.
+    # authorization groups the coarse authorization knobs.
     authorization:
-      # provider selects the authorization provider: "none" (default), "kaos"
-      # (OPA data from CRDs), or "aib" (broker permission sets).
-      provider: ""
       # agentJwtVerification selects how the agent (actor) JWT is trusted:
       # "skip" (header-trust, non-production) or "verified" (signature-checked).
       # Empty derives it from the issuer.
       agentJwtVerification: ""
       # policyDataSource selects who authors the authorization policy data:
-      # "automated" (operator projects data, default), "manual" (admin authors
-      # data), or "external" (broker authoritative, projection+prune off).
+      # "automated" (operator projects data, default) or "manual" (admin authors
+      # data).
       policyDataSource: ""
       # policyRegoOverride, when true, has the operator own only the policy.rego
       # key and leaves the data key to the admin. Orthogonal to policyDataSource.

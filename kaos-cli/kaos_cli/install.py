@@ -669,7 +669,6 @@ def _build_auth_operator_args(
     tls_issuer_name: str = "",
     tls_issuer_kind: str = "ClusterIssuer",
     tls_secret_name: str = "",
-    authz_provider: str = "",
     agent_jwt_verification: str = "",
     policy_data_source: str = "",
     policy_rego_override: bool = False,
@@ -706,10 +705,6 @@ def _build_auth_operator_args(
     )
     if admin_url:
         args.extend(["--set", f"security.agentAuth.adminUrl={admin_url}"])
-    if authz_provider:
-        args.extend(
-            ["--set", f"security.agentAuth.authorization.provider={authz_provider}"]
-        )
     if agent_jwt_verification:
         args.extend(
             [
@@ -1262,7 +1257,7 @@ def _expand_auth_preset(preset: str, namespace: str) -> dict:
       policy ConfigMap name/namespace are baked in.
     - aib-only: agent identity via the broker with no human-user layer and no
       token exchange -- autonomous/agent-only deployments that still get real
-      broker-minted agent credentials and permission-set projection.
+      broker-minted agent credentials.
 
     All presets route internal agent->ModelAPI/MCP/peer traffic through the
     gateway and generate bypass-prevention NetworkPolicies so the enforcement
@@ -1275,7 +1270,6 @@ def _expand_auth_preset(preset: str, namespace: str) -> dict:
             "token_exchange": True,
             "network_policy": True,
             "gateway_routing": True,
-            "authz_provider": "aib",
             "agent_jwt_verification": "verified",
             "policy_data_source": "automated",
         }
@@ -1286,7 +1280,6 @@ def _expand_auth_preset(preset: str, namespace: str) -> dict:
             "token_exchange": False,
             "network_policy": True,
             "gateway_routing": True,
-            "authz_provider": "kaos",
             "agent_jwt_verification": "skip",
             "policy_data_source": "automated",
             "policy_configmap_name": DEFAULT_POLICY_CONFIGMAP_NAME,
@@ -1299,7 +1292,6 @@ def _expand_auth_preset(preset: str, namespace: str) -> dict:
             "token_exchange": False,
             "network_policy": True,
             "gateway_routing": True,
-            "authz_provider": "aib",
             "agent_jwt_verification": "verified",
             "policy_data_source": "automated",
         }
@@ -1341,7 +1333,6 @@ def install_command(
     tls_issuer_name: str | None = None,
     tls_issuer_kind: str = "ClusterIssuer",
     tls_secret_name: str | None = None,
-    authz_provider: str | None = None,
     agent_jwt_verification: str | None = None,
     policy_data_source: str | None = None,
     policy_rego_override: bool = False,
@@ -1572,7 +1563,6 @@ def install_command(
                 tls_issuer_name=tls_issuer_name or "",
                 tls_issuer_kind=tls_issuer_kind,
                 tls_secret_name=tls_secret_name or "",
-                authz_provider=authz_provider or "",
                 agent_jwt_verification=agent_jwt_verification or "",
                 policy_data_source=policy_data_source or "",
                 policy_rego_override=policy_rego_override,

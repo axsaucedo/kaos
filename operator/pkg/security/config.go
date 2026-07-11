@@ -91,12 +91,6 @@ type Config struct {
 	// NetworkPolicy still requires a CNI that enforces it (e.g. Calico).
 	StrictGatewayAPI bool
 
-	// AuthzProvider selects which authorization provider the operator projects
-	// and enforces
-	// (security.authorization.provider). "none" (default) means authorization
-	// projection is off.
-	AuthzProvider AuthzProvider
-
 	// AgentJWTVerificationMode selects how the agent (actor) JWT is trusted
 	// (security.authorization.agentJwtVerification). Empty derives the mode from
 	// the agent issuer: verified when an issuer is configured, skip (header-trust)
@@ -112,21 +106,6 @@ type Config struct {
 	// orthogonal install-time option available in any PolicyDataSource.
 	PolicyRegoOverride bool
 }
-
-// AuthzProvider selects which authorization provider the operator projects and
-// enforces. Providers differ in where the grant facts live.
-type AuthzProvider string
-
-const (
-	// AuthzProviderNone disables authorization projection (default).
-	AuthzProviderNone AuthzProvider = "none"
-	// AuthzProviderKAOS enforces from KAOS-owned OPA data (data.kaos.grants)
-	// derived from CRDs — the actor-keyed provider.
-	AuthzProviderKAOS AuthzProvider = "kaos"
-	// AuthzProviderAIB enforces from broker permission sets returned by token
-	// exchange (granted_permission_sets) — the broker provider.
-	AuthzProviderAIB AuthzProvider = "aib"
-)
 
 // AgentJWTVerificationMode selects how the agent (actor) JWT is trusted by the
 // policy.
@@ -151,9 +130,6 @@ const (
 	// PolicyDataManual points enforcement at an admin-authored data key the
 	// operator does not project.
 	PolicyDataManual PolicyDataSource = "manual"
-	// PolicyDataExternal turns projection off and leaves the broker authoritative,
-	// forcing prune off while KAOS keeps identity.
-	PolicyDataExternal PolicyDataSource = "external"
 )
 
 const (
@@ -171,7 +147,6 @@ const (
 	envGatewayHost            = "SECURITY_GATEWAY_HOST"
 	envGatewayRouting         = "SECURITY_GATEWAY_ROUTING_ENABLED"
 	envStrictGatewayAPI       = "SECURITY_STRICT_GATEWAY_API_ENABLED"
-	envAuthzProvider          = "SECURITY_AUTHORIZATION_PROVIDER"
 	envAgentJWTVerification   = "SECURITY_AUTHORIZATION_AGENT_JWT_VERIFICATION"
 	envPolicyDataSource       = "SECURITY_AUTHORIZATION_POLICY_DATA_SOURCE"
 	envPolicyRegoOverride     = "SECURITY_AUTHORIZATION_POLICY_REGO_OVERRIDE"
@@ -203,7 +178,6 @@ func GetConfig() Config {
 		GatewayHost:              os.Getenv(envGatewayHost),
 		GatewayRouting:           parseBoolEnv(envGatewayRouting),
 		StrictGatewayAPI:         parseBoolEnv(envStrictGatewayAPI),
-		AuthzProvider:            AuthzProvider(readEnumEnv(envAuthzProvider)),
 		AgentJWTVerificationMode: AgentJWTVerificationMode(readEnumEnv(envAgentJWTVerification)),
 		PolicyDataSource:         PolicyDataSource(readEnumEnv(envPolicyDataSource)),
 		PolicyRegoOverride:       parseBoolEnv(envPolicyRegoOverride),
@@ -428,19 +402,6 @@ func parseServiceHostPort(rawURL, label string) (name, namespace string, port in
 	return name, namespace, port, nil
 }
 
-// AuthzProviderOrDefault returns the configured authorization provider,
-// defaulting to none (no projection) for unset or unrecognized values.
-func (c Config) AuthzProviderOrDefault() AuthzProvider {
-	return normalizeEnum(c.AuthzProvider,
-		[]AuthzProvider{AuthzProviderNone, AuthzProviderKAOS, AuthzProviderAIB},
-		AuthzProviderNone)
-}
-
-// AuthorizationEnabled reports whether any authorization provider is selected.
-func (c Config) AuthorizationEnabled() bool {
-	return c.AuthzProviderOrDefault() != AuthzProviderNone
-}
-
 // ExtAuthzEnabled reports whether the operator should attach the ext_authz
 // external-authorization check to protected routes. It remains default-off and
 // requires a backend to be configured.
@@ -476,6 +437,6 @@ func (c Config) AgentJWTVerificationModeOrDefault() AgentJWTVerificationMode {
 // to operator projection.
 func (c Config) PolicyDataSourceOrDefault() PolicyDataSource {
 	return normalizeEnum(c.PolicyDataSource,
-		[]PolicyDataSource{PolicyDataAutomated, PolicyDataManual, PolicyDataExternal},
+		[]PolicyDataSource{PolicyDataAutomated, PolicyDataManual},
 		PolicyDataAutomated)
 }

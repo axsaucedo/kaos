@@ -1108,14 +1108,12 @@ class TestAuthWiring:
             "aib-access-check-grpc.aib-system:9191",
             "http://aib.aib-system:8000",
             "kaos-aib",
-            authz_provider="kaos",
             policy_data_source="automated",
             agent_jwt_verification="verified",
             policy_configmap_name="kaos-authz-policy",
             policy_configmap_namespace="aib-system",
         )
         joined = " ".join(args)
-        assert "security.agentAuth.authorization.provider=kaos" in joined
         assert "security.agentAuth.authorization.policyDataSource=automated" in joined
         assert (
             "security.agentAuth.authorization.agentJwtVerification=verified" in joined
@@ -1136,7 +1134,6 @@ class TestAuthWiring:
             "aib-access-check-grpc.aib-system:9191",
             "http://aib.aib-system:8000",
             "kaos-aib",
-            authz_provider="kaos",
             policy_data_source="manual",
             policy_rego_override=True,
         )
@@ -1144,7 +1141,7 @@ class TestAuthWiring:
         assert "security.agentAuth.authorization.policyRegoOverride=true" in joined
         assert "security.agentAuth.authorization.policyDataSource=manual" in joined
 
-    def test_build_auth_operator_args_broker_external_off_switch(self):
+    def test_build_auth_operator_args_broker_identity(self):
         from kaos_cli.install import _build_auth_operator_args
 
         args = _build_auth_operator_args(
@@ -1152,12 +1149,8 @@ class TestAuthWiring:
             "http://aib.aib-system:8000",
             "kaos-aib",
             admin_url="http://aib.aib-system:8000/api",
-            authz_provider="aib",
-            policy_data_source="external",
         )
         joined = " ".join(args)
-        assert "security.agentAuth.authorization.provider=aib" in joined
-        assert "security.agentAuth.authorization.policyDataSource=external" in joined
         assert "security.agentAuth.adminUrl=http://aib.aib-system:8000/api" in joined
 
     def test_build_auth_operator_args_omits_authorization_when_unset(self):
@@ -1500,9 +1493,7 @@ class TestAuthWiring:
         assert "security.userAuth" not in joined
         # Agent-auth wiring is unaffected.
         assert "security.agentAuth.extAuthzUrl=" in joined
-        # Demo posture selects the KAOS-owned policy provider with header-trusted
-        # agent JWT.
-        assert "security.agentAuth.authorization.provider=kaos" in joined
+        # Demo posture keeps the header-trusted agent JWT mode.
         assert "security.agentAuth.authorization.agentJwtVerification=skip" in joined
         # The demo preset bakes in the policy ConfigMap projection target.
         assert (
@@ -1587,7 +1578,6 @@ class TestAuthWiring:
         assert kwargs["auth_enabled"] is True
         assert kwargs["user_auth"] is True
         assert kwargs["token_exchange"] is True
-        assert kwargs["authz_provider"] == "aib"
         assert kwargs["agent_jwt_verification"] == "verified"
 
     def test_expand_auth_preset_kaos_internal(self):
@@ -1597,7 +1587,6 @@ class TestAuthWiring:
         assert kwargs["auth_enabled"] is True
         assert kwargs["user_auth"] is False
         assert kwargs["token_exchange"] is False
-        assert kwargs["authz_provider"] == "kaos"
         assert kwargs["agent_jwt_verification"] == "skip"
         # The demo preset bakes in the policy ConfigMap projection target so no
         # extra flags are needed for the operator to project policy data.
@@ -1611,7 +1600,6 @@ class TestAuthWiring:
         assert kwargs["auth_enabled"] is True
         assert kwargs["user_auth"] is False
         assert kwargs["token_exchange"] is False
-        assert kwargs["authz_provider"] == "aib"
         assert kwargs["agent_jwt_verification"] == "verified"
 
     def test_auth_enabled_without_value_defaults_to_aib_keycloak(self):
@@ -1647,7 +1635,7 @@ class TestAuthWiring:
 
         assert result.exit_code == 0, result.output
         joined = " ".join(captured.get("args", []))
-        assert "security.agentAuth.authorization.provider=aib" in joined
+        assert "security.agentAuth.authorization.provider" not in joined
         # Preset implies the gateway is installed for enforcement.
         assert "gatewayAPI.enabled=true" in joined
 

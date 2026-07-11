@@ -58,7 +58,7 @@ func TestConfigMapProjectorSkipsPolicyConfigMapWhenUnset(t *testing.T) {
 		Spec:       kaosv1alpha1.AgentSpec{MCPServers: []string{"github"}},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(agent).Build()
-	p := &ConfigMapProjector{Client: c}
+	p := &ConfigMapProjector{Client: c, Name: "kaos-authz-policy", Namespace: "aib-system", Disabled: true}
 
 	if err := p.Apply(context.Background(), projection.Project([]projection.Resource{resourceFromAgent(agent)})); err != nil {
 		t.Fatalf("apply: %v", err)

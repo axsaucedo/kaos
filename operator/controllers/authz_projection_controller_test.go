@@ -61,9 +61,9 @@ func TestProjectionReconcileDispatchesDesiredState(t *testing.T) {
 	}
 	projector := &fakeProjector{}
 	r := &AuthzProjectionReconciler{
-		Client:    fake.NewClientBuilder().WithScheme(scheme).WithObjects(mcp, agent).Build(),
-		Scheme:    scheme,
-		Projector: projector,
+		Client:     fake.NewClientBuilder().WithScheme(scheme).WithObjects(mcp, agent).Build(),
+		Scheme:     scheme,
+		Projectors: []PolicyProjector{projector},
 	}
 
 	if _, err := r.Reconcile(context.Background(), authzSentinel); err != nil {
@@ -77,6 +77,22 @@ func TestProjectionReconcileDispatchesDesiredState(t *testing.T) {
 	}
 	if len(projector.desired.Services) != 1 || projector.desired.Services[0].ClientID() != "kaos-mcpserver-demo-github" {
 		t.Fatalf("services = %+v", projector.desired.Services)
+	}
+}
+
+func TestProjectionReconcileDispatchesToAllProjectors(t *testing.T) {
+	scheme := newTestScheme(t)
+	first, second := &fakeProjector{}, &fakeProjector{}
+	r := &AuthzProjectionReconciler{
+		Client:     fake.NewClientBuilder().WithScheme(scheme).Build(),
+		Scheme:     scheme,
+		Projectors: []PolicyProjector{first, second},
+	}
+	if _, err := r.Reconcile(context.Background(), authzSentinel); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if first.calls != 1 || second.calls != 1 {
+		t.Fatalf("projector calls = %d/%d, want 1/1", first.calls, second.calls)
 	}
 }
 
