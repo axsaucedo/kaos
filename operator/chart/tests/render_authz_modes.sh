@@ -13,7 +13,7 @@ render() {
 # assert PATTERN present in the rendered output for a described case
 expect() {
 	local desc="$1" out="$2" pattern="$3"
-	if grep -qE "$pattern" <<<"$out"; then
+	if grep -qE -- "$pattern" <<<"$out"; then
 		echo "ok   - $desc"
 	else
 		echo "FAIL - $desc (missing: $pattern)"
@@ -24,7 +24,7 @@ expect() {
 # assert PATTERN absent from the rendered output
 refute() {
 	local desc="$1" out="$2" pattern="$3"
-	if grep -qE "$pattern" <<<"$out"; then
+	if grep -qE -- "$pattern" <<<"$out"; then
 		echo "FAIL - $desc (unexpected: $pattern)"
 		FAIL=1
 	else
@@ -35,6 +35,45 @@ refute() {
 # Default install: the removed provider selector is not rendered.
 out="$(render)"
 refute "authorization provider selector removed" "$out" 'SECURITY_AUTHORIZATION_PROVIDER'
+refute "PDP disabled by default" "$out" 'name: kaos-pdp'
+
+# PDP renders stock OPA, its gRPC Service, policy mount, and HA budget.
+out="$(render \
+	--namespace kaos-system \
+	--set security.pdp.enabled=true \
+	--set security.agentAuth.projection.policyConfigMap.name=kaos-authz-policy \
+	--set security.agentAuth.projection.policyConfigMap.namespace=kaos-system)"
+expect "PDP deployment rendered" "$out" 'kind: Deployment'
+expect "PDP service rendered" "$out" 'kind: Service'
+expect "PDP service name" "$out" 'name: kaos-pdp'
+expect "PDP gRPC port" "$out" 'port: 9191'
+expect "PDP decision path" "$out" 'plugins.envoy_ext_authz_grpc.path=aib/extproc/authz/result'
+expect "PDP watches mounted policy" "$out" -- '--watch'
+expect "PDP policy ConfigMap mounted" "$out" 'name: kaos-authz-policy'
+expect "PDP disruption budget rendered" "$out" 'kind: PodDisruptionBudget'
+expect "PDP disruption budget keeps one replica" "$out" 'minAvailable: 1'
+
+out="$(render \
+	--namespace kaos-system \
+	--set security.pdp.enabled=true \
+	--set security.pdp.replicas=1 \
+	--set security.agentAuth.projection.policyConfigMap.name=kaos-authz-policy \
+	--set security.agentAuth.projection.policyConfigMap.namespace=kaos-system)"
+refute "single-replica PDP omits disruption budget" "$out" 'kind: PodDisruptionBudget'
+
+if mismatch="$(helm template t "$CHART_DIR" \
+	--namespace kaos-system \
+	--set security.pdp.enabled=true \
+	--set security.agentAuth.projection.policyConfigMap.name=kaos-authz-policy \
+	--set security.agentAuth.projection.policyConfigMap.namespace=other-system 2>&1)"; then
+	echo "FAIL - cross-namespace PDP policy mount was accepted"
+	FAIL=1
+elif grep -q 'Pods cannot mount ConfigMaps across namespaces' <<<"$mismatch"; then
+	echo "ok   - cross-namespace PDP policy mount rejected clearly"
+else
+	echo "FAIL - cross-namespace PDP policy mount error was unclear"
+	FAIL=1
+fi
 
 # Automated policy data source with a policy ConfigMap target.
 out="$(render \

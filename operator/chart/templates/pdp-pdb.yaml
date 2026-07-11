@@ -1,0 +1,16 @@
+{{- if and .Values.security.pdp.enabled (gt (int .Values.security.pdp.replicas) 1) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: kaos-pdp
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: pdp
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kaos-pdp
+      app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}

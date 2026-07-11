@@ -1,0 +1,81 @@
+{{- if .Values.security.pdp.enabled }}
+{{- $policyConfigMap := .Values.security.agentAuth.projection.policyConfigMap -}}
+{{- if not $policyConfigMap.name -}}
+{{- fail "security.pdp.enabled requires security.agentAuth.projection.policyConfigMap.name" -}}
+{{- end -}}
+{{- if not $policyConfigMap.namespace -}}
+{{- fail "security.pdp.enabled requires security.agentAuth.projection.policyConfigMap.namespace" -}}
+{{- end -}}
+{{- if ne $policyConfigMap.namespace .Release.Namespace -}}
+{{- fail (printf "security.pdp requires policyConfigMap namespace %q to match release namespace %q because Pods cannot mount ConfigMaps across namespaces" $policyConfigMap.namespace .Release.Namespace) -}}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kaos-pdp
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: pdp
+spec:
+  replicas: {{ .Values.security.pdp.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kaos-pdp
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kaos-pdp
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: pdp
+    spec:
+      containers:
+      - name: opa
+        image: {{ .Values.security.pdp.image | quote }}
+        imagePullPolicy: IfNotPresent
+        args:
+        - run
+        - --server
+        - --watch
+        - --addr=localhost:8181
+        - --diagnostic-addr=0.0.0.0:8282
+        - --set=plugins.envoy_ext_authz_grpc.addr=:9191
+        - --set=plugins.envoy_ext_authz_grpc.path=aib/extproc/authz/result
+        - /policy
+        ports:
+        - name: grpc
+          containerPort: 9191
+          protocol: TCP
+        - name: diagnostic
+          containerPort: 8282
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /health?plugins
+            port: diagnostic
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health?plugins
+            port: diagnostic
+          initialDelaySeconds: 2
+          periodSeconds: 5
+        resources:
+          {{- toYaml .Values.security.pdp.resources | nindent 10 }}
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+        volumeMounts:
+        - name: policy
+          mountPath: /policy
+          readOnly: true
+      volumes:
+      - name: policy
+        configMap:
+          name: {{ $policyConfigMap.name }}
+{{- end }}

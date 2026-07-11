@@ -74,6 +74,19 @@ gateway:
 # protected routes so requests are allowed or denied based on the calling
 # agent's granted permissions. Disabled by default — routing is unchanged.
 security:
+  # pdp runs stock OPA with the Envoy ext_authz gRPC plugin. It is disabled
+  # until gateway enforcement is enabled separately.
+  pdp:
+    enabled: false
+    image: openpolicyagent/opa:latest-envoy
+    replicas: 2
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
   # Operator-wide security configuration. Security is enabled by the presence of
   # an agent-auth ext_authz URL; when unset, the operator generates no
   # authorization policies and routing behavior is unchanged.
