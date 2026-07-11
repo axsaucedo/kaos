@@ -3,6 +3,9 @@ package main
 import (
 	"flag"
 	"os"
+	"strconv"
+	"strings"
+	"time"
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -17,6 +20,9 @@ import (
 
 	kaosv1alpha1 "github.com/axsaucedo/kaos/operator/api/v1alpha1"
 	"github.com/axsaucedo/kaos/operator/controllers"
+	"github.com/axsaucedo/kaos/operator/internal/aib"
+	"github.com/axsaucedo/kaos/operator/internal/authz/adapters"
+	"github.com/axsaucedo/kaos/operator/pkg/security"
 )
 
 var (
@@ -100,6 +106,59 @@ func main() {
 		os.Exit(1)
 	}
 
+	// The authorization projection controller applies the configured provider.
+	// Provider "none" (default) leaves the operator without any projection.
+	if provider := security.GetConfig().AuthzProviderOrDefault(); provider != security.AuthzProviderNone {
+		cfg := security.GetConfig()
+		policyDataSource := cfg.PolicyDataSourceOrDefault()
+		regoOverride := cfg.PolicyRegoOverride
+
+		brokerProjection := provider == security.AuthzProviderAIB
+		brokerAuthorizationProjection := brokerProjection && policyDataSource != security.PolicyDataExternal
+		policyDataProjection := provider == security.AuthzProviderKAOS &&
+			(policyDataSource == security.PolicyDataAutomated || regoOverride)
+		writeGrantData := provider == security.AuthzProviderKAOS &&
+			policyDataSource == security.PolicyDataAutomated && !regoOverride
+		prune := getBoolWithDefault("AUTHZ_PROJECTION_PRUNE_ENABLED", true) && brokerAuthorizationProjection
+
+		var projector controllers.PolicyProjector
+		switch provider {
+		case security.AuthzProviderKAOS:
+			if policyDataProjection {
+				projector = &adapters.ConfigMapProjector{
+					Client:         mgr.GetClient(),
+					Name:           os.Getenv("AUTHZ_POLICY_CONFIGMAP_NAME"),
+					Namespace:      os.Getenv("AUTHZ_POLICY_CONFIGMAP_NAMESPACE"),
+					JWKSURI:        cfg.AuthzJWKSURI(),
+					WriteGrantData: writeGrantData,
+				}
+			}
+		case security.AuthzProviderAIB:
+			projector = &adapters.BrokerProjector{
+				Client: mgr.GetClient(),
+				Scheme: mgr.GetScheme(),
+				AIB: aib.New(
+					os.Getenv("AIB_ADMIN_URL"),
+					getEnvWithDefault("AIB_PRINCIPAL", "kaos-operator"),
+					getEnvWithDefault("AIB_PRINCIPAL_HEADER", "X-Remote-User"),
+					getDurationWithDefault("AIB_REQUEST_TIMEOUT", 10*time.Second),
+				),
+				SecretPrefix:       getEnvWithDefault("SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX", "kaos-aib"),
+				Prune:              prune,
+				BindPermissionSets: brokerAuthorizationProjection,
+			}
+		}
+		if err = (&controllers.AuthzProjectionReconciler{
+			Client:     mgr.GetClient(),
+			Scheme:     mgr.GetScheme(),
+			Namespaces: splitCSV(os.Getenv("AUTHZ_PROJECTION_NAMESPACES")),
+			Projector:  projector,
+		}).SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "AuthzProjection")
+			os.Exit(1)
+		}
+	}
+
 	// Webhooks not implemented yet in this version
 	// TODO: Add webhook setup when webhooks are needed
 
@@ -124,4 +183,39 @@ func getEnvWithDefault(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+func getBoolWithDefault(key string, defaultValue bool) bool {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return defaultValue
+	}
+	parsed, err := strconv.ParseBool(v)
+	if err != nil {
+		return defaultValue
+	}
+	return parsed
+}
+
+func getDurationWithDefault(key string, defaultValue time.Duration) time.Duration {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return defaultValue
+	}
+	parsed, err := time.ParseDuration(v)
+	if err != nil {
+		return defaultValue
+	}
+	return parsed
+}
+
+// splitCSV splits a comma-separated list into trimmed, non-empty entries.
+func splitCSV(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if p := strings.TrimSpace(part); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

@@ -45,16 +45,14 @@ type PolicyParams struct {
 }
 
 // constructSecurityPolicy builds an Envoy Gateway SecurityPolicy (as an
-// unstructured object) that attaches a fail-closed gRPC external authorization
-// check to the target HTTPRoute. The check is performed by the configured
-// access-check backend Service. It returns an error if the configured ext_authz
-// URL cannot be resolved to a Service backend reference.
+// unstructured object) attaching JWT authentication and, when the optional
+// ext_authz enforcement seam is enabled, a fail-closed gRPC external
+// authorization check to the target HTTPRoute. The ext_authz block is emitted
+// only in ext_authz enforcement mode (the default is OPA-in-ext_proc); JWT
+// providers are emitted whenever an issuer is configured. It returns a nil policy
+// when neither block applies, so no SecurityPolicy is created. It returns an
+// error only when the ext_authz backend is enabled but cannot be resolved.
 func constructSecurityPolicy(params PolicyParams, cfg Config) (*unstructured.Unstructured, error) {
-	name, namespace, port, err := cfg.ExtAuthzBackendRef()
-	if err != nil {
-		return nil, err
-	}
-
 	policy := &unstructured.Unstructured{}
 	policy.SetGroupVersionKind(SecurityPolicyGVK)
 	policy.SetName(params.Name)
@@ -71,31 +69,45 @@ func constructSecurityPolicy(params PolicyParams, cfg Config) (*unstructured.Uns
 		},
 	}, "spec", "targetRefs")
 
-	backendRef := map[string]interface{}{
-		"group": "",
-		"kind":  "Service",
-		"name":  name,
-		"port":  int64(port),
-	}
-	if namespace != "" {
-		backendRef["namespace"] = namespace
-	}
+	attached := false
 
-	_ = unstructured.SetNestedMap(policy.Object, map[string]interface{}{
-		"failOpen": false,
-		"headersToExtAuth": []interface{}{
-			"authorization",
-			"x-agent-authorization",
-		},
-		"grpc": map[string]interface{}{
-			"backendRef": backendRef,
-		},
-	}, "spec", "extAuth")
+	if cfg.ExtAuthzEnabled() {
+		name, namespace, port, err := cfg.ExtAuthzBackendRef()
+		if err != nil {
+			return nil, err
+		}
+		backendRef := map[string]interface{}{
+			"group": "",
+			"kind":  "Service",
+			"name":  name,
+			"port":  int64(port),
+		}
+		if namespace != "" {
+			backendRef["namespace"] = namespace
+		}
+
+		_ = unstructured.SetNestedMap(policy.Object, map[string]interface{}{
+			"failOpen": false,
+			"headersToExtAuth": []interface{}{
+				"authorization",
+				"x-agent-authorization",
+			},
+			"grpc": map[string]interface{}{
+				"backendRef": backendRef,
+			},
+		}, "spec", "extAuth")
+		attached = true
+	}
 
 	if cfg.JWTEnabled() {
 		if providers := constructJWTProviders(cfg); len(providers) > 0 {
 			_ = unstructured.SetNestedSlice(policy.Object, providers, "spec", "jwt", "providers")
+			attached = true
 		}
+	}
+
+	if !attached {
+		return nil, nil
 	}
 
 	return policy, nil
@@ -154,8 +166,11 @@ func constructJWTProviders(cfg Config) []interface{} {
 }
 
 // ReconcileSecurityPolicy creates or updates the SecurityPolicy that guards a
-// protected route. It is a no-op unless authorization is enabled and the
-// external authorization backend is fully specified.
+// protected route with JWT authentication and, when the ext_authz enforcement
+// seam is enabled, an external authorization check. It is a no-op when security
+// is disabled or when neither JWT authn nor ext_authz applies (for example an
+// ext_proc-only install with no issuer), leaving enforcement entirely to the
+// ext_proc OPA path.
 func ReconcileSecurityPolicy(
 	ctx context.Context,
 	c client.Client,
@@ -165,13 +180,16 @@ func ReconcileSecurityPolicy(
 	cfg Config,
 	log logr.Logger,
 ) error {
-	if !cfg.IsOperational() {
+	if !cfg.SecurityEnabled() {
 		return nil
 	}
 
 	desired, err := constructSecurityPolicy(params, cfg)
 	if err != nil {
 		return fmt.Errorf("construct SecurityPolicy: %w", err)
+	}
+	if desired == nil {
+		return nil
 	}
 
 	existing := &unstructured.Unstructured{}

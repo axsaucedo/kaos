@@ -17,9 +17,9 @@ This sample demonstrates that swap.
 The operator generates the `SecurityPolicy.spec.extAuth.grpc.backendRef` from a single configuration value — the ext_authz backend host:port. Pointing it at opa-envoy instead of AIB is a config change:
 
 ```bash
-# CLI
-kaos system install --auth-enabled \
-  --ext-authz-url opa-envoy.opa-system.svc.cluster.local:9191
+# CLI — select an auth preset and override the ext_authz backend
+kaos system install --auth-enabled aib-keycloak \
+  --set security.agentAuth.extAuthzUrl=opa-envoy.opa-system.svc.cluster.local:9191
 
 # or Helm
 helm upgrade kaos kaos/kaos-operator \
@@ -36,8 +36,8 @@ kubectl apply -f docs/security/opa-drop-in/opa-envoy.yaml
 kubectl -n opa-system rollout status deploy/opa-envoy
 
 # 2. Point KAOS at it (config only) and enable auth.
-kaos system install --auth-enabled \
-  --ext-authz-url opa-envoy.opa-system.svc.cluster.local:9191 --wait
+kaos system install --auth-enabled aib-keycloak \
+  --set security.agentAuth.extAuthzUrl=opa-envoy.opa-system.svc.cluster.local:9191 --wait
 
 # 3. A granted edge is allowed, an ungranted one is denied — equivalently to AIB.
 #    (agent `demo/researcher` is granted `call` on `mcpserver/demo/github` only.)
