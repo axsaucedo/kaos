@@ -100,8 +100,8 @@ tmp/                       # Local work files (gitignored)
 - **ModelAPI**: LLM proxy (LiteLLM) or hosted (Ollama) mode
 - **MemoryStore**: central memory service backing long-term semantic memory (local or external pgvector storage; external defaults to 2 replicas + PDB; summarization/embedding model refs; `--pgvector-memory-enabled` installs dev Postgres)
 
-## Authorization (optional, off by default)
-Enforced at the gateway by an OPA policy in the Envoy `ext_proc` filter. `AuthzProjectionReconciler` projects a policy ConfigMap (`policy.rego` + `data.json`) from CRDs. Provider `kaos` (KAOS-owned grants) or `aib` (broker permission sets); modes automated / bring-your-own ConfigMap / operator-rego+admin-data / broker external off-switch; verification `verified` (inject JWKS, verify actor token) or `skip` (demo, non-production). `data.kaos.grants`/`data.kaos.jwks` is a published contract. Enable via `kaos system install --auth-enabled <preset>` (presets: `aib-keycloak`, `aib-only`, `kaos-internal`). See `docs/security/authorization.md`.
+## Authorization (optional, enabled by security presets)
+Envoy Gateway verifies agent JWTs and calls the fail-closed `kaos-pdp` OPA Service over gRPC external authorization. `AuthzProjectionReconciler` projects `policy.rego` plus `data.json` from CRDs; the published data contract is `data.kaos.grants`, issuer-keyed `data.kaos.jwks`, and `data.kaos.agents`. Identity provider selection is `serviceaccount`, `aib`, or `oidc`; AIB provisions identity credentials only. Policy data is `automated` or `manual`. Enable with `kaos system install --auth-enabled <preset>` (`kaos-internal`, `aib-only`, or `aib-keycloak`). See `docs/security/authorization.md`.
 
 ## Key Files
 - `operator/api/v1alpha1/*_types.go`: CRD schemas

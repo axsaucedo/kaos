@@ -1,51 +1,59 @@
-# Security Overview
+# Security overview
 
-KAOS secures agent-to-agent and agent-to-tool traffic at the Envoy Gateway. Every call an agent makes to another KAOS resource can be authenticated, authorized, and confined to the gateway path, so a request is checked before it reaches the target workload. Each layer is independent and opt-in, and they compose into a full end-to-end posture.
+KAOS authenticates and authorizes agent traffic at Envoy Gateway before it reaches an internal resource. The self-contained security topology uses Kubernetes ServiceAccount tokens for agent identity, Envoy Gateway `SecurityPolicy` resources for JWT verification and external authorization, and an in-chart Open Policy Agent (OPA) deployment for policy decisions.
 
-## Layers
+## Request path
 
-- **Identity** — each agent is issued a signed actor token (`sub = kaos://agent/<namespace>/<name>`) and each user authenticates against an identity provider. The gateway carries the user (subject) token in `Authorization` and the agent (actor) token in `x-agent-authorization`.
-- **Authorization** — an Open Policy Agent policy inside the Envoy `ext_proc` filter decides whether an actor may reach a resource. Grant data is either projected by KAOS from your CRDs (`kaos` provider) or owned by an external identity broker (`aib` provider). See [Authorization](/security/authorization).
-- **Gateway-only traffic** — NetworkPolicies deny direct workload-to-workload traffic and internal calls are routed through the gateway, so the enforcement point cannot be bypassed. This can be enabled on its own as a defence-in-depth posture. See [Gateway API](/operator/gateway-api#strict-gateway-only-traffic).
-- **Transport security** — the gateway can terminate HTTPS (self-signed, cert-manager, or a provided certificate).
-
-## Install postures
-
-The `kaos system install` command bundles these layers into three curated postures selected with `--auth-enabled`:
-
-| Preset | Identity | Authorization | Agent token | Use when |
-|--------|----------|---------------|-------------|----------|
-| `kaos-internal` | none | KAOS-projected grants (`kaos` provider) | header-trusted (spoofable) | Exploring authorization without an IdP |
-| `aib-only` | identity broker | broker permission sets (`aib` provider) | signature-verified against IdP JWKS | Broker-issued agent identity without user login |
-| `aib-keycloak` (default) | Keycloak + identity broker | broker permission sets (`aib` provider) | signature-verified against IdP JWKS | Production-like end-to-end security with user auth + token exchange |
-
-```bash
-# Self-contained demo — no external identity provider or broker
-kaos system install --gateway-enabled --auth-enabled kaos-internal
-
-# Broker-issued agent identity, no user login or token exchange
-kaos system install --gateway-enabled --auth-enabled aib-only
-
-# Full verified path — Keycloak user identity + identity broker + token exchange
-kaos system install --gateway-enabled --auth-enabled aib-keycloak
+```mermaid
+flowchart LR
+    A[Agent pod] -->|x-agent-authorization| G[Envoy Gateway]
+    G -->|JWT verification| J[Issuer JWKS]
+    G -->|gRPC ext_authz| P[kaos-pdp / OPA]
+    C[Policy ConfigMap] -->|policy.rego + data.json| P
+    P -->|allow or deny| G
+    G -->|allowed requests| R[Agent, MCPServer, ModelAPI, or MemoryStore]
 ```
 
-All presets imply `--gateway-enabled`, route internal traffic through the gateway, and generate bypass-prevention NetworkPolicies. Every underlying knob remains configurable via Helm `--set` for advanced compositions; see [Authorization](/security/authorization#advanced-configuration).
+The operator creates a `SecurityPolicy` for each internal route. Envoy verifies the actor JWT, then calls `kaos-pdp.<release-namespace>.svc:9191` over the Envoy external-authorization gRPC protocol. The policy is fail-closed: `failOpen` is explicitly false, so an unavailable PDP never permits a request.
 
-## Enforcement model
+The PDP runs stock `openpolicyagent/opa:1.18.1-envoy-static` with the Envoy plugin listening on port 9191. It watches `/policy/policy.rego` and `/policy/data.json`, mounted from the policy ConfigMap in the release namespace. The decision path is `aib/extproc/authz/result`, matching the package and `result` rule in the shipped policy.
 
-Authorization runs as OPA embedded in the gateway `ext_proc` filter. On each request the policy sees the subject identity (from `Authorization`), the actor identity (from `x-agent-authorization`), the target resource (from `x-kaos-target-resource`), and the grant facts — whether KAOS-owned (`data.kaos.grants`) or broker-owned (`granted_permission_sets`). Because the actor token is always present, KAOS-owned authorization also enforces in autonomous mode.
+## Identity issuers
 
-::: warning
-OPA only evaluates when a subject bearer token is present. Pure-autonomous agent-to-resource calls with no user token bypass the policy. Use the verified posture and require a token on protected paths for production.
-:::
+Exactly one agent identity issuer is active:
 
-## Gateway-only strict traffic
+- `serviceaccount` uses one owned ServiceAccount per Agent. Kubernetes projects a short-lived token with audience `kaos-gateway` into the agent pod at `/var/run/secrets/kaos-agent/token`; `AGENT_AUTH_TOKEN_FILE` points the runtime to that file. The operator discovers the cluster issuer and JWKS through the Kubernetes API, embeds the JWKS in gateway policies, and projects the issuer-keyed keys into OPA data.
+- `aib` registers each Agent with the Agentic Identity Broker and delivers OAuth client credentials in a Secret. The runtime obtains actor tokens through `client_credentials`. One issuer URL configures the broker's public issuer and every KAOS verifier.
+- `oidc` accepts an explicitly configured OIDC issuer for advanced deployments.
 
-Strict gateway-only traffic can be enabled independently of authorization to make the gateway the single application path between workloads:
+ServiceAccount identity needs no external identity service and is the agent issuer selected by the `kaos-internal` preset.
+
+## Install presets
+
+Use `kaos system install --auth-enabled <preset>`:
+
+| Preset | Agent identity | User identity | Authorization | External dependencies |
+|---|---|---|---|---|
+| `kaos-internal` | Kubernetes ServiceAccount tokens | none | In-chart OPA with CRD-derived grants | none |
+| `aib-only` | AIB OAuth client credentials | none | In-chart OPA with CRD-derived grants | AIB |
+| `aib-keycloak` | AIB OAuth client credentials | Keycloak JWTs at the gateway | In-chart OPA with CRD-derived grants | AIB and Keycloak |
+
+All three presets enable the PDP, automated policy projection, internal gateway routing, and NetworkPolicy generation. AIB provisions identity only; authorization decisions remain in the gateway-external PDP. Keycloak supplies the user JWT provider in `aib-keycloak`.
 
 ```bash
-kaos system install --gateway-enabled --gateway-api-strict
+kaos system install --auth-enabled kaos-internal --metallb-enabled --wait
+kaos system install --auth-enabled aib-only --aib-chart-path ./agentic-identity-broker/chart --wait
+kaos system install --auth-enabled aib-keycloak --aib-chart-path ./agentic-identity-broker/chart --wait
 ```
 
-Enforcement of the generated NetworkPolicies requires a CNI that implements NetworkPolicy (for example Calico); the default KIND CNI does not. See [Gateway API](/operator/gateway-api#strict-gateway-only-traffic).
+## Traffic confinement
+
+The presets route internal calls through Envoy Gateway and generate NetworkPolicies that restrict direct workload access. NetworkPolicy enforcement depends on the cluster CNI; KIND's default kindnet does not enforce these policies. See [Gateway API](/operator/gateway-api#strict-gateway-only-traffic).
+
+## Current limits
+
+- Authorization evaluates agent actor → resource grants. User identity can be verified at the gateway, but user → resource grants are not part of the decision yet.
+- Projection is eventually consistent. Allow changes and revocations can take about 90 seconds to reach every controller, ConfigMap mount, OPA watcher, and gateway dataplane.
+- In ServiceAccount mode, the operator discovers and caches the cluster issuer JWKS at startup. Restart the operator after the cluster rotates its ServiceAccount signing keys so new keys reach Envoy and OPA.
+
+See [Authorization](/security/authorization) for the request contract and policy-data schema.

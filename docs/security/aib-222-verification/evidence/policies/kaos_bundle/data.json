@@ -1,8 +1,0 @@
-{
-  "kaos": {
-    "grants": {
-      "agent-A": ["mcp-x:9003", "agent-b:9003"],
-      "agent-B": ["mcp-y:9003", "agent-c:9003"]
-    }
-  }
-}

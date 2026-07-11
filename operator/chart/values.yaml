@@ -128,9 +128,9 @@ security:
     # variables. Empty disables credential mounting. Example: kaos-aib
     credentialSecretPrefix: ""
     # adminUrl is the base URL of the identity broker admin API. When set, the
-    # operator's identity projection controller registers agents, mints their
-    # per-agent credential Secrets, and projects services and permission sets
-    # into the broker. Leaving it empty disables projection entirely. Example:
+    # operator's identity projection controller registers agents and manages
+    # their per-agent credential Secrets. Leaving it empty disables AIB identity
+    # projection. Example:
     # http://aib-agentic-identity-broker.aib-system.svc.cluster.local:8000/api
     adminUrl: ""
     # adminPrincipal is the principal the projection controller presents to the
@@ -143,13 +143,13 @@ security:
       # namespaces optionally restricts projection to a comma-separated list of
       # namespaces. Empty projects across all namespaces.
       namespaces: ""
-      # prune removes broker records (services, permission sets, agents) that no
-      # longer correspond to any KAOS resource. On by default.
+      # prune removes broker agent records that no longer correspond to a KAOS
+      # Agent. On by default.
       prune: true
-      # policyConfigMap names the ConfigMap the operator writes with the Model-1
-      # authorization policy and projected grant data for the enforcement engine
+      # policyConfigMap names the ConfigMap the operator writes with the
+      # authorization policy and projected grant data for the PDP
       # to mount. When name and namespace are both set, the operator maintains
-      # it; leaving either empty disables the Model-1 data path.
+      # it; leaving either empty disables policy projection.
       policyConfigMap:
         name: ""
         namespace: ""
