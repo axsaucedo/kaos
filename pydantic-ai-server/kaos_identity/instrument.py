@@ -456,6 +456,6 @@ def instrument_httpx() -> None:
         _raise_for_gateway_outcome(request, response)
         return response
 
-    httpx.Client.send = _patched_sync_send  # ty: ignore[invalid-assignment]
-    httpx.AsyncClient.send = _patched_async_send  # ty: ignore[invalid-assignment]
+    httpx.Client.send = _patched_sync_send
+    httpx.AsyncClient.send = _patched_async_send
     _httpx_patched = True
