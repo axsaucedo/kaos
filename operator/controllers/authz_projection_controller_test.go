@@ -60,6 +60,29 @@ func TestResourceFromAgentWithoutNetworkHasNoAccess(t *testing.T) {
 	}
 }
 
+func TestResourceFromAgentDerivesAutonomousFromGoal(t *testing.T) {
+	tests := []struct {
+		name       string
+		autonomous *kaosv1alpha1.AutonomousConfig
+		want       bool
+	}{
+		{name: "goal", autonomous: &kaosv1alpha1.AutonomousConfig{Goal: "Investigate"}, want: true},
+		{name: "blank goal", autonomous: &kaosv1alpha1.AutonomousConfig{Goal: "  "}},
+		{name: "plain agent"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			agent := &kaosv1alpha1.Agent{}
+			if tt.autonomous != nil {
+				agent.Spec.Config = &kaosv1alpha1.AgentConfig{Autonomous: tt.autonomous}
+			}
+			if got := resourceFromAgent(agent).Autonomous; got != tt.want {
+				t.Fatalf("Autonomous = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestProjectionReconcileDispatchesDesiredState(t *testing.T) {
 	scheme := newTestScheme(t)
 	mcp := &kaosv1alpha1.MCPServer{ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "github"}}

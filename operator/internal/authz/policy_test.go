@@ -53,8 +53,11 @@ func TestDataDocumentVerifiedModeCarriesJWKS(t *testing.T) {
 }
 
 func TestDataDocumentCarriesAgentIssuerSubjectMapping(t *testing.T) {
-	agents := map[string]map[string]string{
-		"kaos://agent/demo/researcher": {"issuer_sub": "system:serviceaccount:demo:kaos-agent-researcher"},
+	agents := map[string]map[string]any{
+		"kaos://agent/demo/researcher": {
+			"issuer_sub": "system:serviceaccount:demo:kaos-agent-researcher",
+			"autonomous": true,
+		},
 	}
 	raw, err := DataDocument(map[string][]string{}, nil, "", nil, agents)
 	if err != nil {
@@ -64,9 +67,12 @@ func TestDataDocumentCarriesAgentIssuerSubjectMapping(t *testing.T) {
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	got := doc["kaos"].(map[string]any)["agents"].(map[string]any)["kaos://agent/demo/researcher"].(map[string]any)["issuer_sub"]
-	if got != "system:serviceaccount:demo:kaos-agent-researcher" {
-		t.Fatalf("issuer_sub = %v", got)
+	got := doc["kaos"].(map[string]any)["agents"].(map[string]any)["kaos://agent/demo/researcher"].(map[string]any)
+	if got["issuer_sub"] != "system:serviceaccount:demo:kaos-agent-researcher" {
+		t.Fatalf("issuer_sub = %v", got["issuer_sub"])
+	}
+	if autonomous, ok := got["autonomous"].(bool); !ok || !autonomous {
+		t.Fatalf("autonomous = %v (%T), want true bool", got["autonomous"], got["autonomous"])
 	}
 }
 

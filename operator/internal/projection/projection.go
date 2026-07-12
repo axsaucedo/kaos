@@ -62,6 +62,7 @@ type Resource struct {
 	ModelAPI    string   // spec.modelAPI (Agent only)
 	MemoryStore string   // spec.config.memory.memoryStore (Agent only)
 	Access      []string // spec.agentNetwork.access -- peer agents this agent may call (Agent only)
+	Autonomous  bool     // spec.autonomous.goal is non-empty (Agent only)
 }
 
 // AccessGrant is the projection input for a namespaced user-plane grant.
@@ -185,6 +186,7 @@ type DesiredAgent struct {
 	Namespace          string
 	Name               string
 	PermissionSetNames []string
+	Autonomous         bool
 }
 
 // ExternalID is the stable external identity for the agent in the projected
@@ -274,6 +276,7 @@ func Project(resources []Resource) DesiredState {
 			Namespace:          r.Namespace,
 			Name:               r.Name,
 			PermissionSetNames: psNames,
+			Autonomous:         r.Autonomous,
 		})
 	}
 

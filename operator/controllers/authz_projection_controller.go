@@ -168,6 +168,9 @@ func resourceFromAgent(a *kaosv1alpha1.Agent) projection.Resource {
 		MCPServers: a.Spec.MCPServers,
 		ModelAPI:   a.Spec.ModelAPI,
 	}
+	if a.Spec.Config != nil && a.Spec.Config.Autonomous != nil {
+		res.Autonomous = strings.TrimSpace(a.Spec.Config.Autonomous.Goal) != ""
+	}
 	if a.Spec.AgentNetwork != nil {
 		res.Access = a.Spec.AgentNetwork.Access
 	}

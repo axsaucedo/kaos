@@ -150,6 +150,7 @@ func TestAuthzPolicyProjectorInjectsServiceAccountIdentityData(t *testing.T) {
 		`"https://kubernetes.default.svc"`,
 		`"kaos://agent/demo/researcher"`,
 		`"issuer_sub": "system:serviceaccount:demo:kaos-agent-researcher"`,
+		`"autonomous": false`,
 		`"kid": "sa-key"`,
 	} {
 		if !contains(data, expected) {

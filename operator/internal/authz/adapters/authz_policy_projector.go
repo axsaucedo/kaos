@@ -49,12 +49,13 @@ func (p *AuthzPolicyProjector) Apply(ctx context.Context, desired projection.Des
 			}
 			jwks = fetched
 		}
-		var agents map[string]map[string]string
+		var agents map[string]map[string]any
 		if p.MapServiceAccounts {
-			agents = map[string]map[string]string{}
+			agents = map[string]map[string]any{}
 			for _, agent := range desired.Agents {
-				agents[agent.ExternalID()] = map[string]string{
+				agents[agent.ExternalID()] = map[string]any{
 					"issuer_sub": fmt.Sprintf("system:serviceaccount:%s:%s", agent.Namespace, security.AgentServiceAccountName(agent.Name)),
+					"autonomous": agent.Autonomous,
 				}
 			}
 		}
