@@ -35,6 +35,7 @@ from opentelemetry import trace as trace_api, metrics
 
 from pais.telemetry import SERVICE_NAME, is_otel_enabled
 from pais.outcomes import access_event_data, find_access_outcome
+import kaos_identity
 
 logger = logging.getLogger(__name__)
 
@@ -300,9 +301,11 @@ class LocalTaskManager(TaskManager):
         process_fn: ProcessFn,
         max_tasks: int = 10000,
         setup_fn: Optional[Callable[[], None]] = None,
+        autonomous_principal: Optional[str] = None,
     ):
         self._process_fn = process_fn
         self._setup_fn = setup_fn
+        self._autonomous_principal = autonomous_principal
         self._tasks: Dict[str, Task] = {}
         self._running_tasks: Dict[str, asyncio.Task] = {}
         self.max_tasks = max_tasks
@@ -647,6 +650,16 @@ class LocalTaskManager(TaskManager):
                         attributes={"autonomous.iteration": iteration},
                     ):
                         try:
+                            actor_token = None
+                            if is_autonomous and self._autonomous_principal:
+                                try:
+                                    actor_token = await kaos_identity.actor_token_async()
+                                except kaos_identity.IdentityUnavailable:
+                                    logger.warning(
+                                        "Autonomous actor token unavailable; running iteration "
+                                        "without self-subject"
+                                    )
+
                             iter_timeout = (
                                 autonomous_config.max_iter_runtime_seconds
                                 if is_autonomous
@@ -654,15 +667,21 @@ class LocalTaskManager(TaskManager):
                                 and autonomous_config.max_iter_runtime_seconds > 0
                                 else 0
                             )
+
+                            async def run_iteration() -> Tuple[str, int]:
+                                if actor_token and self._autonomous_principal:
+                                    with kaos_identity.autonomous_identity_context(
+                                        actor_token, self._autonomous_principal
+                                    ):
+                                        return await self._process_fn(message, session_id)
+                                return await self._process_fn(message, session_id)
+
                             if iter_timeout > 0:
                                 last_response, tool_call_count = await asyncio.wait_for(
-                                    self._process_fn(message, session_id),
-                                    timeout=iter_timeout,
+                                    run_iteration(), timeout=iter_timeout
                                 )
                             else:
-                                last_response, tool_call_count = await self._process_fn(
-                                    message, session_id
-                                )
+                                last_response, tool_call_count = await run_iteration()
                         except Exception as iter_err:
                             access_outcome = find_access_outcome(iter_err)
                             if access_outcome is not None:

@@ -6,11 +6,15 @@ import time
 import pytest
 
 from pais.a2a import (
+    AutonomousConfig,
+    LocalTaskManager,
+    TaskState,
     TaskBudgets,
     EVENT_AUTONOMOUS_BUDGET_EXHAUSTED,
     EVENT_TASK_SUBMITTED,
     EVENT_TASK_COMPLETED,
 )
+import kaos_identity
 from tests.helpers import make_test_server
 
 
@@ -202,6 +206,74 @@ class TestAutonomousLoop:
         completed = await server.task_manager.wait_for_completion(task.id, timeout=5.0)
         assert completed is not None
         assert "done" in completed.output.lower()
+
+
+class TestAutonomousIdentity:
+    @pytest.mark.asyncio
+    async def test_self_subjects_with_current_actor_token_each_iteration(self, monkeypatch):
+        snapshots = []
+        tokens = iter(["agent-token-1", "agent-token-2"])
+
+        async def actor_token_async():
+            return next(tokens)
+
+        holder = {}
+
+        async def process_fn(message, session_id):
+            snapshots.append((kaos_identity.current(), kaos_identity.to_headers()))
+            if len(snapshots) == 2:
+                holder["tm"]._transition(task.id, TaskState.CANCELED)
+            return "working", 1
+
+        monkeypatch.setattr(kaos_identity, "actor_token_async", actor_token_async)
+        tm = LocalTaskManager(process_fn, autonomous_principal="kaos://agent/default/researcher")
+        holder["tm"] = tm
+        try:
+            task = await tm.submit_autonomous(
+                "research",
+                autonomous_config=AutonomousConfig(max_iter_runtime_seconds=5),
+            )
+            await tm.wait_for_completion(task.id, timeout=5.0)
+
+            assert [snapshot[0]["subject_token"] for snapshot in snapshots] == [
+                "agent-token-1",
+                "agent-token-2",
+            ]
+            for context, headers in snapshots:
+                assert context["principal"] == "kaos://agent/default/researcher"
+                assert headers["authorization"] == f"Bearer {context['subject_token']}"
+                assert headers["x-agent-authorization"] == (f"Bearer {context['subject_token']}")
+            assert kaos_identity.current() == {}
+        finally:
+            await tm.shutdown()
+
+    @pytest.mark.asyncio
+    async def test_no_actor_token_runs_without_subject(self, monkeypatch):
+        snapshots = []
+
+        async def actor_token_async():
+            return None
+
+        holder = {}
+
+        async def process_fn(message, session_id):
+            snapshots.append(kaos_identity.current())
+            holder["tm"]._transition(task.id, TaskState.CANCELED)
+            return "working", 1
+
+        monkeypatch.setattr(kaos_identity, "actor_token_async", actor_token_async)
+        tm = LocalTaskManager(process_fn, autonomous_principal="kaos://agent/default/researcher")
+        holder["tm"] = tm
+        try:
+            task = await tm.submit_autonomous(
+                "research",
+                autonomous_config=AutonomousConfig(max_iter_runtime_seconds=5),
+            )
+            await tm.wait_for_completion(task.id, timeout=5.0)
+
+            assert snapshots == [{}]
+        finally:
+            await tm.shutdown()
 
 
 class TestStartupAutonomous:

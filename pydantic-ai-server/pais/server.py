@@ -128,7 +128,12 @@ class AgentServer:
         self._agent_identity = settings.agent_identity or settings.security_actor or ""
         if task_manager_type == "local":
             setup_fn = self._mock_state.reset if self._mock_state else None
-            self.task_manager: TaskManager = LocalTaskManager(self._run_agent, setup_fn=setup_fn)
+            local_actor = self.settings.security_actor or f"kaos://agent/{self.settings.agent_name}"
+            self.task_manager: TaskManager = LocalTaskManager(
+                self._run_agent,
+                setup_fn=setup_fn,
+                autonomous_principal=local_actor,
+            )
         else:
             self.task_manager = NullTaskManager()
 

@@ -17,6 +17,7 @@ from __future__ import annotations
 import contextvars
 import os
 import uuid
+from contextlib import contextmanager
 from typing import Any, Callable, Dict, Iterator, MutableMapping, Optional
 
 # --- Header model -----------------------------------------------------
@@ -173,6 +174,23 @@ def _build_context(
         "scopes": scopes,
     }
     return {key: value for key, value in fields.items() if value}
+
+
+@contextmanager
+def autonomous_identity_context(actor_token: str, principal: str) -> Iterator[None]:
+    """Self-subject an autonomous agent for one execution iteration."""
+    token = ctx.replace(
+        _build_context(
+            principal=principal,
+            subject_token=actor_token,
+            actor=principal,
+            actor_token=actor_token,
+        )
+    )
+    try:
+        yield
+    finally:
+        ctx.reset(token)
 
 
 # --- Inbound boundary instrumentation -----------------------------------------------
