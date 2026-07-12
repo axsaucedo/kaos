@@ -114,6 +114,9 @@ expect "PDP enablement reaches operator" "$out" 'SECURITY_PDP_ENABLED:\s*"true"'
 expect "PDP ext_authz URL defaults to Service" "$out" 'SECURITY_AGENT_AUTH_EXT_AUTHZ_URL:\s*"kaos-pdp.kaos-system.svc:9191"'
 expect "PDP disruption budget rendered" "$out" 'kind: PodDisruptionBudget'
 expect "PDP disruption budget keeps one replica" "$out" 'minAvailable: 1'
+expect "PDP NetworkPolicy rendered" "$out" 'kind: NetworkPolicy'
+expect "PDP NetworkPolicy allows only gateway namespace" "$out" 'kubernetes.io/metadata.name: "envoy-gateway-system"'
+expect "PDP NetworkPolicy restricts ingress to gRPC port" "$out" 'port: 9191'
 
 out="$(render \
 	--namespace kaos-system \

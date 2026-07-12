@@ -1,0 +1,25 @@
+{{- if .Values.security.pdp.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: kaos-pdp
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: pdp
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: kaos-pdp
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ .Values.security.gatewayNamespace | quote }}
+      ports:
+        - protocol: TCP
+          port: 9191
+{{- end }}
