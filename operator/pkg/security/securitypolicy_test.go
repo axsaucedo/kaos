@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/axsaucedo/kaos/operator/pkg/gateway"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
@@ -162,6 +163,9 @@ func TestConstructSecurityPolicyJWTOnlyWithoutExtAuthz(t *testing.T) {
 	if _, found, _ := unstructured.NestedSlice(policy.Object, "spec", "jwt", "providers"); !found {
 		t.Errorf("expected jwt providers to be attached")
 	}
+	if _, found, _ := unstructured.NestedBool(policy.Object, "spec", "jwt", "optional"); found {
+		t.Errorf("JWT-only policy must keep gateway verification enforcing")
+	}
 }
 
 func bothIssuersConfig() Config {
@@ -194,6 +198,14 @@ func providerByName(providers []interface{}, name string) map[string]interface{}
 	return nil
 }
 
+func assertPDPJWTIsOptional(t *testing.T, policy *unstructured.Unstructured) {
+	t.Helper()
+	optional, found, err := unstructured.NestedBool(policy.Object, "spec", "jwt", "optional")
+	if err != nil || !found || !optional {
+		t.Fatalf("expected spec.jwt.optional=true, got %v (found=%v err=%v)", optional, found, err)
+	}
+}
+
 func TestConstructSecurityPolicyEmitsBothJWTProviders(t *testing.T) {
 	policy, err := constructSecurityPolicy(PolicyParams{Name: "a", Namespace: "ns", RouteName: "a"}, bothIssuersConfig())
 	if err != nil {
@@ -210,6 +222,7 @@ func TestConstructSecurityPolicyEmitsBothJWTProviders(t *testing.T) {
 	if len(providers) != 2 {
 		t.Fatalf("expected 2 jwt providers, got %d", len(providers))
 	}
+	assertPDPJWTIsOptional(t, policy)
 
 	agent := providerByName(providers, "agent")
 	if agent == nil {
@@ -259,6 +272,41 @@ func TestConstructSecurityPolicyEmitsBothJWTProviders(t *testing.T) {
 	}
 }
 
+func TestProtectedRouteClassesCarryUserPlanePolicy(t *testing.T) {
+	// Keep this list aligned with every resource controller that attaches
+	// ext_authz. A newly protected route class must opt into the same entry
+	// policy shape instead of silently omitting user-token verification.
+	protectedRouteTypes := []gateway.ResourceType{
+		gateway.ResourceTypeAgent,
+		gateway.ResourceTypeMCP,
+		gateway.ResourceTypeModelAPI,
+		gateway.ResourceTypeMemoryStore,
+	}
+
+	for _, resourceType := range protectedRouteTypes {
+		t.Run(string(resourceType), func(t *testing.T) {
+			routeName := gateway.HTTPRouteName(resourceType, "example")
+			policy, err := constructSecurityPolicy(PolicyParams{
+				Name: routeName, Namespace: "default", RouteName: routeName,
+			}, bothIssuersConfig())
+			if err != nil {
+				t.Fatalf("constructSecurityPolicy: %v", err)
+			}
+
+			providers := jwtProviders(t, policy)
+			if len(providers) != 2 || providerByName(providers, "agent") == nil || providerByName(providers, "user") == nil {
+				t.Fatalf("protected %s route must carry agent and user JWT providers: %#v", resourceType, providers)
+			}
+			assertPDPJWTIsOptional(t, policy)
+
+			headers, found, err := unstructured.NestedStringSlice(policy.Object, "spec", "extAuth", "headersToExtAuth")
+			if err != nil || !found || len(headers) != 2 || headers[0] != "authorization" || headers[1] != "x-agent-authorization" {
+				t.Fatalf("protected %s route has unexpected headersToExtAuth %#v (found=%v err=%v)", resourceType, headers, found, err)
+			}
+		})
+	}
+}
+
 func TestConstructSecurityPolicyAgentOnlyWhenNoUserIssuer(t *testing.T) {
 	cfg := operationalConfig()
 	cfg.Issuer = "http://aib:8000"
@@ -278,6 +326,7 @@ func TestConstructSecurityPolicyAgentOnlyWhenNoUserIssuer(t *testing.T) {
 	if providerByName(providers, "user") != nil {
 		t.Errorf("did not expect a user provider without a user issuer")
 	}
+	assertPDPJWTIsOptional(t, policy)
 }
 
 func TestConstructSecurityPolicyServiceAccountUsesLocalJWKS(t *testing.T) {
