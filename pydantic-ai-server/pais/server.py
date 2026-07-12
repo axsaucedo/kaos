@@ -749,7 +749,7 @@ def _setup_otel_instrumentation(settings: AgentServerSettings) -> None:
         instrumentation = InstrumentationSettings(
             tracer_provider=get_tracer_provider(),
             meter_provider=get_meter_provider(),
-            version=settings.otel_instrumentation_version,  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+            version=settings.otel_instrumentation_version,  # type: ignore[arg-type]
         )
         PydanticAgent.instrument_all(instrumentation)
 
@@ -761,7 +761,7 @@ def create_agent_server(
 ) -> AgentServer:
     """Create an AgentServer with optional sub-agents and MCP clients."""
     if not settings:
-        settings = AgentServerSettings()  # type: ignore[call-arg]  # ty: ignore[missing-argument]
+        settings = AgentServerSettings()  # type: ignore[call-arg]
 
     # Logging + OTel
     configure_logging(get_log_level(), otel_correlation=should_enable_otel())
