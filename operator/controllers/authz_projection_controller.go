@@ -57,6 +57,8 @@ type AuthzProjectionReconciler struct {
 //+kubebuilder:rbac:groups=kaos.tools,resources=accessgrants/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=kaos.tools,resources=agents,verbs=get;list;watch;update;patch
 //+kubebuilder:rbac:groups=kaos.tools,resources=agents/finalizers,verbs=update;patch
+//+kubebuilder:rbac:groups=kaos.tools,resources=thirdpartyservices,verbs=get;list;watch
+//+kubebuilder:rbac:groups=kaos.tools,resources=thirdpartyservices/status,verbs=get;update;patch
 
 // SetupWithManager registers the controller. Every watched-resource change funnels
 // to the sentinel request so bursts coalesce into a single whole-world reconcile.

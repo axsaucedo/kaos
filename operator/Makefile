@@ -46,7 +46,7 @@ deploy: manifests
 	kubectl apply -k config/manager/
 
 undeploy: manifests
-	kubectl delete agents,mcpservers,modelapis --all-namespaces --all
+	kubectl delete agents,mcpservers,modelapis,thirdpartyservices --all-namespaces --all
 	kubectl delete -k config/crd/
 	kubectl delete -k config/rbac/
 	kubectl delete -k config/manager/

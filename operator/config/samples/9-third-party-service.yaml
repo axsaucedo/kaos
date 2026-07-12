@@ -1,0 +1,41 @@
+# Token exchange is opt-in. This declaration projects a real GitHub service and
+# binds the researcher Agent to its read scopes. The referenced HTTPRoute must be
+# a dedicated third-party egress route; KAOS never attaches ext_proc to internal routes.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: github-oauth-client
+  namespace: token-exchange-demo
+type: Opaque
+stringData:
+  client-secret: replace-me
+---
+apiVersion: kaos.tools/v1alpha1
+kind: ThirdPartyService
+metadata:
+  name: github
+  namespace: token-exchange-demo
+spec:
+  displayName: GitHub
+  clientID: replace-me
+  clientSecretRef:
+    name: github-oauth-client
+    key: client-secret
+  issuerURI: https://github.com
+  endpoints:
+    authorization: https://github.com/login/oauth/authorize
+    token: https://github.com/login/oauth/access_token
+  scopes:
+    - name: repo
+      description: Read repositories as the consenting user
+    - name: read:user
+      description: Read the consenting user's profile
+  protectedResources:
+    - https://api.github.com/
+  routeRef:
+    name: github-egress
+  access:
+    - agent: researcher
+      scopes:
+        - repo
+        - read:user

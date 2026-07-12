@@ -11,6 +11,7 @@ flowchart TB
         crd2["ModelAPI CRD"]
         crd3["MCPServer CRD"]
         crd4["MemoryStore CRD"]
+        crd5["ThirdPartyService CRD"]
     end
     
     subgraph controller["Agentic Operator Controller Manager<br/>(kaos-system namespace)"]
@@ -18,6 +19,7 @@ flowchart TB
         mr["ModelAPIReconciler"]
         mcpr["MCPServerReconciler"]
         msr["MemoryStoreReconciler"]
+        tpsr["Token exchange projection"]
     end
     
     subgraph user["User Namespace"]
@@ -31,6 +33,7 @@ flowchart TB
     crd2 --> mr
     crd3 --> mcpr
     crd4 --> msr
+    crd5 --> tpsr
     
     ar --> ad
     mr --> md
@@ -125,6 +128,10 @@ Manages MemoryStore custom resources (the central memory service backing long-te
    - Report health and the service endpoint
 
 See [Memory Architecture](./memory-architecture.md) for the full design.
+
+### ThirdPartyService
+
+`ThirdPartyService` is the optional, namespaced declaration for delegated third-party access. One object contains the provider issuer or explicit OAuth endpoints, a Secret reference for its OAuth client, protected-resource URLs, the dedicated egress `HTTPRoute`, available scopes, and the real Agent-to-scope bindings. When token exchange is disabled, these declarations do not change routing or authorization.
 
 ## Resource Dependencies
 
