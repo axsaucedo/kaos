@@ -120,8 +120,9 @@ export default withMermaid(defineConfig({
         items: [
           { text: 'Overview', link: '/security/overview' },
           { text: 'Authorization', link: '/security/authorization' },
-          { text: 'Walkthrough: kaos-internal', link: '/security/walkthrough-kaos' },
-          { text: 'Walkthrough: aib-keycloak', link: '/security/walkthrough-aib' }
+          { text: 'Agent identity', link: '/security/walkthrough-agent-identity' },
+          { text: 'User identity', link: '/security/walkthrough-user-identity' },
+          { text: 'Auth', link: '/security/walkthrough-auth' }
         ]
       },
       {

@@ -114,3 +114,5 @@ Set `security.agentAuth.extAuthzUrl` only to replace the in-chart PDP Service wi
 Authorization data is eventually consistent. Budget about 90 seconds for resource reconciliation, ConfigMap projection, kubelet volume refresh, OPA file watching, and gateway configuration; this bound also applies to revocations.
 
 ServiceAccount issuer discovery and JWKS loading happen during operator startup. Restart the operator after Kubernetes ServiceAccount signing-key rotation.
+
+See [Authentication and authorization](/security/walkthrough-auth) for the end-to-end gateway and PDP request path.

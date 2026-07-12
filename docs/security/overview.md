@@ -24,7 +24,7 @@ Exactly one agent identity issuer is active:
 
 - `serviceaccount` uses one owned ServiceAccount per Agent. Kubernetes projects a short-lived token with audience `kaos-gateway` into the agent pod at `/var/run/secrets/kaos-agent/token`; `AGENT_AUTH_TOKEN_FILE` points the runtime to that file. The operator discovers the cluster issuer and JWKS through the Kubernetes API, embeds the JWKS in gateway policies, and projects the issuer-keyed keys into OPA data.
 - `aib` registers each Agent with the Agentic Identity Broker and delivers OAuth client credentials in a Secret. The runtime obtains actor tokens through `client_credentials`. One issuer URL configures the broker's public issuer and every KAOS verifier.
-- `oidc` accepts an explicitly configured OIDC issuer for advanced deployments.
+- `oidc` reserves the issuer-selection abstraction for agent OAuth clients. Dynamic Client Registration and per-agent credential provisioning are forthcoming; this is not an operational agent-identity flow today.
 
 ServiceAccount identity needs no external identity service and is the agent issuer selected by the `kaos-internal` preset.
 
@@ -56,4 +56,4 @@ The presets route internal calls through Envoy Gateway and generate NetworkPolic
 - Projection is eventually consistent. Allow changes and revocations can take about 90 seconds to reach every controller, ConfigMap mount, OPA watcher, and gateway dataplane.
 - In ServiceAccount mode, the operator discovers and caches the cluster issuer JWKS at startup. Restart the operator after the cluster rotates its ServiceAccount signing keys so new keys reach Envoy and OPA.
 
-See [Authorization](/security/authorization) for the request contract and policy-data schema.
+See [Agent identity](/security/walkthrough-agent-identity), [User identity](/security/walkthrough-user-identity), and [Authentication and authorization](/security/walkthrough-auth) for the identity planes and their enforcement path. See [Authorization](/security/authorization) for the policy-data schema.
