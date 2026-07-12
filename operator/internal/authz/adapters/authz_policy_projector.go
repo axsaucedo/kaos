@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -24,6 +25,7 @@ type AuthzPolicyProjector struct {
 	JWKSURI            string
 	JWKSClient         *http.Client
 	Issuer             string
+	UserIssuer         string
 	StaticJWKS         map[string]any
 	MapServiceAccounts bool
 	WriteGrantData     bool
@@ -56,7 +58,11 @@ func (p *AuthzPolicyProjector) Apply(ctx context.Context, desired projection.Des
 				}
 			}
 		}
-		dataDoc, err := authz.DataDocument(grants, p.Issuer, jwks, agents)
+		var userGrants map[string][]string
+		if strings.TrimSpace(p.UserIssuer) != "" {
+			userGrants = projection.UserGrantData(desired)
+		}
+		dataDoc, err := authz.DataDocument(grants, userGrants, p.Issuer, jwks, agents)
 		if err != nil {
 			return err
 		}

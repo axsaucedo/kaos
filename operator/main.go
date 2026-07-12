@@ -168,6 +168,7 @@ func main() {
 			Namespace:          policyNamespace,
 			JWKSURI:            cfg.AuthzJWKSURI(),
 			Issuer:             cfg.AgentIssuer(),
+			UserIssuer:         cfg.UserIssuer,
 			StaticJWKS:         cfg.AgentLocalJWKS(),
 			MapServiceAccounts: cfg.ServiceAccountIdentityEnabled(),
 			WriteGrantData:     policyDataSource == security.PolicyDataAutomated && !cfg.PolicyRegoOverride,
@@ -180,6 +181,8 @@ func main() {
 			Scheme:     mgr.GetScheme(),
 			Namespaces: projectionNamespaces,
 			Projectors: projectors,
+			UserIssuer: cfg.UserIssuer,
+			Recorder:   mgr.GetEventRecorderFor("kaos-authz-projection"),
 		}).SetupWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create controller", "controller", "AuthzProjection")
 			os.Exit(1)

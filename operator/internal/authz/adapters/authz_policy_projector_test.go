@@ -51,6 +51,28 @@ func TestAuthzPolicyProjectorWritesPolicyConfigMap(t *testing.T) {
 	}
 }
 
+func TestAuthzPolicyProjectorWritesUserGrantsWhenUserIssuerConfigured(t *testing.T) {
+	scheme := newTestScheme(t)
+	c := fake.NewClientBuilder().WithScheme(scheme).Build()
+	p := &AuthzPolicyProjector{Client: c, Name: "kaos-authz-policy", Namespace: "aib-system", WriteGrantData: true, UserIssuer: "https://users.example"}
+	desired := projection.DesiredState{AccessGrants: []projection.AccessGrant{{
+		Namespace: "demo",
+		Subjects:  []projection.AccessGrantSubject{{Kind: "User", Name: "alice"}},
+		Resources: []projection.AccessGrantResource{{Kind: "Agent", Name: "writer"}},
+	}}}
+
+	if err := p.Apply(context.Background(), desired); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	cm := &corev1.ConfigMap{}
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "aib-system", Name: "kaos-authz-policy"}, cm); err != nil {
+		t.Fatalf("get ConfigMap: %v", err)
+	}
+	if !contains(cm.Data["data.json"], `"user_grants"`) || !contains(cm.Data["data.json"], `"user:alice"`) {
+		t.Fatalf("data.json missing user grants: %s", cm.Data["data.json"])
+	}
+}
+
 func TestAuthzPolicyProjectorSkipsPolicyConfigMapWhenUnset(t *testing.T) {
 	scheme := newTestScheme(t)
 	agent := &kaosv1alpha1.Agent{

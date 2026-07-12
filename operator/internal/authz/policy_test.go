@@ -18,7 +18,7 @@ func TestPolicyEmbedsRego(t *testing.T) {
 
 func TestDataDocumentWithoutJWKSOmitsJWKS(t *testing.T) {
 	grants := map[string][]string{"kaos://agent/demo/researcher": {"kaos://mcpserver/demo/github"}}
-	raw, err := DataDocument(grants, "", nil, nil)
+	raw, err := DataDocument(grants, nil, "", nil, nil)
 	if err != nil {
 		t.Fatalf("DataDocument: %v", err)
 	}
@@ -38,7 +38,7 @@ func TestDataDocumentWithoutJWKSOmitsJWKS(t *testing.T) {
 
 func TestDataDocumentVerifiedModeCarriesJWKS(t *testing.T) {
 	jwks := map[string]any{"keys": []any{map[string]any{"kty": "RSA", "kid": "x"}}}
-	raw, err := DataDocument(map[string][]string{}, "https://issuer.example", jwks, nil)
+	raw, err := DataDocument(map[string][]string{}, nil, "https://issuer.example", jwks, nil)
 	if err != nil {
 		t.Fatalf("DataDocument: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestDataDocumentCarriesAgentIssuerSubjectMapping(t *testing.T) {
 	agents := map[string]map[string]string{
 		"kaos://agent/demo/researcher": {"issuer_sub": "system:serviceaccount:demo:kaos-agent-researcher"},
 	}
-	raw, err := DataDocument(map[string][]string{}, "", nil, agents)
+	raw, err := DataDocument(map[string][]string{}, nil, "", nil, agents)
 	if err != nil {
 		t.Fatalf("DataDocument: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestDataDocumentCarriesAgentIssuerSubjectMapping(t *testing.T) {
 }
 
 func TestConfigMapDataCarriesPolicyAndData(t *testing.T) {
-	cm, err := ConfigMapData(map[string][]string{"a": {"b"}}, "", nil, nil)
+	cm, err := ConfigMapData(map[string][]string{"a": {"b"}}, nil, "", nil, nil)
 	if err != nil {
 		t.Fatalf("ConfigMapData: %v", err)
 	}
@@ -80,5 +80,25 @@ func TestConfigMapDataCarriesPolicyAndData(t *testing.T) {
 	}
 	if !strings.Contains(cm[DataKey], "grants") {
 		t.Fatalf("data key missing grants")
+	}
+}
+
+func TestDataDocumentCarriesUserGrantsWhenPresent(t *testing.T) {
+	raw, err := DataDocument(nil, map[string][]string{"user:alice": {"kaos://agent/demo/a"}}, "", nil, nil)
+	if err != nil {
+		t.Fatalf("DataDocument: %v", err)
+	}
+	if !strings.Contains(string(raw), `"user_grants"`) || !strings.Contains(string(raw), `"user:alice"`) {
+		t.Fatalf("data missing user_grants: %s", raw)
+	}
+}
+
+func TestDataDocumentOmitsEmptyUserGrants(t *testing.T) {
+	raw, err := DataDocument(nil, map[string][]string{}, "", nil, nil)
+	if err != nil {
+		t.Fatalf("DataDocument: %v", err)
+	}
+	if strings.Contains(string(raw), `"user_grants"`) {
+		t.Fatalf("data must omit empty user_grants: %s", raw)
 	}
 }

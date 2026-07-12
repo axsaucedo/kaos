@@ -3,9 +3,14 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"strings"
 
+	corev1 "k8s.io/api/core/v1"
+	apiMeta "k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -38,6 +43,8 @@ type AuthzProjectionReconciler struct {
 	Scheme     *runtime.Scheme
 	Namespaces []string
 	Projectors []PolicyProjector
+	UserIssuer string
+	Recorder   record.EventRecorder
 }
 
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
@@ -58,6 +65,8 @@ func (r *AuthzProjectionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&kaosv1alpha1.Agent{}, toSentinel, specChanged).
 		Watches(&kaosv1alpha1.MCPServer{}, toSentinel, specChanged).
 		Watches(&kaosv1alpha1.ModelAPI{}, toSentinel, specChanged).
+		Watches(&kaosv1alpha1.MemoryStore{}, toSentinel, specChanged).
+		Watches(&kaosv1alpha1.AccessGrant{}, toSentinel, specChanged).
 		Complete(r)
 }
 
@@ -69,6 +78,19 @@ func (r *AuthzProjectionReconciler) Reconcile(ctx context.Context, _ reconcile.R
 		return reconcile.Result{}, fmt.Errorf("listing KAOS resources: %w", err)
 	}
 	desired := projection.Project(resources)
+	accessGrants, err := r.listAccessGrants(ctx)
+	if err != nil {
+		return reconcile.Result{}, fmt.Errorf("listing AccessGrants: %w", err)
+	}
+	enforced := strings.TrimSpace(r.UserIssuer) != ""
+	for i := range accessGrants {
+		if err := r.updateAccessGrantStatus(ctx, &accessGrants[i], enforced); err != nil {
+			return reconcile.Result{}, fmt.Errorf("updating AccessGrant %s/%s status: %w", accessGrants[i].Namespace, accessGrants[i].Name, err)
+		}
+		if enforced {
+			desired.AccessGrants = append(desired.AccessGrants, accessGrantForProjection(&accessGrants[i]))
+		}
+	}
 	for _, projector := range r.Projectors {
 		if err := projector.Apply(ctx, desired); err != nil {
 			return reconcile.Result{}, err
@@ -108,6 +130,7 @@ func (r *AuthzProjectionReconciler) listResources(ctx context.Context) ([]projec
 				Kind:      projection.MCPServer.ResourceKind,
 				Namespace: mcpServers.Items[i].Namespace,
 				Name:      mcpServers.Items[i].Name,
+				Labels:    mcpServers.Items[i].Labels,
 			})
 		}
 
@@ -120,7 +143,16 @@ func (r *AuthzProjectionReconciler) listResources(ctx context.Context) ([]projec
 				Kind:      projection.ModelAPI.ResourceKind,
 				Namespace: modelAPIs.Items[i].Namespace,
 				Name:      modelAPIs.Items[i].Name,
+				Labels:    modelAPIs.Items[i].Labels,
 			})
+		}
+
+		memoryStores := &kaosv1alpha1.MemoryStoreList{}
+		if err := r.Client.List(ctx, memoryStores, opts...); err != nil {
+			return nil, err
+		}
+		for i := range memoryStores.Items {
+			out = append(out, projection.Resource{Kind: projection.MemoryStore.ResourceKind, Namespace: memoryStores.Items[i].Namespace, Name: memoryStores.Items[i].Name, Labels: memoryStores.Items[i].Labels})
 		}
 	}
 	return out, nil
@@ -132,6 +164,7 @@ func resourceFromAgent(a *kaosv1alpha1.Agent) projection.Resource {
 		Kind:       projection.AgentKind,
 		Namespace:  a.Namespace,
 		Name:       a.Name,
+		Labels:     a.Labels,
 		MCPServers: a.Spec.MCPServers,
 		ModelAPI:   a.Spec.ModelAPI,
 	}
@@ -142,4 +175,50 @@ func resourceFromAgent(a *kaosv1alpha1.Agent) projection.Resource {
 		res.MemoryStore = a.Spec.Config.Memory.MemoryStore
 	}
 	return res
+}
+
+func (r *AuthzProjectionReconciler) listAccessGrants(ctx context.Context) ([]kaosv1alpha1.AccessGrant, error) {
+	namespaces := r.Namespaces
+	if len(namespaces) == 0 {
+		namespaces = []string{""}
+	}
+	var out []kaosv1alpha1.AccessGrant
+	for _, namespace := range namespaces {
+		var opts []client.ListOption
+		if namespace != "" {
+			opts = append(opts, client.InNamespace(namespace))
+		}
+		list := &kaosv1alpha1.AccessGrantList{}
+		if err := r.Client.List(ctx, list, opts...); err != nil {
+			return nil, err
+		}
+		out = append(out, list.Items...)
+	}
+	return out, nil
+}
+
+func accessGrantForProjection(grant *kaosv1alpha1.AccessGrant) projection.AccessGrant {
+	out := projection.AccessGrant{Namespace: grant.Namespace}
+	for _, subject := range grant.Spec.Subjects {
+		out.Subjects = append(out.Subjects, projection.AccessGrantSubject{Kind: string(subject.Kind), Name: subject.Name})
+	}
+	for _, resource := range grant.Spec.Resources {
+		out.Resources = append(out.Resources, projection.AccessGrantResource{Kind: string(resource.Kind), Name: resource.Name, Selector: resource.Selector})
+	}
+	return out
+}
+
+func (r *AuthzProjectionReconciler) updateAccessGrantStatus(ctx context.Context, grant *kaosv1alpha1.AccessGrant, enforced bool) error {
+	before := grant.DeepCopy()
+	condition := metav1.Condition{Type: "Enforced", Status: metav1.ConditionTrue, Reason: "Enforced", Message: "AccessGrant is enforced by the configured user identity provider", ObservedGeneration: grant.Generation}
+	if !enforced {
+		condition.Status = metav1.ConditionFalse
+		condition.Reason = "NoUserIdentityProvider"
+		condition.Message = "A user identity provider must be configured for this AccessGrant to be enforced"
+		if r.Recorder != nil {
+			r.Recorder.Event(grant, corev1.EventTypeWarning, condition.Reason, condition.Message)
+		}
+	}
+	apiMeta.SetStatusCondition(&grant.Status.Conditions, condition)
+	return r.Client.Status().Patch(ctx, grant, client.MergeFrom(before))
 }

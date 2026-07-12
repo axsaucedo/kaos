@@ -3,11 +3,13 @@ package controllers
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -99,6 +101,73 @@ func TestProjectionReconcileDispatchesToAllProjectors(t *testing.T) {
 	}
 	if first.calls != 1 || second.calls != 1 {
 		t.Fatalf("projector calls = %d/%d, want 1/1", first.calls, second.calls)
+	}
+}
+
+func TestProjectionReconcileMarksAccessGrantUnenforcedAndSkipsProjection(t *testing.T) {
+	scheme := newTestScheme(t)
+	grant := &kaosv1alpha1.AccessGrant{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "users"},
+		Spec: kaosv1alpha1.AccessGrantSpec{
+			Subjects:  []kaosv1alpha1.AccessGrantSubject{{Kind: kaosv1alpha1.AccessGrantSubjectKindUser, Name: "alice"}},
+			Resources: []kaosv1alpha1.AccessGrantResource{{Kind: kaosv1alpha1.AccessGrantResourceKindAgent, Name: "a"}},
+		},
+	}
+	projector := &fakeProjector{}
+	recorder := record.NewFakeRecorder(1)
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(grant).WithObjects(grant).Build()
+	r := &AuthzProjectionReconciler{Client: c, Scheme: scheme, Projectors: []PolicyProjector{projector}, Recorder: recorder}
+
+	if _, err := r.Reconcile(context.Background(), authzSentinel); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if len(projector.desired.AccessGrants) != 0 {
+		t.Fatalf("projected AccessGrants = %v, want none", projector.desired.AccessGrants)
+	}
+	updated := &kaosv1alpha1.AccessGrant{}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(grant), updated); err != nil {
+		t.Fatalf("get AccessGrant: %v", err)
+	}
+	condition := updated.Status.Conditions[0]
+	if condition.Type != "Enforced" || condition.Status != metav1.ConditionFalse || condition.Reason != "NoUserIdentityProvider" {
+		t.Fatalf("condition = %+v", condition)
+	}
+	select {
+	case event := <-recorder.Events:
+		if !strings.Contains(event, "NoUserIdentityProvider") {
+			t.Fatalf("event = %q", event)
+		}
+	default:
+		t.Fatal("expected warning event")
+	}
+}
+
+func TestProjectionReconcileMarksAccessGrantEnforcedAndProjectsIt(t *testing.T) {
+	scheme := newTestScheme(t)
+	grant := &kaosv1alpha1.AccessGrant{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "users"},
+		Spec: kaosv1alpha1.AccessGrantSpec{
+			Subjects:  []kaosv1alpha1.AccessGrantSubject{{Kind: kaosv1alpha1.AccessGrantSubjectKindGroup, Name: "editors"}},
+			Resources: []kaosv1alpha1.AccessGrantResource{{Kind: kaosv1alpha1.AccessGrantResourceKindAgent, Name: "a"}},
+		},
+	}
+	projector := &fakeProjector{}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(grant).WithObjects(grant).Build()
+	r := &AuthzProjectionReconciler{Client: c, Scheme: scheme, Projectors: []PolicyProjector{projector}, UserIssuer: "https://users.example"}
+
+	if _, err := r.Reconcile(context.Background(), authzSentinel); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if len(projector.desired.AccessGrants) != 1 {
+		t.Fatalf("projected AccessGrants = %v", projector.desired.AccessGrants)
+	}
+	updated := &kaosv1alpha1.AccessGrant{}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(grant), updated); err != nil {
+		t.Fatalf("get AccessGrant: %v", err)
+	}
+	condition := updated.Status.Conditions[0]
+	if condition.Status != metav1.ConditionTrue || condition.Reason != "Enforced" {
+		t.Fatalf("condition = %+v", condition)
 	}
 }
 
