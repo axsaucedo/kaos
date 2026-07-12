@@ -805,7 +805,8 @@ def _keycloak_realm_json(
 
     The realm exposes a confidential client with the direct-access-grant flow so a
     user access token can be minted programmatically (password grant), and an
-    audience mapper so the issued token carries the audience the gateway verifies.
+    audience and group mappers so issued access tokens carry the claims the gateway
+    and group-based AccessGrants require.
     """
 
     return {
@@ -831,10 +832,23 @@ def _keycloak_realm_json(
                             "id.token.claim": "false",
                             "access.token.claim": "true",
                         },
-                    }
+                    },
+                    {
+                        "name": "kaos-groups",
+                        "protocol": "openid-connect",
+                        "protocolMapper": "oidc-group-membership-mapper",
+                        "config": {
+                            "claim.name": "groups",
+                            "full.path": "false",
+                            "id.token.claim": "false",
+                            "access.token.claim": "true",
+                            "userinfo.token.claim": "false",
+                        },
+                    },
                 ],
             },
         ],
+        "groups": [{"name": "researchers"}],
         "users": [
             {
                 "username": username,
@@ -844,6 +858,7 @@ def _keycloak_realm_json(
                 "firstName": "KAOS",
                 "lastName": "User",
                 "requiredActions": [],
+                "groups": ["researchers"],
                 "credentials": [
                     {"type": "password", "value": password, "temporary": False}
                 ],

@@ -21,6 +21,12 @@ The gateway `jwt_authn` configuration contains two independent providers when bo
 
 The gateway then invokes OPA through the Envoy gRPC `ext_authz` filter. The `SecurityPolicy` sets `failOpen: false`; an invalid or missing required actor token, an explicit policy denial, or an unavailable PDP does not reach the workload.
 
+## Keycloak groups claim requirement
+
+Group-based `AccessGrant`s require a Keycloak Group Membership protocol mapper that emits the `groups` claim in access tokens. Configure the mapper with access-token claims enabled and `full.path: false`; group subjects consequently use short names, such as `name: researchers`, rather than `/researchers`.
+
+This mapper is a hard requirement: without the `groups` claim, group-based grants cannot match. The CLI provisions it automatically for the managed Keycloak preset, while bring-your-own-Keycloak deployments must configure it themselves.
+
 ## Request conventions
 
 The actor credential is:

@@ -5,7 +5,7 @@ metadata:
 spec:
   subjects:
   - kind: Group
-    name: platform-team
+    name: researchers
   resources:
   - kind: Agent
     name: simple-echo

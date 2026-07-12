@@ -843,11 +843,12 @@ class TestPackageData:
         from kaos_cli.samples import _get_sample_files
 
         files = _get_sample_files()
-        assert len(files) == 7
+        assert len(files) == 8
         names = [f.stem for f in files]
         assert "1-simple-echo-agent" in names
         assert "5-proxy-external-api" in names
         assert "7-memory-agent" in names
+        assert "8-access-grant" in names
 
 
 # ─── Monitoring validation ──────────────────────────────────────────────
@@ -1361,6 +1362,24 @@ class TestAuthWiring:
         clients = {c["clientId"]: c for c in realm["clients"]}
         assert set(clients) == {"kaos"}
         assert clients["kaos"]["secret"] == "kaos-dev-secret"
+        mappers = {
+            mapper["name"]: mapper for mapper in clients["kaos"]["protocolMappers"]
+        }
+        assert set(mappers) == {"kaos-audience", "kaos-groups"}
+        assert mappers["kaos-groups"] == {
+            "name": "kaos-groups",
+            "protocol": "openid-connect",
+            "protocolMapper": "oidc-group-membership-mapper",
+            "config": {
+                "claim.name": "groups",
+                "full.path": "false",
+                "id.token.claim": "false",
+                "access.token.claim": "true",
+                "userinfo.token.claim": "false",
+            },
+        }
+        assert realm["groups"] == [{"name": "researchers"}]
+        assert realm["users"][0]["groups"] == ["researchers"]
 
     def test_default_user_auth_issuer(self):
         from kaos_cli.install import _default_user_auth_issuer
