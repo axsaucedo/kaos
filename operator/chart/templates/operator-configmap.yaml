@@ -37,6 +37,7 @@ data:
   {{- fail "security.agentAuth.identity.provider must be one of: serviceaccount, oidc, aib" }}
   {{- end }}
   SECURITY_AGENT_AUTH_IDENTITY_PROVIDER: {{ $identityProvider | quote }}
+  SECURITY_AGENT_AUTH_GATEWAY_JWT_OPTIONAL: {{ .gatewayJwtOptional | quote }}
   {{- if eq $identityProvider "serviceaccount" }}
   SECURITY_AGENT_AUTH_SERVICE_ACCOUNT_AUDIENCE: {{ .identity.serviceAccount.audience | default "kaos-gateway" | quote }}
   SECURITY_AGENT_AUTH_SERVICE_ACCOUNT_EXPIRATION_SECONDS: {{ .identity.serviceAccount.expirationSeconds | default 3600 | quote }}

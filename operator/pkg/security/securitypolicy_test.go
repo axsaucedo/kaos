@@ -10,7 +10,8 @@ import (
 
 func operationalConfig() Config {
 	return Config{
-		ExtAuthzURL: "aib-access-check.kaos-system.svc.cluster.local:9191",
+		ExtAuthzURL:        "aib-access-check.kaos-system.svc.cluster.local:9191",
+		GatewayJWTOptional: true,
 	}
 }
 
@@ -203,6 +204,19 @@ func assertPDPJWTIsOptional(t *testing.T, policy *unstructured.Unstructured) {
 	optional, found, err := unstructured.NestedBool(policy.Object, "spec", "jwt", "optional")
 	if err != nil || !found || !optional {
 		t.Fatalf("expected spec.jwt.optional=true, got %v (found=%v err=%v)", optional, found, err)
+	}
+}
+
+func TestConstructSecurityPolicyAllowsBlockingGatewayJWT(t *testing.T) {
+	cfg := bothIssuersConfig()
+	cfg.GatewayJWTOptional = false
+	policy, err := constructSecurityPolicy(PolicyParams{Name: "a", Namespace: "ns", RouteName: "a"}, cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	optional, found, err := unstructured.NestedBool(policy.Object, "spec", "jwt", "optional")
+	if err != nil || !found || optional {
+		t.Fatalf("expected spec.jwt.optional=false, got %v (found=%v err=%v)", optional, found, err)
 	}
 }
 

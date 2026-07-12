@@ -38,6 +38,10 @@ refute "authorization provider selector removed" "$out" 'SECURITY_AUTHORIZATION_
 refute "PDP disabled by default" "$out" 'name: kaos-pdp'
 refute "disabled PDP does not enable operator enforcement" "$out" 'SECURITY_PDP_ENABLED'
 expect "ServiceAccount identity is default" "$out" 'SECURITY_AGENT_AUTH_IDENTITY_PROVIDER:\s*"serviceaccount"'
+expect "gateway JWT is optional by default" "$out" 'SECURITY_AGENT_AUTH_GATEWAY_JWT_OPTIONAL:\s*"true"'
+
+out="$(render --set security.agentAuth.gatewayJwtOptional=false)"
+expect "gateway JWT can be blocking" "$out" 'SECURITY_AGENT_AUTH_GATEWAY_JWT_OPTIONAL:\s*"false"'
 
 out="$(render \
 	--set security.agentAuth.identity.provider=aib \

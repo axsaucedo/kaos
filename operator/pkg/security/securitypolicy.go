@@ -117,7 +117,7 @@ func constructSecurityPolicy(params PolicyParams, cfg Config) (*unstructured.Uns
 			// ext_authz is enabled. Keep gateway JWT extraction best-effort so a
 			// missing token reaches the PDP for the authoritative decision.
 			if cfg.ExtAuthzEnabled() {
-				jwt["optional"] = true
+				jwt["optional"] = cfg.GatewayJWTOptional
 			}
 			_ = unstructured.SetNestedMap(policy.Object, jwt, "spec", "jwt")
 			attached = true

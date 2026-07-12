@@ -19,7 +19,11 @@ The gateway `jwt_authn` configuration contains two independent providers when bo
 - `agent` reads `x-agent-authorization`, verifies the selected actor issuer, and requires audience `kaos-gateway`.
 - `user` reads `Authorization` and verifies the configured Keycloak issuer and audience.
 
-The generated JWT rule uses `optional: true` so agent-issuer tokens carried in `Authorization` can reach the PDP for autonomous self-subjecting. Optional gateway JWT authentication does not make identity optional: the PDP verifies every required token in policy and is authoritative for the allow or deny decision. The gateway invokes OPA through the Envoy gRPC `ext_authz` filter, and the `SecurityPolicy` sets `failOpen: false`; invalid identity, an explicit policy denial, or an unavailable PDP does not reach the workload.
+The gateway invokes OPA through the Envoy gRPC `ext_authz` filter, and the `SecurityPolicy` sets `failOpen: false`; invalid identity, an explicit policy denial, or an unavailable PDP does not reach the workload.
+
+## Gateway JWT behavior
+
+`security.agentAuth.gatewayJwtOptional` defaults to `true`, keeping gateway JWT processing non-blocking so agent-issuer tokens carried in `Authorization` can reach the PDP for autonomous self-subjecting. The PDP still verifies every required token and remains authoritative. Setting this value to `false` makes the gateway reject invalid tokens at the edge, but it also breaks autonomous agents because the user provider rejects their propagated agent-issuer self-subject token before the PDP runs. Set it to `false` only when no autonomous agents run; the value has no effect without the PDP.
 
 ## Subject-required authorization model
 

@@ -73,6 +73,10 @@ type Config struct {
 	// standard OIDC realm path.
 	UserJWKSURIOverride string
 
+	// GatewayJWTOptional keeps gateway JWT verification non-blocking when the
+	// PDP is enabled so the PDP remains the sole authorization authority.
+	GatewayJWTOptional bool
+
 	// GatewayNamespace is the namespace of the Envoy Gateway data plane
 	// (security.gatewayNamespace). It is the ingress source allowed by the
 	// generated NetworkPolicy so the Gateway can reach protected workloads. An
@@ -168,6 +172,7 @@ const (
 	envIssuer                   = "SECURITY_AGENT_AUTH_ISSUER"
 	envCredentialSecretPrefix   = "SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX"
 	envOIDCRegistrationToken    = "SECURITY_AGENT_AUTH_OIDC_REGISTRATION_TOKEN"
+	envGatewayJWTOptional       = "SECURITY_AGENT_AUTH_GATEWAY_JWT_OPTIONAL"
 	envUserIssuer               = "SECURITY_USER_AUTH_ISSUER"
 	envUserAudience             = "SECURITY_USER_AUTH_AUDIENCE"
 	envUserJWKSURI              = "SECURITY_USER_AUTH_JWKS_URI"
@@ -224,6 +229,7 @@ func GetConfig() Config {
 		UserIssuer:                           os.Getenv(envUserIssuer),
 		UserAudience:                         os.Getenv(envUserAudience),
 		UserJWKSURIOverride:                  os.Getenv(envUserJWKSURI),
+		GatewayJWTOptional:                   parseBoolEnvDefault(envGatewayJWTOptional, true),
 		GatewayNamespace:                     os.Getenv(envGatewayNamespace),
 		OperatorNamespace:                    operatorNamespace,
 		NetworkPolicyDisabled:                parseBoolEnv(envNetworkPolicyDisabled),
@@ -242,6 +248,14 @@ func parseBoolEnv(key string) bool {
 	v, err := strconv.ParseBool(strings.TrimSpace(os.Getenv(key)))
 	if err != nil {
 		return false
+	}
+	return v
+}
+
+func parseBoolEnvDefault(key string, defaultValue bool) bool {
+	v, err := strconv.ParseBool(strings.TrimSpace(os.Getenv(key)))
+	if err != nil {
+		return defaultValue
 	}
 	return v
 }

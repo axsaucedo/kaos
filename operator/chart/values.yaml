@@ -91,6 +91,13 @@ security:
   # an agent-auth ext_authz URL; when unset, the operator generates no
   # authorization policies and routing behavior is unchanged.
   agentAuth:
+    # gatewayJwtOptional keeps gateway JWT non-blocking so the PDP is the sole
+    # authority. This is REQUIRED for autonomous agents: their propagated
+    # self-subject is an agent-issuer token in Authorization that the Keycloak user
+    # provider would otherwise reject before the PDP runs. Set false ONLY when no
+    # autonomous agents run and gateway rejection of invalid tokens is desired.
+    # The PDP enforces in all cases; this has no effect without the PDP.
+    gatewayJwtOptional: true
     # identity selects exactly one agent token issuer.
     identity:
       # provider is serviceaccount, oidc, or aib.

@@ -92,6 +92,17 @@ func TestUserPlaneEnabled(t *testing.T) {
 	}
 }
 
+func TestGatewayJWTOptionalDefaultsTrue(t *testing.T) {
+	t.Setenv(envGatewayJWTOptional, "")
+	if !GetConfig().GatewayJWTOptional {
+		t.Fatal("expected gateway JWT to be optional by default")
+	}
+	t.Setenv(envGatewayJWTOptional, "false")
+	if GetConfig().GatewayJWTOptional {
+		t.Fatal("expected explicit false to make gateway JWT blocking")
+	}
+}
+
 func TestCredentialMountingEnabled(t *testing.T) {
 	cases := []struct {
 		name     string
