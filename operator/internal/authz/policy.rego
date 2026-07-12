@@ -92,18 +92,8 @@ user_subject := {"principal_key": principal_key, "group_keys": group_keys} if {
 	group_keys := [sprintf("group:%v", [group]) | some group in object.get(claims, "groups", [])]
 }
 
-is_user_issuer(issuer) if {
-	issuer == data.kaos.user.issuer
-}
-
-agent_issuer(issuer) if {
-	data.kaos.jwks[issuer]
-	not is_user_issuer(issuer)
-}
-
 autonomous_subject if {
 	claims := verify_token(subject_token, "kaos-gateway")
-	agent_issuer(claims.iss)
 	some id
 	data.kaos.agents[id].issuer_sub == claims.sub
 	data.kaos.agents[id].autonomous == true

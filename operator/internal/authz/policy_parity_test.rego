@@ -57,6 +57,8 @@ signed_token(issuer, audience, subject, extra) := io.jwt.encode_sign(
 
 actor_jwt := signed_token(verified_issuer, ["kaos-gateway"], actor_sub, {})
 autonomous_subject_jwt := signed_token(verified_issuer, ["kaos-gateway"], autonomous_sub, {})
+shared_issuer_autonomous_subject_jwt := signed_token(user_issuer, ["kaos-gateway"], autonomous_sub, {})
+shared_issuer_user_subject_jwt := signed_token(user_issuer, ["kaos-users"], autonomous_sub, {})
 non_autonomous_subject_jwt := signed_token(verified_issuer, ["kaos-gateway"], non_autonomous_sub, {})
 user_subject_jwt := signed_token(user_issuer, ["kaos-users"], "user-123", {"email": "alice@example.com", "groups": ["writers", "readers"]})
 user_subject_without_email_jwt := signed_token(user_issuer, ["kaos-users"], "user-123", {})
@@ -117,6 +119,25 @@ test_internal_actor_granted_with_autonomous_subject_allows if {
 		with data.kaos.agents as agents
 		with data.kaos.user as user_config
 	out.allowed == true
+}
+
+test_internal_shared_issuer_autonomous_subject_allows if {
+	out := result with input as internal_input(actor_jwt, shared_issuer_autonomous_subject_jwt, ["demo", "mcp", "github"])
+		with data.kaos.grants as grants
+		with data.kaos.jwks as configured_jwks
+		with data.kaos.agents as agents
+		with data.kaos.user as user_config
+	out.allowed == true
+}
+
+test_shared_issuer_user_audience_is_not_an_autonomous_subject if {
+	out := result with input as entry_input(shared_issuer_user_subject_jwt)
+		with data.kaos.jwks as configured_jwks
+		with data.kaos.agents as agents
+		with data.kaos.user as user_config
+		with data.kaos.user_grants as {}
+	out.allowed == false
+	"user is not granted target resource" in out.reasons
 }
 
 test_internal_autonomous_subject_without_user_provider_allows if {
