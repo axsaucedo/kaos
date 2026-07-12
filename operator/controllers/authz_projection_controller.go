@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	apiMeta "k8s.io/apimachinery/pkg/api/meta"
@@ -210,9 +209,7 @@ func resourceFromAgent(a *kaosv1alpha1.Agent) projection.Resource {
 		MCPServers: a.Spec.MCPServers,
 		ModelAPI:   a.Spec.ModelAPI,
 	}
-	if a.Spec.Config != nil && a.Spec.Config.Autonomous != nil {
-		res.Autonomous = strings.TrimSpace(a.Spec.Config.Autonomous.Goal) != ""
-	}
+	res.Autonomous = a.IsAutonomous()
 	if a.Spec.AgentNetwork != nil {
 		res.Access = a.Spec.AgentNetwork.Access
 	}

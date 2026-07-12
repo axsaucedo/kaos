@@ -1,6 +1,8 @@
 package v1alpha1
 
 import (
+	"strings"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -323,6 +325,12 @@ type Agent struct {
 
 	Spec   AgentSpec   `json:"spec,omitempty"`
 	Status AgentStatus `json:"status,omitempty"`
+}
+
+// IsAutonomous reports whether the agent has a non-empty autonomous goal.
+// The runtime uses the same goal-is-non-empty rule so both layers stay aligned.
+func (a *Agent) IsAutonomous() bool {
+	return a != nil && a.Spec.Config != nil && a.Spec.Config.Autonomous != nil && strings.TrimSpace(a.Spec.Config.Autonomous.Goal) != ""
 }
 
 // +kubebuilder:object:root=true
