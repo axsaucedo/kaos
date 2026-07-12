@@ -46,42 +46,24 @@ unverified_actor_claims := payload if {
 	[_, payload, _] := io.jwt.decode(actor_token)
 }
 
-unverified_actor_header := header if {
-	[header, _, _] := io.jwt.decode(actor_token)
-}
+allowed_actor_algorithms := {"RS256"}
 
 # Verified mode: a JWKS is configured, so the actor token signature must verify
-# against it before the subject is trusted.
+# against it before the subject is trusted. Demo mode falls back to unverified
+# decoding only when no JWKS is configured (spoofable).
 actor_sub := sub if {
 	jwks_configured
 	keys := data.kaos.jwks[unverified_actor_claims.iss]
+	some algorithm in allowed_actor_algorithms
 	result := io.jwt.decode_verify(actor_token, {
-		"alg": unverified_actor_header.alg,
-		"cert": json.marshal(keys),
-		"iss": unverified_actor_claims.iss,
-	})
-	result[0] == true
-	sub := result[2].sub
-}
-
-# Kubernetes projected tokens carry the fixed gateway audience. OPA requires
-# that audience to be supplied when decode_verify evaluates a token with aud.
-actor_sub := sub if {
-	jwks_configured
-	"kaos-gateway" in unverified_actor_claims.aud
-	keys := data.kaos.jwks[unverified_actor_claims.iss]
-	result := io.jwt.decode_verify(actor_token, {
-		"alg": unverified_actor_header.alg,
+		"alg": algorithm,
 		"aud": "kaos-gateway",
 		"cert": json.marshal(keys),
 		"iss": unverified_actor_claims.iss,
 	})
 	result[0] == true
 	sub := result[2].sub
-}
-
-# Demo mode: no JWKS configured, decode without verifying (spoofable).
-actor_sub := sub if {
+} else := sub if {
 	not jwks_configured
 	sub := unverified_actor_claims.sub
 }

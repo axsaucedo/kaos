@@ -24,7 +24,7 @@ The calling agent sends its JWT in:
 x-agent-authorization: Bearer <actor-jwt>
 ```
 
-The gateway's agent JWT provider validates the token against the selected issuer. ServiceAccount mode uses the discovered Kubernetes issuer, audience `kaos-gateway`, and an inline JWKS. AIB mode uses the single configured AIB issuer URL and its JWKS.
+The gateway's agent JWT provider validates the token against the selected issuer and requires audience `kaos-gateway`. ServiceAccount mode uses the discovered Kubernetes issuer and an inline JWKS. AIB mode uses the single configured AIB issuer URL and its JWKS; the broker must mint agent tokens with `kaos-gateway` in their audience claim.
 
 ServiceAccount token subjects have the form `system:serviceaccount:<namespace>:<serviceaccount-name>`. The policy resolves that issuer subject to the logical actor id through `data.kaos.agents`.
 
@@ -91,7 +91,7 @@ Maps each logical agent id to a sorted, deduplicated list of resources it may re
 
 ### `data.kaos.jwks`
 
-Maps the exact token issuer string to its JSON Web Key Set. The policy selects keys by the unverified token's `iss`, verifies the signature and issuer, and applies the `kaos-gateway` audience constraint to projected ServiceAccount tokens.
+Maps the exact token issuer string to its JSON Web Key Set. The policy selects keys by the unverified token's `iss`, then verifies the signature with the server-side `RS256` allowlist and requires the exact issuer plus the `kaos-gateway` audience for every configured issuer.
 
 ### `data.kaos.agents`
 

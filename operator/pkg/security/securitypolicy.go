@@ -202,12 +202,16 @@ func constructJWTProviders(cfg Config) []interface{} {
 		if localJWKS := cfg.AgentLocalJWKS(); localJWKS != nil {
 			if raw, err := json.Marshal(localJWKS); err == nil {
 				agentProvider["localJWKS"] = map[string]interface{}{"type": "Inline", "inline": string(raw)}
-				agentProvider["audiences"] = []interface{}{cfg.ServiceAccountAudience}
 			}
 		} else if agentJWKS := cfg.AgentJWKSURI(); agentJWKS != "" {
 			agentProvider["remoteJWKS"] = map[string]interface{}{"uri": agentJWKS}
 		}
 		if _, local := agentProvider["localJWKS"]; local || agentProvider["remoteJWKS"] != nil {
+			audience := strings.TrimSpace(cfg.ServiceAccountAudience)
+			if audience == "" {
+				audience = defaultAgentTokenAudience
+			}
+			agentProvider["audiences"] = []interface{}{audience}
 			providers = append(providers, agentProvider)
 		}
 	}

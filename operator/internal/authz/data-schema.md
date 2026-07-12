@@ -31,7 +31,7 @@ The policy derives the target only from the operator-owned gateway path because 
 
 ## `kaos.jwks`
 
-Maps the exact actor-token issuer to its JSON Web Key Set. The policy selects the issuer entry from the token `iss` and verifies the token before trusting its subject. ServiceAccount tokens also require the `kaos-gateway` audience.
+Maps the exact actor-token issuer to its JSON Web Key Set. The policy selects the issuer entry from the token `iss`, verifies the token with the server-side `RS256` allowlist, and requires the exact issuer plus the `kaos-gateway` audience before trusting its subject.
 
 ## `kaos.agents`
 

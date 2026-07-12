@@ -31,12 +31,63 @@ serviceaccount_actor_jwt := io.jwt.encode_sign(
 	{"kty": "oct", "k": "c2VjcmV0"},
 )
 
+verified_issuer := "https://kubernetes.default.svc"
+
+verified_private_jwk := {
+	"alg": "RS256",
+	"d": "Fx-xsp8YrFSRa1thpaNBkQUPVeAk1tH_9SMwZMo6NZyiol6TKOss60nHLEQ-C-OCw_dupSazHbB8uGkRs1GUmsvoF0PRIm3vT4rdp6pNNDna2ySULiKd-htcAgb17T7bfd1YhSiLJgcx9XS0vVb6rfnkJcQWNwdnAl1ZUjQ7ypV4F1o_L5Dd9JcoVMTibO3XN1ZnDBs9UhzBgctLI-zEPyMhYA57Bp6nOkYMwlWhcaZgJTyHrD0jB6hMlVcL9RQlOZjmJHdxnX5OnsKuCoAopCFU1f7i3Ob024hlSkCLLNnVUq4KTiYCx0n9xrGj1ld1Pq6x6j4CnxKjkZYQic7o0Q",
+	"dp": "YbYWmJiHtN5hiLYAuICfCdiBcuAQc6NUdY8Up2geRFd174gousniBKIkW3293mischAL7fq0sfaJP7iHOwRL4wMYlL62ksy8603IIO4zPhxX2ACrpfcwU4Hs3AldvH6M82eeUCCzp5-L4zYT6bANOVbPeN4yk04J3NtHFvR5HcE",
+	"dq": "wGWzVF0eT-tcCDtdISXcAFx883V9vI1uozPq9Fg3xkKpBG4wz_wN5OvGvG7TuwRewiyRBNKn_kxncmyHcwsQn_BiHrd3G7_i-TFFzOjMR7LpHem2nmwuizzFtX0Yc6M6H6St0vr6utaPV8Z3iot0Twy0C6T9YF2JOAMo3-__fy0",
+	"e": "AQAB",
+	"kid": "kaos-test",
+	"kty": "RSA",
+	"n": "o9ZEw_zcv2ygbW9wL5dTPAh6jrrmBmEn2lY3fXpXrtJMszWCEZCw7_jC-Hz5zwwLHIHfoDQvq0zHyp22DP9Ds6V31oUkhokqR4LKCqK7dx_fExOI0-R0whV4fVzr5iKf9emCihZhTC3QHE2u5p4mw4xHtW2s8BIs0dnFP-MpSt0ZugkDVjvzKyf8vVp65ANPK96C11zrxQCHa9BmFbfgnvLlCIRhCIZs1qbhG1eySynZK1KSTAXHgWO205QYPmLttXzbcXlDmXh12S1jQYrFGuOeAvarH-WPiHqS8toNONZ1tIchzPaI05qCcXfc6UsJXw0vn4Ic1Ke3yvapaGwkNw",
+	"p": "0i2TkPLLUBMCYOyv1HQ3V1iWZS0Hy3ediHLk7pjVltoTFNrucn6Ldwtm23wP9y6jxCV9pcgqDO7aT0PZCxZGCRDeSe8WxBpY3NWDbyGLE6hlzf58ErXgsvQSZo9S5T_nJU-RJ8BPHk8Cvtk9zhcdJpVdh_8FSgu9RtuACRq4Q3E",
+	"q": "x45QHX84hebZECnEyO-D0kz8AUYjB5r75PI1j_KQy6fu2alFFmBFoB16QHEekGnEsiayazfoBNCYl5Nk59re1IPUNRkBXcGmXknISs1BXpFKixvNwvZ_wCD_3xSdK4EIPHn0_qJDOvigf6m3QTvR_BkyZPO-hDzP0T8zCZsMvic",
+	"qi": "WVX8QmZsplHXZ1PsT-J5JyG-9RlT0hVErhVSRgqBTNic9Hzt4eeR2eRn1ZX3A3vlolQlO0vrXwXj-wgXEubSsZYZWGbE0LMHycB2iB22Xj513rbnrROJU9DtREjIQA3-EQtIsaCGTOZG7W5pJwqCPXRcLGvFE1JIKuJ1SCfYffU",
+	"use": "sig",
+}
+
+verified_jwks := {"keys": [{
+	"alg": "RS256",
+	"e": verified_private_jwk.e,
+	"kid": verified_private_jwk.kid,
+	"kty": verified_private_jwk.kty,
+	"n": verified_private_jwk.n,
+	"use": verified_private_jwk.use,
+}]}
+
+verified_actor_jwt(audience) := io.jwt.encode_sign(
+	{"alg": "RS256", "kid": "kaos-test"},
+	{"aud": audience, "iss": verified_issuer, "sub": "system:serviceaccount:demo:kaos-agent-researcher"},
+	verified_private_jwk,
+)
+
+verified_actor_jwt_without_audience := io.jwt.encode_sign(
+	{"alg": "RS256", "kid": "kaos-test"},
+	{"iss": verified_issuer, "sub": "system:serviceaccount:demo:kaos-agent-researcher"},
+	verified_private_jwk,
+)
+
+disallowed_algorithm_actor_jwt := io.jwt.encode_sign(
+	{"alg": "HS256"},
+	{"aud": ["kaos-gateway"], "iss": verified_issuer, "sub": "system:serviceaccount:demo:kaos-agent-researcher"},
+	{"kty": "oct", "k": "c2VjcmV0"},
+)
+
 request_input(path) := {
 	"attributes": {"request": {"http": {"headers": {
 		"authorization": sprintf("Bearer %v", [subject_jwt]),
 		"x-agent-authorization": sprintf("Bearer %v", [actor_jwt]),
 	}}}},
 	"parsed_path": path,
+}
+
+verified_request_input(token) := {
+	"attributes": {"request": {"http": {"headers": {
+		"x-agent-authorization": sprintf("Bearer %v", [token]),
+	}}}},
+	"parsed_path": ["demo", "mcp", "github"],
 }
 
 grants := {"kaos://agent/demo/researcher": ["kaos://mcpserver/demo/github"]}
@@ -65,9 +116,12 @@ test_denies_when_no_target_resource if {
 }
 
 test_denies_when_no_actor_token if {
-	out := result with input as {"attributes": {"request": {"http": {"headers": {
-		"authorization": sprintf("Bearer %v", [subject_jwt]),
-	}}}}, "parsed_path": ["demo", "mcp", "github"]}
+	out := result with input as {
+		"attributes": {"request": {"http": {"headers": {
+			"authorization": sprintf("Bearer %v", [subject_jwt]),
+		}}}},
+		"parsed_path": ["demo", "mcp", "github"],
+	}
 		with data.kaos.grants as grants
 	out.action == "deny"
 }
@@ -109,4 +163,36 @@ test_allows_granted_resource_from_path_without_target_header if {
 	out := result with input as path_input
 		with data.kaos.grants as grants
 	out.allowed == true
+}
+
+test_verified_allows_correct_serviceaccount_issuer_algorithm_and_audience if {
+	out := result with input as verified_request_input(verified_actor_jwt(["kaos-gateway"]))
+		with data.kaos.grants as grants
+		with data.kaos.jwks as {verified_issuer: verified_jwks}
+		with data.kaos.agents as agents
+	out.allowed == true
+}
+
+test_verified_denies_missing_audience if {
+	out := result with input as verified_request_input(verified_actor_jwt_without_audience)
+		with data.kaos.grants as grants
+		with data.kaos.jwks as {verified_issuer: verified_jwks}
+		with data.kaos.agents as agents
+	out.allowed == false
+}
+
+test_verified_denies_wrong_audience if {
+	out := result with input as verified_request_input(verified_actor_jwt(["another-service"]))
+		with data.kaos.grants as grants
+		with data.kaos.jwks as {verified_issuer: verified_jwks}
+		with data.kaos.agents as agents
+	out.allowed == false
+}
+
+test_verified_denies_disallowed_algorithm if {
+	out := result with input as verified_request_input(disallowed_algorithm_actor_jwt)
+		with data.kaos.grants as grants
+		with data.kaos.jwks as {verified_issuer: verified_jwks}
+		with data.kaos.agents as agents
+	out.allowed == false
 }

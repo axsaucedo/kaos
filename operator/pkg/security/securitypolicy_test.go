@@ -230,8 +230,9 @@ func TestConstructSecurityPolicyEmitsBothJWTProviders(t *testing.T) {
 	if h["name"] != "x-agent-authorization" || h["valuePrefix"] != "Bearer " {
 		t.Errorf("unexpected agent extractFrom header %#v", h)
 	}
-	if _, hasAud := agent["audiences"]; hasAud {
-		t.Errorf("agent provider should not set audiences")
+	agentAud, _, _ := unstructured.NestedStringSlice(agent, "audiences")
+	if len(agentAud) != 1 || agentAud[0] != "kaos-gateway" {
+		t.Errorf("unexpected agent audiences %#v", agentAud)
 	}
 
 	user := providerByName(providers, "user")
