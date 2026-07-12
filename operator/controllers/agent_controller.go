@@ -1240,11 +1240,15 @@ func (r *AgentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return requests
 	})
 
-	mapThirdPartyServiceToAgents := handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []ctrl.Request {
+	mapThirdPartyServiceToAgents := handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []ctrl.Request {
 		service := obj.(*kaosv1alpha1.ThirdPartyService)
-		requests := make([]ctrl.Request, 0, len(service.Spec.Access))
-		for _, access := range service.Spec.Access {
-			requests = append(requests, ctrl.Request{NamespacedName: types.NamespacedName{Name: access.Agent, Namespace: service.Namespace}})
+		agents := &kaosv1alpha1.AgentList{}
+		if err := r.List(ctx, agents, client.InNamespace(service.Namespace)); err != nil {
+			return nil
+		}
+		requests := make([]ctrl.Request, 0, len(agents.Items))
+		for _, agent := range agents.Items {
+			requests = append(requests, ctrl.Request{NamespacedName: types.NamespacedName{Name: agent.Name, Namespace: agent.Namespace}})
 		}
 		return requests
 	})
