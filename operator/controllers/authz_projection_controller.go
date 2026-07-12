@@ -19,6 +19,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
+	"sigs.k8s.io/controller-runtime/pkg/source"
 
 	kaosv1alpha1 "github.com/axsaucedo/kaos/operator/api/v1alpha1"
 	"github.com/axsaucedo/kaos/operator/internal/projection"
@@ -64,6 +65,8 @@ func (r *AuthzProjectionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	toSentinel := handler.EnqueueRequestsFromMapFunc(func(context.Context, client.Object) []reconcile.Request {
 		return []reconcile.Request{authzSentinel}
 	})
+	startup := make(chan event.GenericEvent, 1)
+	startup <- event.GenericEvent{Object: &corev1.ConfigMap{}}
 	specChanged := builder.WithPredicates(predicate.GenerationChangedPredicate{})
 	agentChanged := builder.WithPredicates(predicate.Funcs{
 		CreateFunc: func(event.CreateEvent) bool { return true },
@@ -82,6 +85,7 @@ func (r *AuthzProjectionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&kaosv1alpha1.ModelAPI{}, toSentinel, specChanged).
 		Watches(&kaosv1alpha1.MemoryStore{}, toSentinel, specChanged).
 		Watches(&kaosv1alpha1.AccessGrant{}, toSentinel, specChanged).
+		WatchesRawSource(source.Channel(startup, toSentinel)).
 		Complete(r)
 }
 
