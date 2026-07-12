@@ -54,6 +54,10 @@ type Config struct {
 	// An empty value disables credential mounting into agent pods.
 	CredentialSecretPrefix string
 
+	// OIDCRegistrationInitialAccessToken authorizes RFC 7591 client
+	// registration with the selected OIDC provider.
+	OIDCRegistrationInitialAccessToken string
+
 	// UserIssuer is the user-auth OIDC issuer URL (userAuth.issuer): the identity
 	// provider (e.g. Keycloak) that issues human user subject tokens. When set, a
 	// user jwt_authn provider is emitted on protected routes. Empty means no user
@@ -163,6 +167,7 @@ const (
 	envServiceAccountJWKS       = "SECURITY_AGENT_AUTH_SERVICE_ACCOUNT_JWKS"
 	envIssuer                   = "SECURITY_AGENT_AUTH_ISSUER"
 	envCredentialSecretPrefix   = "SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX"
+	envOIDCRegistrationToken    = "SECURITY_AGENT_AUTH_OIDC_REGISTRATION_TOKEN"
 	envUserIssuer               = "SECURITY_USER_AUTH_ISSUER"
 	envUserAudience             = "SECURITY_USER_AUTH_AUDIENCE"
 	envUserJWKSURI              = "SECURITY_USER_AUTH_JWKS_URI"
@@ -215,6 +220,7 @@ func GetConfig() Config {
 		ExtAuthzURL:                          os.Getenv(envExtAuthzURL),
 		Issuer:                               os.Getenv(envIssuer),
 		CredentialSecretPrefix:               os.Getenv(envCredentialSecretPrefix),
+		OIDCRegistrationInitialAccessToken:   strings.TrimSpace(os.Getenv(envOIDCRegistrationToken)),
 		UserIssuer:                           os.Getenv(envUserIssuer),
 		UserAudience:                         os.Getenv(envUserAudience),
 		UserJWKSURIOverride:                  os.Getenv(envUserJWKSURI),
@@ -270,10 +276,24 @@ func (c Config) SecurityEnabled() bool {
 }
 
 // CredentialMountingEnabled reports whether the operator should mount per-agent
-// AIB credentials into agent pods. This requires security to be enabled and a
+// OAuth credentials into agent pods. This requires security to be enabled and a
 // credential Secret prefix to be configured.
 func (c Config) CredentialMountingEnabled() bool {
-	return c.IdentityProviderOrDefault() == IdentityProviderAIB && c.SecurityEnabled() && strings.TrimSpace(c.CredentialSecretPrefix) != ""
+	provider := c.IdentityProviderOrDefault()
+	return (provider == IdentityProviderAIB || provider == IdentityProviderOIDC) && c.SecurityEnabled() && c.CredentialSecretPrefixOrDefault() != ""
+}
+
+// CredentialSecretPrefixOrDefault returns the configured credential Secret
+// prefix. OIDC uses a provider-specific default so DCR works from the bootstrap
+// Secret configuration alone; existing AIB configuration remains unchanged.
+func (c Config) CredentialSecretPrefixOrDefault() string {
+	if prefix := strings.TrimSpace(c.CredentialSecretPrefix); prefix != "" {
+		return prefix
+	}
+	if c.IdentityProviderOrDefault() == IdentityProviderOIDC {
+		return "kaos-oidc"
+	}
+	return ""
 }
 
 // IdentityProviderOrDefault returns the single configured issuer, preserving
@@ -328,7 +348,7 @@ func (c Config) ServiceAccountTokenFilename() string {
 // given agent, using the configured prefix. It matches the name the projection
 // controller writes, so the operator can mount it without coordination.
 func (c Config) CredentialSecretName(agentName string) string {
-	return CredentialSecretName(c.CredentialSecretPrefix, agentName)
+	return CredentialSecretName(c.CredentialSecretPrefixOrDefault(), agentName)
 }
 
 // TokenEndpoint returns the agent-auth token endpoint derived from the issuer, or an

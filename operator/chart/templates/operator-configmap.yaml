@@ -58,8 +58,8 @@ data:
   {{- if and (ne $identityProvider "serviceaccount") .issuer }}
   SECURITY_AGENT_AUTH_ISSUER: {{ .issuer | quote }}
   {{- end }}
-  {{- if and (eq $identityProvider "aib") .credentialSecretPrefix }}
-  SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX: {{ .credentialSecretPrefix | quote }}
+  {{- if and (or (eq $identityProvider "aib") (eq $identityProvider "oidc")) (or .credentialSecretPrefix (eq $identityProvider "oidc")) }}
+  SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX: {{ .credentialSecretPrefix | default "kaos-oidc" | quote }}
   {{- end }}
   {{- if and (eq $identityProvider "aib") .adminUrl }}
   # Broker identity projection: when an admin URL is set the operator registers

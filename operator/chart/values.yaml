@@ -99,6 +99,13 @@ security:
         audience: kaos-gateway
         expirationSeconds: 3600
         tokenPath: /var/run/secrets/kaos-agent/token
+      oidc:
+        registration:
+          # initialAccessTokenSecretRef authorizes RFC 7591 Dynamic Client
+          # Registration. Both name and key are required to enable projection.
+          initialAccessTokenSecretRef:
+            name: ""
+            key: ""
     # authorization groups the coarse authorization knobs.
     authorization:
       # policyDataSource selects who authors the authorization policy data:
@@ -120,7 +127,8 @@ security:
     # Secret provisioned by the operator's identity projection. When set (and
     # extAuthzUrl is set), the operator mounts the matching Secret into each
     # agent pod as the AGENT_AUTH_CLIENT_ID/AGENT_AUTH_CLIENT_SECRET environment
-    # variables. Empty disables credential mounting. Example: kaos-aib
+    # variables. OIDC defaults to kaos-oidc; empty disables AIB credential
+    # mounting. Example: kaos-aib
     credentialSecretPrefix: ""
     # adminUrl is the base URL of the identity broker admin API. When set, the
     # operator's identity projection controller registers agents and manages

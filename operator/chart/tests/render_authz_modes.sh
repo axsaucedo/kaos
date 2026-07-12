@@ -66,12 +66,24 @@ refute "ServiceAccount identity omits credential Secret prefix" "$out" 'SECURITY
 out="$(render \
 	--set security.agentAuth.identity.provider=oidc \
 	--set security.agentAuth.issuer=https://issuer.example \
+	--set security.agentAuth.identity.oidc.registration.initialAccessTokenSecretRef.name=oidc-registration \
+	--set security.agentAuth.identity.oidc.registration.initialAccessTokenSecretRef.key=token \
 	--set security.agentAuth.adminUrl=http://ignored-admin \
 	--set security.agentAuth.credentialSecretPrefix=ignored-secret)"
 expect "OIDC identity selected" "$out" 'SECURITY_AGENT_AUTH_IDENTITY_PROVIDER:\s*"oidc"'
 expect "OIDC issuer rendered" "$out" 'SECURITY_AGENT_AUTH_ISSUER:\s*"https://issuer.example"'
 refute "OIDC identity omits AIB admin" "$out" 'AIB_ADMIN_URL'
-refute "OIDC identity omits credential Secret prefix" "$out" 'SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX'
+expect "OIDC credential Secret prefix rendered" "$out" 'SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX:\s*"ignored-secret"'
+expect "OIDC registration token uses Secret ref" "$out" 'name:\s*SECURITY_AGENT_AUTH_OIDC_REGISTRATION_TOKEN'
+expect "OIDC registration Secret name" "$out" 'name:\s*"oidc-registration"'
+expect "OIDC registration Secret key" "$out" 'key:\s*"token"'
+refute "OIDC registration token is not placed in ConfigMap" "$out" 'SECURITY_AGENT_AUTH_OIDC_REGISTRATION_TOKEN:'
+
+out="$(render \
+	--set security.agentAuth.identity.provider=oidc \
+	--set security.agentAuth.issuer=https://issuer.example)"
+expect "OIDC credential Secret prefix defaults" "$out" 'SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX:\s*"kaos-oidc"'
+refute "OIDC registration env omitted without Secret ref" "$out" 'name:\s*SECURITY_AGENT_AUTH_OIDC_REGISTRATION_TOKEN'
 
 if invalid_identity="$(helm template t "$CHART_DIR" --set security.agentAuth.identity.provider=invalid 2>&1)"; then
 	echo "FAIL - invalid identity provider was accepted"

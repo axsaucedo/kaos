@@ -19,8 +19,23 @@ type IssuerKeys struct {
 }
 
 type oidcDiscovery struct {
-	Issuer  string `json:"issuer"`
-	JWKSURI string `json:"jwks_uri"`
+	Issuer               string `json:"issuer"`
+	JWKSURI              string `json:"jwks_uri"`
+	RegistrationEndpoint string `json:"registration_endpoint"`
+}
+
+// DiscoverRegistrationEndpoint returns the RFC 7591 registration endpoint
+// advertised by an OIDC provider.
+func DiscoverRegistrationEndpoint(ctx context.Context, client *http.Client, issuer string) (string, error) {
+	discovery, endpoint, err := discoverOIDC(ctx, client, issuer)
+	if err != nil {
+		return "", err
+	}
+	registrationEndpoint := strings.TrimSpace(discovery.RegistrationEndpoint)
+	if registrationEndpoint == "" {
+		return "", fmt.Errorf("OIDC discovery at %s returned an empty registration_endpoint", endpoint)
+	}
+	return registrationEndpoint, nil
 }
 
 // DiscoverIssuer returns the issuer advertised by an OIDC provider.

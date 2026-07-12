@@ -26,6 +26,7 @@ import (
 	"github.com/axsaucedo/kaos/operator/internal/aib"
 	"github.com/axsaucedo/kaos/operator/internal/authz"
 	"github.com/axsaucedo/kaos/operator/internal/authz/adapters"
+	"github.com/axsaucedo/kaos/operator/internal/authz/dcr"
 	"github.com/axsaucedo/kaos/operator/pkg/security"
 )
 
@@ -157,6 +158,21 @@ func main() {
 			Prune:        getBoolWithDefault("AUTHZ_PROJECTION_PRUNE_ENABLED", true),
 			HTTPClient:   &http.Client{Timeout: 5 * time.Second},
 			Issuer:       cfg.AgentIssuer(),
+			Namespaces:   projectionNamespaces,
+		})
+	}
+	if cfg.IdentityProviderOrDefault() == security.IdentityProviderOIDC && cfg.AgentIssuer() != "" && cfg.OIDCRegistrationInitialAccessToken != "" {
+		httpClient := &http.Client{Timeout: 10 * time.Second}
+		projectors = append(projectors, &adapters.OIDCProjector{
+			Client: mgr.GetClient(),
+			Scheme: mgr.GetScheme(),
+			DCR: &dcr.Client{
+				Issuer:             cfg.AgentIssuer(),
+				InitialAccessToken: cfg.OIDCRegistrationInitialAccessToken,
+				HTTPClient:         httpClient,
+			},
+			SecretPrefix: cfg.CredentialSecretPrefixOrDefault(),
+			Prune:        getBoolWithDefault("AUTHZ_PROJECTION_PRUNE_ENABLED", true),
 			Namespaces:   projectionNamespaces,
 		})
 	}
