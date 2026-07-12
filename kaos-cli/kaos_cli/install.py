@@ -37,6 +37,7 @@ DEFAULT_AUTH_RELEASE = "aib"
 DEFAULT_CREDENTIAL_SECRET_PREFIX = "kaos-aib"
 AUTH_ENDUSER_PORT = 8000
 AUTH_ADMIN_PORT = 14000
+AUTH_EXTPROC_PORT = 50051
 
 
 # Independent agent and user identity modes selected by the install flags.
@@ -810,6 +811,61 @@ def _build_aib_broker_public_url_args(public_url: str) -> list[str]:
     return ["--set", f"broker.server.enduser.publicUrl={public_url}"]
 
 
+def _build_token_exchange_aib_args(
+    auth_namespace: str,
+    auth_release: str,
+    keycloak_issuer: str,
+) -> list[str]:
+    """Configure the self-managed AIB release for Keycloak-backed exchange."""
+    aib_issuer = _default_auth_issuer(auth_namespace, auth_release)
+    keycloak_token_endpoint = f"{keycloak_issuer}/protocol/openid-connect/token"
+    keycloak_authorize_endpoint = f"{keycloak_issuer}/protocol/openid-connect/auth"
+    extra_env = [
+        {
+            "name": "EXTPROC_OAUTH2_TOKEN_ENDPOINT",
+            "value": f"{aib_issuer}/oauth2/token",
+        },
+        {"name": "EXTPROC_OAUTH2_ISSUER", "value": keycloak_issuer},
+        {"name": "EXTPROC_OAUTH2_CLIENT_ID", "value": DEFAULT_USER_AUTH_CLIENT_ID},
+        {
+            "name": "EXTPROC_OAUTH2_CLIENT_SECRET",
+            "value": DEFAULT_USER_AUTH_CLIENT_SECRET,
+        },
+        {"name": "EXTPROC_OAUTH2_TLS_ALLOW_HTTP", "value": "true"},
+    ]
+    return [
+        "--set",
+        f"broker.server.enduser.publicUrl={aib_issuer}",
+        "--set",
+        "broker.oauth2AuthorizationServer.mode=proxy",
+        "--set",
+        f"broker.oauth2AuthorizationServer.proxy.upstreamIssuerUri={keycloak_issuer}",
+        "--set",
+        "broker.oauth2AuthorizationServer.proxy.upstreamAuthorizeEndpoint="
+        f"{keycloak_authorize_endpoint}",
+        "--set",
+        f"broker.oauth2AuthorizationServer.proxy.upstreamTokenEndpoint={keycloak_token_endpoint}",
+        "--set",
+        "broker.tokenExchange.expectedAudience=token-exchange-broker",
+        "--set",
+        "broker.tokenExchange.claimExtraction.principalExpression=subject_token.sub",
+        "--set",
+        "broker.tokenExchange.claimExtraction.agentIdExpression="
+        "resolveAgentIdByClientId(subject_token.azp)",
+        "--set",
+        "broker.tokenExchange.authorization.type=cel",
+        "--set",
+        "broker.tokenExchange.authorization.cel.expression="
+        "client_assertion.azp == subject_token.azp",
+        "--set",
+        "extProc.enabled=true",
+        "--set",
+        f"extProc.oauth2.clientCredentialsEndpoint={keycloak_token_endpoint}",
+        "--set-json",
+        f"extProc.extraEnv={json.dumps(extra_env, separators=(',', ':'))}",
+    ]
+
+
 def _keycloak_realm_json(
     realm: str,
     client_id: str,
@@ -1185,6 +1241,7 @@ def install_command(
     gateway_enabled: bool = False,
     metallb_enabled: bool = False,
     pgvector_memory_enabled: bool = False,
+    token_exchange_enabled: bool = False,
     chart_path: str | None = None,
     auth_enabled: bool = False,
     auth_namespace: str = DEFAULT_AUTH_NAMESPACE,
@@ -1267,8 +1324,18 @@ def install_command(
 
         # Install the identity broker from a local chart when provided (it is
         # unpublished, so a chart path is required to install it here).
-        if identity_provider == "aib" and aib_chart_path:
-            aib_extra_set = _build_aib_broker_public_url_args(resolved_auth_issuer)
+        if (identity_provider == "aib" or token_exchange_enabled) and aib_chart_path:
+            if token_exchange_enabled:
+                keycloak_issuer = user_auth_issuer or _default_user_auth_issuer(
+                    keycloak_namespace, keycloak_release
+                )
+                aib_extra_set = _build_token_exchange_aib_args(
+                    auth_namespace,
+                    auth_release,
+                    keycloak_issuer,
+                )
+            else:
+                aib_extra_set = _build_aib_broker_public_url_args(resolved_auth_issuer)
             if not _install_aib(
                 auth_namespace,
                 auth_release,
@@ -1440,6 +1507,23 @@ def install_command(
                 policy_configmap_namespace=policy_configmap_namespace or "",
             )
         )
+        if token_exchange_enabled:
+            helm_args.extend(
+                [
+                    "--set",
+                    "security.tokenExchange.enabled=true",
+                    "--set",
+                    "security.tokenExchange.aib.adminUrl="
+                    f"{_default_auth_admin_url(auth_namespace, auth_release)}",
+                    "--set",
+                    "security.tokenExchange.extProc.serviceName="
+                    f"{auth_release}-agentic-identity-broker-extproc",
+                    "--set",
+                    f"security.tokenExchange.extProc.namespace={auth_namespace}",
+                    "--set",
+                    f"security.tokenExchange.extProc.port={AUTH_EXTPROC_PORT}",
+                ]
+            )
     elif gateway_api_strict:
         # Strict gateway-only traffic is a standalone posture: it applies even
         # without an authorization enforcement hook, so emit it directly when
