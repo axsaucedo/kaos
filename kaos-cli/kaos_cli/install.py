@@ -822,17 +822,13 @@ def _build_token_exchange_aib_args(
     keycloak_token_endpoint = f"{keycloak_issuer}/protocol/openid-connect/token"
     keycloak_authorize_endpoint = f"{keycloak_issuer}/protocol/openid-connect/auth"
     extra_env = [
-        {
-            "name": "EXTPROC_OAUTH2_TOKEN_ENDPOINT",
-            "value": f"{aib_issuer}/oauth2/token",
-        },
         {"name": "EXTPROC_OAUTH2_ISSUER", "value": keycloak_issuer},
         {"name": "EXTPROC_OAUTH2_CLIENT_ID", "value": DEFAULT_USER_AUTH_CLIENT_ID},
         {
             "name": "EXTPROC_OAUTH2_CLIENT_SECRET",
             "value": DEFAULT_USER_AUTH_CLIENT_SECRET,
         },
-        {"name": "EXTPROC_OAUTH2_TLS_ALLOW_HTTP", "value": "true"},
+        {"name": "EXTPROC_OAUTH2_CLIENT_ASSERTION_TYPE", "value": "access_token"},
     ]
     return [
         "--set",
