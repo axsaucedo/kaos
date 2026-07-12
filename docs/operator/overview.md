@@ -131,7 +131,7 @@ See [Memory Architecture](./memory-architecture.md) for the full design.
 
 ### ThirdPartyService
 
-`ThirdPartyService` is the optional, namespaced declaration for delegated third-party access. One object contains the provider issuer or explicit OAuth endpoints, a Secret reference for its OAuth client, protected-resource URLs, the dedicated egress `HTTPRoute`, available scopes, and the real Agent-to-scope bindings. When token exchange is disabled, these declarations do not change routing or authorization.
+`ThirdPartyService` is the optional, namespaced declaration for delegated third-party access. One object contains the provider issuer or explicit OAuth endpoints, a Secret reference for its OAuth client, protected-resource URLs, the dedicated egress `HTTPRoute`, available scopes, and the real Agent-to-scope bindings. For each bound Agent, the operator injects the protected-resource URL prefixes and Keycloak exchange settings used by the runtime to identify calls that need a delegated user token. When token exchange is disabled, these declarations do not change routing or authorization.
 
 ## Resource Dependencies
 

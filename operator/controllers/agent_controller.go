@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
@@ -46,6 +47,7 @@ type AgentReconciler struct {
 //+kubebuilder:rbac:groups=kaos.tools,resources=modelapis,verbs=get;list;watch
 //+kubebuilder:rbac:groups=kaos.tools,resources=mcpservers,verbs=get;list;watch
 //+kubebuilder:rbac:groups=kaos.tools,resources=memorystores,verbs=get;list;watch
+//+kubebuilder:rbac:groups=kaos.tools,resources=thirdpartyservices,verbs=get;list;watch
 //+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
@@ -302,6 +304,10 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	// agent->ModelAPI/MCP/peer traffic traverses jwt_authn/ext_authz rather
 	// than reaching the workload Service directly (which NetworkPolicy denies).
 	r.applyGatewayRouting(ctx, agent, modelapi, mcpServers, peerAgents, memoryStoreName, &memoryEndpoint, log)
+	tokenExchangeConfig, err := r.tokenExchangeConfig(ctx, agent)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
 	if err := r.reconcileAgentServiceAccount(ctx, agent); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -313,7 +319,7 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	if err != nil && apierrors.IsNotFound(err) {
 		// Create new Deployment
-		deployment, err = r.constructDeployment(agent, modelapi, mcpServers, peerAgents, memoryEndpoint)
+		deployment, err = r.constructDeployment(agent, modelapi, mcpServers, peerAgents, memoryEndpoint, tokenExchangeConfig)
 		if err != nil {
 			log.Error(err, "failed to construct Deployment")
 			agent.Status.Phase = "Failed"
@@ -343,7 +349,7 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, err
 	} else {
 		// Deployment exists - check if spec has changed using hash annotation
-		desiredDeployment, err := r.constructDeployment(agent, modelapi, mcpServers, peerAgents, memoryEndpoint)
+		desiredDeployment, err := r.constructDeployment(agent, modelapi, mcpServers, peerAgents, memoryEndpoint, tokenExchangeConfig)
 		if err != nil {
 			log.Error(err, "failed to construct Deployment for comparison")
 			return ctrl.Result{}, err
@@ -569,7 +575,7 @@ func (r *AgentReconciler) agentDeploymentExists(ctx context.Context, agent *kaos
 }
 
 // constructDeployment creates a Deployment for the Agent
-func (r *AgentReconciler) constructDeployment(agent *kaosv1alpha1.Agent, modelapi *kaosv1alpha1.ModelAPI, mcpServers map[string]string, peerAgents map[string]string, memoryEndpoint string) (*appsv1.Deployment, error) {
+func (r *AgentReconciler) constructDeployment(agent *kaosv1alpha1.Agent, modelapi *kaosv1alpha1.ModelAPI, mcpServers map[string]string, peerAgents map[string]string, memoryEndpoint, tokenExchangeConfig string) (*appsv1.Deployment, error) {
 	labels := map[string]string{
 		"app":   "agent",
 		"agent": agent.Name,
@@ -578,7 +584,7 @@ func (r *AgentReconciler) constructDeployment(agent *kaosv1alpha1.Agent, modelap
 	replicas := int32(1)
 
 	// Build environment variables
-	env := r.constructEnvVars(agent, modelapi, mcpServers, peerAgents, memoryEndpoint)
+	env := r.constructEnvVars(agent, modelapi, mcpServers, peerAgents, memoryEndpoint, tokenExchangeConfig)
 
 	// Get agent image from environment (required - set via ConfigMap)
 	agentImage := os.Getenv("DEFAULT_AGENT_IMAGE")
@@ -687,7 +693,7 @@ func (r *AgentReconciler) constructDeployment(agent *kaosv1alpha1.Agent, modelap
 }
 
 // constructEnvVars builds environment variables for the agent
-func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *kaosv1alpha1.ModelAPI, mcpServers map[string]string, peerAgents map[string]string, memoryEndpoint string) []corev1.EnvVar {
+func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *kaosv1alpha1.ModelAPI, mcpServers map[string]string, peerAgents map[string]string, memoryEndpoint, tokenExchangeConfig string) []corev1.EnvVar {
 	var env []corev1.EnvVar
 
 	// Agent identity and configuration
@@ -944,8 +950,50 @@ func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *
 
 	// Agent identity and credentials (when security credential mounting is enabled)
 	env = append(env, buildAgentAuthEnvVars(agent)...)
+	if tokenExchangeConfig != "" {
+		env = append(env, corev1.EnvVar{Name: "KAOS_TOKEN_EXCHANGE_CONFIG", Value: tokenExchangeConfig})
+	}
 
 	return env
+}
+
+type agentTokenExchangeConfig struct {
+	Issuer        string   `json:"issuer"`
+	TokenEndpoint string   `json:"token_endpoint"`
+	Audience      string   `json:"audience"`
+	Targets       []string `json:"targets"`
+}
+
+func (r *AgentReconciler) tokenExchangeConfig(ctx context.Context, agent *kaosv1alpha1.Agent) (string, error) {
+	if !strings.EqualFold(os.Getenv("TOKEN_EXCHANGE_ENABLED"), "true") {
+		return "", nil
+	}
+	services := &kaosv1alpha1.ThirdPartyServiceList{}
+	if err := r.List(ctx, services, client.InNamespace(agent.Namespace)); err != nil {
+		return "", fmt.Errorf("listing ThirdPartyServices: %w", err)
+	}
+	var targets []string
+	for _, service := range services.Items {
+		for _, access := range service.Spec.Access {
+			if access.Agent == agent.Name {
+				targets = append(targets, service.Spec.ProtectedResources...)
+				break
+			}
+		}
+	}
+	if len(targets) == 0 {
+		return "", nil
+	}
+	sort.Strings(targets)
+	cfg := security.GetConfig()
+	data, err := json.Marshal(agentTokenExchangeConfig{
+		Issuer: cfg.AgentIssuer(), TokenEndpoint: cfg.TokenEndpoint(),
+		Audience: "token-exchange-broker", Targets: targets,
+	})
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
 }
 
 // buildAgentAuthEnvVars returns the agent-auth environment variables that give the
@@ -1192,6 +1240,15 @@ func (r *AgentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return requests
 	})
 
+	mapThirdPartyServiceToAgents := handler.EnqueueRequestsFromMapFunc(func(_ context.Context, obj client.Object) []ctrl.Request {
+		service := obj.(*kaosv1alpha1.ThirdPartyService)
+		requests := make([]ctrl.Request, 0, len(service.Spec.Access))
+		for _, access := range service.Spec.Access {
+			requests = append(requests, ctrl.Request{NamespacedName: types.NamespacedName{Name: access.Agent, Namespace: service.Namespace}})
+		}
+		return requests
+	})
+
 	builder := ctrl.NewControllerManagedBy(mgr).
 		For(&kaosv1alpha1.Agent{}).
 		Owns(&appsv1.Deployment{}).
@@ -1199,7 +1256,8 @@ func (r *AgentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Owns(&corev1.ServiceAccount{}).
 		Watches(&kaosv1alpha1.ModelAPI{}, mapModelAPIToAgents).
 		Watches(&kaosv1alpha1.MCPServer{}, mapMCPServerToAgents).
-		Watches(&kaosv1alpha1.MemoryStore{}, mapMemoryStoreToAgents)
+		Watches(&kaosv1alpha1.MemoryStore{}, mapMemoryStoreToAgents).
+		Watches(&kaosv1alpha1.ThirdPartyService{}, mapThirdPartyServiceToAgents)
 
 	// Own HTTPRoutes if Gateway API is enabled
 	if gateway.GetConfig().Enabled {
