@@ -24,7 +24,11 @@ The later user-plane and gateway-bypass sections are read-only examples. They sh
 Install KAOS with gateway authorization backed by projected Kubernetes ServiceAccount tokens:
 
 ```bash
-kaos system install --gateway-enabled --metallb-enabled --agent-auth-enabled service-account --wait
+set -euo pipefail
+REPO_ROOT=$(git rev-parse --show-toplevel)
+kaos system install --gateway-enabled --metallb-enabled \
+  --agent-auth-enabled service-account \
+  --chart-path "$REPO_ROOT/operator/chart" --wait
 ```
 
 Apply the self-contained sample and wait for its workloads. The autonomous Agent is granted only `granted-model`; `unrelated-agent` exists to make the deny side visible.
