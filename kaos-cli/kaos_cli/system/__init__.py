@@ -13,6 +13,7 @@ from kaos_cli.install import (
     AUTH_PRESET_AIB_KEYCLOAK,
     AUTH_PRESET_AIB_ONLY,
     AUTH_PRESET_KAOS_INTERNAL,
+    AUTH_PRESET_OIDC_KEYCLOAK,
     AUTH_PRESETS,
     DEFAULT_AUTH_PRESET,
     DEFAULT_RELEASE_NAME,
@@ -107,6 +108,7 @@ def install(
         "--auth-enabled",
         help="Enable gateway policy enforcement by preset. Options: "
         f"'{AUTH_PRESET_AIB_KEYCLOAK}' (default; AIB + Keycloak identity), "
+        f"'{AUTH_PRESET_OIDC_KEYCLOAK}' (Keycloak user and DCR agent identity), "
         f"'{AUTH_PRESET_KAOS_INTERNAL}' (cluster-issued agent identity), or "
         f"'{AUTH_PRESET_AIB_ONLY}' (AIB agent identity). May "
         "be passed without a value to select the default.",

@@ -1421,7 +1421,10 @@ class TestAuthWiring:
 
         assert result.exit_code == 0, result.output
         joined = " ".join(captured.get("args", []))
-        assert "security.userAuth.issuer=" in joined
+        assert (
+            "security.userAuth.issuer="
+            "http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos" in joined
+        )
         assert "security.userAuth.audience=kaos" in joined
 
     def test_no_user_auth_omits_user_auth_values(self):
@@ -1556,6 +1559,26 @@ class TestAuthWiring:
             "user_auth": True,
         }
 
+    def test_expand_auth_preset_keycloak_oidc(self):
+        from kaos_cli.install import _expand_auth_preset
+
+        kwargs = _expand_auth_preset("oidc-keycloak", "kaos-system")
+        assert kwargs == {
+            "auth_enabled": True,
+            "gateway_enabled": True,
+            "pdp_enabled": True,
+            "network_policy": True,
+            "gateway_routing": True,
+            "policy_data_source": "automated",
+            "policy_configmap_name": "kaos-authz-policy",
+            "policy_configmap_namespace": "kaos-system",
+            "identity_provider": "oidc",
+            "credential_secret_prefix": "kaos-oidc",
+            "oidc_registration_secret_name": "kaos-oidc-registration",
+            "oidc_registration_secret_key": "token",
+            "user_auth": True,
+        }
+
     def test_expand_auth_preset_kaos_internal(self):
         from kaos_cli.install import _expand_auth_preset
 
@@ -1649,6 +1672,27 @@ class TestAuthWiring:
                 True,
                 True,
             ),
+            (
+                "oidc-keycloak",
+                {
+                    "security.agentAuth.identity.provider=oidc",
+                    "security.pdp.enabled=true",
+                    "gatewayAPI.enabled=true",
+                    "gatewayAPI.createGateway=true",
+                    "gatewayAPI.gatewayClassName=envoy-gateway",
+                    "security.agentAuth.issuer=http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos",
+                    "security.agentAuth.identity.oidc.registration.initialAccessTokenSecretRef.name=kaos-oidc-registration",
+                    "security.agentAuth.identity.oidc.registration.initialAccessTokenSecretRef.key=token",
+                    "security.agentAuth.authorization.policyDataSource=automated",
+                    "security.agentAuth.projection.policyConfigMap.name=kaos-authz-policy",
+                    "security.agentAuth.projection.policyConfigMap.namespace=kaos-system",
+                    "security.userAuth.issuer=http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos",
+                    "security.userAuth.audience=kaos",
+                    "security.gatewayRouting.enabled=true",
+                },
+                False,
+                True,
+            ),
         ],
     )
     def test_auth_preset_exact_helm_values(
@@ -1691,6 +1735,11 @@ class TestAuthWiring:
             mock_keycloak.assert_called_once()
         else:
             mock_keycloak.assert_not_called()
+        if preset == "oidc-keycloak":
+            assert (
+                "kubectl create secret generic kaos-oidc-registration "
+                "-n kaos-system --from-literal=token=<token>" in result.output
+            )
         args = captured["operator"]
         rendered = {args[i + 1] for i, arg in enumerate(args) if arg == "--set"}
         assert rendered == expected

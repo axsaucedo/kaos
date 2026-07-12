@@ -41,10 +41,12 @@ AUTH_ADMIN_PORT = 14000
 
 # Curated identity and gateway-policy postures selected with --auth-enabled.
 AUTH_PRESET_AIB_KEYCLOAK = "aib-keycloak"
+AUTH_PRESET_OIDC_KEYCLOAK = "oidc-keycloak"
 AUTH_PRESET_KAOS_INTERNAL = "kaos-internal"
 AUTH_PRESET_AIB_ONLY = "aib-only"
 AUTH_PRESETS = (
     AUTH_PRESET_AIB_KEYCLOAK,
+    AUTH_PRESET_OIDC_KEYCLOAK,
     AUTH_PRESET_KAOS_INTERNAL,
     AUTH_PRESET_AIB_ONLY,
 )
@@ -59,6 +61,9 @@ KEYCLOAK_HTTP_PORT = 8080
 DEFAULT_USER_AUTH_REALM = "kaos"
 DEFAULT_USER_AUTH_AUDIENCE = "kaos"
 DEFAULT_USER_AUTH_CLIENT_ID = "kaos"
+DEFAULT_OIDC_CREDENTIAL_SECRET_PREFIX = "kaos-oidc"
+DEFAULT_OIDC_REGISTRATION_SECRET_NAME = "kaos-oidc-registration"
+DEFAULT_OIDC_REGISTRATION_SECRET_KEY = "token"
 # Dev-only fixtures used to bootstrap a non-interactive test identity. These are
 # intended exclusively for local/e2e validation, never for production installs.
 DEFAULT_USER_AUTH_CLIENT_SECRET = "kaos-dev-secret"
@@ -638,6 +643,8 @@ def _build_auth_operator_args(
     user_issuer: str = "",
     user_audience: str = "",
     user_jwks_uri: str = "",
+    oidc_registration_secret_name: str = "",
+    oidc_registration_secret_key: str = "",
     network_policy: bool = True,
     network_policy_egress: bool = False,
     gateway_routing: bool = False,
@@ -688,6 +695,22 @@ def _build_auth_operator_args(
         )
     if identity_provider == "aib" and admin_url:
         args.extend(["--set", f"security.agentAuth.adminUrl={admin_url}"])
+    if identity_provider == "oidc" and oidc_registration_secret_name:
+        args.extend(
+            [
+                "--set",
+                "security.agentAuth.identity.oidc.registration."
+                f"initialAccessTokenSecretRef.name={oidc_registration_secret_name}",
+            ]
+        )
+    if identity_provider == "oidc" and oidc_registration_secret_key:
+        args.extend(
+            [
+                "--set",
+                "security.agentAuth.identity.oidc.registration."
+                f"initialAccessTokenSecretRef.key={oidc_registration_secret_key}",
+            ]
+        )
     if policy_data_source:
         args.extend(
             [
@@ -1111,6 +1134,15 @@ def _expand_auth_preset(preset: str, namespace: str) -> dict:
     }
     if preset == AUTH_PRESET_AIB_KEYCLOAK:
         return {**base, "identity_provider": "aib", "user_auth": True}
+    if preset == AUTH_PRESET_OIDC_KEYCLOAK:
+        return {
+            **base,
+            "identity_provider": "oidc",
+            "credential_secret_prefix": DEFAULT_OIDC_CREDENTIAL_SECRET_PREFIX,
+            "oidc_registration_secret_name": DEFAULT_OIDC_REGISTRATION_SECRET_NAME,
+            "oidc_registration_secret_key": DEFAULT_OIDC_REGISTRATION_SECRET_KEY,
+            "user_auth": True,
+        }
     if preset == AUTH_PRESET_KAOS_INTERNAL:
         return {**base, "identity_provider": "serviceaccount", "user_auth": False}
     if preset == AUTH_PRESET_AIB_ONLY:
@@ -1157,6 +1189,8 @@ def install_command(
     policy_data_source: str | None = None,
     policy_rego_override: bool = False,
     admin_url: str | None = None,
+    oidc_registration_secret_name: str = "",
+    oidc_registration_secret_key: str = "",
     policy_configmap_name: str | None = None,
     policy_configmap_namespace: str | None = None,
 ) -> None:
@@ -1196,6 +1230,10 @@ def install_command(
         if identity_provider == "aib":
             resolved_auth_issuer = auth_issuer or _default_auth_issuer(
                 auth_namespace, auth_release
+            )
+        elif identity_provider == "oidc":
+            resolved_auth_issuer = auth_issuer or _default_user_auth_issuer(
+                keycloak_namespace, keycloak_release
             )
         if user_auth:
             user_auth_issuer = user_auth_issuer or _default_user_auth_issuer(
@@ -1361,6 +1399,8 @@ def install_command(
                 ),
                 user_issuer=resolved_user_issuer,
                 user_audience=user_auth_audience if user_auth else "",
+                oidc_registration_secret_name=oidc_registration_secret_name,
+                oidc_registration_secret_key=oidc_registration_secret_key,
                 network_policy=network_policy,
                 network_policy_egress=network_policy_egress,
                 gateway_routing=gateway_routing,
@@ -1383,6 +1423,15 @@ def install_command(
         helm_args.extend(["--set", "security.strictGatewayApi.enabled=true"])
 
     typer.echo(f"Installing chart {HELM_CHART_NAME}...")
+    if identity_provider == "oidc" and oidc_registration_secret_name:
+        typer.echo(
+            "Note: create a Keycloak initial access token and provision it with:"
+        )
+        typer.echo(
+            f"  kubectl create secret generic {oidc_registration_secret_name} "
+            f"-n {namespace} --from-literal={oidc_registration_secret_key}=<token>"
+        )
+        typer.echo("  The operator pod remains pending until this Secret exists.")
     result = run_helm_command(helm_args)
 
     if result.returncode == 0:
