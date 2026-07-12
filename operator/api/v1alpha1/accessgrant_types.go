@@ -64,6 +64,8 @@ type AccessGrantSpec struct {
 // AccessGrantStatus defines the observed enforcement state of an AccessGrant.
 type AccessGrantStatus struct {
 	// Conditions represent the latest available observations of the grant's state.
+	// The Enforced condition uses reasons Enforced, NoUserIdentityProvider,
+	// PolicyProjectionInactive, ProjectionFailed, or AuthorizationDisabled.
 	// +optional
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }

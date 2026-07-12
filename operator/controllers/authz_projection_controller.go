@@ -42,13 +42,14 @@ type PolicyProjector interface {
 // AuthzProjectionReconciler projects KAOS resources into the configured identity
 // and policy sinks. It recomputes the whole world on every change.
 type AuthzProjectionReconciler struct {
-	Client                client.Client
-	Scheme                *runtime.Scheme
-	Namespaces            []string
-	Projectors            []PolicyProjector
-	UserIssuer            string
-	AccessGrantProjection bool
-	Recorder              record.EventRecorder
+	Client                   client.Client
+	Scheme                   *runtime.Scheme
+	Namespaces               []string
+	Projectors               []PolicyProjector
+	UserIssuer               string
+	AuthorizationOperational bool
+	AccessGrantProjection    bool
+	Recorder                 record.EventRecorder
 }
 
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
@@ -92,17 +93,18 @@ func (r *AuthzProjectionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // Reconcile runs a full projection pass: list every KAOS resource, project the
 // desired state, and apply it through every configured projector.
 func (r *AuthzProjectionReconciler) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
-	resources, err := r.listResources(ctx)
-	if err != nil {
-		return reconcile.Result{}, fmt.Errorf("listing KAOS resources: %w", err)
-	}
-	desired := projection.Project(resources)
 	accessGrants, err := r.listAccessGrants(ctx)
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("listing AccessGrants: %w", err)
 	}
 	hasUserProvider := (security.Config{UserIssuer: r.UserIssuer}).UserPlaneEnabled()
 	for i := range accessGrants {
+		if !r.AuthorizationOperational {
+			if err := r.updateAccessGrantStatus(ctx, &accessGrants[i], metav1.ConditionFalse, "AuthorizationDisabled", "Gateway authorization is not enabled; this AccessGrant is not enforced"); err != nil {
+				return reconcile.Result{}, fmt.Errorf("updating AccessGrant %s/%s status: %w", accessGrants[i].Namespace, accessGrants[i].Name, err)
+			}
+			continue
+		}
 		if !hasUserProvider {
 			if err := r.updateAccessGrantStatus(ctx, &accessGrants[i], metav1.ConditionFalse, "NoUserIdentityProvider", "A user identity provider must be configured for this AccessGrant to be enforced"); err != nil {
 				return reconcile.Result{}, fmt.Errorf("updating AccessGrant %s/%s status: %w", accessGrants[i].Namespace, accessGrants[i].Name, err)
@@ -115,13 +117,25 @@ func (r *AuthzProjectionReconciler) Reconcile(ctx context.Context, _ reconcile.R
 			}
 			continue
 		}
-		desired.AccessGrants = append(desired.AccessGrants, accessGrantForProjection(&accessGrants[i]))
+	}
+	if len(r.Projectors) == 0 {
+		return reconcile.Result{}, nil
+	}
+	resources, err := r.listResources(ctx)
+	if err != nil {
+		return reconcile.Result{}, fmt.Errorf("listing KAOS resources: %w", err)
+	}
+	desired := projection.Project(resources)
+	if r.AuthorizationOperational && hasUserProvider && r.AccessGrantProjection {
+		for i := range accessGrants {
+			desired.AccessGrants = append(desired.AccessGrants, accessGrantForProjection(&accessGrants[i]))
+		}
 	}
 	for _, projector := range r.Projectors {
 		if err := projector.Apply(ctx, desired); err != nil {
 			var statusErrors []error
 			for i := range accessGrants {
-				if hasUserProvider && r.AccessGrantProjection {
+				if r.AuthorizationOperational && hasUserProvider && r.AccessGrantProjection {
 					if statusErr := r.updateAccessGrantStatus(ctx, &accessGrants[i], metav1.ConditionFalse, "ProjectionFailed", "Policy projection failed; this AccessGrant is not currently enforced"); statusErr != nil {
 						statusErrors = append(statusErrors, fmt.Errorf("updating AccessGrant %s/%s failure status: %w", accessGrants[i].Namespace, accessGrants[i].Name, statusErr))
 					}
@@ -130,7 +144,7 @@ func (r *AuthzProjectionReconciler) Reconcile(ctx context.Context, _ reconcile.R
 			return reconcile.Result{}, errors.Join(err, errors.Join(statusErrors...))
 		}
 	}
-	if hasUserProvider && r.AccessGrantProjection {
+	if r.AuthorizationOperational && hasUserProvider && r.AccessGrantProjection {
 		for i := range accessGrants {
 			if err := r.updateAccessGrantStatus(ctx, &accessGrants[i], metav1.ConditionTrue, "Enforced", "AccessGrant is included in the successfully projected authorization policy"); err != nil {
 				return reconcile.Result{}, fmt.Errorf("updating AccessGrant %s/%s status: %w", accessGrants[i].Namespace, accessGrants[i].Name, err)

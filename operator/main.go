@@ -195,19 +195,18 @@ func main() {
 			Disabled:           policyDataSource == security.PolicyDataManual && !cfg.PolicyRegoOverride,
 		})
 	}
-	if len(projectors) > 0 {
-		if err = (&controllers.AuthzProjectionReconciler{
-			Client:                mgr.GetClient(),
-			Scheme:                mgr.GetScheme(),
-			Namespaces:            projectionNamespaces,
-			Projectors:            projectors,
-			UserIssuer:            cfg.UserIssuer,
-			AccessGrantProjection: policyName != "" && policyNamespace != "" && cfg.PolicyDataSourceOrDefault() == security.PolicyDataAutomated && !cfg.PolicyRegoOverride,
-			Recorder:              mgr.GetEventRecorderFor("kaos-authz-projection"),
-		}).SetupWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create controller", "controller", "AuthzProjection")
-			os.Exit(1)
-		}
+	if err = (&controllers.AuthzProjectionReconciler{
+		Client:                   mgr.GetClient(),
+		Scheme:                   mgr.GetScheme(),
+		Namespaces:               projectionNamespaces,
+		Projectors:               projectors,
+		UserIssuer:               cfg.UserIssuer,
+		AuthorizationOperational: policyName != "" && policyNamespace != "",
+		AccessGrantProjection:    policyName != "" && policyNamespace != "" && cfg.PolicyDataSourceOrDefault() == security.PolicyDataAutomated && !cfg.PolicyRegoOverride,
+		Recorder:                 mgr.GetEventRecorderFor("kaos-authz-projection"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "AuthzProjection")
+		os.Exit(1)
 	}
 
 	// Webhooks not implemented yet in this version

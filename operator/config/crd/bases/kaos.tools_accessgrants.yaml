@@ -139,8 +139,10 @@ spec:
               of an AccessGrant.
             properties:
               conditions:
-                description: Conditions represent the latest available observations
-                  of the grant's state.
+                description: |-
+                  Conditions represent the latest available observations of the grant's state.
+                  The Enforced condition uses reasons Enforced, NoUserIdentityProvider,
+                  PolicyProjectionInactive, ProjectionFailed, or AuthorizationDisabled.
                 items:
                   description: Condition contains details for one aspect of the current
                     state of this API Resource.
