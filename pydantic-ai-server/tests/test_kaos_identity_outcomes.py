@@ -3,10 +3,13 @@
 A KAOS-secured gateway stamps enforcement decisions onto the response: an ext_authz
 denial returns ``403`` with ``x-kaos-access-reason`` (``platform_grant_missing`` /
 ``user_grant_required``, no URL); an ext_proc token-exchange re-auth returns ``200``
-with ``x-kaos-access-reason: third_party_reauth_required`` plus ``x-kaos-reauth-url``.
+with a JSON-RPC ``-32042`` URL elicitation body. The legacy response-header convention
+is retained for compatibility.
 The SDK turns these into typed outcomes so the runtime can surface them; every other
 response (including ordinary non-KAOS 4xx/5xx) is returned untouched.
 """
+
+import json
 
 import kaos_identity
 import httpx
@@ -15,9 +18,10 @@ import respx
 
 
 @pytest.fixture(autouse=True)
-def _patch_and_clear():
+def _patch_and_clear(monkeypatch):
     kaos_identity.instrument_httpx()  # idempotent — safe to call per test
     kaos_identity.ctx.replace({})
+    monkeypatch.delenv("KAOS_TOKEN_EXCHANGE_CONFIG", raising=False)
     yield
     kaos_identity.ctx.replace({})
 
@@ -62,6 +66,35 @@ def test_outcome_reauth_carries_url():
     assert decision.reason == "third_party_reauth_required"
     assert decision.reauth_url == "https://idp.example/reauth"
     assert decision.requires_reauth is True
+
+
+def test_outcome_reauth_from_aib_url_elicitation():
+    decision = kaos_identity.outcome_from_response(
+        httpx.Response(
+            200,
+            json={
+                "jsonrpc": "2.0",
+                "id": None,
+                "error": {
+                    "code": -32042,
+                    "message": "Consent required",
+                    "data": {
+                        "elicitations": [
+                            {
+                                "mode": "url",
+                                "elicitationId": "one",
+                                "url": "https://aib.example/consent",
+                                "message": "Consent required",
+                            }
+                        ]
+                    },
+                },
+            },
+        )
+    )
+    assert decision is not None
+    assert decision.reason == "third_party_reauth_required"
+    assert decision.reauth_url == "https://aib.example/consent"
 
 
 # --- raise_for_gateway_outcome -----------------------------------------------
@@ -125,6 +158,57 @@ async def test_async_send_raises_reauth_on_ext_proc():
         with pytest.raises(kaos_identity.ReauthenticationRequired) as exc:
             await client.post("http://downstream/tool")
     assert exc.value.reauth_url == "https://idp.example/reauth"
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_exchange_consent_url_surfaces_then_retry_proceeds(monkeypatch):
+    monkeypatch.setenv(
+        "KAOS_TOKEN_EXCHANGE_CONFIG",
+        json.dumps(
+            {
+                "issuer": "https://keycloak.example/realms/kaos",
+                "token_endpoint": "https://keycloak.example/token",
+                "audience": "token-exchange-broker",
+                "targets": ["https://api.github.com/"],
+            }
+        ),
+    )
+    route = respx.get("https://api.github.com/user").mock(
+        side_effect=[
+            httpx.Response(
+                200,
+                json={
+                    "jsonrpc": "2.0",
+                    "id": None,
+                    "error": {
+                        "code": -32042,
+                        "message": "Consent required",
+                        "data": {
+                            "elicitations": [
+                                {
+                                    "mode": "url",
+                                    "elicitationId": "one",
+                                    "url": "https://aib.example/consent",
+                                    "message": "Connect GitHub",
+                                }
+                            ]
+                        },
+                    },
+                },
+            ),
+            httpx.Response(200, json={"login": "alice"}),
+        ]
+    )
+    async with httpx.AsyncClient() as client:
+        with pytest.raises(kaos_identity.ReauthenticationRequired) as exc:
+            await client.get("https://api.github.com/user")
+        assert exc.value.reauth_url == "https://aib.example/consent"
+
+        response = await client.get("https://api.github.com/user")
+
+    assert response.json() == {"login": "alice"}
+    assert route.call_count == 2
 
 
 @respx.mock

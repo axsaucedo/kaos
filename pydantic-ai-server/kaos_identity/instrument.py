@@ -406,13 +406,14 @@ async def _refresh_actor_header_async(request: Any) -> bool:
 def _raise_for_gateway_outcome(request: Any, response: Any) -> None:
     """Raise a typed access outcome when a response carries a KAOS-gateway denial.
 
-    Header-gated (``x-kaos-access-reason``) so it imports the outcome machinery only
-    for genuine gateway enforcement responses; ordinary traffic and non-KAOS 4xx/5xx
-    responses are untouched. Reads only headers — never the body — so streaming
-    responses are unaffected.
+    Header-gated for ordinary routes. Declared token-exchange targets also inspect an
+    already-buffered AIB JSON-RPC URL elicitation body. Streaming bodies are untouched.
     """
     if HEADER_ACCESS_REASON not in response.headers:
-        return
+        from .exchange import is_declared_target
+
+        if not is_declared_target(request.url):
+            return
     from .client import raise_for_gateway_outcome
 
     raise_for_gateway_outcome(
