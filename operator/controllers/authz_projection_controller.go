@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -14,6 +15,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -39,17 +41,20 @@ type PolicyProjector interface {
 // AuthzProjectionReconciler projects KAOS resources into the configured identity
 // and policy sinks. It recomputes the whole world on every change.
 type AuthzProjectionReconciler struct {
-	Client     client.Client
-	Scheme     *runtime.Scheme
-	Namespaces []string
-	Projectors []PolicyProjector
-	UserIssuer string
-	Recorder   record.EventRecorder
+	Client                client.Client
+	Scheme                *runtime.Scheme
+	Namespaces            []string
+	Projectors            []PolicyProjector
+	UserIssuer            string
+	AccessGrantProjection bool
+	Recorder              record.EventRecorder
 }
 
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=kaos.tools,resources=accessgrants,verbs=get;list;watch
 //+kubebuilder:rbac:groups=kaos.tools,resources=accessgrants/status,verbs=get;update;patch
+//+kubebuilder:rbac:groups=kaos.tools,resources=agents,verbs=get;list;watch;update;patch
+//+kubebuilder:rbac:groups=kaos.tools,resources=agents/finalizers,verbs=update;patch
 
 // SetupWithManager registers the controller. Every watched-resource change funnels
 // to the sentinel request so bursts coalesce into a single whole-world reconcile.
@@ -60,9 +65,19 @@ func (r *AuthzProjectionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return []reconcile.Request{authzSentinel}
 	})
 	specChanged := builder.WithPredicates(predicate.GenerationChangedPredicate{})
+	agentChanged := builder.WithPredicates(predicate.Funcs{
+		CreateFunc: func(event.CreateEvent) bool { return true },
+		DeleteFunc: func(event.DeleteEvent) bool { return true },
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			oldDeletion := e.ObjectOld.GetDeletionTimestamp()
+			newDeletion := e.ObjectNew.GetDeletionTimestamp()
+			return e.ObjectOld.GetGeneration() != e.ObjectNew.GetGeneration() ||
+				(oldDeletion == nil && newDeletion != nil)
+		},
+	})
 	return builder.ControllerManagedBy(mgr).
 		Named(authzProjectionControllerName).
-		Watches(&kaosv1alpha1.Agent{}, toSentinel, specChanged).
+		Watches(&kaosv1alpha1.Agent{}, toSentinel, agentChanged).
 		Watches(&kaosv1alpha1.MCPServer{}, toSentinel, specChanged).
 		Watches(&kaosv1alpha1.ModelAPI{}, toSentinel, specChanged).
 		Watches(&kaosv1alpha1.MemoryStore{}, toSentinel, specChanged).
@@ -82,18 +97,40 @@ func (r *AuthzProjectionReconciler) Reconcile(ctx context.Context, _ reconcile.R
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("listing AccessGrants: %w", err)
 	}
-	enforced := strings.TrimSpace(r.UserIssuer) != ""
+	hasUserProvider := strings.TrimSpace(r.UserIssuer) != ""
 	for i := range accessGrants {
-		if err := r.updateAccessGrantStatus(ctx, &accessGrants[i], enforced); err != nil {
-			return reconcile.Result{}, fmt.Errorf("updating AccessGrant %s/%s status: %w", accessGrants[i].Namespace, accessGrants[i].Name, err)
+		if !hasUserProvider {
+			if err := r.updateAccessGrantStatus(ctx, &accessGrants[i], metav1.ConditionFalse, "NoUserIdentityProvider", "A user identity provider must be configured for this AccessGrant to be enforced"); err != nil {
+				return reconcile.Result{}, fmt.Errorf("updating AccessGrant %s/%s status: %w", accessGrants[i].Namespace, accessGrants[i].Name, err)
+			}
+			continue
 		}
-		if enforced {
-			desired.AccessGrants = append(desired.AccessGrants, accessGrantForProjection(&accessGrants[i]))
+		if !r.AccessGrantProjection {
+			if err := r.updateAccessGrantStatus(ctx, &accessGrants[i], metav1.ConditionFalse, "PolicyProjectionInactive", "Automated policy projection must be active for this AccessGrant to be enforced"); err != nil {
+				return reconcile.Result{}, fmt.Errorf("updating AccessGrant %s/%s status: %w", accessGrants[i].Namespace, accessGrants[i].Name, err)
+			}
+			continue
 		}
+		desired.AccessGrants = append(desired.AccessGrants, accessGrantForProjection(&accessGrants[i]))
 	}
 	for _, projector := range r.Projectors {
 		if err := projector.Apply(ctx, desired); err != nil {
-			return reconcile.Result{}, err
+			var statusErrors []error
+			for i := range accessGrants {
+				if hasUserProvider && r.AccessGrantProjection {
+					if statusErr := r.updateAccessGrantStatus(ctx, &accessGrants[i], metav1.ConditionFalse, "ProjectionFailed", "Policy projection failed; this AccessGrant is not currently enforced"); statusErr != nil {
+						statusErrors = append(statusErrors, fmt.Errorf("updating AccessGrant %s/%s failure status: %w", accessGrants[i].Namespace, accessGrants[i].Name, statusErr))
+					}
+				}
+			}
+			return reconcile.Result{}, errors.Join(err, errors.Join(statusErrors...))
+		}
+	}
+	if hasUserProvider && r.AccessGrantProjection {
+		for i := range accessGrants {
+			if err := r.updateAccessGrantStatus(ctx, &accessGrants[i], metav1.ConditionTrue, "Enforced", "AccessGrant is included in the successfully projected authorization policy"); err != nil {
+				return reconcile.Result{}, fmt.Errorf("updating AccessGrant %s/%s status: %w", accessGrants[i].Namespace, accessGrants[i].Name, err)
+			}
 		}
 	}
 	return reconcile.Result{}, nil
@@ -211,13 +248,10 @@ func accessGrantForProjection(grant *kaosv1alpha1.AccessGrant) projection.Access
 	return out
 }
 
-func (r *AuthzProjectionReconciler) updateAccessGrantStatus(ctx context.Context, grant *kaosv1alpha1.AccessGrant, enforced bool) error {
+func (r *AuthzProjectionReconciler) updateAccessGrantStatus(ctx context.Context, grant *kaosv1alpha1.AccessGrant, status metav1.ConditionStatus, reason, message string) error {
 	before := grant.DeepCopy()
-	condition := metav1.Condition{Type: "Enforced", Status: metav1.ConditionTrue, Reason: "Enforced", Message: "AccessGrant is enforced by the configured user identity provider", ObservedGeneration: grant.Generation}
-	if !enforced {
-		condition.Status = metav1.ConditionFalse
-		condition.Reason = "NoUserIdentityProvider"
-		condition.Message = "A user identity provider must be configured for this AccessGrant to be enforced"
+	condition := metav1.Condition{Type: "Enforced", Status: status, Reason: reason, Message: message, ObservedGeneration: grant.Generation}
+	if status != metav1.ConditionTrue {
 		if r.Recorder != nil {
 			r.Recorder.Event(grant, corev1.EventTypeWarning, condition.Reason, condition.Message)
 		}

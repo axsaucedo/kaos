@@ -25,6 +25,7 @@ const (
 	oidcProviderLabel             = "kaos.tools/identity-provider"
 	oidcProviderLabelValue        = "oidc"
 	oidcAgentExternalIDAnnotation = "kaos.tools/agent-external-id"
+	oidcAgentFinalizer            = "kaos.tools/oidc-client-finalizer"
 	registrationClientURIKey      = "registration_client_uri"
 	registrationAccessTokenKey    = "registration_access_token"
 	credentialClientIDKey         = "client_id"
@@ -80,6 +81,16 @@ func (p *OIDCProjector) reconcileAgent(ctx context.Context, agent projection.Des
 	if err := p.Client.Get(ctx, key, owner); err != nil {
 		return false, fmt.Errorf("reading agent for ownership: %w", err)
 	}
+	if owner.DeletionTimestamp != nil {
+		return false, p.finalizeAgent(ctx, owner)
+	}
+	if !controllerutil.ContainsFinalizer(owner, oidcAgentFinalizer) {
+		before := owner.DeepCopy()
+		controllerutil.AddFinalizer(owner, oidcAgentFinalizer)
+		if err := p.Client.Patch(ctx, owner, client.MergeFrom(before)); err != nil {
+			return false, fmt.Errorf("adding OIDC client finalizer: %w", err)
+		}
+	}
 
 	secretName := security.CredentialSecretName(p.SecretPrefix, agent.Name)
 	secret := &corev1.Secret{}
@@ -125,6 +136,60 @@ func (p *OIDCProjector) reconcileAgent(ctx context.Context, agent projection.Des
 		return false, errors.Join(fmt.Errorf("writing credential Secret: %w", err), cleanupErr)
 	}
 	return true, nil
+}
+
+func (p *OIDCProjector) finalizeAgent(ctx context.Context, owner *kaosv1alpha1.Agent) error {
+	if !controllerutil.ContainsFinalizer(owner, oidcAgentFinalizer) {
+		return nil
+	}
+	secretName := security.CredentialSecretName(p.SecretPrefix, owner.Name)
+	secret := &corev1.Secret{}
+	err := p.Client.Get(ctx, types.NamespacedName{Namespace: owner.Namespace, Name: secretName}, secret)
+	if err == nil {
+		ref := registrationReference(secret)
+		if !completeReference(ref) {
+			return fmt.Errorf("credential Secret has an incomplete registration reference")
+		}
+		if err := p.DCR.Delete(ctx, ref); err != nil {
+			return fmt.Errorf("deleting OAuth client for %s: %w", projection.AgentExternalID(owner.Namespace, owner.Name), err)
+		}
+		if err := p.Client.Delete(ctx, secret); err != nil && !apierrors.IsNotFound(err) {
+			return fmt.Errorf("deleting Secret %s/%s: %w", secret.Namespace, secret.Name, err)
+		}
+	} else if !apierrors.IsNotFound(err) {
+		return fmt.Errorf("reading credential Secret during finalization: %w", err)
+	}
+	return p.removeAgentFinalizer(ctx, owner)
+}
+
+func (p *OIDCProjector) removeAgentFinalizer(ctx context.Context, owner *kaosv1alpha1.Agent) error {
+	if !controllerutil.ContainsFinalizer(owner, oidcAgentFinalizer) {
+		return nil
+	}
+	before := owner.DeepCopy()
+	controllerutil.RemoveFinalizer(owner, oidcAgentFinalizer)
+	if err := p.Client.Patch(ctx, owner, client.MergeFrom(before)); err != nil {
+		return fmt.Errorf("removing OIDC client finalizer: %w", err)
+	}
+	return nil
+}
+
+func (p *OIDCProjector) removeSecretOwnerFinalizer(ctx context.Context, secret *corev1.Secret) error {
+	for _, ownerRef := range secret.OwnerReferences {
+		if ownerRef.Kind != "Agent" || ownerRef.Name == "" {
+			continue
+		}
+		owner := &kaosv1alpha1.Agent{}
+		err := p.Client.Get(ctx, types.NamespacedName{Namespace: secret.Namespace, Name: ownerRef.Name}, owner)
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("reading Agent %s/%s during prune: %w", secret.Namespace, ownerRef.Name, err)
+		}
+		return p.removeAgentFinalizer(ctx, owner)
+	}
+	return nil
 }
 
 func (p *OIDCProjector) upsertSecret(ctx context.Context, owner *kaosv1alpha1.Agent, name, externalID string, registration dcr.Registration) error {
@@ -184,6 +249,10 @@ func (p *OIDCProjector) prune(ctx context.Context, desired projection.DesiredSta
 			}
 			if err := p.DCR.Delete(ctx, ref); err != nil {
 				pruneErrors = append(pruneErrors, fmt.Errorf("deleting OAuth client for %s: %w", externalID, err))
+				continue
+			}
+			if err := p.removeSecretOwnerFinalizer(ctx, secret); err != nil {
+				pruneErrors = append(pruneErrors, err)
 				continue
 			}
 			if err := p.Client.Delete(ctx, secret); err != nil && !apierrors.IsNotFound(err) {

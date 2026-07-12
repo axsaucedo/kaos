@@ -48,7 +48,7 @@ kubectl get accessgrant researchers-enter-researcher -n demo \
   -o jsonpath='{.status.conditions[?(@.type=="Enforced")]}'
 ```
 
-Without a configured user identity provider, the object is accepted but its condition is `Enforced=False` with reason `NoUserIdentityProvider`, and it is not projected into policy data. When `security.userAuth` is configured, reconciliation flips the condition to `Enforced=True` and projects the grant.
+Without a configured user identity provider, the object is accepted but its condition is `Enforced=False` with reason `NoUserIdentityProvider`, and it is not projected into policy data. Manual or disabled policy projection reports `PolicyProjectionInactive`, and a failed publication reports `ProjectionFailed`. The condition becomes `Enforced=True` only after automated policy projection successfully publishes the grant.
 
 ## User entry
 

@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -176,7 +177,7 @@ func TestProjectionReconcileMarksAccessGrantEnforcedAndProjectsIt(t *testing.T) 
 	}
 	projector := &fakeProjector{}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(grant).WithObjects(grant).Build()
-	r := &AuthzProjectionReconciler{Client: c, Scheme: scheme, Projectors: []PolicyProjector{projector}, UserIssuer: "https://users.example"}
+	r := &AuthzProjectionReconciler{Client: c, Scheme: scheme, Projectors: []PolicyProjector{projector}, UserIssuer: "https://users.example", AccessGrantProjection: true}
 
 	if _, err := r.Reconcile(context.Background(), authzSentinel); err != nil {
 		t.Fatalf("reconcile: %v", err)
@@ -190,6 +191,46 @@ func TestProjectionReconcileMarksAccessGrantEnforcedAndProjectsIt(t *testing.T) 
 	}
 	condition := updated.Status.Conditions[0]
 	if condition.Status != metav1.ConditionTrue || condition.Reason != "Enforced" {
+		t.Fatalf("condition = %+v", condition)
+	}
+}
+
+func TestProjectionReconcileDoesNotMarkAccessGrantEnforcedWhenProjectionInactive(t *testing.T) {
+	scheme := newTestScheme(t)
+	grant := &kaosv1alpha1.AccessGrant{ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "users"}}
+	projector := &fakeProjector{}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(grant).WithObjects(grant).Build()
+	r := &AuthzProjectionReconciler{Client: c, Scheme: scheme, Projectors: []PolicyProjector{projector}, UserIssuer: "https://users.example"}
+
+	if _, err := r.Reconcile(context.Background(), authzSentinel); err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	updated := &kaosv1alpha1.AccessGrant{}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(grant), updated); err != nil {
+		t.Fatalf("get AccessGrant: %v", err)
+	}
+	condition := updated.Status.Conditions[0]
+	if condition.Status != metav1.ConditionFalse || condition.Reason != "PolicyProjectionInactive" {
+		t.Fatalf("condition = %+v", condition)
+	}
+}
+
+func TestProjectionReconcileMarksAccessGrantUnenforcedWhenProjectionFails(t *testing.T) {
+	scheme := newTestScheme(t)
+	grant := &kaosv1alpha1.AccessGrant{ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "users"}}
+	projector := &fakeProjector{err: errors.New("write failed")}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(grant).WithObjects(grant).Build()
+	r := &AuthzProjectionReconciler{Client: c, Scheme: scheme, Projectors: []PolicyProjector{projector}, UserIssuer: "https://users.example", AccessGrantProjection: true}
+
+	if _, err := r.Reconcile(context.Background(), authzSentinel); err == nil {
+		t.Fatal("expected projection error")
+	}
+	updated := &kaosv1alpha1.AccessGrant{}
+	if err := c.Get(context.Background(), client.ObjectKeyFromObject(grant), updated); err != nil {
+		t.Fatalf("get AccessGrant: %v", err)
+	}
+	condition := updated.Status.Conditions[0]
+	if condition.Status == metav1.ConditionTrue || condition.Reason != "ProjectionFailed" {
 		t.Fatalf("condition = %+v", condition)
 	}
 }
@@ -212,10 +253,11 @@ func newTestScheme(t *testing.T) *runtime.Scheme {
 type fakeProjector struct {
 	calls   int
 	desired projection.DesiredState
+	err     error
 }
 
 func (f *fakeProjector) Apply(_ context.Context, desired projection.DesiredState) error {
 	f.calls++
 	f.desired = desired
-	return nil
+	return f.err
 }

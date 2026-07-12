@@ -13,6 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	kaosv1alpha1 "github.com/axsaucedo/kaos/operator/api/v1alpha1"
 	"github.com/axsaucedo/kaos/operator/internal/authz/dcr"
@@ -85,6 +86,13 @@ func TestOIDCProjectorLifecycle(t *testing.T) {
 		if provider.deleted != 1 {
 			t.Fatalf("deletions = %d, want 1", provider.deleted)
 		}
+		stored := &kaosv1alpha1.Agent{}
+		if err := kubeClient.Get(context.Background(), types.NamespacedName{Namespace: "demo", Name: "researcher"}, stored); err != nil {
+			t.Fatalf("get Agent: %v", err)
+		}
+		if controllerutil.ContainsFinalizer(stored, oidcAgentFinalizer) {
+			t.Fatalf("OIDC finalizer remains after pruning registration: %v", stored.Finalizers)
+		}
 		secret := &corev1.Secret{}
 		err := kubeClient.Get(context.Background(), types.NamespacedName{Namespace: "demo", Name: "kaos-oidc-researcher"}, secret)
 		if !apierrors.IsNotFound(err) {
@@ -93,13 +101,64 @@ func TestOIDCProjectorLifecycle(t *testing.T) {
 	})
 }
 
+func TestOIDCProjectorFinalizerDeregistersBeforeAgentCredentialsDisappear(t *testing.T) {
+	provider := newFakeOIDCProvider(t)
+	defer provider.server.Close()
+	scheme := newTestScheme(t)
+	agent := &kaosv1alpha1.Agent{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "researcher", UID: types.UID("agent-uid")},
+		Spec:       kaosv1alpha1.AgentSpec{ModelAPI: "gpt"},
+	}
+	kubeClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(agent).Build()
+	projector := &OIDCProjector{
+		Client: kubeClient, Scheme: scheme, SecretPrefix: "kaos-oidc", Prune: true,
+		DCR: &dcr.Client{Issuer: provider.server.URL, InitialAccessToken: "bootstrap", HTTPClient: provider.server.Client()},
+	}
+	desired := projection.Project([]projection.Resource{resourceFromAgent(agent)})
+	if err := projector.Apply(context.Background(), desired); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	stored := &kaosv1alpha1.Agent{}
+	key := types.NamespacedName{Namespace: agent.Namespace, Name: agent.Name}
+	if err := kubeClient.Get(context.Background(), key, stored); err != nil {
+		t.Fatalf("get Agent: %v", err)
+	}
+	if !controllerutil.ContainsFinalizer(stored, oidcAgentFinalizer) {
+		t.Fatalf("Agent finalizers = %v", stored.Finalizers)
+	}
+	if err := kubeClient.Delete(context.Background(), stored); err != nil {
+		t.Fatalf("delete Agent: %v", err)
+	}
+	provider.beforeDelete = func() {
+		secret := &corev1.Secret{}
+		if err := kubeClient.Get(context.Background(), types.NamespacedName{Namespace: "demo", Name: "kaos-oidc-researcher"}, secret); err != nil {
+			t.Errorf("credential Secret disappeared before provider DELETE: %v", err)
+		}
+	}
+	if err := projector.Apply(context.Background(), desired); err != nil {
+		t.Fatalf("finalize: %v", err)
+	}
+	if provider.deleted != 1 {
+		t.Fatalf("provider deletions = %d, want 1", provider.deleted)
+	}
+	secret := &corev1.Secret{}
+	if err := kubeClient.Get(context.Background(), types.NamespacedName{Namespace: "demo", Name: "kaos-oidc-researcher"}, secret); !apierrors.IsNotFound(err) {
+		t.Fatalf("credential Secret still exists after provider DELETE: %v", err)
+	}
+	remaining := &kaosv1alpha1.Agent{}
+	if err := kubeClient.Get(context.Background(), key, remaining); err == nil && controllerutil.ContainsFinalizer(remaining, oidcAgentFinalizer) {
+		t.Fatalf("OIDC finalizer remains after cleanup: %v", remaining.Finalizers)
+	}
+}
+
 type fakeOIDCProvider struct {
-	t          *testing.T
-	server     *httptest.Server
-	registered int
-	got        int
-	deleted    int
-	clients    map[string]bool
+	t            *testing.T
+	server       *httptest.Server
+	registered   int
+	got          int
+	deleted      int
+	clients      map[string]bool
+	beforeDelete func()
 }
 
 func newFakeOIDCProvider(t *testing.T) *fakeOIDCProvider {
@@ -149,6 +208,9 @@ func (p *fakeOIDCProvider) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		if !p.authorized(r, id) || !p.clients[id] {
 			http.NotFound(w, r)
 			return
+		}
+		if p.beforeDelete != nil {
+			p.beforeDelete()
 		}
 		delete(p.clients, id)
 		p.deleted++

@@ -123,6 +123,12 @@ rules:
   - kaos.tools
   resources:
   - agents/finalizers
+  verbs:
+  - patch
+  - update
+- apiGroups:
+  - kaos.tools
+  resources:
   - mcpservers/finalizers
   - modelapis/finalizers
   verbs:
