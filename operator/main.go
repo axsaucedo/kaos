@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"net/http"
 	"os"
 	"strconv"
@@ -174,6 +175,24 @@ func main() {
 			SecretPrefix: cfg.CredentialSecretPrefixOrDefault(),
 			Prune:        getBoolWithDefault("AUTHZ_PROJECTION_PRUNE_ENABLED", true),
 			Namespaces:   projectionNamespaces,
+		})
+	}
+	if getBoolWithDefault("TOKEN_EXCHANGE_ENABLED", false) {
+		exchangeAdminURL := os.Getenv("TOKEN_EXCHANGE_AIB_ADMIN_URL")
+		if exchangeAdminURL == "" {
+			setupLog.Error(fmt.Errorf("TOKEN_EXCHANGE_AIB_ADMIN_URL is empty"), "invalid token exchange configuration")
+			os.Exit(1)
+		}
+		projectors = append(projectors, &adapters.ExchangeProjector{
+			Client: mgr.GetClient(),
+			AIB: aib.New(
+				exchangeAdminURL,
+				getEnvWithDefault("TOKEN_EXCHANGE_AIB_PRINCIPAL", "kaos-operator"),
+				getEnvWithDefault("TOKEN_EXCHANGE_AIB_PRINCIPAL_HEADER", "X-Remote-User"),
+				getDurationWithDefault("AIB_REQUEST_TIMEOUT", 10*time.Second),
+			),
+			Enabled:          true,
+			OIDCSecretPrefix: cfg.CredentialSecretPrefixOrDefault(),
 		})
 	}
 	if policyName != "" && policyNamespace != "" {

@@ -88,6 +88,7 @@ func (r *AuthzProjectionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&kaosv1alpha1.ModelAPI{}, toSentinel, specChanged).
 		Watches(&kaosv1alpha1.MemoryStore{}, toSentinel, specChanged).
 		Watches(&kaosv1alpha1.AccessGrant{}, toSentinel, specChanged).
+		Watches(&kaosv1alpha1.ThirdPartyService{}, toSentinel, specChanged).
 		WatchesRawSource(source.Channel(startup, toSentinel)).
 		Complete(r)
 }
@@ -128,6 +129,13 @@ func (r *AuthzProjectionReconciler) Reconcile(ctx context.Context, _ reconcile.R
 		return reconcile.Result{}, fmt.Errorf("listing KAOS resources: %w", err)
 	}
 	desired := projection.Project(resources)
+	thirdPartyServices, err := r.listThirdPartyServices(ctx)
+	if err != nil {
+		return reconcile.Result{}, fmt.Errorf("listing ThirdPartyServices: %w", err)
+	}
+	for i := range thirdPartyServices {
+		desired.ThirdPartyServices = append(desired.ThirdPartyServices, thirdPartyServiceForProjection(&thirdPartyServices[i]))
+	}
 	if r.AuthorizationOperational && hasUserProvider && r.AccessGrantProjection {
 		for i := range accessGrants {
 			desired.AccessGrants = append(desired.AccessGrants, accessGrantForProjection(&accessGrants[i]))
@@ -154,6 +162,46 @@ func (r *AuthzProjectionReconciler) Reconcile(ctx context.Context, _ reconcile.R
 		}
 	}
 	return reconcile.Result{}, nil
+}
+
+func (r *AuthzProjectionReconciler) listThirdPartyServices(ctx context.Context) ([]kaosv1alpha1.ThirdPartyService, error) {
+	namespaces := r.Namespaces
+	if len(namespaces) == 0 {
+		namespaces = []string{""}
+	}
+	var out []kaosv1alpha1.ThirdPartyService
+	for _, namespace := range namespaces {
+		var options []client.ListOption
+		if namespace != "" {
+			options = append(options, client.InNamespace(namespace))
+		}
+		list := &kaosv1alpha1.ThirdPartyServiceList{}
+		if err := r.Client.List(ctx, list, options...); err != nil {
+			return nil, err
+		}
+		out = append(out, list.Items...)
+	}
+	return out, nil
+}
+
+func thirdPartyServiceForProjection(service *kaosv1alpha1.ThirdPartyService) projection.DesiredThirdPartyService {
+	out := projection.DesiredThirdPartyService{
+		Namespace: service.Namespace, Name: service.Name, DisplayName: service.Spec.DisplayName,
+		ClientID: service.Spec.ClientID, ClientSecretName: service.Spec.ClientSecretRef.Name,
+		ClientSecretKey: service.Spec.ClientSecretRef.Key, IssuerURI: service.Spec.IssuerURI,
+		ProtectedResources: append([]string(nil), service.Spec.ProtectedResources...), RouteName: service.Spec.RouteRef.Name,
+	}
+	if service.Spec.Endpoints != nil {
+		out.TokenEndpoint = service.Spec.Endpoints.Token
+		out.AuthorizeEndpoint = service.Spec.Endpoints.Authorization
+	}
+	for _, scope := range service.Spec.Scopes {
+		out.Scopes = append(out.Scopes, projection.ThirdPartyScope{Name: scope.Name, Description: scope.Description})
+	}
+	for _, access := range service.Spec.Access {
+		out.Access = append(out.Access, projection.ThirdPartyAccess{Agent: access.Agent, Scopes: append([]string(nil), access.Scopes...)})
+	}
+	return out
 }
 
 // listResources reads every watched KAOS kind via the typed client and maps each

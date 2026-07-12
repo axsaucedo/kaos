@@ -112,6 +112,11 @@ func (c *Client) list(ctx context.Context, collection string) ([]map[string]any,
 	return bare, nil
 }
 
+// List returns all records in an AIB admin collection.
+func (c *Client) List(ctx context.Context, collection string) ([]map[string]any, error) {
+	return c.list(ctx, collection)
+}
+
 // createOrGet creates a resource and returns its id; if it already exists, the
 // collection is scanned for an item whose matchField equals matchValue, making
 // the call idempotent across reconcile passes.
@@ -141,6 +146,37 @@ func (c *Client) createOrGet(ctx context.Context, collection, matchField, matchV
 		}
 	}
 	return "", fmt.Errorf("failed to create or find %s %s: %d %s", collection, matchValue, resp.StatusCode, string(data))
+}
+
+// CreateOrGet idempotently creates or finds a record in an AIB admin collection.
+func (c *Client) CreateOrGet(ctx context.Context, collection, matchField, matchValue string, body map[string]any) (string, error) {
+	return c.createOrGet(ctx, collection, matchField, matchValue, body)
+}
+
+// Upsert creates a record or replaces the matching record through the admin API.
+func (c *Client) Upsert(ctx context.Context, collection, matchField, matchValue string, body map[string]any) (string, error) {
+	items, err := c.list(ctx, collection)
+	if err != nil {
+		return "", err
+	}
+	for _, item := range items {
+		if value, _ := item[matchField].(string); value != matchValue {
+			continue
+		}
+		id, _ := item["id"].(string)
+		if id == "" {
+			break
+		}
+		resp, data, err := c.do(ctx, http.MethodPut, "/"+collection+"/"+id, body)
+		if err != nil {
+			return "", err
+		}
+		if resp.StatusCode/100 != 2 {
+			return "", fmt.Errorf("update %s %s: %d %s", collection, matchValue, resp.StatusCode, string(data))
+		}
+		return id, nil
+	}
+	return c.createOrGet(ctx, collection, matchField, matchValue, body)
 }
 
 // CreateOrGetAgent registers an agent or returns its existing id.

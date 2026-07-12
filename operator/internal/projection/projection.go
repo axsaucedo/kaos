@@ -202,6 +202,42 @@ type DesiredState struct {
 	Agents         []DesiredAgent
 	Resources      []Resource
 	AccessGrants   []AccessGrant
+	// ThirdPartyServices is exchange-only input. It is ignored by the PDP data path.
+	ThirdPartyServices []DesiredThirdPartyService
+}
+
+// DesiredThirdPartyService is the exchange-specific projection of a namespaced declaration.
+type DesiredThirdPartyService struct {
+	Namespace          string
+	Name               string
+	DisplayName        string
+	ClientID           string
+	ClientSecretName   string
+	ClientSecretKey    string
+	IssuerURI          string
+	TokenEndpoint      string
+	AuthorizeEndpoint  string
+	Scopes             []ThirdPartyScope
+	ProtectedResources []string
+	RouteName          string
+	Access             []ThirdPartyAccess
+}
+
+// ThirdPartyScope is an OAuth scope exposed by a declared service.
+type ThirdPartyScope struct {
+	Name        string
+	Description string
+}
+
+// ThirdPartyAccess binds one Agent to a real subset of provider scopes.
+type ThirdPartyAccess struct {
+	Agent  string
+	Scopes []string
+}
+
+// ThirdPartyPermissionSetName returns the stable per-Agent permission-set name.
+func ThirdPartyPermissionSetName(namespace, service, agent string) string {
+	return fmt.Sprintf("kaos:thirdparty:%s:%s:%s", namespace, service, agent)
 }
 
 // Project turns a list of KAOS resources into the desired authorization graph.

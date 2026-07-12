@@ -182,6 +182,28 @@ expect "ext_authz url" "$out" 'SECURITY_AGENT_AUTH_EXT_AUTHZ_URL:\s*"http://auth
 refute "gateway extension selector removed" "$out" 'SECURITY_AUTHORIZATION_GATEWAY_EXTENSION'
 refute "ext_proc backend removed" "$out" 'SECURITY_AGENT_AUTH_EXT_PROC_URL'
 
+out="$(render \
+	--set security.tokenExchange.enabled=true \
+	--set security.tokenExchange.aib.adminUrl=http://aib:14000/api \
+	--set security.agentAuth.identity.provider=oidc \
+	--set security.userAuth.issuer=https://keycloak.example/realms/kaos)"
+expect "token exchange feature gate" "$out" 'TOKEN_EXCHANGE_ENABLED:\s*"true"'
+expect "exchange AIB admin URL" "$out" 'TOKEN_EXCHANGE_AIB_ADMIN_URL:\s*"http://aib:14000/api"'
+
+if incompatible_exchange="$(helm template t "$CHART_DIR" \
+	--set security.tokenExchange.enabled=true \
+	--set security.tokenExchange.aib.adminUrl=http://aib:14000/api \
+	--set security.agentAuth.identity.provider=serviceaccount \
+	--set security.userAuth.issuer=https://keycloak.example/realms/kaos 2>&1)"; then
+	echo "FAIL - service-account token exchange posture was accepted"
+	FAIL=1
+elif grep -q 'requires security.agentAuth.identity.provider=oidc' <<<"$incompatible_exchange"; then
+	echo "ok   - service-account token exchange posture rejected clearly"
+else
+	echo "FAIL - service-account token exchange posture error was unclear"
+	FAIL=1
+fi
+
 # The controller-manager pod carries a config checksum so that changes to the
 # operator ConfigMap (e.g. enabling agent auth) roll the pod automatically.
 default_out="$(render)"

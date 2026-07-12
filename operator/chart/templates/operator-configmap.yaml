@@ -31,6 +31,21 @@ data:
   SECURITY_PDP_ENABLED: "true"
   {{- end }}
   {{- with .Values.security }}
+  {{- if .tokenExchange.enabled }}
+  {{- if ne (.agentAuth.identity.provider | default "serviceaccount") "oidc" }}
+  {{- fail "security.tokenExchange.enabled requires security.agentAuth.identity.provider=oidc" }}
+  {{- end }}
+  {{- if not .userAuth.issuer }}
+  {{- fail "security.tokenExchange.enabled requires security.userAuth.issuer" }}
+  {{- end }}
+  {{- if not .tokenExchange.aib.adminUrl }}
+  {{- fail "security.tokenExchange.enabled requires security.tokenExchange.aib.adminUrl" }}
+  {{- end }}
+  TOKEN_EXCHANGE_ENABLED: "true"
+  TOKEN_EXCHANGE_AIB_ADMIN_URL: {{ .tokenExchange.aib.adminUrl | quote }}
+  TOKEN_EXCHANGE_AIB_PRINCIPAL: {{ .tokenExchange.aib.adminPrincipal | default "kaos-operator" | quote }}
+  TOKEN_EXCHANGE_AIB_PRINCIPAL_HEADER: {{ .tokenExchange.aib.adminPrincipalHeader | default "X-Remote-User" | quote }}
+  {{- end }}
   {{- with .agentAuth }}
   {{- $identityProvider := .identity.provider | default "serviceaccount" }}
   {{- if not (has $identityProvider (list "serviceaccount" "oidc" "aib")) }}
