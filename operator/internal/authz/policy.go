@@ -31,8 +31,7 @@ func Policy() string {
 
 // DataDocument builds the OPA data document from the projected grant map and,
 // when verification is enabled, the issuer-keyed IdP JWKS and optional issuer
-// subject mappings. The presence of `data.kaos.jwks` switches the policy from
-// demo (decode) to verified (decode_verify) mode.
+// subject mappings. Without `data.kaos.jwks`, the policy fails closed.
 func DataDocument(grants map[string][]string, issuer string, jwks map[string]any, agents map[string]map[string]string) ([]byte, error) {
 	if grants == nil {
 		grants = map[string][]string{}

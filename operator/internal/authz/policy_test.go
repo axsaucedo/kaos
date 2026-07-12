@@ -16,7 +16,7 @@ func TestPolicyEmbedsRego(t *testing.T) {
 	}
 }
 
-func TestDataDocumentDemoModeOmitsJWKS(t *testing.T) {
+func TestDataDocumentWithoutJWKSOmitsJWKS(t *testing.T) {
 	grants := map[string][]string{"kaos://agent/demo/researcher": {"kaos://mcpserver/demo/github"}}
 	raw, err := DataDocument(grants, "", nil, nil)
 	if err != nil {
@@ -28,7 +28,7 @@ func TestDataDocumentDemoModeOmitsJWKS(t *testing.T) {
 	}
 	kaos := doc["kaos"].(map[string]any)
 	if _, ok := kaos["jwks"]; ok {
-		t.Fatalf("demo mode must not carry jwks: %v", kaos)
+		t.Fatalf("data without verification keys must not carry jwks: %v", kaos)
 	}
 	g := kaos["grants"].(map[string]any)["kaos://agent/demo/researcher"].([]any)
 	if g[0] != "kaos://mcpserver/demo/github" {

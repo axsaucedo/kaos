@@ -10,11 +10,10 @@ import rego.v1
 # only the grant facts differ in origin (KAOS-owned data here, broker
 # granted_permission_sets for the broker provider).
 
-# A demo-mode actor token (decoded, not verified) whose sub is the agent identity.
 actor_jwt := io.jwt.encode_sign(
-	{"alg": "HS256"},
-	{"sub": "kaos://agent/demo/researcher"},
-	{"kty": "oct", "k": "c2VjcmV0"},
+	{"alg": "RS256", "kid": "kaos-test"},
+	{"aud": ["kaos-gateway"], "iss": verified_issuer, "sub": "kaos://agent/demo/researcher"},
+	verified_private_jwk,
 )
 
 # A subject (user) token present in the same request, proving the subject fact is
@@ -26,9 +25,9 @@ subject_jwt := io.jwt.encode_sign(
 )
 
 serviceaccount_actor_jwt := io.jwt.encode_sign(
-	{"alg": "HS256"},
-	{"sub": "system:serviceaccount:demo:kaos-agent-researcher"},
-	{"kty": "oct", "k": "c2VjcmV0"},
+	{"alg": "RS256", "kid": "kaos-test"},
+	{"aud": ["kaos-gateway"], "iss": verified_issuer, "sub": "system:serviceaccount:demo:kaos-agent-researcher"},
+	verified_private_jwk,
 )
 
 verified_issuer := "https://kubernetes.default.svc"
@@ -57,6 +56,8 @@ verified_jwks := {"keys": [{
 	"use": verified_private_jwk.use,
 }]}
 
+configured_jwks := {verified_issuer: verified_jwks}
+
 verified_actor_jwt(audience) := io.jwt.encode_sign(
 	{"alg": "RS256", "kid": "kaos-test"},
 	{"aud": audience, "iss": verified_issuer, "sub": "system:serviceaccount:demo:kaos-agent-researcher"},
@@ -73,6 +74,12 @@ disallowed_algorithm_actor_jwt := io.jwt.encode_sign(
 	{"alg": "HS256"},
 	{"aud": ["kaos-gateway"], "iss": verified_issuer, "sub": "system:serviceaccount:demo:kaos-agent-researcher"},
 	{"kty": "oct", "k": "c2VjcmV0"},
+)
+
+forged_actor_jwt := io.jwt.encode_sign(
+	{"alg": "HS256"},
+	{"sub": "kaos://agent/demo/researcher"},
+	{"kty": "oct", "k": "Zm9yZ2Vk"},
 )
 
 request_input(path) := {
@@ -96,6 +103,7 @@ agents := {"kaos://agent/demo/researcher": {"issuer_sub": "system:serviceaccount
 test_allows_when_actor_granted_resource if {
 	out := result with input as request_input(["demo", "mcp", "github"])
 		with data.kaos.grants as grants
+		with data.kaos.jwks as configured_jwks
 	out.action == "allow"
 	out.allowed == true
 }
@@ -103,6 +111,7 @@ test_allows_when_actor_granted_resource if {
 test_denies_when_actor_not_granted_resource if {
 	out := result with input as request_input(["demo", "mcp", "secret"])
 		with data.kaos.grants as grants
+		with data.kaos.jwks as configured_jwks
 	out.action == "deny"
 }
 
@@ -112,6 +121,7 @@ test_denies_when_no_target_resource if {
 		"x-agent-authorization": actor_jwt,
 	}}}}}
 		with data.kaos.grants as grants
+		with data.kaos.jwks as configured_jwks
 	out.action == "deny"
 }
 
@@ -123,6 +133,7 @@ test_denies_when_no_actor_token if {
 		"parsed_path": ["demo", "mcp", "github"],
 	}
 		with data.kaos.grants as grants
+		with data.kaos.jwks as configured_jwks
 	out.action == "deny"
 }
 
@@ -135,6 +146,7 @@ test_allows_serviceaccount_subject_via_agent_mapping if {
 	}
 	out := result with input as serviceaccount_input
 		with data.kaos.grants as grants
+		with data.kaos.jwks as configured_jwks
 		with data.kaos.agents as agents
 	out.action == "allow"
 }
@@ -149,6 +161,7 @@ test_denies_spoofed_granted_header_for_ungranted_path if {
 	}
 	out := result with input as spoofed_input
 		with data.kaos.grants as grants
+		with data.kaos.jwks as configured_jwks
 	out.allowed == false
 	out.action == "deny"
 }
@@ -162,6 +175,7 @@ test_allows_granted_resource_from_path_without_target_header if {
 	}
 	out := result with input as path_input
 		with data.kaos.grants as grants
+		with data.kaos.jwks as configured_jwks
 	out.allowed == true
 }
 
@@ -195,4 +209,17 @@ test_verified_denies_disallowed_algorithm if {
 		with data.kaos.jwks as {verified_issuer: verified_jwks}
 		with data.kaos.agents as agents
 	out.allowed == false
+}
+
+test_denies_forged_token_when_jwks_not_configured if {
+	missing_jwks := result with input as verified_request_input(forged_actor_jwt)
+		with data.kaos.grants as grants
+	missing_jwks.allowed == false
+	missing_jwks.reasons == ["missing or invalid actor token"]
+
+	empty_jwks := result with input as verified_request_input(forged_actor_jwt)
+		with data.kaos.grants as grants
+		with data.kaos.jwks as {}
+	empty_jwks.allowed == false
+	empty_jwks.reasons == ["missing or invalid actor token"]
 }

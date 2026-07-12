@@ -533,8 +533,8 @@ func (c Config) ExtAuthzEnabled() bool {
 
 // AuthzJWKSURI returns the agent (actor) JWKS endpoint the operator injects into
 // the authorization policy data, but only in verified mode. In skip mode it
-// returns an empty string so no JWKS is injected and the policy decodes the
-// actor token without verifying it.
+// returns an empty string, so no JWKS is injected and the policy denies actor
+// tokens.
 func (c Config) AuthzJWKSURI() string {
 	if c.AgentJWTVerificationModeOrDefault() != VerificationVerified {
 		return ""

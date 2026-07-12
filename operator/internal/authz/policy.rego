@@ -9,10 +9,9 @@ import rego.v1
 # header and the target resource derived from the gateway path, and it checks the actor's
 # grants in `data.kaos.grants` (projected by the operator from Agent CRDs).
 #
-# Verification is data-gated: when the operator injects an IdP JWKS at
-# `data.kaos.jwks` (verified mode) the actor token signature is verified before
-# its `sub` is trusted; when no JWKS is present (demo mode) the token is decoded
-# without verification, which is spoofable and non-production.
+# Actor identity is fail-closed: the token subject is trusted only after the
+# configured issuer JWKS verifies its signature, algorithm, issuer, and audience.
+# Missing or empty JWKS data leaves the actor undefined and denies the request.
 
 actor_token := token if {
 	raw := input.attributes.request.http.headers["x-agent-authorization"]
@@ -48,9 +47,7 @@ unverified_actor_claims := payload if {
 
 allowed_actor_algorithms := {"RS256"}
 
-# Verified mode: a JWKS is configured, so the actor token signature must verify
-# against it before the subject is trusted. Demo mode falls back to unverified
-# decoding only when no JWKS is configured (spoofable).
+# Fail closed: without a configured issuer JWKS, actor_sub remains undefined.
 actor_sub := sub if {
 	jwks_configured
 	keys := data.kaos.jwks[unverified_actor_claims.iss]
@@ -63,9 +60,6 @@ actor_sub := sub if {
 	})
 	result[0] == true
 	sub := result[2].sub
-} else := sub if {
-	not jwks_configured
-	sub := unverified_actor_claims.sub
 }
 
 mapped_actor_id := id if {
