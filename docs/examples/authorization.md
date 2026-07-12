@@ -322,3 +322,136 @@ code=$(curl -sS -o /dev/null -w '%{http_code}' \
 ```
 
 Authorization projection and mounted OPA data are eventually consistent. After a grant, issuer, or DCR mapping changes, allow up to 90 seconds for the new policy to appear before treating a denial as final.
+
+## Delegated access to a third-party service
+
+This final walkthrough is also `.noeval`. It needs Keycloak, an AIB release whose chart includes ext_proc, and a real or mock third-party OAuth provider, so CI renders it without running it. The example assumes an Agent named `researcher` has a tool that calls `https://api.github.com/user` with `httpx`.
+
+Install the self-managed AIB release and KAOS token-exchange integration. Token exchange selects Keycloak for both user and Agent identity, creates a DCR client for each Agent, and remains off unless explicitly enabled.
+
+```bash .noeval
+set -euo pipefail
+REPO_ROOT=$(git rev-parse --show-toplevel)
+kaos system install --gateway-enabled --metallb-enabled \
+  --agent-auth-enabled keycloak --user-auth-enabled keycloak \
+  --token-exchange-enabled \
+  --aib-chart-path ../aib-222-verify/charts/agentic-identity-broker \
+  --chart-path "$REPO_ROOT/operator/chart" --wait
+```
+
+Create a dedicated egress route, the provider OAuth client Secret, and a `ThirdPartyService`. The `access` entry is the binding: only `researcher` receives `api.github.com` as a re-mint target and only its declared `repo` and `read:user` scopes are projected into AIB. In a production setup, use your platform's standard external-service backend and TLS policy in place of this compact `ExternalName` example.
+
+```yaml .noeval
+apiVersion: v1
+kind: Service
+metadata:
+  name: github-egress
+  namespace: token-exchange-demo
+spec:
+  type: ExternalName
+  externalName: api.github.com
+  ports:
+    - name: https
+      port: 443
+      appProtocol: https
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: github-egress
+  namespace: token-exchange-demo
+spec:
+  parentRefs:
+    - name: kaos-gateway
+      namespace: kaos-system
+      sectionName: http
+  hostnames:
+    - api.github.com
+  rules:
+    - backendRefs:
+        - name: github-egress
+          port: 443
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: github-oauth-client
+  namespace: token-exchange-demo
+type: Opaque
+stringData:
+  client-secret: replace-with-github-oauth-client-secret
+---
+apiVersion: kaos.tools/v1alpha1
+kind: ThirdPartyService
+metadata:
+  name: github
+  namespace: token-exchange-demo
+spec:
+  displayName: GitHub
+  clientID: replace-with-github-oauth-client-id
+  clientSecretRef:
+    name: github-oauth-client
+    key: client-secret
+  issuerURI: https://github.com
+  endpoints:
+    authorization: https://github.com/login/oauth/authorize
+    token: https://github.com/login/oauth/access_token
+  scopes:
+    - name: repo
+      description: Read repositories as the consenting user
+    - name: read:user
+      description: Read the consenting user's profile
+  protectedResources:
+    - https://api.github.com/
+  routeRef:
+    name: github-egress
+  access:
+    - agent: researcher
+      scopes:
+        - repo
+        - read:user
+```
+
+```bash .noeval
+kubectl create namespace token-exchange-demo
+kubectl apply -f github-token-exchange.yaml
+kubectl wait thirdpartyservice/github -n token-exchange-demo \
+  --for=condition=Ready --timeout=180s
+```
+
+Mint or obtain Alice's normal Keycloak login token, then ask the Agent to read her GitHub profile. The runtime re-mints that user token only for the declared GitHub target. The first call has no GitHub vault session or consent, so AIB ext_proc returns a JSON-RPC URL elicitation and KAOS surfaces the URL in the Agent response.
+
+```bash .noeval
+USER_TOKEN=$(curl -fsS -X POST \
+  "$KEYCLOAK_URL/realms/kaos/protocol/openid-connect/token" \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode client_id=kaos \
+  --data-urlencode client_secret=kaos-dev-secret \
+  --data-urlencode username=alice \
+  --data-urlencode password="$ALICE_PASSWORD" \
+  --data-urlencode grant_type=password | jq -r .access_token)
+
+FIRST_RESULT=$(curl -fsS "$GATEWAY_URL/token-exchange-demo/agent/researcher/v1/chat/completions" \
+  -H "Authorization: Bearer $USER_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"researcher","messages":[{"role":"user","content":"Show my GitHub profile"}]}' \
+  | jq -r '.choices[0].message.content')
+echo "$FIRST_RESULT"
+# Access to api.github.com requires re-authentication (third_party_reauth_required).
+# Please reconnect at https://aib.example/consent/... and try again.
+```
+
+Open the surfaced URL as Alice and approve the requested GitHub scopes. That authorization-code flow is what seeds AIB's vault and records consent; KAOS does not store the GitHub token. Retry the same request after approval.
+
+```bash .noeval
+open "$(echo "$FIRST_RESULT" | grep -Eo 'https://[^ ]+')"  # use xdg-open on Linux
+
+curl -fsS "$GATEWAY_URL/token-exchange-demo/agent/researcher/v1/chat/completions" \
+  -H "Authorization: Bearer $USER_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"researcher","messages":[{"role":"user","content":"Show my GitHub profile"}]}' \
+  | jq -r '.choices[0].message.content'
+# GitHub user: alice (Alice Example)
+```
+
+On the successful call, `Authorization` reaches the declared route with the re-minted Keycloak token (`iss` is the KAOS realm, `sub` is Alice, `azp` is `researcher`'s DCR client, and `aud` is only `token-exchange-broker`). `x-agent-authorization` still carries `researcher`'s normal actor token. AIB ext_proc replaces only the first header with Alice's vaulted GitHub token. If consent or the vault session later expires or is revoked, the same URL outcome is surfaced and the caller repeats the approval and retry steps.
