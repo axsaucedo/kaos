@@ -100,6 +100,9 @@ jobs:
           - name: example-memory
             files: "e2e/test_examples_e2e.py"
             pytest_filter: "test_memory_example"
+          - name: example-authorization
+            files: "e2e/test_examples_e2e.py"
+            pytest_filter: "test_authorization_example"
     name: E2E (${{ matrix.shard.name }})
     steps:
       - name: Checkout
