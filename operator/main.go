@@ -169,6 +169,8 @@ func main() {
 			JWKSURI:            cfg.AuthzJWKSURI(),
 			Issuer:             cfg.AgentIssuer(),
 			UserIssuer:         cfg.UserIssuer,
+			UserAudience:       cfg.UserAudience,
+			UserJWKSURI:        cfg.UserJWKSURI(),
 			StaticJWKS:         cfg.AgentLocalJWKS(),
 			MapServiceAccounts: cfg.ServiceAccountIdentityEnabled(),
 			WriteGrantData:     policyDataSource == security.PolicyDataAutomated && !cfg.PolicyRegoOverride,

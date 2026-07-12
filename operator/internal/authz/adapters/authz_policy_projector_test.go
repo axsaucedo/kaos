@@ -52,9 +52,26 @@ func TestAuthzPolicyProjectorWritesPolicyConfigMap(t *testing.T) {
 }
 
 func TestAuthzPolicyProjectorWritesUserGrantsWhenUserIssuerConfigured(t *testing.T) {
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			_, _ = w.Write([]byte(`{"issuer":"` + srv.URL + `","jwks_uri":"` + srv.URL + `/jwks"}`))
+		case "/jwks":
+			_, _ = w.Write([]byte(`{"keys":[{"kty":"RSA","kid":"user-key"}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
 	scheme := newTestScheme(t)
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()
-	p := &AuthzPolicyProjector{Client: c, Name: "kaos-authz-policy", Namespace: "aib-system", WriteGrantData: true, UserIssuer: "https://users.example"}
+	p := &AuthzPolicyProjector{
+		Client: c, Name: "kaos-authz-policy", Namespace: "aib-system", WriteGrantData: true,
+		Issuer: "https://agents.example", StaticJWKS: map[string]any{"keys": []any{map[string]any{"kty": "RSA", "kid": "agent-key"}}},
+		UserIssuer: srv.URL, UserAudience: "kaos-users",
+	}
 	desired := projection.DesiredState{AccessGrants: []projection.AccessGrant{{
 		Namespace: "demo",
 		Subjects:  []projection.AccessGrantSubject{{Kind: "User", Name: "alice"}},
@@ -70,6 +87,11 @@ func TestAuthzPolicyProjectorWritesUserGrantsWhenUserIssuerConfigured(t *testing
 	}
 	if !contains(cm.Data["data.json"], `"user_grants"`) || !contains(cm.Data["data.json"], `"user:alice"`) {
 		t.Fatalf("data.json missing user grants: %s", cm.Data["data.json"])
+	}
+	for _, expected := range []string{`"user"`, `"audience": "kaos-users"`, `"kid": "agent-key"`, `"kid": "user-key"`} {
+		if !contains(cm.Data["data.json"], expected) {
+			t.Fatalf("data.json missing %s: %s", expected, cm.Data["data.json"])
+		}
 	}
 }
 

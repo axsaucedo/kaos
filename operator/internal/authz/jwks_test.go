@@ -27,6 +27,43 @@ func TestFetchJWKSParsesKeySet(t *testing.T) {
 	}
 }
 
+func TestDiscoverIssuerKeysFetchesDiscoveredJWKS(t *testing.T) {
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			_, _ = w.Write([]byte(`{"issuer":"` + srv.URL + `","jwks_uri":"` + srv.URL + `/keys"}`))
+		case "/keys":
+			_, _ = w.Write([]byte(`{"keys":[{"kty":"RSA","kid":"user-key"}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	got, err := DiscoverIssuerKeys(context.Background(), srv.Client(), srv.URL, "")
+	if err != nil {
+		t.Fatalf("DiscoverIssuerKeys: %v", err)
+	}
+	if got.Issuer != srv.URL {
+		t.Fatalf("issuer = %q", got.Issuer)
+	}
+	if got.JWKS["keys"].([]any)[0].(map[string]any)["kid"] != "user-key" {
+		t.Fatalf("JWKS = %#v", got.JWKS)
+	}
+}
+
+func TestDiscoverIssuerKeysRejectsIssuerMismatch(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"issuer":"https://other.example","jwks_uri":"https://other.example/keys"}`))
+	}))
+	defer srv.Close()
+
+	if _, err := DiscoverIssuerKeys(context.Background(), srv.Client(), srv.URL, ""); err == nil {
+		t.Fatal("expected issuer mismatch to fail")
+	}
+}
+
 func TestDiscoverServiceAccountIssuerUsesKubernetesTLSAndCredentials(t *testing.T) {
 	var server *httptest.Server
 	server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

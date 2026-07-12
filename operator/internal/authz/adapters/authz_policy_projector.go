@@ -26,6 +26,8 @@ type AuthzPolicyProjector struct {
 	JWKSClient         *http.Client
 	Issuer             string
 	UserIssuer         string
+	UserAudience       string
+	UserJWKSURI        string
 	StaticJWKS         map[string]any
 	MapServiceAccounts bool
 	WriteGrantData     bool
@@ -41,13 +43,17 @@ func (p *AuthzPolicyProjector) Apply(ctx context.Context, desired projection.Des
 	data := map[string]string{authz.PolicyKey: authz.Policy()}
 	if p.WriteGrantData {
 		grants := projection.GrantData(desired)
-		jwks := p.StaticJWKS
+		issuerJWKS := map[string]any{}
+		agentJWKS := p.StaticJWKS
 		if p.JWKSURI != "" {
 			fetched, err := authz.FetchJWKS(ctx, p.JWKSClient, p.JWKSURI)
 			if err != nil {
 				return err
 			}
-			jwks = fetched
+			agentJWKS = fetched
+		}
+		if agentJWKS != nil && strings.TrimSpace(p.Issuer) != "" {
+			issuerJWKS[p.Issuer] = agentJWKS
 		}
 		var agents map[string]map[string]any
 		if p.MapServiceAccounts {
@@ -60,10 +66,19 @@ func (p *AuthzPolicyProjector) Apply(ctx context.Context, desired projection.Des
 			}
 		}
 		var userGrants map[string][]string
+		var user map[string]string
 		if strings.TrimSpace(p.UserIssuer) != "" {
+			userKeys, err := authz.DiscoverIssuerKeys(ctx, p.JWKSClient, p.UserIssuer, p.UserJWKSURI)
+			if err != nil {
+				return err
+			}
+			if _, agentIssuer := issuerJWKS[userKeys.Issuer]; !agentIssuer {
+				issuerJWKS[userKeys.Issuer] = userKeys.JWKS
+			}
 			userGrants = projection.UserGrantData(desired)
+			user = map[string]string{"issuer": strings.TrimSpace(p.UserIssuer), "audience": strings.TrimSpace(p.UserAudience)}
 		}
-		dataDoc, err := authz.DataDocument(grants, userGrants, p.Issuer, jwks, agents)
+		dataDoc, err := authz.DataDocument(grants, userGrants, issuerJWKS, agents, user)
 		if err != nil {
 			return err
 		}

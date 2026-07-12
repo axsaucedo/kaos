@@ -10,27 +10,9 @@ import rego.v1
 # only the grant facts differ in origin (KAOS-owned data here, broker
 # granted_permission_sets for the broker provider).
 
-actor_jwt := io.jwt.encode_sign(
-	{"alg": "RS256", "kid": "kaos-test"},
-	{"aud": ["kaos-gateway"], "iss": verified_issuer, "sub": "kaos://agent/demo/researcher"},
-	verified_private_jwk,
-)
-
-# A subject (user) token present in the same request, proving the subject fact is
-# available alongside the actor and resource facts.
-subject_jwt := io.jwt.encode_sign(
-	{"alg": "HS256"},
-	{"sub": "user-alice@example.com"},
-	{"kty": "oct", "k": "c2VjcmV0"},
-)
-
-serviceaccount_actor_jwt := io.jwt.encode_sign(
-	{"alg": "RS256", "kid": "kaos-test"},
-	{"aud": ["kaos-gateway"], "iss": verified_issuer, "sub": "system:serviceaccount:demo:kaos-agent-researcher"},
-	verified_private_jwk,
-)
-
 verified_issuer := "https://kubernetes.default.svc"
+user_issuer := "https://users.example/realms/kaos"
+wrong_issuer := "https://wrong.example"
 
 verified_private_jwk := {
 	"alg": "RS256",
@@ -56,178 +38,253 @@ verified_jwks := {"keys": [{
 	"use": verified_private_jwk.use,
 }]}
 
-configured_jwks := {verified_issuer: verified_jwks}
+configured_jwks := {
+	verified_issuer: verified_jwks,
+	user_issuer: verified_jwks,
+	wrong_issuer: verified_jwks,
+}
 
-verified_actor_jwt(audience) := io.jwt.encode_sign(
+user_config := {"issuer": user_issuer, "audience": "kaos-users"}
+actor_sub := "system:serviceaccount:demo:kaos-agent-researcher"
+autonomous_sub := "system:serviceaccount:demo:kaos-agent-autonomous"
+non_autonomous_sub := "system:serviceaccount:demo:kaos-agent-worker"
+
+signed_token(issuer, audience, subject, extra) := io.jwt.encode_sign(
 	{"alg": "RS256", "kid": "kaos-test"},
-	{"aud": audience, "iss": verified_issuer, "sub": "system:serviceaccount:demo:kaos-agent-researcher"},
+	object.union({"aud": audience, "iss": issuer, "sub": subject}, extra),
 	verified_private_jwk,
 )
 
-verified_actor_jwt_without_audience := io.jwt.encode_sign(
-	{"alg": "RS256", "kid": "kaos-test"},
-	{"iss": verified_issuer, "sub": "system:serviceaccount:demo:kaos-agent-researcher"},
-	verified_private_jwk,
-)
-
-disallowed_algorithm_actor_jwt := io.jwt.encode_sign(
+actor_jwt := signed_token(verified_issuer, ["kaos-gateway"], actor_sub, {})
+autonomous_subject_jwt := signed_token(verified_issuer, ["kaos-gateway"], autonomous_sub, {})
+non_autonomous_subject_jwt := signed_token(verified_issuer, ["kaos-gateway"], non_autonomous_sub, {})
+user_subject_jwt := signed_token(user_issuer, ["kaos-users"], "user-123", {"email": "alice@example.com", "groups": ["writers", "readers"]})
+user_subject_without_email_jwt := signed_token(user_issuer, ["kaos-users"], "user-123", {})
+wrong_audience_subject_jwt := signed_token(user_issuer, ["another-service"], "user-123", {"email": "alice@example.com"})
+wrong_issuer_subject_jwt := signed_token(wrong_issuer, ["kaos-users"], "user-123", {"email": "alice@example.com"})
+forged_subject_jwt := io.jwt.encode_sign(
 	{"alg": "HS256"},
-	{"aud": ["kaos-gateway"], "iss": verified_issuer, "sub": "system:serviceaccount:demo:kaos-agent-researcher"},
-	{"kty": "oct", "k": "c2VjcmV0"},
-)
-
-forged_actor_jwt := io.jwt.encode_sign(
-	{"alg": "HS256"},
-	{"sub": "kaos://agent/demo/researcher"},
+	{"aud": ["kaos-users"], "iss": user_issuer, "sub": "user-123", "email": "alice@example.com"},
 	{"kty": "oct", "k": "Zm9yZ2Vk"},
 )
 
-request_input(path) := {
+internal_input(actor, subject, path) := {
 	"attributes": {"request": {"http": {"headers": {
-		"authorization": sprintf("Bearer %v", [subject_jwt]),
-		"x-agent-authorization": sprintf("Bearer %v", [actor_jwt]),
+		"authorization": sprintf("Bearer %v", [subject]),
+		"x-agent-authorization": sprintf("Bearer %v", [actor]),
 	}}}},
 	"parsed_path": path,
 }
 
-verified_request_input(token) := {
+actor_only_input := {
 	"attributes": {"request": {"http": {"headers": {
-		"x-agent-authorization": sprintf("Bearer %v", [token]),
+		"x-agent-authorization": sprintf("Bearer %v", [actor_jwt]),
 	}}}},
 	"parsed_path": ["demo", "mcp", "github"],
 }
 
+entry_path_input(subject, path) := {
+	"attributes": {"request": {"http": {"headers": {
+		"authorization": sprintf("Bearer %v", [subject]),
+	}}}},
+	"parsed_path": path,
+}
+
+entry_input(subject) := entry_path_input(subject, ["demo", "agent", "writer"])
+
+empty_input := {
+	"attributes": {"request": {"http": {"headers": {}}}},
+	"parsed_path": ["demo", "agent", "writer"],
+}
+
 grants := {"kaos://agent/demo/researcher": ["kaos://mcpserver/demo/github"]}
-agents := {"kaos://agent/demo/researcher": {"issuer_sub": "system:serviceaccount:demo:kaos-agent-researcher"}}
-
-test_allows_when_actor_granted_resource if {
-	out := result with input as request_input(["demo", "mcp", "github"])
-		with data.kaos.grants as grants
-		with data.kaos.jwks as configured_jwks
-	out.action == "allow"
-	out.allowed == true
+agents := {
+	"kaos://agent/demo/researcher": {"issuer_sub": actor_sub, "autonomous": false},
+	"kaos://agent/demo/autonomous": {"issuer_sub": autonomous_sub, "autonomous": true},
+	"kaos://agent/demo/worker": {"issuer_sub": non_autonomous_sub, "autonomous": false},
 }
 
-test_denies_when_actor_not_granted_resource if {
-	out := result with input as request_input(["demo", "mcp", "secret"])
-		with data.kaos.grants as grants
-		with data.kaos.jwks as configured_jwks
-	out.action == "deny"
+user_grants := {
+	"user:alice@example.com": ["kaos://agent/demo/writer"],
+	"user:user-123": ["kaos://agent/demo/by-sub"],
+	"group:writers": ["kaos://agent/demo/group-writer"],
 }
 
-test_denies_when_no_target_resource if {
-	out := result with input as {"attributes": {"request": {"http": {"headers": {
-		"authorization": sprintf("Bearer %v", [subject_jwt]),
-		"x-agent-authorization": actor_jwt,
-	}}}}}
-		with data.kaos.grants as grants
-		with data.kaos.jwks as configured_jwks
-	out.action == "deny"
-}
-
-test_denies_when_no_actor_token if {
-	out := result with input as {
-		"attributes": {"request": {"http": {"headers": {
-			"authorization": sprintf("Bearer %v", [subject_jwt]),
-		}}}},
-		"parsed_path": ["demo", "mcp", "github"],
-	}
-		with data.kaos.grants as grants
-		with data.kaos.jwks as configured_jwks
-	out.action == "deny"
-}
-
-test_allows_serviceaccount_subject_via_agent_mapping if {
-	serviceaccount_input := {
-		"attributes": {"request": {"http": {"headers": {
-			"x-agent-authorization": sprintf("Bearer %v", [serviceaccount_actor_jwt]),
-		}}}},
-		"parsed_path": ["demo", "mcp", "github"],
-	}
-	out := result with input as serviceaccount_input
+test_internal_actor_granted_with_autonomous_subject_allows if {
+	out := result with input as internal_input(actor_jwt, autonomous_subject_jwt, ["demo", "mcp", "github"])
 		with data.kaos.grants as grants
 		with data.kaos.jwks as configured_jwks
 		with data.kaos.agents as agents
-	out.action == "allow"
+		with data.kaos.user as user_config
+	out.allowed == true
 }
 
-test_denies_spoofed_granted_header_for_ungranted_path if {
-	spoofed_input := {
+test_internal_autonomous_subject_without_user_provider_allows if {
+	out := result with input as internal_input(actor_jwt, autonomous_subject_jwt, ["demo", "mcp", "github"])
+		with data.kaos.grants as grants
+		with data.kaos.jwks as {verified_issuer: verified_jwks}
+		with data.kaos.agents as agents
+	out.allowed == true
+}
+
+test_internal_actor_granted_with_user_subject_allows if {
+	out := result with input as internal_input(actor_jwt, user_subject_jwt, ["demo", "mcp", "github"])
+		with data.kaos.grants as grants
+		with data.kaos.jwks as configured_jwks
+		with data.kaos.agents as agents
+		with data.kaos.user as user_config
+	out.allowed == true
+}
+
+test_internal_actor_alone_without_subject_denies if {
+	out := result with input as actor_only_input
+		with data.kaos.grants as grants
+		with data.kaos.jwks as configured_jwks
+		with data.kaos.agents as agents
+		with data.kaos.user as user_config
+	out.allowed == false
+	"subject missing or invalid" in out.reasons
+}
+
+test_internal_non_autonomous_agent_subject_denies if {
+	out := result with input as internal_input(actor_jwt, non_autonomous_subject_jwt, ["demo", "mcp", "github"])
+		with data.kaos.grants as grants
+		with data.kaos.jwks as configured_jwks
+		with data.kaos.agents as agents
+		with data.kaos.user as user_config
+	out.allowed == false
+}
+
+test_internal_ungranted_actor_with_valid_subject_denies if {
+	out := result with input as internal_input(actor_jwt, user_subject_jwt, ["demo", "mcp", "secret"])
+		with data.kaos.grants as grants
+		with data.kaos.jwks as configured_jwks
+		with data.kaos.agents as agents
+		with data.kaos.user as user_config
+	out.allowed == false
+}
+
+test_entry_user_grant_by_principal_allows if {
+	out := result with input as entry_input(user_subject_jwt)
+		with data.kaos.jwks as configured_jwks
+		with data.kaos.user as user_config
+		with data.kaos.user_grants as user_grants
+	out.allowed == true
+}
+
+test_entry_user_grant_by_group_allows if {
+	out := result with input as entry_path_input(user_subject_jwt, ["demo", "agent", "group-writer"])
+		with data.kaos.jwks as configured_jwks
+		with data.kaos.user as user_config
+		with data.kaos.user_grants as user_grants
+	out.allowed == true
+}
+
+test_entry_user_grant_by_sub_when_email_missing_allows if {
+	out := result with input as entry_path_input(user_subject_without_email_jwt, ["demo", "agent", "by-sub"])
+		with data.kaos.jwks as configured_jwks
+		with data.kaos.user as user_config
+		with data.kaos.user_grants as user_grants
+	out.allowed == true
+}
+
+test_entry_user_without_matching_grant_denies if {
+	out := result with input as entry_input(user_subject_jwt)
+		with data.kaos.jwks as configured_jwks
+		with data.kaos.user as user_config
+		with data.kaos.user_grants as {}
+	out.allowed == false
+}
+
+test_entry_without_subject_denies if {
+	out := result with input as empty_input
+		with data.kaos.jwks as configured_jwks
+		with data.kaos.user as user_config
+	out.allowed == false
+}
+
+test_entry_forged_subject_denies if {
+	out := result with input as entry_input(forged_subject_jwt)
+		with data.kaos.jwks as configured_jwks
+		with data.kaos.user as user_config
+		with data.kaos.user_grants as user_grants
+	out.allowed == false
+}
+
+test_entry_wrong_audience_subject_denies if {
+	out := result with input as entry_input(wrong_audience_subject_jwt)
+		with data.kaos.jwks as configured_jwks
+		with data.kaos.user as user_config
+		with data.kaos.user_grants as user_grants
+	out.allowed == false
+}
+
+test_entry_wrong_issuer_subject_denies if {
+	out := result with input as entry_input(wrong_issuer_subject_jwt)
+		with data.kaos.jwks as configured_jwks
+		with data.kaos.user as user_config
+		with data.kaos.user_grants as user_grants
+	out.allowed == false
+}
+
+test_entry_missing_jwks_denies if {
+	out := result with input as entry_input(user_subject_jwt)
+		with data.kaos.user as user_config
+		with data.kaos.user_grants as user_grants
+	out.allowed == false
+}
+
+test_entry_missing_user_configuration_denies if {
+	out := result with input as entry_input(user_subject_jwt)
+		with data.kaos.jwks as configured_jwks
+		with data.kaos.user_grants as user_grants
+	out.allowed == false
+}
+
+test_internal_invalid_actor_denies_with_valid_subject if {
+	wrong_actor := signed_token(verified_issuer, ["wrong-audience"], actor_sub, {})
+	out := result with input as internal_input(wrong_actor, user_subject_jwt, ["demo", "mcp", "github"])
+		with data.kaos.grants as grants
+		with data.kaos.jwks as configured_jwks
+		with data.kaos.agents as agents
+		with data.kaos.user as user_config
+	out.allowed == false
+	"missing or invalid actor token" in out.reasons
+}
+
+test_internal_missing_target_denies if {
+	request := internal_input(actor_jwt, user_subject_jwt, ["demo"])
+	out := result with input as request
+		with data.kaos.grants as grants
+		with data.kaos.jwks as configured_jwks
+		with data.kaos.agents as agents
+		with data.kaos.user as user_config
+	out.allowed == false
+}
+
+test_internal_spoofed_target_header_does_not_override_path if {
+	request := {
 		"attributes": {"request": {"http": {"headers": {
+			"authorization": sprintf("Bearer %v", [user_subject_jwt]),
 			"x-agent-authorization": sprintf("Bearer %v", [actor_jwt]),
 			"x-kaos-target-resource": "kaos://mcpserver/demo/github",
 		}}}},
 		"parsed_path": ["demo", "mcp", "secret"],
 	}
-	out := result with input as spoofed_input
+	out := result with input as request
 		with data.kaos.grants as grants
 		with data.kaos.jwks as configured_jwks
+		with data.kaos.agents as agents
+		with data.kaos.user as user_config
 	out.allowed == false
-	out.action == "deny"
 }
 
-test_allows_granted_resource_from_path_without_target_header if {
-	path_input := {
-		"attributes": {"request": {"http": {"headers": {
-			"x-agent-authorization": sprintf("Bearer %v", [actor_jwt]),
-		}}}},
-		"parsed_path": ["demo", "mcp", "github", "tools", "call"],
-	}
-	out := result with input as path_input
-		with data.kaos.grants as grants
-		with data.kaos.jwks as configured_jwks
-	out.allowed == true
-}
-
-test_allows_granted_memorystore_resource_from_path if {
+test_internal_granted_memorystore_path_allows_with_valid_subject if {
 	memory_grants := {"kaos://agent/demo/researcher": ["kaos://memorystore/demo/brain"]}
-	out := result with input as request_input(["demo", "memorystore", "brain", "v1", "recall"])
+	out := result with input as internal_input(actor_jwt, user_subject_jwt, ["demo", "memorystore", "brain", "v1", "recall"])
 		with data.kaos.grants as memory_grants
 		with data.kaos.jwks as configured_jwks
+		with data.kaos.agents as agents
+		with data.kaos.user as user_config
 	out.allowed == true
-}
-
-test_verified_allows_correct_serviceaccount_issuer_algorithm_and_audience if {
-	out := result with input as verified_request_input(verified_actor_jwt(["kaos-gateway"]))
-		with data.kaos.grants as grants
-		with data.kaos.jwks as {verified_issuer: verified_jwks}
-		with data.kaos.agents as agents
-	out.allowed == true
-}
-
-test_verified_denies_missing_audience if {
-	out := result with input as verified_request_input(verified_actor_jwt_without_audience)
-		with data.kaos.grants as grants
-		with data.kaos.jwks as {verified_issuer: verified_jwks}
-		with data.kaos.agents as agents
-	out.allowed == false
-}
-
-test_verified_denies_wrong_audience if {
-	out := result with input as verified_request_input(verified_actor_jwt(["another-service"]))
-		with data.kaos.grants as grants
-		with data.kaos.jwks as {verified_issuer: verified_jwks}
-		with data.kaos.agents as agents
-	out.allowed == false
-}
-
-test_verified_denies_disallowed_algorithm if {
-	out := result with input as verified_request_input(disallowed_algorithm_actor_jwt)
-		with data.kaos.grants as grants
-		with data.kaos.jwks as {verified_issuer: verified_jwks}
-		with data.kaos.agents as agents
-	out.allowed == false
-}
-
-test_denies_forged_token_when_jwks_not_configured if {
-	missing_jwks := result with input as verified_request_input(forged_actor_jwt)
-		with data.kaos.grants as grants
-	missing_jwks.allowed == false
-	missing_jwks.reasons == ["missing or invalid actor token"]
-
-	empty_jwks := result with input as verified_request_input(forged_actor_jwt)
-		with data.kaos.grants as grants
-		with data.kaos.jwks as {}
-	empty_jwks.allowed == false
-	empty_jwks.reasons == ["missing or invalid actor token"]
 }

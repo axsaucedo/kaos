@@ -18,23 +18,63 @@ type IssuerKeys struct {
 	JWKS   map[string]any
 }
 
+type oidcDiscovery struct {
+	Issuer  string `json:"issuer"`
+	JWKSURI string `json:"jwks_uri"`
+}
+
 // DiscoverIssuer returns the issuer advertised by an OIDC provider.
 func DiscoverIssuer(ctx context.Context, client *http.Client, issuer string) (string, error) {
-	if client == nil {
-		client = http.DefaultClient
-	}
-	var discovery struct {
-		Issuer string `json:"issuer"`
-	}
-	endpoint := strings.TrimRight(strings.TrimSpace(issuer), "/") + "/.well-known/openid-configuration"
-	if err := fetchJSON(ctx, client, endpoint, &discovery); err != nil {
-		return "", fmt.Errorf("discovering issuer from %s: %w", endpoint, err)
+	discovery, endpoint, err := discoverOIDC(ctx, client, issuer)
+	if err != nil {
+		return "", err
 	}
 	discovered := strings.TrimSpace(discovery.Issuer)
 	if discovered == "" {
 		return "", fmt.Errorf("OIDC discovery at %s returned an empty issuer", endpoint)
 	}
 	return discovered, nil
+}
+
+// DiscoverIssuerKeys verifies an OIDC issuer through discovery and fetches its
+// signing keys. An explicit JWKS URI overrides the discovered jwks_uri.
+func DiscoverIssuerKeys(ctx context.Context, client *http.Client, issuer, jwksURI string) (IssuerKeys, error) {
+	discovery, endpoint, err := discoverOIDC(ctx, client, issuer)
+	if err != nil {
+		return IssuerKeys{}, err
+	}
+	configured := strings.TrimSpace(issuer)
+	discovered := strings.TrimSpace(discovery.Issuer)
+	if discovered == "" {
+		return IssuerKeys{}, fmt.Errorf("OIDC discovery at %s returned an empty issuer", endpoint)
+	}
+	if discovered != configured {
+		return IssuerKeys{}, fmt.Errorf("configured issuer %q does not match OIDC discovery issuer %q", configured, discovered)
+	}
+	keysURL := strings.TrimSpace(jwksURI)
+	if keysURL == "" {
+		keysURL = strings.TrimSpace(discovery.JWKSURI)
+	}
+	if keysURL == "" {
+		return IssuerKeys{}, fmt.Errorf("OIDC discovery at %s returned an empty jwks_uri", endpoint)
+	}
+	keys, err := FetchJWKS(ctx, client, keysURL)
+	if err != nil {
+		return IssuerKeys{}, err
+	}
+	return IssuerKeys{Issuer: discovered, JWKS: keys}, nil
+}
+
+func discoverOIDC(ctx context.Context, client *http.Client, issuer string) (oidcDiscovery, string, error) {
+	if client == nil {
+		client = http.DefaultClient
+	}
+	endpoint := strings.TrimRight(strings.TrimSpace(issuer), "/") + "/.well-known/openid-configuration"
+	var discovery oidcDiscovery
+	if err := fetchJSON(ctx, client, endpoint, &discovery); err != nil {
+		return oidcDiscovery{}, endpoint, fmt.Errorf("discovering issuer from %s: %w", endpoint, err)
+	}
+	return discovery, endpoint, nil
 }
 
 // DiscoverServiceAccountIssuer reads the API server's OIDC discovery document
