@@ -264,10 +264,20 @@ func normalizeEnum[T ~string](v T, allowed []T, def T) T {
 	return def
 }
 
+// Configured reports whether a string contains a non-whitespace value.
+func Configured(s string) bool {
+	return strings.TrimSpace(s) != ""
+}
+
 // IsOperational reports whether ext_authz enforcement is enabled through the
 // chart-managed PDP or an explicit backend override.
 func (c Config) IsOperational() bool {
-	return c.PDPEnabled || strings.TrimSpace(c.ExtAuthzURL) != ""
+	return c.PDPEnabled || Configured(c.ExtAuthzURL)
+}
+
+// UserPlaneEnabled reports whether a user identity provider is configured.
+func (c Config) UserPlaneEnabled() bool {
+	return Configured(c.UserIssuer)
 }
 
 // SecurityEnabled reports whether gateway authorization enforcement is configured.
@@ -393,7 +403,7 @@ func (c Config) CredentialSecretFilePath() string {
 // is configured. This is independent of IsOperational (which gates ext_authz):
 // the jwt block is only rendered when at least one issuer is known.
 func (c Config) JWTEnabled() bool {
-	return c.AgentIssuer() != "" || strings.TrimSpace(c.UserIssuer) != ""
+	return Configured(c.AgentIssuer()) || c.UserPlaneEnabled()
 }
 
 // AgentJWKSURI returns the JWKS endpoint for the agent (actor) provider. AIB

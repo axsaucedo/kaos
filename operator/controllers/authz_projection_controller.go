@@ -23,6 +23,7 @@ import (
 
 	kaosv1alpha1 "github.com/axsaucedo/kaos/operator/api/v1alpha1"
 	"github.com/axsaucedo/kaos/operator/internal/projection"
+	"github.com/axsaucedo/kaos/operator/pkg/security"
 )
 
 // authzProjectionControllerName is the manager-registered name of the projection
@@ -101,7 +102,7 @@ func (r *AuthzProjectionReconciler) Reconcile(ctx context.Context, _ reconcile.R
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("listing AccessGrants: %w", err)
 	}
-	hasUserProvider := strings.TrimSpace(r.UserIssuer) != ""
+	hasUserProvider := (security.Config{UserIssuer: r.UserIssuer}).UserPlaneEnabled()
 	for i := range accessGrants {
 		if !hasUserProvider {
 			if err := r.updateAccessGrantStatus(ctx, &accessGrants[i], metav1.ConditionFalse, "NoUserIdentityProvider", "A user identity provider must be configured for this AccessGrant to be enforced"); err != nil {

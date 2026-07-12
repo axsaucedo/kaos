@@ -55,7 +55,7 @@ func (p *AuthzPolicyProjector) Apply(ctx context.Context, desired projection.Des
 			}
 			agentJWKS = fetched
 		}
-		if agentJWKS != nil && strings.TrimSpace(p.Issuer) != "" {
+		if agentJWKS != nil && security.Configured(p.Issuer) {
 			issuerJWKS[p.Issuer] = agentJWKS
 		}
 		var agents map[string]map[string]any
@@ -88,7 +88,7 @@ func (p *AuthzPolicyProjector) Apply(ctx context.Context, desired projection.Des
 		}
 		var userGrants map[string][]string
 		var user map[string]string
-		if strings.TrimSpace(p.UserIssuer) != "" {
+		if (security.Config{UserIssuer: p.UserIssuer}).UserPlaneEnabled() {
 			userKeys, err := authz.DiscoverIssuerKeys(ctx, p.JWKSClient, p.UserIssuer, p.UserJWKSURI)
 			if err != nil {
 				return err

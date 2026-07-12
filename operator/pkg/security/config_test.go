@@ -83,6 +83,15 @@ func TestIsOperationalIgnoresWhitespace(t *testing.T) {
 	}
 }
 
+func TestUserPlaneEnabled(t *testing.T) {
+	if !(Config{UserIssuer: "https://users.example"}).UserPlaneEnabled() {
+		t.Fatal("expected configured user issuer to enable the user plane")
+	}
+	if (Config{UserIssuer: "  "}).UserPlaneEnabled() {
+		t.Fatal("expected whitespace-only user issuer to leave the user plane disabled")
+	}
+}
+
 func TestCredentialMountingEnabled(t *testing.T) {
 	cases := []struct {
 		name     string
