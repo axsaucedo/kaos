@@ -1,0 +1,11 @@
+apiVersion: kaos.tools/v1alpha1
+kind: AccessGrant
+metadata:
+  name: team-agent-access
+spec:
+  subjects:
+  - kind: Group
+    name: platform-team
+  resources:
+  - kind: Agent
+    name: simple-echo
