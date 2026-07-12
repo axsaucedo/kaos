@@ -1,11 +1,80 @@
+# This sample allows autonomous-researcher to call granted-model, denies it access
+# to ungranted-model, and grants the researchers group entry to that Agent only.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: authz-demo
+---
+apiVersion: kaos.tools/v1alpha1
+kind: ModelAPI
+metadata:
+  name: granted-model
+  namespace: authz-demo
+spec:
+  mode: Proxy
+  proxyConfig:
+    models:
+      - "*"
+  container:
+    env:
+      - name: OPENAI_API_KEY
+        value: sk-authz-demo
+---
+apiVersion: kaos.tools/v1alpha1
+kind: ModelAPI
+metadata:
+  name: ungranted-model
+  namespace: authz-demo
+spec:
+  mode: Proxy
+  proxyConfig:
+    models:
+      - "*"
+  container:
+    env:
+      - name: OPENAI_API_KEY
+        value: sk-authz-demo
+---
+apiVersion: kaos.tools/v1alpha1
+kind: Agent
+metadata:
+  name: autonomous-researcher
+  namespace: authz-demo
+spec:
+  modelAPI: granted-model
+  model: openai/authz-demo
+  waitForDependencies: false
+  config:
+    instructions: Return a short research result.
+    autonomous:
+      goal: Research the requested topic autonomously.
+      intervalSeconds: 3600
+  agentNetwork:
+    expose: true
+---
+apiVersion: kaos.tools/v1alpha1
+kind: Agent
+metadata:
+  name: unrelated-agent
+  namespace: authz-demo
+spec:
+  modelAPI: ungranted-model
+  model: openai/authz-demo
+  waitForDependencies: false
+  config:
+    instructions: Return a short unrelated result.
+  agentNetwork:
+    expose: true
+---
 apiVersion: kaos.tools/v1alpha1
 kind: AccessGrant
 metadata:
-  name: team-agent-access
+  name: researchers-enter-autonomous
+  namespace: authz-demo
 spec:
   subjects:
-  - kind: Group
-    name: researchers
+    - kind: Group
+      name: researchers
   resources:
-  - kind: Agent
-    name: simple-echo
+    - kind: Agent
+      name: autonomous-researcher

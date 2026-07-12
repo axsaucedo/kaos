@@ -95,6 +95,7 @@ export default withMermaid(defineConfig({
         items: [
           { text: 'Custom MCP Server', link: '/examples/custom-mcp-server' },
           { text: 'Custom Agent Image', link: '/examples/custom-agent' },
+          { text: 'Gateway Authorization', link: '/examples/authorization' },
           { text: 'Agent Memory', link: '/examples/memory' },
           { text: 'KAOS Monkey', link: '/examples/kaos-monkey' },
           { text: 'Autonomous Agent', link: '/examples/autonomous-agent' },
@@ -123,7 +124,7 @@ export default withMermaid(defineConfig({
           { text: 'Agent identity', link: '/security/walkthrough-agent-identity' },
           { text: 'User identity', link: '/security/walkthrough-user-identity' },
           { text: 'Auth', link: '/security/walkthrough-auth' },
-          { text: 'Live validation', link: '/security/walkthrough-validation' }
+          { text: 'Live validation', link: '/examples/authorization' }
         ]
       },
       {
