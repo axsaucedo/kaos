@@ -20,7 +20,8 @@ The shipped policy package is `kaos.authz`, and the Envoy plugin queries its `re
       }
     },
     "agents": {
-      "<actor-id>": { "issuer_sub": "<token-subject>", "autonomous": false }
+      "<serviceaccount-actor-id>": { "issuer_sub": "<token-subject>", "autonomous": false },
+      "<oidc-actor-id>": { "issuer_azp": "<authorized-party>", "autonomous": false }
     }
   }
 }
@@ -56,7 +57,7 @@ User grants gate entry requests. Internal movement is authorized through `kaos.g
 
 ## `kaos.agents`
 
-Maps logical agent ids to issuer-specific token subjects and an `autonomous` boolean. ServiceAccount mode uses `system:serviceaccount:<namespace>:<serviceaccount-name>` subjects, so `issuer_sub` resolves the verified token subject back to its KAOS actor id. `autonomous: true` permits that Agent to use its own verified agent token as the required subject for autonomous execution.
+Maps logical agent ids to issuer-specific token identities and an `autonomous` boolean. ServiceAccount mode uses `system:serviceaccount:<namespace>:<serviceaccount-name>` subjects, so `issuer_sub` resolves the verified token subject back to its KAOS actor id. Keycloak DCR client-credentials tokens use the registered `client_id` in the `azp` claim while assigning a separate service-account UUID to `sub`; OIDC mode therefore stores the exact registered client id as `issuer_azp`. `autonomous: true` permits that Agent to use its own verified agent token as the required subject for autonomous execution.
 
 For example:
 
@@ -64,6 +65,17 @@ For example:
 {
   "kaos://agent/demo/researcher": {
     "issuer_sub": "system:serviceaccount:demo:kaos-agent-researcher",
+    "autonomous": true
+  }
+}
+```
+
+An OIDC mapping uses the provider's exact authorized-party claim:
+
+```json
+{
+  "kaos://agent/demo/researcher": {
+    "issuer_azp": "0d146e02-0405-4948-b3cb-59efbb36c68c",
     "autonomous": true
   }
 }

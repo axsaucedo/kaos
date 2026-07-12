@@ -118,17 +118,20 @@ func TestCredentialSecretName(t *testing.T) {
 
 func TestTokenEndpoint(t *testing.T) {
 	cases := []struct {
-		name   string
-		issuer string
-		want   string
+		name     string
+		provider IdentityProvider
+		issuer   string
+		want     string
 	}{
-		{"empty issuer", "", ""},
-		{"issuer without slash", "http://aib:8000", "http://aib:8000/oauth2/token"},
-		{"issuer with trailing slash", "http://aib:8000/", "http://aib:8000/oauth2/token"},
+		{"empty issuer", IdentityProviderAIB, "", ""},
+		{"AIB issuer", IdentityProviderAIB, "http://aib:8000", "http://aib:8000/oauth2/token"},
+		{"AIB issuer with trailing slash", IdentityProviderAIB, "http://aib:8000/", "http://aib:8000/oauth2/token"},
+		{"OIDC issuer", IdentityProviderOIDC, "http://keycloak:8080/realms/kaos", "http://keycloak:8080/realms/kaos/protocol/openid-connect/token"},
+		{"OIDC issuer with trailing slash", IdentityProviderOIDC, "http://keycloak:8080/realms/kaos/", "http://keycloak:8080/realms/kaos/protocol/openid-connect/token"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := (Config{Issuer: tc.issuer}).TokenEndpoint(); got != tc.want {
+			if got := (Config{IdentityProvider: tc.provider, Issuer: tc.issuer}).TokenEndpoint(); got != tc.want {
 				t.Errorf("TokenEndpoint() = %q, want %q", got, tc.want)
 			}
 		})

@@ -189,6 +189,8 @@ func main() {
 			UserJWKSURI:        cfg.UserJWKSURI(),
 			StaticJWKS:         cfg.AgentLocalJWKS(),
 			MapServiceAccounts: cfg.ServiceAccountIdentityEnabled(),
+			MapOIDCAgents:      cfg.IdentityProviderOrDefault() == security.IdentityProviderOIDC,
+			CredentialPrefix:   cfg.CredentialSecretPrefixOrDefault(),
 			WriteGrantData:     policyDataSource == security.PolicyDataAutomated && !cfg.PolicyRegoOverride,
 			Disabled:           policyDataSource == security.PolicyDataManual && !cfg.PolicyRegoOverride,
 		})

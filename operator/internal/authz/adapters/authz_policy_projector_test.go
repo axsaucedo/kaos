@@ -181,6 +181,39 @@ func TestAuthzPolicyProjectorInjectsServiceAccountIdentityData(t *testing.T) {
 	}
 }
 
+func TestAuthzPolicyProjectorInjectsOIDCClientIdentityData(t *testing.T) {
+	scheme := newTestScheme(t)
+	agent := &kaosv1alpha1.Agent{ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "researcher"}, Spec: kaosv1alpha1.AgentSpec{MCPServers: []string{"github"}}}
+	mcp := &kaosv1alpha1.MCPServer{ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "github"}}
+	credentials := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "kaos-oidc-researcher"},
+		Data:       map[string][]byte{credentialClientIDKey: []byte("keycloak-client-uuid")},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(agent, mcp, credentials).Build()
+	p := &AuthzPolicyProjector{
+		Client: c, Name: "kaos-authz-policy", Namespace: "kaos-system", WriteGrantData: true,
+		MapOIDCAgents: true, CredentialPrefix: "kaos-oidc",
+	}
+	desired := projection.Project([]projection.Resource{resourceFromAgent(agent), {Kind: projection.MCPServer.ResourceKind, Namespace: "demo", Name: "github"}})
+	if err := p.Apply(context.Background(), desired); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	cm := &corev1.ConfigMap{}
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "kaos-system", Name: "kaos-authz-policy"}, cm); err != nil {
+		t.Fatalf("get ConfigMap: %v", err)
+	}
+	data := cm.Data["data.json"]
+	for _, expected := range []string{
+		`"kaos://agent/demo/researcher"`,
+		`"issuer_azp": "keycloak-client-uuid"`,
+		`"autonomous": false`,
+	} {
+		if !contains(data, expected) {
+			t.Fatalf("data.json missing %s: %s", expected, data)
+		}
+	}
+}
+
 func contains(s, sub string) bool {
 	return strings.Contains(s, sub)
 }

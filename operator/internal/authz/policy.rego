@@ -61,9 +61,17 @@ verify_token(token, expected_audience) := claims if {
 
 actor_claims := verify_token(actor_token, "kaos-gateway")
 
+agent_claim_matches(agent, claims) if {
+	agent.issuer_sub == claims.sub
+}
+
+agent_claim_matches(agent, claims) if {
+	agent.issuer_azp == claims.azp
+}
+
 mapped_actor_id := id if {
 	some id
-	data.kaos.agents[id].issuer_sub == actor_claims.sub
+	agent_claim_matches(data.kaos.agents[id], actor_claims)
 }
 
 actor_id := mapped_actor_id if {
@@ -95,7 +103,7 @@ user_subject := {"principal_key": principal_key, "group_keys": group_keys} if {
 autonomous_subject if {
 	claims := verify_token(subject_token, "kaos-gateway")
 	some id
-	data.kaos.agents[id].issuer_sub == claims.sub
+	agent_claim_matches(data.kaos.agents[id], claims)
 	data.kaos.agents[id].autonomous == true
 }
 

@@ -84,6 +84,18 @@ func TestBuildAgentAuthEnvVarsEnabled(t *testing.T) {
 	}
 }
 
+func TestBuildAgentAuthEnvVarsOIDCUsesKeycloakTokenEndpoint(t *testing.T) {
+	t.Setenv("SECURITY_AGENT_AUTH_IDENTITY_PROVIDER", "oidc")
+	t.Setenv("SECURITY_AGENT_AUTH_EXT_AUTHZ_URL", "kaos-pdp.kaos-system:9191")
+	t.Setenv("SECURITY_AGENT_AUTH_ISSUER", "http://keycloak.keycloak:8080/realms/kaos")
+
+	env := buildAgentAuthEnvVars(newAgent("demo", "researcher"))
+	endpoint, ok := envByName(env, "AGENT_AUTH_TOKEN_ENDPOINT")
+	if !ok || endpoint.Value != "http://keycloak.keycloak:8080/realms/kaos/protocol/openid-connect/token" {
+		t.Fatalf("AGENT_AUTH_TOKEN_ENDPOINT = %q (found=%v)", endpoint.Value, ok)
+	}
+}
+
 func TestBuildAgentAuthVolumeDisabled(t *testing.T) {
 	t.Setenv("SECURITY_AGENT_AUTH_EXT_AUTHZ_URL", "")
 	t.Setenv("SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX", "")

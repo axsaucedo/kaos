@@ -358,6 +358,9 @@ func (c Config) TokenEndpoint() string {
 	if issuer == "" {
 		return ""
 	}
+	if c.IdentityProviderOrDefault() == IdentityProviderOIDC {
+		return issuer + "/protocol/openid-connect/token"
+	}
 	return issuer + "/oauth2/token"
 }
 

@@ -56,6 +56,8 @@ signed_token(issuer, audience, subject, extra) := io.jwt.encode_sign(
 )
 
 actor_jwt := signed_token(verified_issuer, ["kaos-gateway"], actor_sub, {})
+oidc_actor_jwt := signed_token(user_issuer, ["kaos-gateway"], "keycloak-service-account-uuid", {"azp": "oidc-client-1"})
+unmapped_oidc_actor_jwt := signed_token(user_issuer, ["kaos-gateway"], "other-service-account-uuid", {"azp": "unmapped-client"})
 autonomous_subject_jwt := signed_token(verified_issuer, ["kaos-gateway"], autonomous_sub, {})
 shared_issuer_autonomous_subject_jwt := signed_token(user_issuer, ["kaos-gateway"], autonomous_sub, {})
 shared_issuer_user_subject_jwt := signed_token(user_issuer, ["kaos-users"], autonomous_sub, {})
@@ -104,6 +106,7 @@ agents := {
 	"kaos://agent/demo/researcher": {"issuer_sub": actor_sub, "autonomous": false},
 	"kaos://agent/demo/autonomous": {"issuer_sub": autonomous_sub, "autonomous": true},
 	"kaos://agent/demo/worker": {"issuer_sub": non_autonomous_sub, "autonomous": false},
+	"kaos://agent/demo/oidc": {"issuer_azp": "oidc-client-1", "autonomous": true},
 }
 
 user_grants := {
@@ -114,6 +117,37 @@ user_grants := {
 
 test_internal_actor_granted_with_autonomous_subject_allows if {
 	out := result with input as internal_input(actor_jwt, autonomous_subject_jwt, ["demo", "mcp", "github"])
+		with data.kaos.grants as grants
+		with data.kaos.jwks as configured_jwks
+		with data.kaos.agents as agents
+		with data.kaos.user as user_config
+	out.allowed == true
+}
+
+test_oidc_actor_azp_resolves_to_logical_grant if {
+	oidc_grants := {"kaos://agent/demo/oidc": ["kaos://mcpserver/demo/github"]}
+	out := result with input as internal_input(oidc_actor_jwt, user_subject_jwt, ["demo", "mcp", "github"])
+		with data.kaos.grants as oidc_grants
+		with data.kaos.jwks as configured_jwks
+		with data.kaos.agents as agents
+		with data.kaos.user as user_config
+	out.allowed == true
+	"actor kaos://agent/demo/oidc may reach kaos://mcpserver/demo/github for a verified subject" in out.reasons
+}
+
+test_unmapped_oidc_actor_denies if {
+	oidc_grants := {"kaos://agent/demo/oidc": ["kaos://mcpserver/demo/github"]}
+	out := result with input as internal_input(unmapped_oidc_actor_jwt, user_subject_jwt, ["demo", "mcp", "github"])
+		with data.kaos.grants as oidc_grants
+		with data.kaos.jwks as configured_jwks
+		with data.kaos.agents as agents
+		with data.kaos.user as user_config
+	out.allowed == false
+	"missing or invalid actor token" in out.reasons
+}
+
+test_oidc_autonomous_subject_azp_resolves_to_mapping if {
+	out := result with input as internal_input(actor_jwt, oidc_actor_jwt, ["demo", "mcp", "github"])
 		with data.kaos.grants as grants
 		with data.kaos.jwks as configured_jwks
 		with data.kaos.agents as agents

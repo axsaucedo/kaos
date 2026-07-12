@@ -38,7 +38,7 @@ The Secret name and key come from `security.agentAuth.identity.oidc.registration
 The operator publishes issuer data in the policy ConfigMap:
 
 - `data.kaos.jwks` maps the exact actor-token issuer to its JWKS. The PDP selects this entry from `iss` and verifies the signature, exact issuer, `RS256` algorithm, and `kaos-gateway` audience.
-- `data.kaos.agents` maps a logical actor id such as `kaos://agent/demo/researcher` to its issuer-specific `issuer_sub` and `autonomous` status. This resolves a verified token `sub` to the KAOS actor used by authorization and controls whether the Agent may self-subject.
+- `data.kaos.agents` maps a logical actor id such as `kaos://agent/demo/researcher` to its issuer-specific identity and `autonomous` status. ServiceAccount tokens use `issuer_sub`. Keycloak client-credentials tokens carry the DCR `client_id` in `azp` and a separate service-account UUID in `sub`, so OIDC mappings use `issuer_azp`. This resolves a verified token to the KAOS actor used by authorization and controls whether the Agent may self-subject.
 
 ServiceAccount subjects require this mapping because their Kubernetes subject is not a KAOS resource id. Issuers that use the logical actor id directly as `sub` can be resolved without a mapping when no agent map is present.
 

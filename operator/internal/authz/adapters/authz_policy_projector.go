@@ -8,6 +8,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/axsaucedo/kaos/operator/internal/authz"
@@ -30,6 +31,8 @@ type AuthzPolicyProjector struct {
 	UserJWKSURI        string
 	StaticJWKS         map[string]any
 	MapServiceAccounts bool
+	MapOIDCAgents      bool
+	CredentialPrefix   string
 	WriteGrantData     bool
 	Disabled           bool
 }
@@ -61,6 +64,24 @@ func (p *AuthzPolicyProjector) Apply(ctx context.Context, desired projection.Des
 			for _, agent := range desired.Agents {
 				agents[agent.ExternalID()] = map[string]any{
 					"issuer_sub": fmt.Sprintf("system:serviceaccount:%s:%s", agent.Namespace, security.AgentServiceAccountName(agent.Name)),
+					"autonomous": agent.Autonomous,
+				}
+			}
+		}
+		if p.MapOIDCAgents {
+			agents = map[string]map[string]any{}
+			for _, agent := range desired.Agents {
+				secret := &corev1.Secret{}
+				key := types.NamespacedName{Namespace: agent.Namespace, Name: security.CredentialSecretName(p.CredentialPrefix, agent.Name)}
+				if err := p.Client.Get(ctx, key, secret); err != nil {
+					return fmt.Errorf("reading OIDC credentials for %s: %w", agent.ExternalID(), err)
+				}
+				clientID := strings.TrimSpace(secretValue(secret, credentialClientIDKey))
+				if clientID == "" {
+					return fmt.Errorf("OIDC credentials for %s have no client_id", agent.ExternalID())
+				}
+				agents[agent.ExternalID()] = map[string]any{
+					"issuer_azp": clientID,
 					"autonomous": agent.Autonomous,
 				}
 			}
