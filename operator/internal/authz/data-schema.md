@@ -27,7 +27,7 @@ Maps an agent's logical actor id to the sorted, deduplicated resources it may re
 - Actor ids use `kaos://agent/<namespace>/<name>`.
 - Automated resource ids use `kaos://<slug>/<namespace>/<name>`, where `slug` is `agent`, `mcpserver`, or `modelapi`. Manual policy data can also address a protected MemoryStore route with the `memorystore` slug.
 
-The policy matches the target from `x-kaos-target-resource` or derives the same id from the operator-owned gateway path when external authorization runs before route header modification.
+The policy derives the target only from the operator-owned gateway path because external authorization runs before route header modification. Inbound `x-kaos-target-resource` headers are not forwarded to or trusted by the PDP.
 
 ## `kaos.jwks`
 

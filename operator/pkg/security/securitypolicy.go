@@ -102,7 +102,6 @@ func constructSecurityPolicy(params PolicyParams, cfg Config) (*unstructured.Uns
 			"headersToExtAuth": []interface{}{
 				"authorization",
 				"x-agent-authorization",
-				"x-kaos-target-resource",
 			},
 			"grpc": map[string]interface{}{
 				"backendRef": backendRef,

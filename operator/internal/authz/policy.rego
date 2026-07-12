@@ -6,7 +6,7 @@ import rego.v1
 #
 # The policy is static; only the data it reads changes as KAOS resources change.
 # It keys on the actor identity carried in the custom `x-agent-authorization`
-# header and the target resource the request declares, and it checks the actor's
+# header and the target resource derived from the gateway path, and it checks the actor's
 # grants in `data.kaos.grants` (projected by the operator from Agent CRDs).
 #
 # Verification is data-gated: when the operator injects an IdP JWKS at
@@ -25,22 +25,15 @@ actor_token := raw if {
 	count(split(raw, " ")) == 1
 }
 
-# The resource the request targets, as the KAOS logical identity
-# (kaos://<slug>/<ns>/<name>) stamped onto the request by the gateway route.
-target_resource := r if {
-	r := input.attributes.request.http.headers["x-kaos-target-resource"]
-}
-
 resource_slug("mcp") := "mcpserver"
 
 resource_slug(slug) := slug if {
 	slug != "mcp"
 }
 
-# Route request-header modifiers run after ext_authz in Envoy, so derive the
-# same logical identity from the operator-owned path when the header is absent.
+# Derive the logical identity from the operator-owned gateway path. Route
+# request-header modifiers run after ext_authz, so inbound headers are untrusted.
 target_resource := sprintf("kaos://%v/%v/%v", [slug, input.parsed_path[0], input.parsed_path[2]]) if {
-	not input.attributes.request.http.headers["x-kaos-target-resource"]
 	count(input.parsed_path) >= 3
 	slug := resource_slug(input.parsed_path[1])
 }

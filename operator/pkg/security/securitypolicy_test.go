@@ -54,7 +54,7 @@ func TestConstructSecurityPolicyShape(t *testing.T) {
 	if err != nil || !found {
 		t.Fatalf("expected headersToExtAuth, found=%v err=%v", found, err)
 	}
-	if len(headers) != 3 || headers[0] != "authorization" || headers[1] != "x-agent-authorization" || headers[2] != "x-kaos-target-resource" {
+	if len(headers) != 2 || headers[0] != "authorization" || headers[1] != "x-agent-authorization" {
 		t.Errorf("unexpected headersToExtAuth %#v", headers)
 	}
 

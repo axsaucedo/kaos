@@ -26,3 +26,21 @@ func TestResourceIdentityUsesProjectionSlugs(t *testing.T) {
 		t.Fatalf("MCP resource identity = %q", got)
 	}
 }
+
+func TestProtectedRoutePathsCarryResourceIdentity(t *testing.T) {
+	tests := []struct {
+		resourceType ResourceType
+		want         string
+	}{
+		{ResourceTypeAgent, "/agents/agent/researcher"},
+		{ResourceTypeMCP, "/agents/mcp/researcher"},
+		{ResourceTypeModelAPI, "/agents/modelapi/researcher"},
+		{ResourceTypeMemoryStore, "/agents/memorystore/researcher"},
+	}
+
+	for _, tt := range tests {
+		if got := HTTPRoutePath("agents", tt.resourceType, "researcher"); got != tt.want {
+			t.Errorf("%s route path = %q, want %q", tt.resourceType, got, tt.want)
+		}
+	}
+}
