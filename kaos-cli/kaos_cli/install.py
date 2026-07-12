@@ -39,18 +39,11 @@ AUTH_ENDUSER_PORT = 8000
 AUTH_ADMIN_PORT = 14000
 
 
-# Curated identity and gateway-policy postures selected with --auth-enabled.
-AUTH_PRESET_AIB_KEYCLOAK = "aib-keycloak"
-AUTH_PRESET_OIDC_KEYCLOAK = "oidc-keycloak"
-AUTH_PRESET_KAOS_INTERNAL = "kaos-internal"
-AUTH_PRESET_AIB_ONLY = "aib-only"
-AUTH_PRESETS = (
-    AUTH_PRESET_AIB_KEYCLOAK,
-    AUTH_PRESET_OIDC_KEYCLOAK,
-    AUTH_PRESET_KAOS_INTERNAL,
-    AUTH_PRESET_AIB_ONLY,
-)
-DEFAULT_AUTH_PRESET = AUTH_PRESET_AIB_KEYCLOAK
+# Independent agent and user identity modes selected by the install flags.
+AGENT_AUTH_MODES = ("service-account", "aib", "keycloak")
+USER_AUTH_MODES = ("keycloak", "none")
+DEFAULT_AGENT_AUTH_MODE = "service-account"
+DEFAULT_USER_AUTH_MODE = "keycloak"
 DEFAULT_POLICY_CONFIGMAP_NAME = "kaos-authz-policy"
 
 # User-auth (human identity provider, Keycloak by default) defaults
@@ -1151,11 +1144,8 @@ def _get_otel_endpoint(backend: str, namespace: str) -> str:
     return f"http://signoz-otel-collector.{namespace}:4317"
 
 
-def _expand_auth_preset(preset: str, namespace: str) -> dict:
-    """Expand an --auth-enabled preset into install_command auth kwargs.
-
-    Every preset enables the in-chart PDP and automated policy projection.
-    """
+def _expand_auth_flags(agent_mode: str, user_mode: str, namespace: str) -> dict:
+    """Expand agent and user auth modes into install_command auth kwargs."""
     base = {
         "auth_enabled": True,
         "gateway_enabled": True,
@@ -1166,22 +1156,23 @@ def _expand_auth_preset(preset: str, namespace: str) -> dict:
         "policy_configmap_name": DEFAULT_POLICY_CONFIGMAP_NAME,
         "policy_configmap_namespace": namespace,
     }
-    if preset == AUTH_PRESET_AIB_KEYCLOAK:
-        return {**base, "identity_provider": "aib", "user_auth": True}
-    if preset == AUTH_PRESET_OIDC_KEYCLOAK:
-        return {
-            **base,
-            "identity_provider": "oidc",
-            "credential_secret_prefix": DEFAULT_OIDC_CREDENTIAL_SECRET_PREFIX,
-            "oidc_registration_secret_name": DEFAULT_OIDC_REGISTRATION_SECRET_NAME,
-            "oidc_registration_secret_key": DEFAULT_OIDC_REGISTRATION_SECRET_KEY,
-            "user_auth": True,
-        }
-    if preset == AUTH_PRESET_KAOS_INTERNAL:
-        return {**base, "identity_provider": "serviceaccount", "user_auth": False}
-    if preset == AUTH_PRESET_AIB_ONLY:
-        return {**base, "identity_provider": "aib", "user_auth": False}
-    raise ValueError(f"unknown auth preset: {preset!r}")
+    identity_provider = {
+        "service-account": "serviceaccount",
+        "aib": "aib",
+        "keycloak": "oidc",
+    }[agent_mode]
+    result = {
+        **base,
+        "identity_provider": identity_provider,
+        "user_auth": user_mode == "keycloak",
+    }
+    if agent_mode == "keycloak":
+        result.update(
+            credential_secret_prefix=DEFAULT_OIDC_CREDENTIAL_SECRET_PREFIX,
+            oidc_registration_secret_name=DEFAULT_OIDC_REGISTRATION_SECRET_NAME,
+            oidc_registration_secret_key=DEFAULT_OIDC_REGISTRATION_SECRET_KEY,
+        )
+    return result
 
 
 def install_command(
@@ -1299,10 +1290,9 @@ def install_command(
         # In AIB mode the operator registers agents and provisions credentials;
         # ServiceAccount mode needs no external identity component.
 
-        # Install Keycloak as the human user identity provider and bootstrap its
-        # realm so the gateway can verify user subject tokens alongside agent
-        # actor tokens. Skipped when user-auth is disabled.
-        if user_auth:
+        # Keycloak backs the user plane and the OIDC DCR agent mode. Install it
+        # when either plane selects it.
+        if user_auth or identity_provider == "oidc":
             if not _install_keycloak(
                 keycloak_namespace,
                 keycloak_release,

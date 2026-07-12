@@ -20,7 +20,7 @@ The configured AIB issuer is the token `iss` value used by all verifiers. Gatewa
 
 ## OIDC issuer
 
-`oidc` provides agent OAuth identity through RFC 7591/7592 Dynamic Client Registration (DCR). Select it with `security.agentAuth.identity.provider=oidc`; the `oidc-keycloak` preset configures Keycloak as both the agent issuer and user identity provider.
+`oidc` provides agent OAuth identity through RFC 7591/7592 Dynamic Client Registration (DCR). Select it with `--agent-auth-enabled keycloak`; add `--user-auth-enabled keycloak` when Keycloak should also provide user identity.
 
 The operator registers one confidential OAuth client per Agent, stores the returned client id, client secret, and registration metadata in a per-agent Secret, and delivers the provider-neutral token endpoint and credential settings to the Agent pod. The runtime uses `client_credentials` to obtain short-lived actor tokens for the `kaos-gateway` audience. An Agent finalizer keeps the owned credential Secret available during deletion; the operator sends the RFC 7592 client deletion first, removes the Secret second, and only then releases the Agent for garbage collection.
 

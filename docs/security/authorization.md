@@ -110,7 +110,7 @@ Maps a logical agent id to its issuer-specific token subject and `autonomous` bo
 ## Configuration example
 
 ```bash
-kaos system install --auth-enabled kaos-internal \
+kaos system install --agent-auth-enabled service-account --user-auth-enabled none \
   --set security.agentAuth.authorization.policyDataSource=automated \
   --set security.agentAuth.projection.policyConfigMap.name=kaos-authz-policy \
   --set security.agentAuth.projection.policyConfigMap.namespace=kaos-system \
