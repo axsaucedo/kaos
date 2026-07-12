@@ -393,9 +393,9 @@ func (c Config) JWTEnabled() bool {
 	return c.AgentIssuer() != "" || strings.TrimSpace(c.UserIssuer) != ""
 }
 
-// AgentJWKSURI returns the JWKS endpoint for the agent (actor) provider, derived
-// from the agent-auth issuer. The broker publishes its signing keys at
-// "<issuer>/oauth2/jwks.json". It returns an empty string when no issuer is set.
+// AgentJWKSURI returns the JWKS endpoint for the agent (actor) provider. AIB
+// publishes at /oauth2/jwks.json; the oidc-keycloak preset uses Keycloak's
+// standard realm certs endpoint. It returns an empty string when no issuer is set.
 func (c Config) AgentJWKSURI() string {
 	if c.ServiceAccountIdentityEnabled() {
 		return ""
@@ -403,6 +403,9 @@ func (c Config) AgentJWKSURI() string {
 	issuer := strings.TrimRight(strings.TrimSpace(c.Issuer), "/")
 	if issuer == "" {
 		return ""
+	}
+	if c.IdentityProviderOrDefault() == IdentityProviderOIDC {
+		return issuer + "/protocol/openid-connect/certs"
 	}
 	return issuer + "/oauth2/jwks.json"
 }

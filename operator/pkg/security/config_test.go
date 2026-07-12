@@ -264,6 +264,14 @@ func TestAgentJWKSURI(t *testing.T) {
 	}
 }
 
+func TestAgentJWKSURIForOIDCKeycloak(t *testing.T) {
+	cfg := Config{IdentityProvider: IdentityProviderOIDC, Issuer: "http://keycloak:8080/realms/kaos"}
+	want := "http://keycloak:8080/realms/kaos/protocol/openid-connect/certs"
+	if got := cfg.AgentJWKSURI(); got != want {
+		t.Fatalf("AgentJWKSURI() = %q, want %q", got, want)
+	}
+}
+
 func TestAuthzJWKSURI(t *testing.T) {
 	cases := []struct {
 		name   string
