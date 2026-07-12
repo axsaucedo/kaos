@@ -85,7 +85,7 @@ class TestOtelConfig:
             from pydantic import ValidationError
 
             with pytest.raises(ValidationError):
-                OtelConfig()  # type: ignore[call-arg]
+                OtelConfig()  # ty: ignore[missing-argument]  # type: ignore[call-arg]
 
     def test_config_with_required_values(self):
         """Test configuration from environment variables."""
@@ -99,7 +99,7 @@ class TestOtelConfig:
         ):
             from pais.telemetry import OtelConfig
 
-            config = OtelConfig()  # type: ignore[call-arg]
+            config = OtelConfig()  # ty: ignore[missing-argument]  # type: ignore[call-arg]
             assert config.otel_service_name == "test-agent"
             assert config.otel_exporter_otlp_endpoint == "http://collector:4317"
             assert config.enabled is True
@@ -117,7 +117,7 @@ class TestOtelConfig:
         ):
             from pais.telemetry import OtelConfig
 
-            config = OtelConfig()  # type: ignore[call-arg]
+            config = OtelConfig()  # ty: ignore[missing-argument]  # type: ignore[call-arg]
             assert config.enabled is False
 
 

@@ -166,7 +166,7 @@ def init_otel(service_name: Optional[str] = None) -> bool:
             )
             return False
 
-        config = OtelConfig()  # type: ignore[call-arg]
+        config = OtelConfig()  # ty: ignore[missing-argument]  # type: ignore[call-arg]
     except Exception as e:
         logger.warning(f"OpenTelemetry config error: {e}")
         return False
