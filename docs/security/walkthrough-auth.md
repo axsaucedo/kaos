@@ -19,7 +19,21 @@ The gateway `jwt_authn` configuration contains two independent providers when bo
 - `agent` reads `x-agent-authorization`, verifies the selected actor issuer, and requires audience `kaos-gateway`.
 - `user` reads `Authorization` and verifies the configured Keycloak issuer and audience.
 
-The gateway then invokes OPA through the Envoy gRPC `ext_authz` filter. The `SecurityPolicy` sets `failOpen: false`; an invalid or missing required actor token, an explicit policy denial, or an unavailable PDP does not reach the workload.
+The generated JWT rule uses `optional: true` so agent-issuer tokens carried in `Authorization` can reach the PDP for autonomous self-subjecting. Optional gateway JWT authentication does not make identity optional: the PDP verifies every required token in policy and is authoritative for the allow or deny decision. The gateway invokes OPA through the Envoy gRPC `ext_authz` filter, and the `SecurityPolicy` sets `failOpen: false`; invalid identity, an explicit policy denial, or an unavailable PDP does not reach the workload.
+
+## Subject-required authorization model
+
+Every protected request requires a verified subject on every hop:
+
+- A user subject is a verified Keycloak token whose `sub` or `email`, and optional short-name `groups`, identify the user.
+- An autonomous Agent can self-subject with its own verified agent token only when `data.kaos.agents[id].autonomous` is `true`. A non-autonomous Agent cannot self-subject.
+
+Entry and internal movement use different grants:
+
+- At entry, `Authorization` carries the user token and no actor token is present. An enforced `AccessGrant` in `data.kaos.user_grants` must cover the path-derived target for that user or one of their groups.
+- On an internal hop, `Authorization` carries the propagated subject and `x-agent-authorization` carries the calling Agent's token. The subject must remain valid, while `data.kaos.grants` determines whether that Agent may move to the target resource.
+
+This keeps user intent attached to the complete call chain while separating permission to enter the system from permission for each Agent to move inside it.
 
 ## Keycloak groups claim requirement
 
@@ -35,6 +49,14 @@ The actor credential is:
 x-agent-authorization: Bearer <actor-jwt>
 ```
 
+The subject credential is:
+
+```http
+Authorization: Bearer <subject-jwt>
+```
+
+At user entry the subject is a Keycloak token. During autonomous execution it is the autonomous Agent's own agent token. Internal calls propagate the subject unchanged and replace the actor token with the current calling Agent's token.
+
 Protected resources use logical ids:
 
 - `kaos://agent/<namespace>/<name>`
@@ -49,15 +71,17 @@ OPA derives the target from the operator-owned route path `/<namespace>/<route-k
 OPA reads the following stable fields from `data.kaos`:
 
 - `data.kaos.grants`: logical actor id to allowed target-resource ids.
+- `data.kaos.user_grants`: `user:<sub-or-email>` or `group:<name>` to allowed entry-resource ids.
 - `data.kaos.jwks`: exact actor-token issuer to JWKS.
-- `data.kaos.agents`: logical actor id to issuer-specific token subject.
+- `data.kaos.agents`: logical actor id to issuer-specific token subject and autonomous status.
 
-The shipped policy verifies the actor token again against `data.kaos.jwks`, resolves its `sub` through `data.kaos.agents`, derives the target resource from the request path, and checks membership in `data.kaos.grants`.
+The shipped policy verifies subject and actor tokens, resolves agent subjects through `data.kaos.agents`, derives the target resource from the request path, and applies the entry or internal grant check.
 
-## Current decision model
+## Does not support
 
-A request is allowed only when the actor token is valid and the resolved actor has an explicit grant for the path-derived resource. The PDP denies requests with a missing or invalid actor token, no derivable target resource, or no actor-to-resource grant. The default decision is deny.
+- Per-user downstream authorization is not supported. User grants gate entry; internal hops require a valid propagated subject but authorize movement with the calling Agent's grants.
+- Policy and grant changes, including revocations, can take about 90 seconds to pass through reconciliation, the ConfigMap volume, OPA file watching, and gateway configuration.
+- ServiceAccount JWKS is discovered and cached at operator startup. Restart the operator after ServiceAccount signing-key rotation.
+- Token signature verification supports RS256 only.
 
-User-to-resource authorization through `AccessGrant` is forthcoming. User JWT verification and propagation exist today, but the current PDP decision is actor to resource only.
-
-Policy projection is eventually consistent. Allow changes and revocations can take about 90 seconds to pass through reconciliation, the ConfigMap volume, OPA file watching, and gateway configuration.
+The default decision is deny. Missing or invalid subjects, invalid actors on internal hops, unknown targets, and absent grants are denied.

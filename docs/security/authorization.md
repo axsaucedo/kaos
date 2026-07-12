@@ -1,6 +1,6 @@
 # Authorization
 
-KAOS enforces coarse agent actor → resource authorization at Envoy Gateway. The operator projects the desired grant graph from KAOS resources, and a gateway-external OPA deployment evaluates every protected request through Envoy's gRPC external-authorization filter.
+KAOS requires a verified user or autonomous-Agent subject on every hop. User `AccessGrant`s gate entry, Agent grants gate internal movement, and a gateway-external OPA deployment evaluates every protected request through Envoy's gRPC external-authorization filter.
 
 ## Enforcement components
 
@@ -8,7 +8,7 @@ When `security.pdp.enabled=true`:
 
 1. The chart deploys `kaos-pdp` with two replicas, a gRPC Service on port 9191, and a PodDisruptionBudget with `minAvailable: 1`.
 2. The operator attaches a `SecurityPolicy` to every internal Agent, MCPServer, ModelAPI, and MemoryStore route.
-3. The gateway verifies the actor JWT and sends the selected request headers to OPA.
+3. The gateway verifies recognized JWTs and sends the subject and actor credentials to OPA.
 4. OPA evaluates `data.kaos.authz.result` using the mounted `policy.rego` and `data.json` files.
 5. Envoy forwards allowed requests and returns 403 for policy denials. `failOpen: false` also denies requests when the PDP cannot answer.
 
@@ -43,9 +43,9 @@ Operator-owned routes stamp the logical id in `x-kaos-target-resource`. Envoy pe
 
 Clients must not use `x-kaos-target-resource` to select an arbitrary resource. The gateway route and its path are authoritative.
 
-### User token
+### Subject token
 
-The standard `Authorization: Bearer <user-jwt>` header is verified by the user JWT provider when user authentication is configured. The current authorization decision does not add a user → resource dimension; it remains an agent actor → resource check.
+The standard `Authorization: Bearer <subject-jwt>` header carries the required subject. At entry it is a Keycloak user token; autonomous Agents use their own agent token. Internal calls propagate the subject unchanged. The PDP verifies the token and applies `data.kaos.user_grants` at user entry or checks `data.kaos.agents[id].autonomous` for agent self-subjecting.
 
 ## Automated and manual policy data
 
@@ -69,6 +69,11 @@ OPA reads this document from the ConfigMap key `data.json`:
         "kaos://modelapi/demo/llama"
       ]
     },
+    "user_grants": {
+      "group:researchers": [
+        "kaos://agent/demo/researcher"
+      ]
+    },
     "jwks": {
       "https://kubernetes.default.svc.cluster.local": {
         "keys": [
@@ -78,7 +83,8 @@ OPA reads this document from the ConfigMap key `data.json`:
     },
     "agents": {
       "kaos://agent/demo/researcher": {
-        "issuer_sub": "system:serviceaccount:demo:kaos-agent-researcher"
+        "issuer_sub": "system:serviceaccount:demo:kaos-agent-researcher",
+        "autonomous": false
       }
     }
   }
@@ -93,9 +99,13 @@ Maps each logical agent id to a sorted, deduplicated list of resources it may re
 
 Maps the exact token issuer string to its JSON Web Key Set. The policy selects keys by the unverified token's `iss`, then verifies the signature with the server-side `RS256` allowlist and requires the exact issuer plus the `kaos-gateway` audience for every configured issuer.
 
+### `data.kaos.user_grants`
+
+Maps `user:<sub-or-email>` and `group:<short-name>` principals to the resources they may enter. The operator compiles enforced namespaced `AccessGrant` resources into this map.
+
 ### `data.kaos.agents`
 
-Maps a logical agent id to its issuer-specific token subject. ServiceAccount mode uses this reverse lookup because Kubernetes subjects are not KAOS resource ids. For issuers whose token `sub` already equals the logical agent id, the mapping can be omitted.
+Maps a logical agent id to its issuer-specific token subject and `autonomous` boolean. ServiceAccount mode uses the reverse lookup because Kubernetes subjects are not KAOS resource ids. The autonomous flag controls whether the Agent may use its own token as the required subject.
 
 ## Configuration example
 
