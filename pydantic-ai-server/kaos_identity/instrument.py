@@ -458,6 +458,9 @@ def instrument_httpx() -> None:
 
     def _patched_sync_send(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
         _inject_request_headers(request)
+        from .exchange import remint_request_sync
+
+        remint_request_sync(request, sync_send)
         had_actor = HEADER_ACTOR_TOKEN in request.headers
         response = sync_send(self, request, *args, **kwargs)
         if response.status_code == 401 and had_actor and _refresh_actor_header_sync(request):
@@ -467,6 +470,9 @@ def instrument_httpx() -> None:
 
     async def _patched_async_send(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
         await _inject_request_headers_async(request)
+        from .exchange import remint_request_async
+
+        await remint_request_async(request, async_send)
         had_actor = HEADER_ACTOR_TOKEN in request.headers
         response = await async_send(self, request, *args, **kwargs)
         if response.status_code == 401 and had_actor and await _refresh_actor_header_async(request):
