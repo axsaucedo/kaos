@@ -157,12 +157,6 @@ def install(
         help="Path to a local Keycloak Helm chart to install. When omitted, a "
         "self-contained dev deployment is applied instead (advanced/dev).",
     ),
-    agent_jwt_verification: str | None = typer.Option(
-        None,
-        "--agent-jwt-verification",
-        hidden=True,
-        help="Override agent JWT verification mode (advanced/dev).",
-    ),
 ) -> None:
     """Install the KAOS operator using Helm."""
     if monitoring_enabled is not None and monitoring_enabled not in MONITORING_BACKENDS:
@@ -201,7 +195,6 @@ def install(
         aib_values_path=aib_values_path,
         keycloak_chart_path=keycloak_chart_path,
         gateway_api_strict=gateway_api_strict,
-        agent_jwt_verification=agent_jwt_verification,
     )
     call_kwargs.update(auth_kwargs)
     install_command(**call_kwargs)

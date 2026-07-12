@@ -43,7 +43,6 @@ var (
 //+kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gateways,verbs=get;list;watch
 //+kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=referencegrants,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=gateway.envoyproxy.io,resources=securitypolicies,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=gateway.envoyproxy.io,resources=envoyextensionpolicies,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
 
 func init() {
@@ -144,14 +143,6 @@ func main() {
 	adminURL := os.Getenv("AIB_ADMIN_URL")
 	projectionNamespaces := splitCSV(os.Getenv("AUTHZ_PROJECTION_NAMESPACES"))
 	var projectors []controllers.PolicyProjector
-	if cfg.IdentityProviderOrDefault() == security.IdentityProviderAIB && cfg.AgentIssuer() != "" {
-		projectors = append(projectors, &adapters.IssuerConsistencyProjector{
-			Client:     mgr.GetClient(),
-			HTTPClient: &http.Client{Timeout: 5 * time.Second},
-			Issuer:     cfg.AgentIssuer(),
-			Namespaces: projectionNamespaces,
-		})
-	}
 	if adminURL != "" && cfg.IdentityProviderOrDefault() == security.IdentityProviderAIB {
 		projectors = append(projectors, &adapters.BrokerProjector{
 			Client: mgr.GetClient(),
@@ -164,11 +155,14 @@ func main() {
 			),
 			SecretPrefix: getEnvWithDefault("SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX", "kaos-aib"),
 			Prune:        getBoolWithDefault("AUTHZ_PROJECTION_PRUNE_ENABLED", true),
+			HTTPClient:   &http.Client{Timeout: 5 * time.Second},
+			Issuer:       cfg.AgentIssuer(),
+			Namespaces:   projectionNamespaces,
 		})
 	}
 	if policyName != "" && policyNamespace != "" {
 		policyDataSource := cfg.PolicyDataSourceOrDefault()
-		projectors = append(projectors, &adapters.ConfigMapProjector{
+		projectors = append(projectors, &adapters.AuthzPolicyProjector{
 			Client:             mgr.GetClient(),
 			Name:               policyName,
 			Namespace:          policyNamespace,

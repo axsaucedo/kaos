@@ -2,6 +2,8 @@
 
 The gateway-external OPA policy reads one data document from the policy ConfigMap key `data.json`. Automated projection and administrator-authored manual data use the same published shape.
 
+The shipped policy package is `kaos.authz`, and the Envoy plugin queries its `result` rule at `kaos/authz/result`.
+
 ```json
 {
   "kaos": {

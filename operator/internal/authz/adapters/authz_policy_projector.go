@@ -16,8 +16,8 @@ import (
 
 const authzManagedBy = "kaos-operator-authz"
 
-// ConfigMapProjector applies authorization policy and grant data to a ConfigMap.
-type ConfigMapProjector struct {
+// AuthzPolicyProjector applies authorization policy and grant data to a ConfigMap.
+type AuthzPolicyProjector struct {
 	Client             client.Client
 	Name               string
 	Namespace          string
@@ -32,7 +32,7 @@ type ConfigMapProjector struct {
 
 // Apply renders the authorization policy and projected grant data and applies
 // them to the configured ConfigMap. It is a no-op unless name and namespace are set.
-func (p *ConfigMapProjector) Apply(ctx context.Context, desired projection.DesiredState) error {
+func (p *AuthzPolicyProjector) Apply(ctx context.Context, desired projection.DesiredState) error {
 	if p.Disabled || p.Name == "" || p.Namespace == "" {
 		return nil
 	}

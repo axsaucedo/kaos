@@ -3,9 +3,12 @@ package adapters
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -15,6 +18,7 @@ import (
 
 	kaosv1alpha1 "github.com/axsaucedo/kaos/operator/api/v1alpha1"
 	"github.com/axsaucedo/kaos/operator/internal/aib"
+	"github.com/axsaucedo/kaos/operator/internal/authz"
 	"github.com/axsaucedo/kaos/operator/internal/projection"
 	"github.com/axsaucedo/kaos/operator/pkg/security"
 )
@@ -42,11 +46,17 @@ type BrokerProjector struct {
 	AIB          AIBAdmin
 	SecretPrefix string
 	Prune        bool
+	HTTPClient   *http.Client
+	Issuer       string
+	Namespaces   []string
 }
 
 // Apply registers agents and delivers their credentials through Secrets.
 func (p *BrokerProjector) Apply(ctx context.Context, desired projection.DesiredState) error {
 	logger := log.FromContext(ctx)
+	if err := p.updateIssuerConditions(ctx); err != nil {
+		logger.Error(err, "unable to update AIB issuer consistency conditions")
+	}
 	var minted, failed int
 	for _, agent := range desired.Agents {
 		did, agentErr := p.reconcileAgent(ctx, agent)
@@ -72,6 +82,60 @@ func (p *BrokerProjector) Apply(ctx context.Context, desired projection.DesiredS
 
 	if failed > 0 {
 		return fmt.Errorf("%d agent(s) failed to reconcile", failed)
+	}
+	return nil
+}
+
+const identityIssuerDegradedCondition = "IdentityIssuerDegraded"
+
+func (p *BrokerProjector) updateIssuerConditions(ctx context.Context) error {
+	configured := strings.TrimSpace(p.Issuer)
+	if configured == "" {
+		return nil
+	}
+	discovered, checkErr := authz.DiscoverIssuer(ctx, p.HTTPClient, configured)
+	condition := metav1.Condition{
+		Type:    identityIssuerDegradedCondition,
+		Status:  metav1.ConditionFalse,
+		Reason:  "IssuerConsistent",
+		Message: fmt.Sprintf("Configured issuer %q matches AIB discovery", configured),
+	}
+	if checkErr != nil {
+		condition.Status = metav1.ConditionTrue
+		condition.Reason = "IssuerDiscoveryFailed"
+		condition.Message = checkErr.Error()
+		log.FromContext(ctx).Error(checkErr, "unable to verify AIB issuer consistency", "configuredIssuer", configured)
+	} else if discovered != configured {
+		condition.Status = metav1.ConditionTrue
+		condition.Reason = "IssuerMismatch"
+		condition.Message = fmt.Sprintf("Configured issuer %q does not match AIB discovery issuer %q", configured, discovered)
+		log.FromContext(ctx).Error(fmt.Errorf("%s", condition.Message), "AIB issuer mismatch", "configuredIssuer", configured, "discoveredIssuer", discovered)
+	}
+
+	namespaces := p.Namespaces
+	if len(namespaces) == 0 {
+		namespaces = []string{""}
+	}
+	for _, namespace := range namespaces {
+		agents := &kaosv1alpha1.AgentList{}
+		var options []client.ListOption
+		if namespace != "" {
+			options = append(options, client.InNamespace(namespace))
+		}
+		if err := p.Client.List(ctx, agents, options...); err != nil {
+			return fmt.Errorf("listing Agents for issuer condition: %w", err)
+		}
+		for i := range agents.Items {
+			agent := &agents.Items[i]
+			original := agent.DeepCopy()
+			condition.ObservedGeneration = agent.Generation
+			if !meta.SetStatusCondition(&agent.Status.Conditions, condition) {
+				continue
+			}
+			if err := p.Client.Status().Patch(ctx, agent, client.MergeFrom(original)); err != nil {
+				return fmt.Errorf("updating Agent %s/%s issuer condition: %w", agent.Namespace, agent.Name, err)
+			}
+		}
 	}
 	return nil
 }

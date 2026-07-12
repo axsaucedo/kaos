@@ -93,19 +93,14 @@ security:
   agentAuth:
     # identity selects exactly one agent token issuer.
     identity:
-      # provider is serviceaccount, oidc, or aib. AIB preserves the existing
-      # client-credential Secret behavior.
-      provider: aib
+      # provider is serviceaccount, oidc, or aib.
+      provider: serviceaccount
       serviceAccount:
         audience: kaos-gateway
         expirationSeconds: 3600
         tokenPath: /var/run/secrets/kaos-agent/token
     # authorization groups the coarse authorization knobs.
     authorization:
-      # agentJwtVerification selects how the agent (actor) JWT is trusted:
-      # "skip" (header-trust, non-production) or "verified" (signature-checked).
-      # Empty derives it from the issuer.
-      agentJwtVerification: ""
       # policyDataSource selects who authors the authorization policy data:
       # "automated" (operator projects data, default) or "manual" (admin authors
       # data).

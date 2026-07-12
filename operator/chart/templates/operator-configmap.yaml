@@ -32,7 +32,7 @@ data:
   {{- end }}
   {{- with .Values.security }}
   {{- with .agentAuth }}
-  {{- $identityProvider := .identity.provider | default "aib" }}
+  {{- $identityProvider := .identity.provider | default "serviceaccount" }}
   {{- if not (has $identityProvider (list "serviceaccount" "oidc" "aib")) }}
   {{- fail "security.agentAuth.identity.provider must be one of: serviceaccount, oidc, aib" }}
   {{- end }}
@@ -43,9 +43,6 @@ data:
   SECURITY_AGENT_AUTH_SERVICE_ACCOUNT_TOKEN_PATH: {{ .identity.serviceAccount.tokenPath | default "/var/run/secrets/kaos-agent/token" | quote }}
   {{- end }}
   {{- with .authorization }}
-  {{- if .agentJwtVerification }}
-  SECURITY_AUTHORIZATION_AGENT_JWT_VERIFICATION: {{ .agentJwtVerification | quote }}
-  {{- end }}
   {{- if .policyDataSource }}
   SECURITY_AUTHORIZATION_POLICY_DATA_SOURCE: {{ .policyDataSource | quote }}
   {{- end }}

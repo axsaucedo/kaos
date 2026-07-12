@@ -16,7 +16,7 @@ flowchart LR
 
 The operator creates a `SecurityPolicy` for each internal route. Envoy verifies the actor JWT, then calls `kaos-pdp.<release-namespace>.svc:9191` over the Envoy external-authorization gRPC protocol. The policy is fail-closed: `failOpen` is explicitly false, so an unavailable PDP never permits a request.
 
-The PDP runs stock `openpolicyagent/opa:1.18.1-envoy-static` with the Envoy plugin listening on port 9191. It watches `/policy/policy.rego` and `/policy/data.json`, mounted from the policy ConfigMap in the release namespace. The decision path is `aib/extproc/authz/result`, matching the package and `result` rule in the shipped policy.
+The PDP runs stock `openpolicyagent/opa:1.18.1-envoy-static` with the Envoy plugin listening on port 9191. It watches `/policy/policy.rego` and `/policy/data.json`, mounted from the policy ConfigMap in the release namespace. The decision path is `kaos/authz/result`, matching the package and `result` rule in the shipped policy.
 
 ## Identity issuers
 

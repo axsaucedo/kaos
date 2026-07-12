@@ -184,37 +184,14 @@ def _list_admin_collection(local_port: int, collection: str) -> list:
     return payload
 
 
-def _wait_for_permission_set(local_port: int, name: str, timeout: int = 180) -> dict:
-    """Poll the AIB admin API until the named permission set is projected."""
-    deadline = time.time() + timeout
-    last = None
-    while time.time() < deadline:
-        try:
-            for ps in _list_admin_collection(local_port, "permission-sets"):
-                if ps.get("name") == name:
-                    return ps
-        except Exception as exc:  # broker not reachable yet
-            last = exc
-        time.sleep(3)
-    raise TimeoutError(
-        f"permission set {name!r} not projected after {timeout}s (last error: {last})"
-    )
-
-
-def test_operator_projects_agent_delegation_grant(aib_namespace: str):
-    """A declared agentNetwork.access peer becomes an AIB delegation grant.
-
-    The delegator's only path to a credential Secret for the peer edge is the
-    agent-to-agent grant projection: the operator fails closed and mints no Secret
-    unless every projected permission set exists, so a provisioned delegator plus
-    the peer permission set in the broker proves the access edge is authorized.
-    """
+def test_operator_projects_agent_identities_only(aib_namespace: str):
+    """Agents and credentials are projected without broker authorization data."""
     namespace = aib_namespace
     modelapi_name = "aib-deleg-proxy"
     peer_name = "aib-deleg-peer"
     delegator_name = "aib-deleg-supervisor"
-    peer_ps_name = f"kaos:agent:{namespace}:{peer_name}:call"
     delegator_secret = f"{CREDENTIAL_SECRET_PREFIX}-{delegator_name}"
+    peer_secret = f"{CREDENTIAL_SECRET_PREFIX}-{peer_name}"
 
     modelapi_spec = create_modelapi_resource(namespace, modelapi_name)
     create_custom_resource(modelapi_spec, namespace)
@@ -239,31 +216,12 @@ def test_operator_projects_agent_delegation_grant(aib_namespace: str):
     )
     create_custom_resource(delegator_spec, namespace)
 
-    # The operator fails closed, so a delegator Secret implies the peer grant exists.
-    secret = _wait_for_secret(namespace, delegator_secret)
-    assert secret.get("data", {}).get("client_id"), "delegator missing credentials"
+    for secret_name in (peer_secret, delegator_secret):
+        secret = _wait_for_secret(namespace, secret_name)
+        assert secret.get("data", {}).get("client_id"), f"{secret_name} missing credentials"
 
-    # Confirm the agent-to-agent permission set was projected into the broker.
-    pf = subprocess.Popen(
-        [
-            "kubectl",
-            "port-forward",
-            f"svc/{AIB_BROKER_SERVICE}",
-            f"{AIB_ADMIN_PORT}:{AIB_ADMIN_PORT}",
-            "-n",
-            AIB_NAMESPACE,
-        ],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    try:
-        ps = _wait_for_permission_set(AIB_ADMIN_PORT, peer_ps_name)
-    finally:
-        pf.terminate()
-
-    assert ps["name"] == peer_ps_name
-
-    # The delegator agent must be bound to the peer grant in the broker.
+    # Identity-only projection registers both agents and creates no broker
+    # permission sets or services.
     pf = subprocess.Popen(
         [
             "kubectl",
@@ -278,11 +236,13 @@ def test_operator_projects_agent_delegation_grant(aib_namespace: str):
     )
     try:
         agents = _list_admin_collection(AIB_ADMIN_PORT, "agents")
+        permission_sets = _list_admin_collection(AIB_ADMIN_PORT, "permission-sets")
+        services = _list_admin_collection(AIB_ADMIN_PORT, "services")
     finally:
         pf.terminate()
 
-    delegator_external_id = f"kaos://agent/{namespace}/{delegator_name}"
-    delegator = next(
-        (a for a in agents if a.get("display_name") == delegator_external_id), None
-    )
-    assert delegator is not None, f"delegator {delegator_external_id} not in broker"
+    external_ids = {a.get("display_name") for a in agents}
+    assert f"kaos://agent/{namespace}/{peer_name}" in external_ids
+    assert f"kaos://agent/{namespace}/{delegator_name}" in external_ids
+    assert permission_sets == []
+    assert services == []

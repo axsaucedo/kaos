@@ -904,7 +904,6 @@ class TestSystemInstallFlags:
         # The fine-grained auth knobs are collapsed into the preset and no longer
         # exposed on the command surface.
         assert "--authz-provider" not in output
-        assert "--agent-jwt-verification" not in output
         # Advanced dev chart paths remain available but hidden from help.
         assert "--aib-chart-path" not in output
 
@@ -1145,15 +1144,11 @@ class TestAuthWiring:
             "http://aib.aib-system:8000",
             "kaos-aib",
             policy_data_source="automated",
-            agent_jwt_verification="verified",
             policy_configmap_name="kaos-authz-policy",
             policy_configmap_namespace="aib-system",
         )
         joined = " ".join(args)
         assert "security.agentAuth.authorization.policyDataSource=automated" in joined
-        assert (
-            "security.agentAuth.authorization.agentJwtVerification=verified" in joined
-        )
         assert (
             "security.agentAuth.projection.policyConfigMap.name=kaos-authz-policy"
             in joined
@@ -1449,7 +1444,6 @@ class TestAuthWiring:
         joined = " ".join(captured.get("args", []))
         assert "security.userAuth" not in joined
         assert "security.agentAuth.extAuthzUrl=" not in joined
-        assert "security.agentAuth.authorization.agentJwtVerification" not in joined
         # The cluster-identity preset bakes in the policy ConfigMap target.
         assert (
             "security.agentAuth.projection.policyConfigMap.name=kaos-authz-policy"
@@ -1681,7 +1675,6 @@ class TestAuthWiring:
         args = captured["operator"]
         rendered = {args[i + 1] for i, arg in enumerate(args) if arg == "--set"}
         assert rendered == expected
-        assert not any("agentJwtVerification" in value for value in rendered)
 
     def test_auth_enabled_without_value_defaults_to_aib_keycloak(self):
         """--auth-enabled with no value selects the keycloak-aib preset."""

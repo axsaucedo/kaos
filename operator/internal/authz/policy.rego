@@ -1,4 +1,4 @@
-package aib.extproc.authz
+package kaos.authz
 
 import rego.v1
 

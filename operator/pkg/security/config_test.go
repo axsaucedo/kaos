@@ -249,19 +249,16 @@ func TestAgentJWKSURI(t *testing.T) {
 
 func TestAuthzJWKSURI(t *testing.T) {
 	cases := []struct {
-		name             string
-		issuer           string
-		verificationMode AgentJWTVerificationMode
-		want             string
+		name   string
+		issuer string
+		want   string
 	}{
-		{"skip default without issuer", "", "", ""},
-		{"verified default with issuer", "http://aib:8000", "", "http://aib:8000/oauth2/jwks.json"},
-		{"forced skip suppresses jwks", "http://aib:8000", VerificationSkip, ""},
-		{"forced verified without issuer", "", VerificationVerified, ""},
+		{"without issuer", "", ""},
+		{"with issuer", "http://aib:8000", "http://aib:8000/oauth2/jwks.json"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			c := Config{Issuer: tc.issuer, AgentJWTVerificationMode: tc.verificationMode}
+			c := Config{Issuer: tc.issuer}
 			if got := c.AuthzJWKSURI(); got != tc.want {
 				t.Errorf("AuthzJWKSURI() = %q, want %q", got, tc.want)
 			}
@@ -524,29 +521,6 @@ func TestExtAuthzEnabled(t *testing.T) {
 	}
 }
 
-func TestAgentJWTVerificationModeOrDefault(t *testing.T) {
-	cases := []struct {
-		name   string
-		mode   AgentJWTVerificationMode
-		issuer string
-		want   AgentJWTVerificationMode
-	}{
-		{"derive skip without issuer", "", "", VerificationSkip},
-		{"derive verified with issuer", "", "http://aib:8000", VerificationVerified},
-		{"explicit skip overrides issuer", "skip", "http://aib:8000", VerificationSkip},
-		{"explicit verified without issuer", "verified", "", VerificationVerified},
-		{"bogus falls back to derived", "bogus", "http://aib:8000", VerificationVerified},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			cfg := Config{AgentJWTVerificationMode: tc.mode, Issuer: tc.issuer}
-			if got := cfg.AgentJWTVerificationModeOrDefault(); got != tc.want {
-				t.Errorf("AgentJWTVerificationModeOrDefault() = %q, want %q", got, tc.want)
-			}
-		})
-	}
-}
-
 func TestPolicyDataSourceOrDefault(t *testing.T) {
 	cases := []struct {
 		in   PolicyDataSource
@@ -566,15 +540,11 @@ func TestPolicyDataSourceOrDefault(t *testing.T) {
 }
 
 func TestGetConfigReadsAuthorizationModes(t *testing.T) {
-	t.Setenv(envAgentJWTVerification, "Verified")
 	t.Setenv(envPolicyDataSource, "External")
 	t.Setenv(envPolicyRegoOverride, "true")
 
 	cfg := GetConfig()
 
-	if got := cfg.AgentJWTVerificationModeOrDefault(); got != VerificationVerified {
-		t.Errorf("AgentJWTVerificationMode = %q, want verified", got)
-	}
 	if got := cfg.PolicyDataSourceOrDefault(); got != PolicyDataAutomated {
 		t.Errorf("PolicyDataSource = %q, want automated", got)
 	}

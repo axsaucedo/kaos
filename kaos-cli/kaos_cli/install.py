@@ -647,7 +647,6 @@ def _build_auth_operator_args(
     tls_issuer_name: str = "",
     tls_issuer_kind: str = "ClusterIssuer",
     tls_secret_name: str = "",
-    agent_jwt_verification: str = "",
     policy_data_source: str = "",
     policy_rego_override: bool = False,
     policy_configmap_name: str = "",
@@ -689,13 +688,6 @@ def _build_auth_operator_args(
         )
     if identity_provider == "aib" and admin_url:
         args.extend(["--set", f"security.agentAuth.adminUrl={admin_url}"])
-    if agent_jwt_verification:
-        args.extend(
-            [
-                "--set",
-                f"security.agentAuth.authorization.agentJwtVerification={agent_jwt_verification}",
-            ]
-        )
     if policy_data_source:
         args.extend(
             [
@@ -1147,7 +1139,6 @@ def install_command(
     tls_issuer_name: str | None = None,
     tls_issuer_kind: str = "ClusterIssuer",
     tls_secret_name: str | None = None,
-    agent_jwt_verification: str | None = None,
     policy_data_source: str | None = None,
     policy_rego_override: bool = False,
     admin_url: str | None = None,
@@ -1364,7 +1355,6 @@ def install_command(
                 tls_issuer_name=tls_issuer_name or "",
                 tls_issuer_kind=tls_issuer_kind,
                 tls_secret_name=tls_secret_name or "",
-                agent_jwt_verification=agent_jwt_verification or "",
                 policy_data_source=policy_data_source or "",
                 policy_rego_override=policy_rego_override,
                 policy_configmap_name=policy_configmap_name or "",

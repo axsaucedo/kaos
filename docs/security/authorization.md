@@ -9,7 +9,7 @@ When `security.pdp.enabled=true`:
 1. The chart deploys `kaos-pdp` with two replicas, a gRPC Service on port 9191, and a PodDisruptionBudget with `minAvailable: 1`.
 2. The operator attaches a `SecurityPolicy` to every internal Agent, MCPServer, ModelAPI, and MemoryStore route.
 3. The gateway verifies the actor JWT and sends the selected request headers to OPA.
-4. OPA evaluates `data.aib.extproc.authz.result` using the mounted `policy.rego` and `data.json` files.
+4. OPA evaluates `data.kaos.authz.result` using the mounted `policy.rego` and `data.json` files.
 5. Envoy forwards allowed requests and returns 403 for policy denials. `failOpen: false` also denies requests when the PDP cannot answer.
 
 The policy ConfigMap must be in the PDP's namespace because Kubernetes cannot mount a ConfigMap across namespaces. Helm rejects an incompatible configuration during rendering.

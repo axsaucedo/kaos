@@ -37,7 +37,7 @@ out="$(render)"
 refute "authorization provider selector removed" "$out" 'SECURITY_AUTHORIZATION_PROVIDER'
 refute "PDP disabled by default" "$out" 'name: kaos-pdp'
 refute "disabled PDP does not enable operator enforcement" "$out" 'SECURITY_PDP_ENABLED'
-expect "AIB identity remains default" "$out" 'SECURITY_AGENT_AUTH_IDENTITY_PROVIDER:\s*"aib"'
+expect "ServiceAccount identity is default" "$out" 'SECURITY_AGENT_AUTH_IDENTITY_PROVIDER:\s*"serviceaccount"'
 
 out="$(render \
 	--set security.agentAuth.identity.provider=aib \
@@ -93,7 +93,7 @@ expect "PDP deployment rendered" "$out" 'kind: Deployment'
 expect "PDP service rendered" "$out" 'kind: Service'
 expect "PDP service name" "$out" 'name: kaos-pdp'
 expect "PDP gRPC port" "$out" 'port: 9191'
-expect "PDP decision path" "$out" 'plugins.envoy_ext_authz_grpc.path=aib/extproc/authz/result'
+expect "PDP decision path" "$out" 'plugins.envoy_ext_authz_grpc.path=kaos/authz/result'
 expect "PDP watches mounted policy" "$out" -- '--watch'
 expect "PDP loads Rego file without ConfigMap symlink recursion" "$out" '/policy/policy.rego'
 expect "PDP loads data file without ConfigMap symlink recursion" "$out" '/policy/data.json'
@@ -152,13 +152,9 @@ expect "manual data source" "$out" 'SECURITY_AUTHORIZATION_POLICY_DATA_SOURCE:\s
 
 # Broker identity provisioning is independent of policy compilation.
 out="$(render \
+	--set security.agentAuth.identity.provider=aib \
 	--set security.agentAuth.adminUrl=http://aib:8000/api)"
 expect "broker admin url" "$out" 'AIB_ADMIN_URL:\s*"http://aib:8000/api"'
-
-# Verified agent JWT verification mode.
-out="$(render \
-	--set security.agentAuth.authorization.agentJwtVerification=verified)"
-expect "verified jwt mode" "$out" 'SECURITY_AUTHORIZATION_AGENT_JWT_VERIFICATION:\s*"verified"'
 
 # ext_authz enforcement backend.
 out="$(render \
@@ -172,7 +168,7 @@ refute "ext_proc backend removed" "$out" 'SECURITY_AGENT_AUTH_EXT_PROC_URL'
 default_out="$(render)"
 expect "config checksum annotation present" "$default_out" 'checksum/config:\s*[0-9a-f]{64}'
 default_sum="$(grep -oE 'checksum/config:\s*[0-9a-f]{64}' <<<"$default_out" | grep -oE '[0-9a-f]{64}')"
-changed_out="$(render --set security.agentAuth.adminUrl=http://aib:8000/api)"
+changed_out="$(render --set security.agentAuth.identity.provider=aib --set security.agentAuth.adminUrl=http://aib:8000/api)"
 changed_sum="$(grep -oE 'checksum/config:\s*[0-9a-f]{64}' <<<"$changed_out" | grep -oE '[0-9a-f]{64}')"
 if [[ "$default_sum" != "$changed_sum" ]]; then
 	echo "ok   - config checksum changes when the ConfigMap changes"

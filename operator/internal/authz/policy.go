@@ -19,7 +19,7 @@ const (
 	// DataKey is the ConfigMap key holding the projected grant data document.
 	DataKey = "data.json"
 	// PolicyPackage is the rego package the enforcement engine queries.
-	PolicyPackage = "aib.extproc.authz"
+	PolicyPackage = "kaos.authz"
 	// DecisionPath is the rule the enforcement engine reads for the decision.
 	DecisionPath = "result"
 )

@@ -115,12 +115,6 @@ type Config struct {
 	// NetworkPolicy still requires a CNI that enforces it (e.g. Calico).
 	StrictGatewayAPI bool
 
-	// AgentJWTVerificationMode selects how the agent (actor) JWT is trusted
-	// (security.authorization.agentJwtVerification). Empty derives the mode from
-	// the agent issuer: verified when an issuer is configured, skip (header-trust)
-	// otherwise.
-	AgentJWTVerificationMode AgentJWTVerificationMode
-
 	// PolicyDataSource selects who authors the authorization policy data
 	// (security.authorization.policyDataSource). Defaults to operator projection.
 	PolicyDataSource PolicyDataSource
@@ -131,10 +125,6 @@ type Config struct {
 	PolicyRegoOverride bool
 }
 
-// AgentJWTVerificationMode selects how the agent (actor) JWT is trusted by the
-// policy.
-type AgentJWTVerificationMode string
-
 // IdentityProvider selects the active agent identity issuer.
 type IdentityProvider string
 
@@ -142,15 +132,6 @@ const (
 	IdentityProviderServiceAccount IdentityProvider = "serviceaccount"
 	IdentityProviderOIDC           IdentityProvider = "oidc"
 	IdentityProviderAIB            IdentityProvider = "aib"
-)
-
-const (
-	// VerificationSkip trusts the actor header without signature verification;
-	// used when no issuer is configured. Not for production.
-	VerificationSkip AgentJWTVerificationMode = "skip"
-	// VerificationVerified requires the actor JWT signature to be verified
-	// against the injected JWKS.
-	VerificationVerified AgentJWTVerificationMode = "verified"
 )
 
 // PolicyDataSource selects who authors the authorization policy data the operator
@@ -193,7 +174,6 @@ const (
 	envGatewayHost              = "SECURITY_GATEWAY_HOST"
 	envGatewayRouting           = "SECURITY_GATEWAY_ROUTING_ENABLED"
 	envStrictGatewayAPI         = "SECURITY_STRICT_GATEWAY_API_ENABLED"
-	envAgentJWTVerification     = "SECURITY_AUTHORIZATION_AGENT_JWT_VERIFICATION"
 	envPolicyDataSource         = "SECURITY_AUTHORIZATION_POLICY_DATA_SOURCE"
 	envPolicyRegoOverride       = "SECURITY_AUTHORIZATION_POLICY_REGO_OVERRIDE"
 )
@@ -245,7 +225,6 @@ func GetConfig() Config {
 		GatewayHost:                          os.Getenv(envGatewayHost),
 		GatewayRouting:                       parseBoolEnv(envGatewayRouting),
 		StrictGatewayAPI:                     parseBoolEnv(envStrictGatewayAPI),
-		AgentJWTVerificationMode:             AgentJWTVerificationMode(readEnumEnv(envAgentJWTVerification)),
 		PolicyDataSource:                     PolicyDataSource(readEnumEnv(envPolicyDataSource)),
 		PolicyRegoOverride:                   parseBoolEnv(envPolicyRegoOverride),
 	}
@@ -532,27 +511,9 @@ func (c Config) ExtAuthzEnabled() bool {
 }
 
 // AuthzJWKSURI returns the agent (actor) JWKS endpoint the operator injects into
-// the authorization policy data, but only in verified mode. In skip mode it
-// returns an empty string, so no JWKS is injected and the policy denies actor
-// tokens.
+// the authorization policy data for signature verification.
 func (c Config) AuthzJWKSURI() string {
-	if c.AgentJWTVerificationModeOrDefault() != VerificationVerified {
-		return ""
-	}
 	return c.AgentJWKSURI()
-}
-
-// AgentJWTVerificationModeOrDefault returns the configured agent JWT
-// verification mode, deriving the default from the issuer: verified when an
-// issuer is configured, skip otherwise.
-func (c Config) AgentJWTVerificationModeOrDefault() AgentJWTVerificationMode {
-	def := VerificationSkip
-	if c.AgentIssuer() != "" {
-		def = VerificationVerified
-	}
-	return normalizeEnum(c.AgentJWTVerificationMode,
-		[]AgentJWTVerificationMode{VerificationSkip, VerificationVerified},
-		def)
 }
 
 // PolicyDataSourceOrDefault returns the configured policy-data source, defaulting

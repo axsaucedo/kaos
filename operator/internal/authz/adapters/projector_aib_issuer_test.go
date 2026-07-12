@@ -16,7 +16,7 @@ import (
 	"github.com/axsaucedo/kaos/operator/internal/projection"
 )
 
-func TestIssuerConsistencyProjectorConditions(t *testing.T) {
+func TestBrokerProjectorIssuerConsistencyConditions(t *testing.T) {
 	for _, test := range []struct {
 		name       string
 		discovered func(string) string
@@ -40,7 +40,7 @@ func TestIssuerConsistencyProjectorConditions(t *testing.T) {
 			scheme := newTestScheme(t)
 			agent := &kaosv1alpha1.Agent{ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "researcher", Generation: 3}}
 			client := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(agent).WithObjects(agent).Build()
-			projector := &IssuerConsistencyProjector{Client: client, HTTPClient: server.Client(), Issuer: server.URL}
+			projector := &BrokerProjector{Client: client, Scheme: scheme, AIB: newFakeAIB(), HTTPClient: server.Client(), Issuer: server.URL}
 			if err := projector.Apply(context.Background(), projection.DesiredState{}); err != nil {
 				t.Fatalf("Apply: %v", err)
 			}
@@ -54,5 +54,34 @@ func TestIssuerConsistencyProjectorConditions(t *testing.T) {
 				t.Fatalf("condition = %#v", condition)
 			}
 		})
+	}
+}
+
+func TestBrokerProjectorDiscoveryFailureDoesNotBlockCredentials(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "unavailable", http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	scheme := newTestScheme(t)
+	agent := &kaosv1alpha1.Agent{ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "researcher", Generation: 3}}
+	client := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(agent).WithObjects(agent).Build()
+	admin := newFakeAIB()
+	projector := &BrokerProjector{Client: client, Scheme: scheme, AIB: admin, SecretPrefix: "kaos-aib", HTTPClient: server.Client(), Issuer: server.URL}
+	desired := projection.DesiredState{Agents: []projection.DesiredAgent{{Namespace: agent.Namespace, Name: agent.Name}}}
+
+	if err := projector.Apply(context.Background(), desired); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if admin.minted != 1 {
+		t.Fatalf("minted = %d, want 1", admin.minted)
+	}
+	updated := &kaosv1alpha1.Agent{}
+	if err := client.Get(context.Background(), types.NamespacedName{Namespace: "demo", Name: "researcher"}, updated); err != nil {
+		t.Fatalf("get Agent: %v", err)
+	}
+	condition := meta.FindStatusCondition(updated.Status.Conditions, identityIssuerDegradedCondition)
+	if condition == nil || condition.Status != metav1.ConditionTrue || condition.Reason != "IssuerDiscoveryFailed" {
+		t.Fatalf("condition = %#v", condition)
 	}
 }
