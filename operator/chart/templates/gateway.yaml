@@ -8,6 +8,13 @@ metadata:
     {{- include "chart.labels" . | nindent 4 }}
 spec:
   gatewayClassName: {{ required "gatewayAPI.gatewayClassName is required when createGateway is true" .Values.gatewayAPI.gatewayClassName }}
+  {{- if .Values.security.tokenExchange.enabled }}
+  infrastructure:
+    parametersRef:
+      group: gateway.envoyproxy.io
+      kind: EnvoyProxy
+      name: {{ .Values.gatewayAPI.gatewayName | default "kaos-gateway" }}-token-exchange
+  {{- end }}
   listeners:
   - name: http
     port: {{ .Values.gatewayAPI.listenerPort | default 80 }}
@@ -48,5 +55,21 @@ spec:
   tls:
     minVersion: {{ .minVersion | quote }}
 {{- end }}
+{{- end }}
+{{- if .Values.security.tokenExchange.enabled }}
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: {{ .Values.gatewayAPI.gatewayName | default "kaos-gateway" }}-token-exchange
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+spec:
+  filterOrder:
+    - name: envoy.filters.http.ext_authz
+      after: envoy.filters.http.jwt_authn
+    - name: envoy.filters.http.ext_proc
+      after: envoy.filters.http.ext_authz
 {{- end }}
 {{- end }}

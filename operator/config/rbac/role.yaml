@@ -54,6 +54,7 @@ rules:
 - apiGroups:
   - gateway.envoyproxy.io
   resources:
+  - envoyextensionpolicies
   - securitypolicies
   verbs:
   - create

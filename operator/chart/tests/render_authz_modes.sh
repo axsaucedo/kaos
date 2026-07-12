@@ -183,17 +183,38 @@ refute "gateway extension selector removed" "$out" 'SECURITY_AUTHORIZATION_GATEW
 refute "ext_proc backend removed" "$out" 'SECURITY_AGENT_AUTH_EXT_PROC_URL'
 
 out="$(render \
+	--set gatewayAPI.enabled=true \
+	--set gatewayAPI.createGateway=true \
+	--set gatewayAPI.gatewayClassName=envoy-gateway \
 	--set security.tokenExchange.enabled=true \
 	--set security.tokenExchange.aib.adminUrl=http://aib:14000/api \
+	--set security.tokenExchange.extProc.serviceName=aib-agentic-identity-broker-extproc \
+	--set security.tokenExchange.extProc.namespace=aib-system \
+	--set security.pdp.enabled=true \
 	--set security.agentAuth.identity.provider=oidc \
+	--set security.agentAuth.issuer=https://keycloak.example/realms/kaos \
+	--set security.agentAuth.projection.policyConfigMap.name=kaos-authz-policy \
+	--set security.agentAuth.projection.policyConfigMap.namespace=default \
 	--set security.userAuth.issuer=https://keycloak.example/realms/kaos)"
 expect "token exchange feature gate" "$out" 'TOKEN_EXCHANGE_ENABLED:\s*"true"'
 expect "exchange AIB admin URL" "$out" 'TOKEN_EXCHANGE_AIB_ADMIN_URL:\s*"http://aib:14000/api"'
+expect "ext_proc backend name" "$out" 'TOKEN_EXCHANGE_EXTPROC_SERVICE_NAME:\s*"aib-agentic-identity-broker-extproc"'
+expect "token exchange EnvoyProxy rendered" "$out" 'kind: EnvoyProxy'
+expect "ext_authz ordered after jwt_authn" "$out" 'after: envoy.filters.http.jwt_authn'
+expect "ext_proc ordered after ext_authz" "$out" 'after: envoy.filters.http.ext_authz'
 
 if incompatible_exchange="$(helm template t "$CHART_DIR" \
+	--set gatewayAPI.enabled=true \
+	--set gatewayAPI.createGateway=true \
+	--set gatewayAPI.gatewayClassName=envoy-gateway \
 	--set security.tokenExchange.enabled=true \
 	--set security.tokenExchange.aib.adminUrl=http://aib:14000/api \
+	--set security.tokenExchange.extProc.serviceName=extproc \
+	--set security.tokenExchange.extProc.namespace=aib-system \
+	--set security.pdp.enabled=true \
 	--set security.agentAuth.identity.provider=serviceaccount \
+	--set security.agentAuth.projection.policyConfigMap.name=kaos-authz-policy \
+	--set security.agentAuth.projection.policyConfigMap.namespace=default \
 	--set security.userAuth.issuer=https://keycloak.example/realms/kaos 2>&1)"; then
 	echo "FAIL - service-account token exchange posture was accepted"
 	FAIL=1

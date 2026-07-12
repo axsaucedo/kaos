@@ -45,6 +45,7 @@ var (
 //+kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gateways,verbs=get;list;watch
 //+kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=referencegrants,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=gateway.envoyproxy.io,resources=securitypolicies,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=gateway.envoyproxy.io,resources=envoyextensionpolicies,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
 
 func init() {
@@ -134,6 +135,18 @@ func main() {
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Agent")
+		os.Exit(1)
+	}
+
+	if err = (&controllers.ThirdPartyServiceReconciler{
+		Client:               mgr.GetClient(),
+		Scheme:               mgr.GetScheme(),
+		TokenExchangeEnabled: getBoolWithDefault("TOKEN_EXCHANGE_ENABLED", false),
+		ExtProcServiceName:   os.Getenv("TOKEN_EXCHANGE_EXTPROC_SERVICE_NAME"),
+		ExtProcNamespace:     os.Getenv("TOKEN_EXCHANGE_EXTPROC_NAMESPACE"),
+		ExtProcPort:          getIntWithDefault("TOKEN_EXCHANGE_EXTPROC_PORT", 50051),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "ThirdPartyService")
 		os.Exit(1)
 	}
 
@@ -273,6 +286,14 @@ func getDurationWithDefault(key string, defaultValue time.Duration) time.Duratio
 	}
 	parsed, err := time.ParseDuration(v)
 	if err != nil {
+		return defaultValue
+	}
+	return parsed
+}
+
+func getIntWithDefault(key string, defaultValue int) int {
+	parsed, err := strconv.Atoi(strings.TrimSpace(os.Getenv(key)))
+	if err != nil || parsed <= 0 {
 		return defaultValue
 	}
 	return parsed

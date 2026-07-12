@@ -26,6 +26,12 @@ x-agent-authorization: Bearer <actor-jwt>
 
 The gateway's agent JWT provider validates the token against the selected issuer and requires audience `kaos-gateway`. ServiceAccount mode uses the discovered Kubernetes issuer and an inline JWKS. AIB mode uses the single configured AIB issuer URL and its JWKS; the broker must mint agent tokens with `kaos-gateway` in their audience claim.
 
+## Delegated third-party token exchange
+
+`kaos system install --token-exchange-enabled` is an optional Keycloak-only posture for agents acting as the requesting user against an external OAuth service. A namespaced `ThirdPartyService` declares the provider OAuth client Secret, issuer or endpoints, scopes, protected resources, dedicated egress `HTTPRoute`, and Agent bindings. The operator projects only those real services and permission sets to the self-managed AIB release and attaches AIB ext_proc only to the declared route; internal Agent, MCPServer, ModelAPI, and MemoryStore routes are rejected. Static per-MCP credentials remain the default when the feature is off.
+
+The runtime re-mint is implemented separately. Its contract is an `Authorization: Bearer <token>` header containing a Keycloak token with the original user `sub`, the acting Agent's DCR client id in `azp`, and `token-exchange-broker` in `aud`. The chart orders gateway filters as `jwt_authn`, then the PDP `ext_authz`, then `ext_proc`; ext_proc is fail closed and replaces that header only on the dedicated third-party route.
+
 ServiceAccount token subjects have the form `system:serviceaccount:<namespace>:<serviceaccount-name>`. The policy resolves that issuer subject to the logical actor id through `data.kaos.agents`.
 
 ### Resource identity

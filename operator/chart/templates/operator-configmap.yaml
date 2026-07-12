@@ -32,8 +32,17 @@ data:
   {{- end }}
   {{- with .Values.security }}
   {{- if .tokenExchange.enabled }}
+  {{- if not (and $.Values.gatewayAPI.enabled $.Values.gatewayAPI.createGateway) }}
+  {{- fail "security.tokenExchange.enabled requires gatewayAPI.enabled and gatewayAPI.createGateway" }}
+  {{- end }}
   {{- if ne (.agentAuth.identity.provider | default "serviceaccount") "oidc" }}
   {{- fail "security.tokenExchange.enabled requires security.agentAuth.identity.provider=oidc" }}
+  {{- end }}
+  {{- if not .agentAuth.issuer }}
+  {{- fail "security.tokenExchange.enabled requires security.agentAuth.issuer" }}
+  {{- end }}
+  {{- if not (or $.Values.security.pdp.enabled .agentAuth.extAuthzUrl) }}
+  {{- fail "security.tokenExchange.enabled requires the ext_authz PDP" }}
   {{- end }}
   {{- if not .userAuth.issuer }}
   {{- fail "security.tokenExchange.enabled requires security.userAuth.issuer" }}
@@ -45,6 +54,9 @@ data:
   TOKEN_EXCHANGE_AIB_ADMIN_URL: {{ .tokenExchange.aib.adminUrl | quote }}
   TOKEN_EXCHANGE_AIB_PRINCIPAL: {{ .tokenExchange.aib.adminPrincipal | default "kaos-operator" | quote }}
   TOKEN_EXCHANGE_AIB_PRINCIPAL_HEADER: {{ .tokenExchange.aib.adminPrincipalHeader | default "X-Remote-User" | quote }}
+  TOKEN_EXCHANGE_EXTPROC_SERVICE_NAME: {{ required "security.tokenExchange.extProc.serviceName is required" .tokenExchange.extProc.serviceName | quote }}
+  TOKEN_EXCHANGE_EXTPROC_NAMESPACE: {{ required "security.tokenExchange.extProc.namespace is required" .tokenExchange.extProc.namespace | quote }}
+  TOKEN_EXCHANGE_EXTPROC_PORT: {{ .tokenExchange.extProc.port | default 50051 | quote }}
   {{- end }}
   {{- with .agentAuth }}
   {{- $identityProvider := .identity.provider | default "serviceaccount" }}

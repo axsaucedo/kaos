@@ -55,6 +55,7 @@ rules:
 - apiGroups:
   - gateway.envoyproxy.io
   resources:
+  - envoyextensionpolicies
   - securitypolicies
   verbs:
   - create
@@ -89,6 +90,7 @@ rules:
   - kaos.tools
   resources:
   - accessgrants
+  - thirdpartyservices
   verbs:
   - get
   - list
@@ -101,6 +103,7 @@ rules:
   - mcpservers/status
   - memorystores/status
   - modelapis/status
+  - thirdpartyservices/status
   verbs:
   - get
   - patch
