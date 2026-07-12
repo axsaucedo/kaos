@@ -1365,7 +1365,7 @@ class TestAuthWiring:
         mappers = {
             mapper["name"]: mapper for mapper in clients["kaos"]["protocolMappers"]
         }
-        assert set(mappers) == {"kaos-audience", "kaos-groups"}
+        assert set(mappers) == {"kaos-audience", "kaos-groups", "kaos-subject"}
         assert mappers["kaos-groups"] == {
             "name": "kaos-groups",
             "protocol": "openid-connect",
@@ -1378,8 +1378,41 @@ class TestAuthWiring:
                 "userinfo.token.claim": "false",
             },
         }
+        assert mappers["kaos-subject"] == {
+            "name": "kaos-subject",
+            "protocol": "openid-connect",
+            "protocolMapper": "oidc-usermodel-property-mapper",
+            "config": {
+                "user.attribute": "id",
+                "claim.name": "sub",
+                "jsonType.label": "String",
+                "id.token.claim": "false",
+                "access.token.claim": "true",
+                "userinfo.token.claim": "false",
+            },
+        }
         assert realm["groups"] == [{"name": "researchers"}]
         assert realm["users"][0]["groups"] == ["researchers"]
+        assert realm["defaultDefaultClientScopes"] == ["kaos-agent-audience"]
+        assert realm["clientScopes"] == [
+            {
+                "name": "kaos-agent-audience",
+                "protocol": "openid-connect",
+                "attributes": {"include.in.token.scope": "false"},
+                "protocolMappers": [
+                    {
+                        "name": "kaos-agent-audience",
+                        "protocol": "openid-connect",
+                        "protocolMapper": "oidc-audience-mapper",
+                        "config": {
+                            "included.custom.audience": "kaos-gateway",
+                            "id.token.claim": "false",
+                            "access.token.claim": "true",
+                        },
+                    }
+                ],
+            }
+        ]
 
     def test_default_user_auth_issuer(self):
         from kaos_cli.install import _default_user_auth_issuer

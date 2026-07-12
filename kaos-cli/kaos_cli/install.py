@@ -64,6 +64,7 @@ DEFAULT_USER_AUTH_CLIENT_ID = "kaos"
 DEFAULT_OIDC_CREDENTIAL_SECRET_PREFIX = "kaos-oidc"
 DEFAULT_OIDC_REGISTRATION_SECRET_NAME = "kaos-oidc-registration"
 DEFAULT_OIDC_REGISTRATION_SECRET_KEY = "token"
+DEFAULT_AGENT_AUTH_AUDIENCE = "kaos-gateway"
 # Dev-only fixtures used to bootstrap a non-interactive test identity. These are
 # intended exclusively for local/e2e validation, never for production installs.
 DEFAULT_USER_AUTH_CLIENT_SECRET = "kaos-dev-secret"
@@ -835,6 +836,26 @@ def _keycloak_realm_json(
     return {
         "realm": realm,
         "enabled": True,
+        "clientScopes": [
+            {
+                "name": "kaos-agent-audience",
+                "protocol": "openid-connect",
+                "attributes": {"include.in.token.scope": "false"},
+                "protocolMappers": [
+                    {
+                        "name": "kaos-agent-audience",
+                        "protocol": "openid-connect",
+                        "protocolMapper": "oidc-audience-mapper",
+                        "config": {
+                            "included.custom.audience": DEFAULT_AGENT_AUTH_AUDIENCE,
+                            "id.token.claim": "false",
+                            "access.token.claim": "true",
+                        },
+                    }
+                ],
+            }
+        ],
+        "defaultDefaultClientScopes": ["kaos-agent-audience"],
         "clients": [
             {
                 "clientId": client_id,
@@ -863,6 +884,19 @@ def _keycloak_realm_json(
                         "config": {
                             "claim.name": "groups",
                             "full.path": "false",
+                            "id.token.claim": "false",
+                            "access.token.claim": "true",
+                            "userinfo.token.claim": "false",
+                        },
+                    },
+                    {
+                        "name": "kaos-subject",
+                        "protocol": "openid-connect",
+                        "protocolMapper": "oidc-usermodel-property-mapper",
+                        "config": {
+                            "user.attribute": "id",
+                            "claim.name": "sub",
+                            "jsonType.label": "String",
                             "id.token.claim": "false",
                             "access.token.claim": "true",
                             "userinfo.token.claim": "false",
