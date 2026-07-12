@@ -22,7 +22,7 @@ make format                     # Auto-format code
 - `pais/tools.py`: DelegationToolset (AbstractToolset), execute_delegation, format_progress_event, build_string_mode_handler
 - `pais/memory.py`: Memory ABC, LocalMemory, RemoteMemory, NullMemory + build_message_history/store_pydantic_message utilities
 - `pais/telemetry.py`: OpenTelemetry instrumentation (tracing, metrics, SERVICE_NAME)
-- `aib/`: AIB propagation SDK (temporary home; upstreams to the AIB project later). `aib/instrument.py` holds the request-local security context and the FastAPI/httpx instrumentation; `import aib` is the public surface.
+- `kaos_identity/`: Agent identity and propagation runtime. `kaos_identity/instrument.py` holds the request-local security context and the FastAPI/httpx instrumentation; `import kaos_identity` is the public surface.
 - `pyproject.toml`: Dependencies — `pydantic-ai`, `opentelemetry-*`
 
 **Module layout rationale:**
@@ -32,11 +32,11 @@ make format                     # Auto-format code
 - `tools.py` owns tool extensions: DelegationToolset (AbstractToolset subclass), string-mode model handler, progress event formatting
 - `memory.py` owns persistence: Memory ABC + all backends, plus build_message_history/store_pydantic_message utilities on the base class
 
-### AIB identity propagation (`aib`)
+### Agent identity propagation (`kaos_identity`)
 
-The `aib` SDK propagates two identities across agent hops (ADR-KAOS-003): the user **subject** (`Authorization` bearer + `x-principal`), forwarded unchanged, and the calling agent **actor** (`x-agent-authorization` bearer + `x-actor`), set to *this* agent on every outbound hop so each agent authenticates as itself. The SDK only propagates — it is not the enforcement boundary (the gateway enforces, later phases).
+The `kaos_identity` runtime propagates two identities across agent hops (ADR-KAOS-003): the user **subject** (`Authorization` bearer + `x-principal`), forwarded unchanged, and the calling agent **actor** (`x-agent-authorization` bearer + `x-actor`), set to *this* agent on every outbound hop so each agent authenticates as itself. The runtime only propagates — it is not the enforcement boundary.
 
-- `AgentServer.__init__` calls `aib.instrument_fastapi(self.app, actor=...)` (extracts inbound context, generates `x-request-id` when absent) and `aib.instrument_httpx()` (injects context onto outbound calls). A single httpx patch covers A2A, MCP, and ModelAPI because all use httpx; injection is at request time, so clients built at startup still propagate, and it is **strictly additive** — an existing header (e.g. the ModelAPI API-key `Authorization`) is never overwritten.
+- `AgentServer.__init__` calls `kaos_identity.instrument_fastapi(self.app, actor=...)` (extracts inbound context, generates `x-request-id` when absent) and `kaos_identity.instrument_httpx()` (injects context onto outbound calls). A single httpx patch covers A2A, MCP, and ModelAPI because all use httpx; injection is at request time, so clients built at startup still propagate, and it is **strictly additive** — an existing header (e.g. the ModelAPI API-key `Authorization`) is never overwritten.
 - The local actor defaults to `kaos://agent/{agent_name}`; override via the `actor` kwarg or the provider-agnostic `AGENT_AUTH_IDENTITY` env var (and `AGENT_AUTH_TOKEN`, `AGENT_AUTH_PRINCIPAL`). Tokens are dummy/static at this stage — real minting + the machine-token lifecycle land in a later phase.
 - `AgentDeps.security_context` carries the non-secret context (request_id/session_id/principal/actor/scopes) for tools; raw bearer tokens are never placed on `AgentDeps` or persisted to memory.
 

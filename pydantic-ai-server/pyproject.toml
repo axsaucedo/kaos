@@ -52,7 +52,7 @@ build-backend = "hatchling.build"
 kaos-memory = { path = "../kaos-memory", editable = true }
 
 [tool.hatch.build.targets.wheel]
-packages = ["pais", "aib"]
+packages = ["pais", "kaos_identity"]
 
 [tool.black]
 line-length = 100

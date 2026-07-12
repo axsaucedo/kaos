@@ -8,8 +8,8 @@ import os
 import httpx
 import pytest
 
-import aib
-from aib import identity
+import kaos_identity
+from kaos_identity import identity
 
 
 @pytest.fixture(autouse=True)
@@ -24,10 +24,10 @@ def _reset(monkeypatch):
     ):
         monkeypatch.delenv(var, raising=False)
     identity.reset_manager()
-    aib.ctx.replace({})
+    kaos_identity.ctx.replace({})
     yield
     identity.reset_manager()
-    aib.ctx.replace({})
+    kaos_identity.ctx.replace({})
 
 
 class _Recorder:
@@ -62,7 +62,7 @@ def test_no_credentials_is_inert(monkeypatch):
     mgr = identity.instrument_agent_identity()
     assert mgr is None
     assert identity.get_manager() is None
-    assert aib.actor_token() is None
+    assert kaos_identity.actor_token() is None
 
 
 def test_file_provider_reads_projected_token(monkeypatch, tmp_path):
@@ -73,7 +73,7 @@ def test_file_provider_reads_projected_token(monkeypatch, tmp_path):
     mgr = identity.instrument_agent_identity()
 
     assert isinstance(mgr, identity.FileActorTokenManager)
-    assert aib.actor_token() == "projected-token"
+    assert kaos_identity.actor_token() == "projected-token"
 
 
 def test_file_provider_picks_up_rotation(monkeypatch, tmp_path):
@@ -114,7 +114,7 @@ def test_file_provider_missing_file_fails_clearly(monkeypatch, tmp_path):
     mgr = identity.instrument_agent_identity()
     assert mgr is not None
 
-    with pytest.raises(identity.AIBUnavailable, match="could not read actor token file"):
+    with pytest.raises(identity.IdentityUnavailable, match="could not read actor token file"):
         mgr.token()
 
 
@@ -130,9 +130,9 @@ def test_token_endpoint_derived_from_issuer(monkeypatch):
 def test_first_call_mints_and_caches(monkeypatch):
     rec = _Recorder([_resp(200, {"access_token": "tok-1", "expires_in": 300})])
     _manager(monkeypatch, rec)
-    assert aib.actor_token() == "tok-1"
+    assert kaos_identity.actor_token() == "tok-1"
     # Second call within TTL serves the cache without re-POSTing.
-    assert aib.actor_token() == "tok-1"
+    assert kaos_identity.actor_token() == "tok-1"
     assert len(rec.calls) == 1
     assert rec.calls[0]["grant_type"] == "client_credentials"
     assert rec.calls[0]["client_id"] == "kaos-agent-default-researcher"
@@ -181,14 +181,14 @@ def test_endpoint_failure_fails_closed(monkeypatch):
 
     mgr = _manager(monkeypatch, _Recorder([]))
     monkeypatch.setattr(httpx, "post", _boom)
-    with pytest.raises(identity.AIBUnavailable):
+    with pytest.raises(identity.IdentityUnavailable):
         mgr.token()
 
 
 def test_missing_access_token_fails_closed(monkeypatch):
     rec = _Recorder([_resp(200, {"expires_in": 300})])
     mgr = _manager(monkeypatch, rec)
-    with pytest.raises(identity.AIBUnavailable):
+    with pytest.raises(identity.IdentityUnavailable):
         mgr.token()
 
 
@@ -335,8 +335,8 @@ def test_async_token_mints(monkeypatch):
     identity.instrument_agent_identity()
 
     async def _run():
-        first = await aib.actor_token_async()
-        second = await aib.actor_token_async()
+        first = await kaos_identity.actor_token_async()
+        second = await kaos_identity.actor_token_async()
         return first, second
 
     first, second = asyncio.run(_run())
@@ -363,7 +363,7 @@ def _configured_manager(monkeypatch, mint_token="fresh-token"):
 
 def test_outbound_401_refreshes_and_replays_once(monkeypatch):
     _configured_manager(monkeypatch, mint_token="fresh-token")
-    aib.instrument_httpx()
+    kaos_identity.instrument_httpx()
 
     seen = []
 
@@ -386,7 +386,7 @@ def test_outbound_401_refreshes_and_replays_once(monkeypatch):
 
 def test_outbound_401_no_manager_does_not_retry(monkeypatch):
     identity.reset_manager()
-    aib.instrument_httpx()
+    kaos_identity.instrument_httpx()
 
     seen = []
 
@@ -405,7 +405,7 @@ def test_outbound_401_no_manager_does_not_retry(monkeypatch):
 
 def test_outbound_non_401_does_not_retry(monkeypatch):
     _configured_manager(monkeypatch)
-    aib.instrument_httpx()
+    kaos_identity.instrument_httpx()
 
     seen = []
 
@@ -426,7 +426,7 @@ def test_outbound_401_without_actor_header_does_not_retry(monkeypatch):
     mgr = _configured_manager(monkeypatch)
     assert mgr is not None
     monkeypatch.setattr(mgr, "token", lambda: None)  # no token to inject
-    aib.instrument_httpx()
+    kaos_identity.instrument_httpx()
 
     seen = []
 
@@ -453,7 +453,7 @@ def test_outbound_async_401_refreshes_and_replays_once(monkeypatch):
         return "fresh-async"
 
     monkeypatch.setattr(mgr, "force_refresh_async", _fake_refresh)
-    aib.instrument_httpx()
+    kaos_identity.instrument_httpx()
 
     seen = []
 
@@ -476,7 +476,7 @@ def test_outbound_async_401_refreshes_and_replays_once(monkeypatch):
 
 def test_outbound_injects_managed_actor_token_when_none_present(monkeypatch):
     _configured_manager(monkeypatch, mint_token="minted-actor")
-    aib.instrument_httpx()
+    kaos_identity.instrument_httpx()
 
     seen = []
 
@@ -494,7 +494,7 @@ def test_outbound_injects_managed_actor_token_when_none_present(monkeypatch):
 
 def test_outbound_does_not_override_existing_actor_token(monkeypatch):
     _configured_manager(monkeypatch, mint_token="minted-actor")
-    aib.instrument_httpx()
+    kaos_identity.instrument_httpx()
 
     seen = []
 
@@ -511,7 +511,7 @@ def test_outbound_does_not_override_existing_actor_token(monkeypatch):
 
 
 def test_outbound_no_manager_injects_nothing(monkeypatch):
-    aib.instrument_httpx()
+    kaos_identity.instrument_httpx()
 
     seen = []
 
@@ -530,7 +530,7 @@ def test_outbound_async_injects_managed_actor_token(monkeypatch):
     mgr = _configured_manager(monkeypatch, mint_token="minted-async")
     assert mgr is not None
     mgr.token()  # prime the cache via the mocked sync grant so no async network call is made
-    aib.instrument_httpx()
+    kaos_identity.instrument_httpx()
 
     seen = []
 

@@ -1,6 +1,6 @@
-"""Unit tests for aib.instrument_httpx outbound header injection."""
+"""Unit tests for kaos_identity.instrument_httpx outbound header injection."""
 
-import aib
+import kaos_identity
 import httpx
 import pytest
 import respx
@@ -8,17 +8,17 @@ import respx
 
 @pytest.fixture(autouse=True)
 def _patch_and_clear():
-    aib.instrument_httpx()  # idempotent — safe to call per test
-    aib.ctx.replace({})
+    kaos_identity.instrument_httpx()  # idempotent — safe to call per test
+    kaos_identity.ctx.replace({})
     yield
-    aib.ctx.replace({})
+    kaos_identity.ctx.replace({})
 
 
 @respx.mock
 @pytest.mark.asyncio
 async def test_async_injects_both_identities():
     route = respx.post("http://downstream/run").respond(200)
-    aib.ctx.update(
+    kaos_identity.ctx.update(
         {
             "request_id": "req-9",
             "principal": "keycloak://kaos/alice",
@@ -41,7 +41,7 @@ async def test_async_injects_both_identities():
 @respx.mock
 def test_sync_client_injects():
     route = respx.get("http://downstream/data").respond(200)
-    aib.ctx["actor"] = "kaos://agent/default/a"
+    kaos_identity.ctx["actor"] = "kaos://agent/default/a"
     with httpx.Client() as client:
         client.get("http://downstream/data")
     assert route.calls.last.request.headers["x-actor"] == "kaos://agent/default/a"
@@ -52,7 +52,7 @@ def test_sync_client_injects():
 async def test_does_not_overwrite_existing_authorization():
     """A provider's own Authorization (e.g. ModelAPI API key) is preserved."""
     route = respx.post("http://modelapi/v1/chat").respond(200)
-    aib.ctx.update({"subject_token": "user-token", "actor": "kaos://agent/default/a"})
+    kaos_identity.ctx.update({"subject_token": "user-token", "actor": "kaos://agent/default/a"})
     async with httpx.AsyncClient() as client:
         await client.post("http://modelapi/v1/chat", headers={"Authorization": "Bearer api-key"})
 
@@ -73,10 +73,10 @@ async def test_empty_context_injects_nothing():
 
 
 def test_instrument_httpx_is_idempotent():
-    import aib.instrument as inst
+    import kaos_identity.instrument as inst
 
     send_before = httpx.AsyncClient.send
-    aib.instrument_httpx()
-    aib.instrument_httpx()
+    kaos_identity.instrument_httpx()
+    kaos_identity.instrument_httpx()
     assert httpx.AsyncClient.send is send_before
     assert inst._httpx_patched is True

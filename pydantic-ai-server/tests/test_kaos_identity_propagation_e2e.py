@@ -1,14 +1,14 @@
 """End-to-end two-identity propagation across agent hops (A -> B -> MCP).
 
 Wires three instrumented apps together in-process via httpx ASGITransport and asserts,
-using the real aib SDK, that:
+using the real identity runtime, that:
 
 * the user **subject** (principal + Authorization) is propagated unchanged across hops,
 * the **actor** is overridden per hop (each agent authenticates as itself), and
 * a request id is generated at the edge and stays stable down the chain.
 """
 
-import aib
+import kaos_identity
 import httpx
 import pytest
 from fastapi import FastAPI, Request
@@ -16,7 +16,7 @@ from fastapi import FastAPI, Request
 
 def _record_app(actor, recorder, downstream=None, downstream_url=None):
     app = FastAPI()
-    aib.instrument_fastapi(app, actor=actor, actor_token=f"{actor}#token")
+    kaos_identity.instrument_fastapi(app, actor=actor, actor_token=f"{actor}#token")
 
     @app.get("/call")
     async def call(request: Request):
@@ -31,8 +31,8 @@ def _record_app(actor, recorder, downstream=None, downstream_url=None):
 
 @pytest.mark.asyncio
 async def test_two_identity_propagation_across_hops():
-    aib.instrument_httpx()
-    aib.ctx.replace({})
+    kaos_identity.instrument_httpx()
+    kaos_identity.ctx.replace({})
 
     seen_b = {}  # headers agent B received from agent A
     seen_c = {}  # headers the MCP leaf received from agent B

@@ -1,6 +1,6 @@
 """Machine actor-token lifecycle for the agent's own identity.
 
-The propagation SDK (:mod:`aib.instrument`) forwards identities but does not *mint*
+The propagation SDK (:mod:`kaos_identity.instrument`) forwards identities but does not *mint*
 them. This module lets an agent authenticate as itself without a static, pre-minted
 token: it acquires the agent **actor** token via an OAuth2 ``client_credentials`` grant
 against the configured broker, caches it with refresh-ahead so the request path rarely
@@ -36,7 +36,7 @@ _BACKOFF_CAP_SECONDS = 2.0
 _FALLBACK_LIFETIME_SECONDS = 300.0
 
 
-class AIBUnavailable(RuntimeError):
+class IdentityUnavailable(RuntimeError):
     """Raised when a fresh actor token cannot be obtained from the broker.
 
     The lifecycle fails closed: callers must treat this as an authentication failure
@@ -105,7 +105,7 @@ class ActorTokenManager:
     The manager serves a cached token until the refresh-ahead point (``refresh_fraction``
     of the lifetime remaining), then transparently re-acquires. Refreshes are
     single-flighted across both sync and async callers. On broker failure it retries with
-    bounded backoff and then raises :class:`AIBUnavailable`; a still-valid cached token is
+    bounded backoff and then raises :class:`IdentityUnavailable`; a still-valid cached token is
     preferred over failing, but an absent/expired token never silently passes.
     """
 
@@ -165,7 +165,7 @@ class ActorTokenManager:
         data = response.json()
         token = data.get("access_token")
         if not token:
-            raise AIBUnavailable("broker token response missing access_token")
+            raise IdentityUnavailable("broker token response missing access_token")
         return token, float(data.get("expires_in", 0) or 0)
 
     # --- sync ---------------------------------------------------------------
@@ -181,7 +181,7 @@ class ActorTokenManager:
                 return self._token
             try:
                 self._store(*self._acquire_sync())
-            except AIBUnavailable:
+            except IdentityUnavailable:
                 cached = self._cached_valid()
                 if cached is not None:
                     return cached
@@ -209,11 +209,11 @@ class ActorTokenManager:
                     self._credential.reload()
                 resp.raise_for_status()
                 return self._parse(resp)
-            except (httpx.HTTPError, AIBUnavailable) as exc:
+            except (httpx.HTTPError, IdentityUnavailable) as exc:
                 last_exc = exc
                 if attempt < _MAX_ATTEMPTS - 1:
                     time.sleep(_backoff(attempt))
-        raise AIBUnavailable(f"could not acquire actor token: {last_exc}") from last_exc
+        raise IdentityUnavailable(f"could not acquire actor token: {last_exc}") from last_exc
 
     # --- async --------------------------------------------------------------
 
@@ -228,7 +228,7 @@ class ActorTokenManager:
                 return self._token
             try:
                 self._store(*await self._acquire_async())
-            except AIBUnavailable:
+            except IdentityUnavailable:
                 cached = self._cached_valid()
                 if cached is not None:
                     return cached
@@ -250,11 +250,11 @@ class ActorTokenManager:
                     self._credential.reload()
                 resp.raise_for_status()
                 return self._parse(resp)
-            except (httpx.HTTPError, AIBUnavailable) as exc:
+            except (httpx.HTTPError, IdentityUnavailable) as exc:
                 last_exc = exc
                 if attempt < _MAX_ATTEMPTS - 1:
                     await asyncio.sleep(_backoff(attempt))
-        raise AIBUnavailable(f"could not acquire actor token: {last_exc}") from last_exc
+        raise IdentityUnavailable(f"could not acquire actor token: {last_exc}") from last_exc
 
 
 class FileActorTokenManager:
@@ -273,11 +273,11 @@ class FileActorTokenManager:
             with open(self._token_file, "r", encoding="utf-8") as fh:
                 token = fh.read().strip()
         except OSError as exc:
-            raise AIBUnavailable(
+            raise IdentityUnavailable(
                 f"could not read actor token file {self._token_file!r}: {exc}"
             ) from exc
         if not token:
-            raise AIBUnavailable(f"actor token file {self._token_file!r} is empty")
+            raise IdentityUnavailable(f"actor token file {self._token_file!r} is empty")
         return token
 
     async def token_async(self) -> str:

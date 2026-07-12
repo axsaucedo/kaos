@@ -1,4 +1,4 @@
-"""AIB propagation SDK (KAOS temporary home).
+"""Agent identity and request-context propagation runtime.
 
 Two-identity request-context propagation for agentic runtimes. Instrument once and the
 user subject + agent actor identities flow across A2A, MCP, and ModelAPI calls
@@ -6,12 +6,12 @@ automatically.
 
 Public API::
 
-    import aib
+    import kaos_identity
 
-    aib.ctx                      # request-local context (ContextVar-backed, dict-like)
-    aib.instrument_fastapi(app)  # extract trusted inbound context at the server boundary
-    aib.instrument_httpx()       # inject subject + actor on outbound httpx calls
-    aib.ctx.to_headers()         # manual escape hatch for non-instrumented transports
+    kaos_identity.ctx                      # request-local context (ContextVar-backed, dict-like)
+    kaos_identity.instrument_fastapi(app)  # extract trusted inbound context at the server boundary
+    kaos_identity.instrument_httpx()       # inject subject + actor on outbound httpx calls
+    kaos_identity.ctx.to_headers()         # manual escape hatch for non-instrumented transports
 
 The SDK is *not* the enforcement boundary; it only propagates.
 """
@@ -30,7 +30,7 @@ from .client import (
     raise_for_gateway_outcome,
 )
 from .identity import (
-    AIBUnavailable,
+    IdentityUnavailable,
     ActorTokenManager,
     actor_token,
     actor_token_async,
@@ -69,7 +69,7 @@ __all__ = [
     "get_manager",
     "reset_manager",
     "ActorTokenManager",
-    "AIBUnavailable",
+    "IdentityUnavailable",
     "Client",
     "AsyncClient",
     "AccessRequest",

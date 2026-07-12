@@ -8,7 +8,7 @@ import sys
 from typing import Dict, Any, AsyncIterator, List, Optional, Union, TYPE_CHECKING
 from contextlib import asynccontextmanager
 
-import aib
+import kaos_identity
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -138,11 +138,11 @@ class AgentServer:
             lifespan=self._lifespan,
         )
 
-        # AIB two-identity propagation: extract inbound user context at the
+        # Two-identity propagation: extract inbound user context at the
         # server boundary and inject the user subject + this agent's actor on outbound
         # A2A/MCP/ModelAPI calls. The SDK is not the enforcement boundary; it propagates.
         local_actor = self.settings.security_actor or f"kaos://agent/{self.settings.agent_name}"
-        aib.instrument_fastapi(
+        kaos_identity.instrument_fastapi(
             self.app,
             actor=local_actor,
             actor_token=self.settings.security_actor_token or None,
@@ -153,8 +153,8 @@ class AgentServer:
         # TOKEN_ENDPOINT), the runtime mints and refreshes this agent's actor token and
         # injects it on outbound calls. Inert when credentials are absent.
         if not self.settings.security_actor_token:
-            aib.instrument_agent_identity()
-        aib.instrument_httpx()
+            kaos_identity.instrument_agent_identity()
+        kaos_identity.instrument_httpx()
 
         self._setup_routes()
         setup_a2a_routes(self.app, self.task_manager)
@@ -402,7 +402,7 @@ class AgentServer:
         deps = AgentDeps(
             session_id=session_id,
             memory=self.memory,
-            security_context=aib.security_context(),
+            security_context=kaos_identity.security_context(),
         )
 
         # Derive the server-side memory scope (owner) for the long-term tier.
@@ -744,7 +744,7 @@ def _setup_otel_instrumentation(settings: AgentServerSettings) -> None:
         instrumentation = InstrumentationSettings(
             tracer_provider=get_tracer_provider(),
             meter_provider=get_meter_provider(),
-            version=settings.otel_instrumentation_version,  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+            version=settings.otel_instrumentation_version,  # type: ignore[arg-type]
         )
         PydanticAgent.instrument_all(instrumentation)
 
@@ -756,7 +756,7 @@ def create_agent_server(
 ) -> AgentServer:
     """Create an AgentServer with optional sub-agents and MCP clients."""
     if not settings:
-        settings = AgentServerSettings()  # type: ignore[call-arg]  # ty: ignore[missing-argument]
+        settings = AgentServerSettings()  # type: ignore[call-arg]
 
     # Logging + OTel
     configure_logging(get_log_level(), otel_correlation=should_enable_otel())
