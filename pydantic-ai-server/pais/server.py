@@ -808,8 +808,7 @@ def create_agent_server(
     if custom_agent:
         pydantic_agent = custom_agent
         pydantic_agent.model = model
-        for ts in toolsets:
-            pydantic_agent._toolsets.append(ts)
+        pydantic_agent._user_toolsets.extend(toolsets)
         # Extract custom tool names from agent's existing toolsets (before KAOS additions)
         if hasattr(custom_agent, "_function_toolset"):
             ft = custom_agent._function_toolset
