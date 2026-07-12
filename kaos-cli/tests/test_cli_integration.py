@@ -1952,6 +1952,9 @@ class TestAuthWiring:
         assert "EXTPROC_OAUTH2_ISSUER" in joined_aib
         assert "EXTPROC_OAUTH2_CLIENT_ID" in joined_aib
         assert "EXTPROC_OAUTH2_CLIENT_SECRET" in joined_aib
+        assert "EXTPROC_OAUTH2_CLIENT_ASSERTION_TYPE" in joined_aib
+        assert "EXTPROC_OAUTH2_TOKEN_ENDPOINT" not in joined_aib
+        assert "EXTPROC_OAUTH2_TLS_ALLOW_HTTP" not in joined_aib
         assert "EXTPROC_OAUTH2_CLIENT_CREDENTIALS_ENDPOINT" not in joined_aib
         assert "extProc.oauth2.clientCredentialsEndpoint=" in joined_aib
 
