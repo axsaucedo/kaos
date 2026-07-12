@@ -115,6 +115,9 @@ func resourceFromAgent(a *kaosv1alpha1.Agent) projection.Resource {
 	if a.Spec.AgentNetwork != nil {
 		res.Access = a.Spec.AgentNetwork.Access
 	}
+	if a.Spec.Config != nil && a.Spec.Config.Memory != nil {
+		res.MemoryStore = a.Spec.Config.Memory.MemoryStore
+	}
 	return res
 }
 

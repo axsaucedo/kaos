@@ -23,6 +23,9 @@ func TestResourceFromAgentMapsSpec(t *testing.T) {
 			MCPServers:   []string{"github"},
 			ModelAPI:     "gpt",
 			AgentNetwork: &kaosv1alpha1.AgentNetworkConfig{Access: []string{"b", "c"}},
+			Config: &kaosv1alpha1.AgentConfig{
+				Memory: &kaosv1alpha1.MemoryConfig{MemoryStore: "brain"},
+			},
 		},
 	}
 
@@ -36,6 +39,9 @@ func TestResourceFromAgentMapsSpec(t *testing.T) {
 	}
 	if res.ModelAPI != "gpt" {
 		t.Fatalf("modelAPI = %q", res.ModelAPI)
+	}
+	if res.MemoryStore != "brain" {
+		t.Fatalf("memoryStore = %q", res.MemoryStore)
 	}
 	if !reflect.DeepEqual(res.Access, []string{"b", "c"}) {
 		t.Fatalf("access = %v", res.Access)

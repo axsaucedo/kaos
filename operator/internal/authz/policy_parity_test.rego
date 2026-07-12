@@ -179,6 +179,14 @@ test_allows_granted_resource_from_path_without_target_header if {
 	out.allowed == true
 }
 
+test_allows_granted_memorystore_resource_from_path if {
+	memory_grants := {"kaos://agent/demo/researcher": ["kaos://memorystore/demo/brain"]}
+	out := result with input as request_input(["demo", "memorystore", "brain", "v1", "recall"])
+		with data.kaos.grants as memory_grants
+		with data.kaos.jwks as configured_jwks
+	out.allowed == true
+}
+
 test_verified_allows_correct_serviceaccount_issuer_algorithm_and_audience if {
 	out := result with input as verified_request_input(verified_actor_jwt(["kaos-gateway"]))
 		with data.kaos.grants as grants

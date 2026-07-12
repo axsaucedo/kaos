@@ -25,7 +25,7 @@ The gateway-external OPA policy reads one data document from the policy ConfigMa
 Maps an agent's logical actor id to the sorted, deduplicated resources it may reach.
 
 - Actor ids use `kaos://agent/<namespace>/<name>`.
-- Automated resource ids use `kaos://<slug>/<namespace>/<name>`, where `slug` is `agent`, `mcpserver`, or `modelapi`. Manual policy data can also address a protected MemoryStore route with the `memorystore` slug.
+- Automated resource ids use `kaos://<slug>/<namespace>/<name>`, where `slug` is `agent`, `mcpserver`, `modelapi`, or `memorystore`.
 
 The policy derives the target only from the operator-owned gateway path because external authorization runs before route header modification. Inbound `x-kaos-target-resource` headers are not forwarded to or trusted by the PDP.
 

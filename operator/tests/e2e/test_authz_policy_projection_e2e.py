@@ -168,15 +168,22 @@ def test_live_serviceaccount_authorization_matrix(
     other_target = "authz-other"
     granted_agent = "authz-granted"
     ungranted_agent = "authz-ungranted"
+    memory_store = "authz-memory"
 
     for modelapi in (granted_target, other_target):
         create_custom_resource(create_modelapi_resource(namespace, modelapi), namespace)
         wait_for_deployment(namespace, f"modelapi-{modelapi}", timeout=240)
         wait_for_modelapi_ready(namespace, modelapi, timeout=240)
 
-    create_custom_resource(
-        create_agent_resource(namespace, granted_target, [], granted_agent), namespace
+    granted_resource = create_agent_resource(
+        namespace, granted_target, [], granted_agent
     )
+    granted_resource["spec"]["config"]["memory"] = {
+        "type": "remote",
+        "memoryStore": memory_store,
+    }
+    granted_resource["spec"]["waitForDependencies"] = False
+    create_custom_resource(granted_resource, namespace)
     create_custom_resource(
         create_agent_resource(namespace, other_target, [], ungranted_agent), namespace
     )
@@ -185,7 +192,14 @@ def test_live_serviceaccount_authorization_matrix(
     ungranted_sa = f"kaos-agent-{ungranted_agent}"
     _wait_for_service_account(namespace, granted_sa)
     _wait_for_service_account(namespace, ungranted_sa)
-    _wait_for_policy_data(namespace, [granted_agent, ungranted_agent])
+    policy_data = _wait_for_policy_data(namespace, [granted_agent, ungranted_agent])
+    memory_grant = f"kaos://memorystore/{namespace}/{memory_store}"
+    assert memory_grant in policy_data["kaos"]["grants"][
+        f"kaos://agent/{namespace}/{granted_agent}"
+    ]
+    assert memory_grant not in policy_data["kaos"]["grants"][
+        f"kaos://agent/{namespace}/{ungranted_agent}"
+    ]
 
     granted_token = str(
         kubectl(
