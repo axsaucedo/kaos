@@ -341,68 +341,41 @@ kaos system install --gateway-enabled --metallb-enabled \
 
 The managed development Keycloak starts with `token-exchange` and `admin-fine-grained-authz` when that flag is set, but Keycloak 26 still requires explicit target-client setup. Create the `token-exchange-broker` client, enable its management permissions, allow each exchange-enabled Agent DCR client to exchange to it, and add an audience mapper that produces exactly `aud=token-exchange-broker`. Without the features, Keycloak returns `400 unsupported_grant_type`; without the per-client permission, it returns `403 Client not allowed to exchange`.
 
-Create the dedicated egress route, provider OAuth client Secret, and `ThirdPartyService`. This is the manifest shape used in the live evaluation. The example assumes `Service/mock-api` already exposes the mock authorization server and API on port 9000.
-
-```yaml .noeval
-apiVersion: gateway.networking.k8s.io/v1
-kind: HTTPRoute
-metadata:
-  name: github-mock-egress
-  namespace: token-exchange-demo
-spec:
-  parentRefs:
-    - name: kaos-gateway
-      namespace: kaos-system
-      sectionName: http
-  hostnames:
-    - github-mock-egress.token-exchange-demo.svc.cluster.local
-  rules:
-    - backendRefs:
-        - name: mock-api
-          port: 9000
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: github-mock-oauth-client
-  namespace: token-exchange-demo
-type: Opaque
-stringData:
-  client-secret: mock-third-party-secret
----
-apiVersion: kaos.tools/v1alpha1
-kind: ThirdPartyService
-metadata:
-  name: github-mock
-  namespace: token-exchange-demo
-spec:
-  displayName: GitHub Mock
-  clientID: mock-third-party-client
-  clientSecretRef:
-    name: github-mock-oauth-client
-    key: client-secret
-  issuerURI: http://mock-oauth.token-exchange-demo.svc.cluster.local:9000
-  endpoints:
-    authorization: http://mock-oauth.token-exchange-demo.svc.cluster.local:9000/oauth/authorize
-    token: http://mock-oauth.token-exchange-demo.svc.cluster.local:9000/oauth/token
-  scopes:
-    - name: read
-      description: Read the mock GitHub profile
-  protectedResources:
-    - http://github-mock-egress.token-exchange-demo.svc.cluster.local/api/data
-  routeRef:
-    name: github-mock-egress
-  access:
-    - agent: researcher
-      scopes:
-        - read
-```
+Administer the service and permission set through AIB's admin API. There is no third-party KAOS CRD or hand-authored route. The Agent's AIB record uses the stable logical name `kaos/token-exchange-demo/researcher`; after the admin binds the permission set, the operator keeps its Keycloak DCR `client_id` current and reflects the protected-resource hostname into cluster egress plumbing.
 
 ```bash .noeval
-kubectl create namespace token-exchange-demo
-kubectl apply -f github-token-exchange.yaml
-kubectl wait thirdpartyservice/github-mock -n token-exchange-demo \
-  --for=condition=Ready --timeout=180s
+kubectl port-forward -n aib-system svc/aib-agentic-identity-broker 14000:14000 >./tmp/aib-admin-port-forward.log 2>&1 &
+AIB_ADMIN=http://localhost:14000/api
+ADMIN_HEADER='X-Remote-User: kaos-operator'
+
+SERVICE_ID=$(curl -fsS -X POST "$AIB_ADMIN/services" -H "$ADMIN_HEADER" -H 'Content-Type: application/json' -d '{
+  "display_name":"GitHub Mock",
+  "client_id":"mock-third-party-client",
+  "client_secret":"mock-third-party-secret",
+  "issuer_uri":"http://mock-oauth.token-exchange-demo.svc.cluster.local:9000",
+  "discovery":{"enable_discovery":false},
+  "endpoints":{"authorize_endpoint":"http://mock-oauth.token-exchange-demo.svc.cluster.local:9000/oauth/authorize","token_endpoint":"http://mock-oauth.token-exchange-demo.svc.cluster.local:9000/oauth/token"},
+  "scopes":[{"scope_value":"read","description":"Read the mock GitHub profile"}],
+  "protected_resources":["http://github-mock-egress.token-exchange-demo.svc.cluster.local/api/data"]
+}' | jq -r .id)
+
+PERMISSION_SET_ID=$(curl -fsS -X POST "$AIB_ADMIN/permission-sets" -H "$ADMIN_HEADER" -H 'Content-Type: application/json' -d "{
+  \"name\":\"github-mock-read\",
+  \"description\":\"Read the mock GitHub API\",
+  \"service_scopes\":[{\"service_id\":\"$SERVICE_ID\",\"scopes\":[\"read\"],\"requirement_type\":\"mandatory\"}]
+}" | jq -r .id)
+
+RESEARCHER_CLIENT_ID=$(kubectl get secret -n token-exchange-demo kaos-oidc-researcher -o jsonpath='{.data.client_id}' | base64 -d)
+curl -fsS -X POST "$AIB_ADMIN/agents" -H "$ADMIN_HEADER" -H 'Content-Type: application/json' -d "{
+  \"client_id\":\"$RESEARCHER_CLIENT_ID\",
+  \"external_id\":\"kaos/token-exchange-demo/researcher\",
+  \"display_name\":\"researcher\",
+  \"description\":\"KAOS Agent token-exchange-demo/researcher\",
+  \"permission_sets\":[{\"permission_set_id\":\"$PERMISSION_SET_ID\",\"requirement_type\":\"mandatory\"}]
+}"
+
+# Reflection is poll-based (45 seconds by default).
+kubectl get backend,httproute,envoyextensionpolicy -n token-exchange-demo -l kaos.tools/token-exchange-managed=true
 ```
 
 Mint the user's normal Keycloak token, then call the Agent. The first call without a live vault session is an application-level HTTP 200 containing the controlled `third_party_reauth_required` result and AIB authorization URL; the third-party tool has not succeeded.

@@ -28,7 +28,9 @@ The gateway's agent JWT provider validates the token against the selected issuer
 
 ## Delegated third-party token exchange
 
-`kaos system install --token-exchange-enabled` is an optional Keycloak-only posture for agents acting as the requesting user against an external OAuth service. A namespaced `ThirdPartyService` declares the provider OAuth client Secret, issuer or endpoints, scopes, protected resources, dedicated egress `HTTPRoute`, and Agent bindings. The operator projects only those real services and permission sets to the self-managed AIB release and attaches AIB ext_proc only to the declared route; internal Agent, MCPServer, ModelAPI, and MemoryStore routes are rejected. Static per-MCP credentials remain the default when the feature is off.
+`kaos system install --token-exchange-enabled` is an optional Keycloak-only posture for agents acting as the requesting user against an external OAuth service. Services, scopes, protected-resource URL prefixes, and Agent permission-set bindings are administered in AIB. Every 45 seconds the operator reads AIB, keeps the bound Agent record keyed by `kaos/<namespace>/<name>` and its Keycloak DCR `client_id` current, generates the required FQDN `Backend` and `HTTPRoute`, and injects re-mint targets only into bound Agents. It attaches AIB ext_proc only to routes carrying its generated-egress label; internal Agent, MCPServer, ModelAPI, and MemoryStore routes can never be selected. Static per-MCP credentials remain the default when the feature is off.
+
+The operator never creates AIB services or permission sets. AIB is the declaration and audit surface; Kubernetes contains only reflected plumbing. Reflection is poll-based and fail-static when AIB is unavailable.
 
 The runtime re-mint is implemented separately. Its contract is an `Authorization: Bearer <token>` header containing a Keycloak token with the original user `sub`, the acting Agent's DCR client id in `azp`, and `token-exchange-broker` in `aud`. The chart orders gateway filters as `jwt_authn`, then the PDP `ext_authz`, then `ext_proc`; ext_proc is fail closed and replaces that header only on the dedicated third-party route.
 

@@ -44,7 +44,7 @@ The `kaos_identity` runtime propagates two identities across agent hops (ADR-KAO
 | Variable | Description |
 |----------|-------------|
 | `AGENT_NAME` | Agent name (required) |
-| `KAOS_TOKEN_EXCHANGE_CONFIG` | Operator-injected JSON containing declared third-party URL prefixes and Keycloak re-mint settings |
+| `KAOS_TOKEN_EXCHANGE_CONFIG` | Operator-injected JSON containing AIB-bound third-party URL prefixes and Keycloak re-mint settings |
 | `MODEL_API_URL` | LLM API base URL (required) |
 | `MODEL_NAME` | Model name (required) |
 | `AGENT_INSTRUCTIONS` | System prompt for the agent |

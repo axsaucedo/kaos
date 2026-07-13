@@ -99,7 +99,6 @@ tmp/                       # Local work files (gitignored)
 - **MCPServer**: MCP tool server with runtime-based architecture (python-string, fastmcp-codemode, pctx-codemode, kubernetes, slack, custom)
 - **ModelAPI**: LLM proxy (LiteLLM) or hosted (Ollama) mode
 - **MemoryStore**: central memory service backing long-term semantic memory (local or external pgvector storage; external defaults to 2 replicas + PDB; summarization/embedding model refs; `--pgvector-memory-enabled` installs dev Postgres)
-- **ThirdPartyService**: optional namespaced OAuth provider, dedicated egress route, scopes, and Agent bindings used only by gated AIB token exchange
 
 ## Authorization (optional, enabled by auth flags)
 Envoy Gateway verifies agent JWTs and calls the fail-closed `kaos-pdp` OPA Service over gRPC external authorization. `AuthzProjectionReconciler` projects `policy.rego` plus `data.json` from CRDs; the published data contract is `data.kaos.grants`, issuer-keyed `data.kaos.jwks`, and `data.kaos.agents`. Select agent identity with `--agent-auth-enabled` (`service-account`, `aib`, or `keycloak`) and user identity with `--user-auth-enabled` (`keycloak` or `none`). Keycloak agent identity uses OIDC DCR; provision its initial-access token in the referenced Secret before the operator starts. See `docs/security/authorization.md`.
@@ -108,7 +107,7 @@ Envoy Gateway verifies agent JWTs and calls the fail-closed `kaos-pdp` OPA Servi
 - `operator/api/v1alpha1/*_types.go`: CRD schemas
 - `operator/controllers/*_controller.go`: Reconciliation logic
 - `operator/controllers/authz_projection_controller.go`: Authorization policy ConfigMap + identity projection
-- `operator/internal/authz/adapters/projector_aib_exchange.go`: Exchange-only AIB service, permission-set, and agent projection
+- `operator/internal/authz/adapters/projector_aib_exchange.go`: Poll-based reflection of AIB-administered exchange bindings into generated egress plumbing
 - `operator/internal/authz/`: Static policy rego, data document builder, JWKS fetch, published `data-schema.md`
 - `operator/chart/`: Helm chart (generated from kustomize)
 - `pydantic-ai-server/pais/server.py`: AgentServer, create_agent_server, routes, _run_autonomous

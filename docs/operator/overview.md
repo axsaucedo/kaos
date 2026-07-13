@@ -11,7 +11,6 @@ flowchart TB
         crd2["ModelAPI CRD"]
         crd3["MCPServer CRD"]
         crd4["MemoryStore CRD"]
-        crd5["ThirdPartyService CRD"]
     end
     
     subgraph controller["Agentic Operator Controller Manager<br/>(kaos-system namespace)"]
@@ -19,7 +18,7 @@ flowchart TB
         mr["ModelAPIReconciler"]
         mcpr["MCPServerReconciler"]
         msr["MemoryStoreReconciler"]
-        tpsr["Token exchange projection"]
+        aibr["AIB token-exchange reflector"]
     end
     
     subgraph user["User Namespace"]
@@ -33,12 +32,13 @@ flowchart TB
     crd2 --> mr
     crd3 --> mcpr
     crd4 --> msr
-    crd5 --> tpsr
+    AIB["AIB admin API"] --> aibr
     
     ar --> ad
     mr --> md
     mcpr --> mcpd
     msr --> msd
+    aibr --> egress["Generated egress Backends<br/>+ HTTPRoutes + ext_proc policies"]
 ```
 
 ## Controllers
@@ -129,9 +129,9 @@ Manages MemoryStore custom resources (the central memory service backing long-te
 
 See [Memory Architecture](./memory-architecture.md) for the full design.
 
-### ThirdPartyService
+### AIB token-exchange reflection
 
-`ThirdPartyService` is the optional, namespaced declaration for delegated third-party access. One object contains the provider issuer or explicit OAuth endpoints, a Secret reference for its OAuth client, protected-resource URLs, the dedicated egress `HTTPRoute`, available scopes, and the real Agent-to-scope bindings. For each bound Agent, the operator injects the protected-resource URL prefixes and Keycloak exchange settings used by the runtime to identify calls that need a delegated user token. When token exchange is disabled, these declarations do not change routing or authorization.
+When token exchange is enabled, third-party services and Agent permission-set bindings are administered in AIB rather than a KAOS CRD. The operator polls AIB, keeps each matching Agent record's stable `kaos/<namespace>/<name>` key and DCR `client_id` current, generates FQDN egress Backends and HTTPRoutes, attaches ext_proc only to those generated routes, and injects protected-resource targets only into bound Agent pods.
 
 ## Resource Dependencies
 
