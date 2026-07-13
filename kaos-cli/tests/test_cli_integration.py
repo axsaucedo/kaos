@@ -1369,7 +1369,22 @@ class TestAuthWiring:
         mappers = {
             mapper["name"]: mapper for mapper in clients["kaos"]["protocolMappers"]
         }
-        assert set(mappers) == {"kaos-audience", "kaos-groups", "kaos-subject"}
+        assert set(mappers) == {
+            "kaos-audience",
+            "kaos-groups",
+            "kaos-subject",
+            "token-exchange-audience",
+        }
+        assert mappers["token-exchange-audience"] == {
+            "name": "token-exchange-audience",
+            "protocol": "openid-connect",
+            "protocolMapper": "oidc-audience-mapper",
+            "config": {
+                "included.custom.audience": "token-exchange-broker",
+                "id.token.claim": "false",
+                "access.token.claim": "true",
+            },
+        }
         assert mappers["kaos-groups"] == {
             "name": "kaos-groups",
             "protocol": "openid-connect",
@@ -1423,6 +1438,17 @@ class TestAuthWiring:
 
         issuer = _default_user_auth_issuer("kc-ns", "keycloak")
         assert issuer == "http://keycloak.kc-ns.svc.cluster.local:8080/realms/kaos"
+
+    def test_keycloak_dev_enables_token_exchange_features_when_requested(self):
+        from kaos_cli.install import _keycloak_dev_manifests
+
+        deployment = _keycloak_dev_manifests("keycloak", "keycloak", True)[0]
+        args = deployment["spec"]["template"]["spec"]["containers"][0]["args"]
+        assert args == [
+            "start-dev",
+            "--import-realm",
+            "--features=token-exchange,admin-fine-grained-authz",
+        ]
 
     def test_auth_enabled_wires_user_auth_values(self):
         """aib-keycloak (user-auth on) adds security.userAuth.* args."""
@@ -1957,6 +1983,9 @@ class TestAuthWiring:
         assert "EXTPROC_OAUTH2_TLS_ALLOW_HTTP" not in joined_aib
         assert "EXTPROC_OAUTH2_CLIENT_CREDENTIALS_ENDPOINT" not in joined_aib
         assert "extProc.oauth2.clientCredentialsEndpoint=" in joined_aib
+        assert 'client_assertion.azp == "kaos"' in joined_aib
+
+        assert mock_keycloak.call_args.args[-1] is True
 
         joined = " ".join(captured["operator"])
         assert "security.agentAuth.identity.provider=oidc" in joined

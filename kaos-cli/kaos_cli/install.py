@@ -55,6 +55,7 @@ KEYCLOAK_HTTP_PORT = 8080
 DEFAULT_USER_AUTH_REALM = "kaos"
 DEFAULT_USER_AUTH_AUDIENCE = "kaos"
 DEFAULT_USER_AUTH_CLIENT_ID = "kaos"
+DEFAULT_TOKEN_EXCHANGE_AUDIENCE = "token-exchange-broker"
 DEFAULT_OIDC_CREDENTIAL_SECRET_PREFIX = "kaos-oidc"
 DEFAULT_OIDC_REGISTRATION_SECRET_NAME = "kaos-oidc-registration"
 DEFAULT_OIDC_REGISTRATION_SECRET_KEY = "token"
@@ -843,7 +844,7 @@ def _build_token_exchange_aib_args(
         "--set",
         f"broker.oauth2AuthorizationServer.proxy.upstreamTokenEndpoint={keycloak_token_endpoint}",
         "--set",
-        "broker.tokenExchange.expectedAudience=token-exchange-broker",
+        f"broker.tokenExchange.expectedAudience={DEFAULT_TOKEN_EXCHANGE_AUDIENCE}",
         "--set",
         "broker.tokenExchange.claimExtraction.principalExpression=subject_token.sub",
         "--set",
@@ -853,7 +854,7 @@ def _build_token_exchange_aib_args(
         "broker.tokenExchange.authorization.type=cel",
         "--set",
         "broker.tokenExchange.authorization.cel.expression="
-        "client_assertion.azp == subject_token.azp",
+        f'client_assertion.azp == "{DEFAULT_USER_AUTH_CLIENT_ID}"',
         "--set",
         "extProc.enabled=true",
         "--set",
@@ -919,6 +920,16 @@ def _keycloak_realm_json(
                         "protocolMapper": "oidc-audience-mapper",
                         "config": {
                             "included.client.audience": audience,
+                            "id.token.claim": "false",
+                            "access.token.claim": "true",
+                        },
+                    },
+                    {
+                        "name": "token-exchange-audience",
+                        "protocol": "openid-connect",
+                        "protocolMapper": "oidc-audience-mapper",
+                        "config": {
+                            "included.custom.audience": DEFAULT_TOKEN_EXCHANGE_AUDIENCE,
                             "id.token.claim": "false",
                             "access.token.claim": "true",
                         },
@@ -1031,7 +1042,9 @@ def _bootstrap_keycloak_realm(
     return True
 
 
-def _keycloak_dev_manifests(namespace: str, release: str) -> list[dict]:
+def _keycloak_dev_manifests(
+    namespace: str, release: str, token_exchange_enabled: bool = False
+) -> list[dict]:
     """Self-contained Keycloak dev deployment (start-dev, H2 in-memory, no DB).
 
     Mounts the realm-import ConfigMap and runs with --import-realm so the
@@ -1040,6 +1053,10 @@ def _keycloak_dev_manifests(namespace: str, release: str) -> list[dict]:
     """
     labels = {"app": release}
     configmap_name = _keycloak_realm_configmap_name(release)
+    args = ["start-dev", "--import-realm"]
+    if token_exchange_enabled:
+        args.append("--features=token-exchange,admin-fine-grained-authz")
+
     deployment = {
         "apiVersion": "apps/v1",
         "kind": "Deployment",
@@ -1054,7 +1071,7 @@ def _keycloak_dev_manifests(namespace: str, release: str) -> list[dict]:
                         {
                             "name": "keycloak",
                             "image": DEFAULT_KEYCLOAK_IMAGE,
-                            "args": ["start-dev", "--import-realm"],
+                            "args": args,
                             "env": [
                                 {
                                     "name": "KEYCLOAK_ADMIN",
@@ -1110,6 +1127,7 @@ def _install_keycloak(
     audience: str,
     chart_path: str | None,
     wait: bool,
+    token_exchange_enabled: bool = False,
 ) -> bool:
     """Install Keycloak as the human user identity provider.
 
@@ -1140,7 +1158,9 @@ def _install_keycloak(
             typer.echo(f"Error installing Keycloak: {result.stderr}", err=True)
             return False
     else:
-        for manifest in _keycloak_dev_manifests(namespace, release):
+        for manifest in _keycloak_dev_manifests(
+            namespace, release, token_exchange_enabled
+        ):
             result = _run_kubectl(
                 ["apply", "-f", "-"], check=False, input=json.dumps(manifest)
             )
@@ -1364,6 +1384,7 @@ def install_command(
                 user_auth_audience,
                 keycloak_chart_path,
                 wait,
+                token_exchange_enabled,
             ):
                 typer.echo(
                     "Warning: Keycloak installation failed, continuing...", err=True
