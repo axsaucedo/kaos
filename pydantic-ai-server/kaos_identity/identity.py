@@ -201,10 +201,15 @@ class ActorTokenManager:
             self._refresh_at = 0.0
 
     def _acquire_sync(self) -> tuple[str, float]:
+        from .instrument import suppress_instrumentation
+
         last_exc: Optional[Exception] = None
         for attempt in range(_MAX_ATTEMPTS):
             try:
-                resp = httpx.post(self._token_endpoint, data=self._grant_params(), timeout=10.0)
+                with suppress_instrumentation():
+                    resp = httpx.post(
+                        self._token_endpoint, data=self._grant_params(), timeout=10.0
+                    )
                 if resp.status_code == 401:
                     self._credential.reload()
                 resp.raise_for_status()
@@ -241,11 +246,16 @@ class ActorTokenManager:
         return await self.token_async()
 
     async def _acquire_async(self) -> tuple[str, float]:
+        from .instrument import suppress_instrumentation
+
         last_exc: Optional[Exception] = None
         for attempt in range(_MAX_ATTEMPTS):
             try:
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    resp = await client.post(self._token_endpoint, data=self._grant_params())
+                with suppress_instrumentation():
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        resp = await client.post(
+                            self._token_endpoint, data=self._grant_params()
+                        )
                 if resp.status_code == 401:
                     self._credential.reload()
                 resp.raise_for_status()
