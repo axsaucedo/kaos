@@ -134,18 +134,22 @@ func (r *AuthzProjectionReconciler) Reconcile(ctx context.Context, _ reconcile.R
 			desired.AccessGrants = append(desired.AccessGrants, accessGrantForProjection(&accessGrants[i]))
 		}
 	}
+	var projectorErrors []error
 	for _, projector := range r.Projectors {
 		if err := projector.Apply(ctx, desired); err != nil {
-			var statusErrors []error
-			for i := range accessGrants {
-				if r.AuthorizationOperational && hasUserProvider && r.AccessGrantProjection {
-					if statusErr := r.updateAccessGrantStatus(ctx, &accessGrants[i], metav1.ConditionFalse, "ProjectionFailed", "Policy projection failed; this AccessGrant is not currently enforced"); statusErr != nil {
-						statusErrors = append(statusErrors, fmt.Errorf("updating AccessGrant %s/%s failure status: %w", accessGrants[i].Namespace, accessGrants[i].Name, statusErr))
-					}
+			projectorErrors = append(projectorErrors, err)
+		}
+	}
+	if len(projectorErrors) > 0 {
+		var statusErrors []error
+		for i := range accessGrants {
+			if r.AuthorizationOperational && hasUserProvider && r.AccessGrantProjection {
+				if statusErr := r.updateAccessGrantStatus(ctx, &accessGrants[i], metav1.ConditionFalse, "ProjectionFailed", "Policy projection failed; this AccessGrant is not currently enforced"); statusErr != nil {
+					statusErrors = append(statusErrors, fmt.Errorf("updating AccessGrant %s/%s failure status: %w", accessGrants[i].Namespace, accessGrants[i].Name, statusErr))
 				}
 			}
-			return reconcile.Result{}, errors.Join(err, errors.Join(statusErrors...))
 		}
+		return reconcile.Result{}, errors.Join(errors.Join(projectorErrors...), errors.Join(statusErrors...))
 	}
 	if r.AuthorizationOperational && hasUserProvider && r.AccessGrantProjection {
 		for i := range accessGrants {
