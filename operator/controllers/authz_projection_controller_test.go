@@ -128,6 +128,23 @@ func TestProjectionReconcileDispatchesToAllProjectors(t *testing.T) {
 	}
 }
 
+func TestProjectionReconcileContinuesAfterProjectorFailure(t *testing.T) {
+	scheme := newTestScheme(t)
+	first := &fakeProjector{err: errors.New("identity unavailable")}
+	second := &fakeProjector{}
+	r := &AuthzProjectionReconciler{
+		Client:     fake.NewClientBuilder().WithScheme(scheme).Build(),
+		Scheme:     scheme,
+		Projectors: []PolicyProjector{first, second},
+	}
+	if _, err := r.Reconcile(context.Background(), authzSentinel); err == nil || !strings.Contains(err.Error(), "identity unavailable") {
+		t.Fatalf("reconcile error = %v", err)
+	}
+	if first.calls != 1 || second.calls != 1 {
+		t.Fatalf("projector calls = %d/%d, want 1/1", first.calls, second.calls)
+	}
+}
+
 func TestProjectionReconcileMarksAccessGrantUnenforcedWhenAuthorizationDisabled(t *testing.T) {
 	scheme := newTestScheme(t)
 	grant := &kaosv1alpha1.AccessGrant{ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "users"}}
