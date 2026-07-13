@@ -98,9 +98,17 @@ func TestRefreshAgentIDsMigratesLegacyNameAndPreservesBindings(t *testing.T) {
 	}
 }
 
-func TestGeneratedEgressUsesFQDNBackendAndTLSOrigination(t *testing.T) {
+func TestGeneratedEgressUsesProtectedResourceOrigin(t *testing.T) {
 	origin := exchangeOrigin{Scheme: "https", Hostname: "api.example.com", Port: 443}
 	backend := constructExchangeBackend("demo", "service-id", origin, "kaos-egress-test")
+	endpoints, found, err := unstructuredNestedSlice(backend.Object, "spec", "endpoints")
+	if err != nil || !found || len(endpoints) != 1 {
+		t.Fatalf("backend endpoints = %#v, found=%v err=%v", endpoints, found, err)
+	}
+	fqdn := endpoints[0].(map[string]any)["fqdn"].(map[string]any)
+	if fqdn["hostname"] != origin.Hostname || fqdn["port"] != int64(origin.Port) {
+		t.Fatalf("backend origin = %#v, want host=%q port=%d", fqdn, origin.Hostname, origin.Port)
+	}
 	tls, found, err := unstructuredNestedMap(backend.Object, "spec", "tls")
 	if err != nil || !found || tls["wellKnownCACertificates"] != "System" {
 		t.Fatalf("backend TLS = %#v, found=%v err=%v", tls, found, err)
@@ -112,43 +120,6 @@ func TestGeneratedEgressUsesFQDNBackendAndTLSOrigination(t *testing.T) {
 	ref := route.Spec.Rules[0].BackendRefs[0].BackendRef.BackendObjectReference
 	if ref.Group == nil || *ref.Group != extensionPolicyGroup || ref.Kind == nil || *ref.Kind != backendKind {
 		t.Fatalf("backendRef = %#v", ref)
-	}
-}
-
-func TestBackendOriginUsesProtectedResourceServiceAnnotation(t *testing.T) {
-	service := &corev1.Service{ObjectMeta: metav1.ObjectMeta{
-		Namespace: "demo",
-		Name:      "github-mock-egress",
-		Annotations: map[string]string{
-			exchangeUpstreamOrigin: "http://mock-api.demo.svc.cluster.local:9000",
-		},
-	}}
-	projector := &ExchangeProjector{Client: fake.NewClientBuilder().WithScheme(newTestScheme(t)).WithObjects(service).Build()}
-	protected := exchangeOrigin{Scheme: "http", Hostname: "github-mock-egress.demo.svc.cluster.local", Port: 80}
-
-	got, err := projector.backendOrigin(context.Background(), "demo", protected)
-	if err != nil {
-		t.Fatalf("backendOrigin: %v", err)
-	}
-	want := exchangeOrigin{Scheme: "http", Hostname: "mock-api.demo.svc.cluster.local", Port: 9000}
-	if got != want {
-		t.Fatalf("backend origin = %#v, want %#v", got, want)
-	}
-}
-
-func TestBackendOriginRejectsAnnotationWithPath(t *testing.T) {
-	service := &corev1.Service{ObjectMeta: metav1.ObjectMeta{
-		Namespace: "demo",
-		Name:      "github-mock-egress",
-		Annotations: map[string]string{
-			exchangeUpstreamOrigin: "http://mock-api.demo.svc.cluster.local:9000/api",
-		},
-	}}
-	projector := &ExchangeProjector{Client: fake.NewClientBuilder().WithScheme(newTestScheme(t)).WithObjects(service).Build()}
-	protected := exchangeOrigin{Scheme: "http", Hostname: "github-mock-egress.demo.svc.cluster.local", Port: 80}
-
-	if _, err := projector.backendOrigin(context.Background(), "demo", protected); err == nil {
-		t.Fatal("backendOrigin accepted an annotation with a path")
 	}
 }
 
