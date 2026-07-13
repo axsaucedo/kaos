@@ -109,7 +109,7 @@ def _run_kubectl(
     return subprocess.run(cmd, capture_output=True, text=True, check=check, **kwargs)
 
 
-def _install_gateway_api() -> bool:
+def _install_gateway_api(enable_backend: bool = False) -> bool:
     """Install Envoy Gateway (includes Gateway API CRDs) and create GatewayClass."""
     typer.echo(f"Installing Envoy Gateway ({ENVOY_GATEWAY_VERSION})...")
 
@@ -164,21 +164,22 @@ def _install_gateway_api() -> bool:
                 check=False,
             )
 
-    result = run_helm_command(
-        [
-            "upgrade",
-            "--install",
-            "envoy-gateway",
-            "oci://docker.io/envoyproxy/gateway-helm",
-            "--version",
-            ENVOY_GATEWAY_VERSION,
-            "--namespace",
-            "envoy-gateway-system",
-            "--create-namespace",
-        ]
-        + (["--skip-crds"] if crd_pre_applied else []),
-        check=False,
-    )
+    helm_args = [
+        "upgrade",
+        "--install",
+        "envoy-gateway",
+        "oci://docker.io/envoyproxy/gateway-helm",
+        "--version",
+        ENVOY_GATEWAY_VERSION,
+        "--namespace",
+        "envoy-gateway-system",
+        "--create-namespace",
+    ] + (["--skip-crds"] if crd_pre_applied else [])
+    if enable_backend:
+        helm_args.extend(
+            ["--set", "config.envoyGateway.extensionApis.enableBackend=true"]
+        )
+    result = run_helm_command(helm_args, check=False)
     if result.returncode != 0:
         typer.echo(f"Error installing Envoy Gateway: {result.stderr}", err=True)
         return False
@@ -1304,7 +1305,7 @@ def install_command(
             typer.echo("Warning: MetalLB installation failed, continuing...", err=True)
 
     if gateway_enabled:
-        if not _install_gateway_api():
+        if not _install_gateway_api(enable_backend=token_exchange_enabled):
             typer.echo(
                 "Warning: Gateway API installation failed, continuing...", err=True
             )
