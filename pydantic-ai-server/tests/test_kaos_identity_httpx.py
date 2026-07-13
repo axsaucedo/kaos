@@ -1,10 +1,12 @@
 """Unit tests for kaos_identity.instrument_httpx outbound header injection."""
 
+import asyncio
 import base64
 import json
 from urllib.parse import parse_qs
 
 import kaos_identity
+from kaos_identity import identity
 import httpx
 import pytest
 import respx
@@ -114,6 +116,40 @@ def test_instrument_httpx_is_idempotent():
     kaos_identity.instrument_httpx()
     assert httpx.AsyncClient.send is send_before
     assert inst._httpx_patched is True
+
+
+@respx.mock
+@pytest.mark.asyncio
+async def test_managed_mint_does_not_deadlock_under_patch(monkeypatch):
+    """Regression: the managed actor-token mint must not re-enter the outbound patch.
+
+    On the first outbound hop the patch injects the actor token, which the manager mints via
+    its own httpx request *while holding its non-reentrant refresh lock*. If that mint were
+    instrumented it would re-enter ``token_async`` and block re-acquiring the lock — a
+    permanent hang with no I/O and no timeout (observed live on-cluster). The mint must be
+    issued under ``suppress_instrumentation`` so it bypasses the patch.
+    """
+    token_route = respx.post("http://broker/oauth2/token").respond(
+        200, json={"access_token": "minted-actor", "expires_in": 300}
+    )
+    target = respx.get("http://downstream/data").respond(200)
+    monkeypatch.setenv("AGENT_AUTH_TOKEN_ENDPOINT", "http://broker/oauth2/token")
+    monkeypatch.setenv("AGENT_AUTH_CLIENT_ID", "kaos-agent-default-researcher")
+    monkeypatch.setenv("AGENT_AUTH_CLIENT_SECRET", "s3cr3t")
+    identity.reset_manager()
+    identity.instrument_agent_identity()
+    try:
+        async with httpx.AsyncClient() as client:
+            # A regression re-introduces a permanent deadlock; the timeout turns that into a
+            # clear failure instead of a hung suite.
+            await asyncio.wait_for(client.get("http://downstream/data"), timeout=5.0)
+    finally:
+        identity.reset_manager()
+
+    assert token_route.called  # the mint actually ran
+    assert target.calls.last.request.headers["x-agent-authorization"] == "Bearer minted-actor"
+    # The mint request itself was bypassed by the patch (never instrumented).
+    assert "x-agent-authorization" not in token_route.calls.last.request.headers
 
 
 @respx.mock
