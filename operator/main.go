@@ -45,7 +45,7 @@ var (
 //+kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gateways,verbs=get;list;watch
 //+kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=referencegrants,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=gateway.envoyproxy.io,resources=securitypolicies,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups=gateway.envoyproxy.io,resources=envoyextensionpolicies,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=gateway.envoyproxy.io,resources=backends;envoyextensionpolicies,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
 
 func init() {
@@ -138,18 +138,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controllers.ThirdPartyServiceReconciler{
-		Client:               mgr.GetClient(),
-		Scheme:               mgr.GetScheme(),
-		TokenExchangeEnabled: getBoolWithDefault("TOKEN_EXCHANGE_ENABLED", false),
-		ExtProcServiceName:   os.Getenv("TOKEN_EXCHANGE_EXTPROC_SERVICE_NAME"),
-		ExtProcNamespace:     os.Getenv("TOKEN_EXCHANGE_EXTPROC_NAMESPACE"),
-		ExtProcPort:          getIntWithDefault("TOKEN_EXCHANGE_EXTPROC_PORT", 50051),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "ThirdPartyService")
-		os.Exit(1)
-	}
-
 	// Identity provisioning and policy compilation are independent projection
 	// sinks. The controller runs whenever either sink is configured.
 	cfg := security.GetConfig()
@@ -198,6 +186,7 @@ func main() {
 		}
 		projectors = append(projectors, &adapters.ExchangeProjector{
 			Client: mgr.GetClient(),
+			Scheme: mgr.GetScheme(),
 			AIB: aib.New(
 				exchangeAdminURL,
 				getEnvWithDefault("TOKEN_EXCHANGE_AIB_PRINCIPAL", "kaos-operator"),
@@ -206,6 +195,9 @@ func main() {
 			),
 			Enabled:          true,
 			OIDCSecretPrefix: cfg.CredentialSecretPrefixOrDefault(),
+			ExtProcName:      os.Getenv("TOKEN_EXCHANGE_EXTPROC_SERVICE_NAME"),
+			ExtProcNamespace: os.Getenv("TOKEN_EXCHANGE_EXTPROC_NAMESPACE"),
+			ExtProcPort:      getIntWithDefault("TOKEN_EXCHANGE_EXTPROC_PORT", 50051),
 		})
 	}
 	if policyName != "" && policyNamespace != "" {
@@ -236,6 +228,7 @@ func main() {
 		AuthorizationOperational: policyName != "" && policyNamespace != "",
 		AccessGrantProjection:    policyName != "" && policyNamespace != "" && cfg.PolicyDataSourceOrDefault() == security.PolicyDataAutomated && !cfg.PolicyRegoOverride,
 		Recorder:                 mgr.GetEventRecorderFor("kaos-authz-projection"),
+		PollInterval:             tokenExchangePollInterval(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "AuthzProjection")
 		os.Exit(1)
@@ -258,6 +251,13 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+func tokenExchangePollInterval() time.Duration {
+	if !getBoolWithDefault("TOKEN_EXCHANGE_ENABLED", false) {
+		return 0
+	}
+	return getDurationWithDefault("TOKEN_EXCHANGE_POLL_INTERVAL", 45*time.Second)
 }
 
 func getEnvWithDefault(key, defaultValue string) string {

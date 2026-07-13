@@ -109,6 +109,12 @@ func AgentExternalID(namespace, name string) string {
 	return ResolveLogicalID(AgentSlug, namespace, name)
 }
 
+// AIBAgentExternalID is the stable logical name used by the exchange broker.
+// It deliberately does not use the DCR client UUID or the internal kaos:// ID.
+func AIBAgentExternalID(namespace, name string) string {
+	return fmt.Sprintf("kaos/%s/%s", namespace, name)
+}
+
 // IsKAOSServiceClientID reports whether a broker service client_id was projected
 // by KAOS (and is therefore safe to prune).
 func IsKAOSServiceClientID(clientID string) bool {
@@ -202,42 +208,6 @@ type DesiredState struct {
 	Agents         []DesiredAgent
 	Resources      []Resource
 	AccessGrants   []AccessGrant
-	// ThirdPartyServices is exchange-only input. It is ignored by the PDP data path.
-	ThirdPartyServices []DesiredThirdPartyService
-}
-
-// DesiredThirdPartyService is the exchange-specific projection of a namespaced declaration.
-type DesiredThirdPartyService struct {
-	Namespace          string
-	Name               string
-	DisplayName        string
-	ClientID           string
-	ClientSecretName   string
-	ClientSecretKey    string
-	IssuerURI          string
-	TokenEndpoint      string
-	AuthorizeEndpoint  string
-	Scopes             []ThirdPartyScope
-	ProtectedResources []string
-	RouteName          string
-	Access             []ThirdPartyAccess
-}
-
-// ThirdPartyScope is an OAuth scope exposed by a declared service.
-type ThirdPartyScope struct {
-	Name        string
-	Description string
-}
-
-// ThirdPartyAccess binds one Agent to a real subset of provider scopes.
-type ThirdPartyAccess struct {
-	Agent  string
-	Scopes []string
-}
-
-// ThirdPartyPermissionSetName returns the stable per-Agent permission-set name.
-func ThirdPartyPermissionSetName(namespace, service, agent string) string {
-	return fmt.Sprintf("kaos:thirdparty:%s:%s:%s", namespace, service, agent)
 }
 
 // Project turns a list of KAOS resources into the desired authorization graph.

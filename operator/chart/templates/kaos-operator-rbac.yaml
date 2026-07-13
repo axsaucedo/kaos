@@ -87,10 +87,21 @@ rules:
   - update
   - watch
 - apiGroups:
+  - gateway.envoyproxy.io
+  resources:
+  - backends
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
   - kaos.tools
   resources:
   - accessgrants
-  - thirdpartyservices
   verbs:
   - get
   - list
@@ -103,7 +114,6 @@ rules:
   - mcpservers/status
   - memorystores/status
   - modelapis/status
-  - thirdpartyservices/status
   verbs:
   - get
   - patch

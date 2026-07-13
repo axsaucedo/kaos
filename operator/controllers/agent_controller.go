@@ -33,6 +33,7 @@ import (
 )
 
 const agentFinalizerName = "kaos.tools/agent-finalizer"
+const exchangeReflectionName = "kaos-token-exchange-reflection"
 
 // AgentReconciler reconciles an Agent object
 type AgentReconciler struct {
@@ -47,10 +48,10 @@ type AgentReconciler struct {
 //+kubebuilder:rbac:groups=kaos.tools,resources=modelapis,verbs=get;list;watch
 //+kubebuilder:rbac:groups=kaos.tools,resources=mcpservers,verbs=get;list;watch
 //+kubebuilder:rbac:groups=kaos.tools,resources=memorystores,verbs=get;list;watch
-//+kubebuilder:rbac:groups=kaos.tools,resources=thirdpartyservices,verbs=get;list;watch
 //+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -968,18 +969,20 @@ func (r *AgentReconciler) tokenExchangeConfig(ctx context.Context, agent *kaosv1
 	if !strings.EqualFold(os.Getenv("TOKEN_EXCHANGE_ENABLED"), "true") {
 		return "", nil
 	}
-	services := &kaosv1alpha1.ThirdPartyServiceList{}
-	if err := r.List(ctx, services, client.InNamespace(agent.Namespace)); err != nil {
-		return "", fmt.Errorf("listing ThirdPartyServices: %w", err)
+	reflection := &corev1.ConfigMap{}
+	if err := r.Get(ctx, types.NamespacedName{Namespace: agent.Namespace, Name: exchangeReflectionName}, reflection); err != nil {
+		if apierrors.IsNotFound(err) {
+			return "", nil
+		}
+		return "", fmt.Errorf("reading AIB exchange reflection: %w", err)
 	}
 	var targets []string
-	for _, service := range services.Items {
-		for _, access := range service.Spec.Access {
-			if access.Agent == agent.Name {
-				targets = append(targets, service.Spec.ProtectedResources...)
-				break
-			}
-		}
+	rawTargets := reflection.Data[agent.Name]
+	if rawTargets == "" {
+		return "", nil
+	}
+	if err := json.Unmarshal([]byte(rawTargets), &targets); err != nil {
+		return "", fmt.Errorf("reading reflected targets for Agent %s/%s: %w", agent.Namespace, agent.Name, err)
 	}
 	if len(targets) == 0 {
 		return "", nil
@@ -1240,10 +1243,13 @@ func (r *AgentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		return requests
 	})
 
-	mapThirdPartyServiceToAgents := handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []ctrl.Request {
-		service := obj.(*kaosv1alpha1.ThirdPartyService)
+	mapExchangeReflectionToAgents := handler.EnqueueRequestsFromMapFunc(func(ctx context.Context, obj client.Object) []ctrl.Request {
+		reflection := obj.(*corev1.ConfigMap)
+		if reflection.Name != exchangeReflectionName {
+			return nil
+		}
 		agents := &kaosv1alpha1.AgentList{}
-		if err := r.List(ctx, agents, client.InNamespace(service.Namespace)); err != nil {
+		if err := r.List(ctx, agents, client.InNamespace(reflection.Namespace)); err != nil {
 			return nil
 		}
 		requests := make([]ctrl.Request, 0, len(agents.Items))
@@ -1261,7 +1267,7 @@ func (r *AgentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Watches(&kaosv1alpha1.ModelAPI{}, mapModelAPIToAgents).
 		Watches(&kaosv1alpha1.MCPServer{}, mapMCPServerToAgents).
 		Watches(&kaosv1alpha1.MemoryStore{}, mapMemoryStoreToAgents).
-		Watches(&kaosv1alpha1.ThirdPartyService{}, mapThirdPartyServiceToAgents)
+		Watches(&corev1.ConfigMap{}, mapExchangeReflectionToAgents)
 
 	// Own HTTPRoutes if Gateway API is enabled
 	if gateway.GetConfig().Enabled {

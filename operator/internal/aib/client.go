@@ -179,6 +179,18 @@ func (c *Client) Upsert(ctx context.Context, collection, matchField, matchValue 
 	return c.createOrGet(ctx, collection, matchField, matchValue, body)
 }
 
+// Update replaces one admin record by id.
+func (c *Client) Update(ctx context.Context, collection, id string, body map[string]any) error {
+	resp, data, err := c.do(ctx, http.MethodPut, "/"+collection+"/"+id, body)
+	if err != nil {
+		return err
+	}
+	if resp.StatusCode/100 != 2 {
+		return fmt.Errorf("update %s %s: %d %s", collection, id, resp.StatusCode, string(data))
+	}
+	return nil
+}
+
 // CreateOrGetAgent registers an agent or returns its existing id.
 func (c *Client) CreateOrGetAgent(ctx context.Context, externalID string, body map[string]any) (string, error) {
 	return c.createOrGet(ctx, "agents", "display_name", externalID, body)

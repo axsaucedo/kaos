@@ -7,4 +7,3 @@ resources:
 - bases/kaos.tools_mcpservers.yaml
 - bases/kaos.tools_modelapis.yaml
 - bases/kaos.tools_memorystores.yaml
-- bases/kaos.tools_thirdpartyservices.yaml

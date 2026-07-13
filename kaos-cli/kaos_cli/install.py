@@ -72,7 +72,6 @@ KAOS_CRDS = [
     "agents.kaos.tools",
     "mcpservers.kaos.tools",
     "modelapis.kaos.tools",
-    "thirdpartyservices.kaos.tools",
 ]
 
 
@@ -1595,7 +1594,7 @@ def uninstall_command(
 
     # Delete all KAOS custom resources so operator can process finalizers
     typer.echo("Deleting KAOS custom resources...")
-    for resource_type in ["agents", "mcpservers", "modelapis", "thirdpartyservices"]:
+    for resource_type in ["agents", "mcpservers", "modelapis"]:
         _run_kubectl(
             ["delete", resource_type, "--all-namespaces", "--all", "--timeout=60s"],
             check=False,
