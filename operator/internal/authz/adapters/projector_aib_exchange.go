@@ -32,6 +32,7 @@ const (
 	exchangeRouteLabel     = "kaos.tools/token-exchange-route"
 	exchangeServiceIDLabel = "kaos.tools/token-exchange-service-id"
 	exchangeSourceNSLabel  = "kaos.tools/token-exchange-source-namespace"
+	exchangeUpstreamOrigin = "kaos.tools/token-exchange-upstream-origin"
 	exchangeFieldOwner     = "kaos-token-exchange-reflector"
 	legacyAIBAgentIDPrefix = "kaos://agent/"
 	extensionPolicyGroup   = "gateway.envoyproxy.io"
@@ -314,7 +315,11 @@ func (p *ExchangeProjector) reconcileAnchor(ctx context.Context, namespace strin
 }
 
 func (p *ExchangeProjector) reconcileOrigin(ctx context.Context, owner *corev1.ConfigMap, serviceID string, origin exchangeOrigin, name string) error {
-	backend := constructExchangeBackend(owner.Namespace, serviceID, origin, name)
+	backendOrigin, err := p.backendOrigin(ctx, owner.Namespace, origin)
+	if err != nil {
+		return err
+	}
+	backend := constructExchangeBackend(owner.Namespace, serviceID, backendOrigin, name)
 	if err := controllerutil.SetControllerReference(owner, backend, p.Scheme); err != nil {
 		return err
 	}
@@ -346,6 +351,40 @@ func (p *ExchangeProjector) reconcileOrigin(ctx context.Context, owner *corev1.C
 		}
 	}
 	return nil
+}
+
+func (p *ExchangeProjector) backendOrigin(ctx context.Context, namespace string, protected exchangeOrigin) (exchangeOrigin, error) {
+	suffix := "." + namespace + ".svc.cluster.local"
+	serviceName, found := strings.CutSuffix(protected.Hostname, suffix)
+	if !found || serviceName == "" || strings.Contains(serviceName, ".") {
+		return protected, nil
+	}
+	service := &corev1.Service{}
+	if err := p.Client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: serviceName}, service); err != nil {
+		if apierrors.IsNotFound(err) {
+			return protected, nil
+		}
+		return exchangeOrigin{}, fmt.Errorf("reading protected-resource Service %s/%s: %w", namespace, serviceName, err)
+	}
+	value := strings.TrimSpace(service.Annotations[exchangeUpstreamOrigin])
+	if value == "" {
+		return protected, nil
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Hostname() == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") ||
+		(parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.User != nil {
+		return exchangeOrigin{}, fmt.Errorf("Service %s/%s annotation %s must be an HTTP(S) origin", namespace, serviceName, exchangeUpstreamOrigin)
+	}
+	port := 80
+	if parsed.Scheme == "https" {
+		port = 443
+	}
+	if parsed.Port() != "" {
+		if _, err := fmt.Sscanf(parsed.Port(), "%d", &port); err != nil || port < 1 || port > 65535 {
+			return exchangeOrigin{}, fmt.Errorf("Service %s/%s annotation %s has invalid port %q", namespace, serviceName, exchangeUpstreamOrigin, parsed.Port())
+		}
+	}
+	return exchangeOrigin{Scheme: parsed.Scheme, Hostname: parsed.Hostname(), Port: port}, nil
 }
 
 func constructExchangeBackend(namespace, serviceID string, origin exchangeOrigin, name string) *unstructured.Unstructured {
