@@ -107,6 +107,15 @@ autonomous_subject if {
 	data.kaos.agents[id].autonomous == true
 }
 
+delegated_egress if {
+	actor_present
+	actor_id
+	not target_resource
+	claims := verify_token(subject_token, "token-exchange-broker")
+	claims.iss == data.kaos.user.issuer
+	claims.sub != ""
+}
+
 subject_valid if {
 	user_subject
 }
@@ -135,6 +144,10 @@ allow contains {"reason": sprintf("user subject may reach %v", [target_resource]
 	user_granted(user_subject, target_resource)
 }
 
+allow contains {"reason": sprintf("actor %v may perform delegated third-party egress", [actor_id])} if {
+	delegated_egress
+}
+
 deny contains {"reason": "missing or invalid actor token"} if {
 	actor_present
 	not actor_id
@@ -144,6 +157,7 @@ deny contains {"reason": "request declares no target resource"} if {
 	actor_present
 	actor_id
 	not target_resource
+	not delegated_egress
 }
 
 deny contains {"reason": sprintf("actor %v is not granted %v", [actor_id, target_resource])} if {
@@ -156,6 +170,7 @@ deny contains {"reason": sprintf("actor %v is not granted %v", [actor_id, target
 deny contains {"reason": "subject missing or invalid"} if {
 	actor_present
 	not subject_valid
+	not delegated_egress
 }
 
 deny contains {"reason": "no user subject at entry"} if {
