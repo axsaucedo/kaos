@@ -111,6 +111,43 @@ func TestGeneratedEgressUsesFQDNBackendAndTLSOrigination(t *testing.T) {
 	}
 }
 
+func TestBackendOriginUsesProtectedResourceServiceAnnotation(t *testing.T) {
+	service := &corev1.Service{ObjectMeta: metav1.ObjectMeta{
+		Namespace: "demo",
+		Name:      "github-mock-egress",
+		Annotations: map[string]string{
+			exchangeUpstreamOrigin: "http://mock-api.demo.svc.cluster.local:9000",
+		},
+	}}
+	projector := &ExchangeProjector{Client: fake.NewClientBuilder().WithScheme(newTestScheme(t)).WithObjects(service).Build()}
+	protected := exchangeOrigin{Scheme: "http", Hostname: "github-mock-egress.demo.svc.cluster.local", Port: 80}
+
+	got, err := projector.backendOrigin(context.Background(), "demo", protected)
+	if err != nil {
+		t.Fatalf("backendOrigin: %v", err)
+	}
+	want := exchangeOrigin{Scheme: "http", Hostname: "mock-api.demo.svc.cluster.local", Port: 9000}
+	if got != want {
+		t.Fatalf("backend origin = %#v, want %#v", got, want)
+	}
+}
+
+func TestBackendOriginRejectsAnnotationWithPath(t *testing.T) {
+	service := &corev1.Service{ObjectMeta: metav1.ObjectMeta{
+		Namespace: "demo",
+		Name:      "github-mock-egress",
+		Annotations: map[string]string{
+			exchangeUpstreamOrigin: "http://mock-api.demo.svc.cluster.local:9000/api",
+		},
+	}}
+	projector := &ExchangeProjector{Client: fake.NewClientBuilder().WithScheme(newTestScheme(t)).WithObjects(service).Build()}
+	protected := exchangeOrigin{Scheme: "http", Hostname: "github-mock-egress.demo.svc.cluster.local", Port: 80}
+
+	if _, err := projector.backendOrigin(context.Background(), "demo", protected); err == nil {
+		t.Fatal("backendOrigin accepted an annotation with a path")
+	}
+}
+
 func TestExtProcTargetsOnlyOperatorGeneratedEgressRoutes(t *testing.T) {
 	generated := &gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "egress", Labels: managedRouteLabels("service-id")}}
 	policy, err := constructExtProcPolicy(generated, "extproc", "aib-system", 50051)
