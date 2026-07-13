@@ -34,7 +34,7 @@ The protected-resource hostname is the Agent-facing egress name and must resolve
 
 The operator never creates AIB services or permission sets. AIB is the declaration and audit surface; Kubernetes contains only reflected plumbing. Reflection is poll-based and fail-static when AIB is unavailable.
 
-The runtime re-mint is implemented separately. Its contract is an `Authorization: Bearer <token>` header containing a Keycloak token with the original user `sub`, the acting Agent's DCR client id in `azp`, and `token-exchange-broker` in `aud`. The chart orders gateway filters as `jwt_authn`, then the PDP `ext_authz`, then `ext_proc`; ext_proc is fail closed and replaces that header only on the dedicated third-party route.
+The runtime re-mint is implemented separately. Its contract is an `Authorization: Bearer <token>` header containing a Keycloak token with the original user `sub`, the acting Agent's DCR client id in `azp`, and `token-exchange-broker` in `aud`. The PDP requires that `azp` to match the verified actor's projected DCR client id, so unbound or non-reminted egress is denied before ext_proc. The chart orders gateway filters as `jwt_authn`, then the PDP `ext_authz`, then `ext_proc`; ext_proc is fail closed and replaces that header only on the dedicated third-party route.
 
 ServiceAccount token subjects have the form `system:serviceaccount:<namespace>:<serviceaccount-name>`. The policy resolves that issuer subject to the logical actor id through `data.kaos.agents`.
 

@@ -114,6 +114,7 @@ delegated_egress if {
 	claims := verify_token(subject_token, "token-exchange-broker")
 	claims.iss == data.kaos.user.issuer
 	claims.sub != ""
+	claims.azp == data.kaos.agents[actor_id].issuer_azp
 }
 
 subject_valid if {
