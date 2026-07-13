@@ -7,11 +7,15 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/axsaucedo/kaos/operator/internal/projection"
 	"github.com/axsaucedo/kaos/operator/pkg/gateway"
+	"github.com/axsaucedo/kaos/operator/pkg/security"
 )
 
 type fakeExchangeAIB struct {
@@ -145,6 +149,47 @@ func TestBackendOriginRejectsAnnotationWithPath(t *testing.T) {
 
 	if _, err := projector.backendOrigin(context.Background(), "demo", protected); err == nil {
 		t.Fatal("backendOrigin accepted an annotation with a path")
+	}
+}
+
+func TestReconcileOriginAttachesSecurityPolicy(t *testing.T) {
+	t.Setenv("SECURITY_PDP_ENABLED", "true")
+	t.Setenv("SECURITY_OPERATOR_NAMESPACE", "demo")
+	scheme := newTestScheme(t)
+	if err := gatewayv1.Install(scheme); err != nil {
+		t.Fatalf("gateway scheme: %v", err)
+	}
+	for _, gvk := range []struct {
+		object, list schema.GroupVersionKind
+	}{
+		{object: backendGVK, list: backendGVK.GroupVersion().WithKind(backendKind + "List")},
+		{object: extensionPolicyGVK, list: extensionPolicyGVK.GroupVersion().WithKind(extensionPolicyKind + "List")},
+		{object: security.SecurityPolicyGVK, list: security.SecurityPolicyGVK.GroupVersion().WithKind("SecurityPolicyList")},
+	} {
+		scheme.AddKnownTypeWithName(gvk.object, &unstructured.Unstructured{})
+		scheme.AddKnownTypeWithName(gvk.list, &unstructured.UnstructuredList{})
+	}
+	anchor := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: exchangeReflectionName}}
+	client := fake.NewClientBuilder().WithScheme(scheme).WithObjects(anchor).Build()
+	projector := &ExchangeProjector{
+		Client: client, Scheme: scheme, ExtProcName: "extproc", ExtProcNamespace: "demo", ExtProcPort: 50051,
+	}
+	origin := exchangeOrigin{Scheme: "http", Hostname: "api.example.com", Port: 80}
+
+	if err := projector.reconcileOrigin(context.Background(), anchor, "service-id", origin, "kaos-egress-test"); err != nil {
+		t.Fatalf("reconcileOrigin: %v", err)
+	}
+	policy := &unstructured.Unstructured{}
+	policy.SetGroupVersionKind(security.SecurityPolicyGVK)
+	if err := client.Get(context.Background(), types.NamespacedName{Namespace: "demo", Name: "kaos-egress-test"}, policy); err != nil {
+		t.Fatalf("get SecurityPolicy: %v", err)
+	}
+	targets, _, _ := unstructuredNestedSlice(policy.Object, "spec", "targetRefs")
+	if len(targets) != 1 || targets[0].(map[string]any)["name"] != "kaos-egress-test" {
+		t.Fatalf("SecurityPolicy targetRefs = %#v", targets)
+	}
+	if policy.GetLabels()[exchangeManagedLabel] != "true" {
+		t.Fatalf("SecurityPolicy labels = %#v", policy.GetLabels())
 	}
 }
 
