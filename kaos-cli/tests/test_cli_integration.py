@@ -955,6 +955,25 @@ class TestPgvectorMemoryInstall:
         assert "image: pgvector/pgvector" in applied["input"]
 
 
+def test_token_exchange_gateway_install_enables_backend_api():
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from kaos_cli.install import _install_gateway_api
+
+    calls = []
+
+    def fake_helm(args, check=False):
+        calls.append(args)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    with patch("kaos_cli.install.run_helm_command", side_effect=fake_helm):
+        assert _install_gateway_api(enable_backend=True)
+
+    install_args = calls[-1]
+    assert "config.envoyGateway.extensionApis.enableBackend=true" in install_args
+
+
 class TestAuthWiring:
     @pytest.fixture(autouse=True)
     def _stub_gateway_install(self):
