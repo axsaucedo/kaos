@@ -325,9 +325,9 @@ Authorization projection and mounted OPA data are eventually consistent. After a
 
 ## Delegated access to a third-party service
 
-This final walkthrough is also `.noeval`. It needs Keycloak, an AIB release whose chart includes ext_proc, and a real or mock third-party OAuth provider, so CI renders it without running it. The example assumes an Agent named `researcher` has a tool that calls `https://api.github.com/user` with `httpx`.
+This final walkthrough is also `.noeval`. It mirrors the passing wire evaluation with Keycloak 26, an AIB release whose chart includes ext_proc, and a mock OAuth provider/API. CI renders it without creating that heavy stack. The example assumes an Agent named `researcher` has an `httpx` tool that calls `http://github-mock-egress.token-exchange-demo.svc.cluster.local/api/data`.
 
-Install the self-managed AIB release and KAOS token-exchange integration. Token exchange selects Keycloak for both user and Agent identity, creates a DCR client for each Agent, and remains off unless explicitly enabled.
+Install the self-managed AIB release and KAOS token-exchange integration. The two feature flags that matter here are `--token-exchange-enabled` and `--aib-chart-path`; token exchange also requires Keycloak for both user and Agent identity.
 
 ```bash .noeval
 set -euo pipefail
@@ -339,26 +339,15 @@ kaos system install --gateway-enabled --metallb-enabled \
   --chart-path "$REPO_ROOT/operator/chart" --wait
 ```
 
-Create a dedicated egress route, the provider OAuth client Secret, and a `ThirdPartyService`. The `access` entry is the binding: only `researcher` receives `api.github.com` as a re-mint target and only its declared `repo` and `read:user` scopes are projected into AIB. In a production setup, use your platform's standard external-service backend and TLS policy in place of this compact `ExternalName` example.
+The managed development Keycloak starts with `token-exchange` and `admin-fine-grained-authz` when that flag is set, but Keycloak 26 still requires explicit target-client setup. Create the `token-exchange-broker` client, enable its management permissions, allow each exchange-enabled Agent DCR client to exchange to it, and add an audience mapper that produces exactly `aud=token-exchange-broker`. Without the features, Keycloak returns `400 unsupported_grant_type`; without the per-client permission, it returns `403 Client not allowed to exchange`.
+
+Create the dedicated egress route, provider OAuth client Secret, and `ThirdPartyService`. This is the manifest shape used in the live evaluation. The example assumes `Service/mock-api` already exposes the mock authorization server and API on port 9000.
 
 ```yaml .noeval
-apiVersion: v1
-kind: Service
-metadata:
-  name: github-egress
-  namespace: token-exchange-demo
-spec:
-  type: ExternalName
-  externalName: api.github.com
-  ports:
-    - name: https
-      port: 443
-      appProtocol: https
----
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
-  name: github-egress
+  name: github-mock-egress
   namespace: token-exchange-demo
 spec:
   parentRefs:
@@ -366,60 +355,57 @@ spec:
       namespace: kaos-system
       sectionName: http
   hostnames:
-    - api.github.com
+    - github-mock-egress.token-exchange-demo.svc.cluster.local
   rules:
     - backendRefs:
-        - name: github-egress
-          port: 443
+        - name: mock-api
+          port: 9000
 ---
 apiVersion: v1
 kind: Secret
 metadata:
-  name: github-oauth-client
+  name: github-mock-oauth-client
   namespace: token-exchange-demo
 type: Opaque
 stringData:
-  client-secret: replace-with-github-oauth-client-secret
+  client-secret: mock-third-party-secret
 ---
 apiVersion: kaos.tools/v1alpha1
 kind: ThirdPartyService
 metadata:
-  name: github
+  name: github-mock
   namespace: token-exchange-demo
 spec:
-  displayName: GitHub
-  clientID: replace-with-github-oauth-client-id
+  displayName: GitHub Mock
+  clientID: mock-third-party-client
   clientSecretRef:
-    name: github-oauth-client
+    name: github-mock-oauth-client
     key: client-secret
-  issuerURI: https://github.com
+  issuerURI: http://mock-oauth.token-exchange-demo.svc.cluster.local:9000
   endpoints:
-    authorization: https://github.com/login/oauth/authorize
-    token: https://github.com/login/oauth/access_token
+    authorization: http://mock-oauth.token-exchange-demo.svc.cluster.local:9000/oauth/authorize
+    token: http://mock-oauth.token-exchange-demo.svc.cluster.local:9000/oauth/token
   scopes:
-    - name: repo
-      description: Read repositories as the consenting user
-    - name: read:user
-      description: Read the consenting user's profile
+    - name: read
+      description: Read the mock GitHub profile
   protectedResources:
-    - https://api.github.com/
+    - http://github-mock-egress.token-exchange-demo.svc.cluster.local/api/data
   routeRef:
-    name: github-egress
+    name: github-mock-egress
   access:
     - agent: researcher
       scopes:
-        - repo
-        - read:user
+        - read
 ```
 
 ```bash .noeval
 kubectl create namespace token-exchange-demo
 kubectl apply -f github-token-exchange.yaml
-kubectl wait thirdpartyservice/github -n token-exchange-demo \
+kubectl wait thirdpartyservice/github-mock -n token-exchange-demo \
   --for=condition=Ready --timeout=180s
 ```
 
-Mint or obtain Alice's normal Keycloak login token, then ask the Agent to read her GitHub profile. The runtime re-mints that user token only for the declared GitHub target. The first call has no GitHub vault session or consent, so AIB ext_proc returns a JSON-RPC URL elicitation and KAOS surfaces the URL in the Agent response.
+Mint the user's normal Keycloak token, then call the Agent. The first call without a live vault session is an application-level HTTP 200 containing the controlled `third_party_reauth_required` result and AIB authorization URL; the third-party tool has not succeeded.
 
 ```bash .noeval
 USER_TOKEN=$(curl -fsS -X POST \
@@ -427,31 +413,67 @@ USER_TOKEN=$(curl -fsS -X POST \
   -H 'Content-Type: application/x-www-form-urlencoded' \
   --data-urlencode client_id=kaos \
   --data-urlencode client_secret=kaos-dev-secret \
-  --data-urlencode username=alice \
-  --data-urlencode password="$ALICE_PASSWORD" \
+  --data-urlencode username=kaos-user \
+  --data-urlencode password="$KAOS_USER_PASSWORD" \
   --data-urlencode grant_type=password | jq -r .access_token)
 
 FIRST_RESULT=$(curl -fsS "$GATEWAY_URL/token-exchange-demo/agent/researcher/v1/chat/completions" \
   -H "Authorization: Bearer $USER_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"model":"researcher","messages":[{"role":"user","content":"Show my GitHub profile"}]}' \
+  -d '{"model":"researcher","messages":[{"role":"user","content":"Call the third-party service"}]}' \
   | jq -r '.choices[0].message.content')
 echo "$FIRST_RESULT"
-# Access to api.github.com requires re-authentication (third_party_reauth_required).
-# Please reconnect at https://aib.example/consent/... and try again.
+# Access to the requested resource requires re-authentication (third_party_reauth_required).
+# Please reconnect at /api/third-party/<service-id>/oauth2/authorize and try again.
 ```
 
-Open the surfaced URL as Alice and approve the requested GitHub scopes. That authorization-code flow is what seeds AIB's vault and records consent; KAOS does not store the GitHub token. Retry the same request after approval.
+Open the surfaced URL as that user, complete the provider's S256 PKCE authorization-code flow, and approve the Agent's `read` permission in AIB. The redirect chain finishes at AIB's consent UI with HTTP 200, the vault session is encrypted and has a refresh token, and the UserGrant records the user + Agent + service triple. KAOS does not store the provider token.
 
 ```bash .noeval
-open "$(echo "$FIRST_RESULT" | grep -Eo 'https://[^ ]+')"  # use xdg-open on Linux
+kubectl port-forward -n aib-system svc/aib-agentic-identity-broker 8000:8000 >./tmp/aib-port-forward.log 2>&1 &
+AIB_URL=http://localhost:8000
+REAUTH_PATH=$(echo "$FIRST_RESULT" | grep -Eo '/api/third-party/[^ ]+/oauth2/authorize')
+open "${AIB_URL}${REAUTH_PATH}"  # use xdg-open on Linux
+
+SUCCESS_RESULT=$(curl -fsS "$GATEWAY_URL/token-exchange-demo/agent/researcher/v1/chat/completions" \
+  -H "Authorization: Bearer $USER_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"researcher","messages":[{"role":"user","content":"Call the third-party service"}]}' \
+  | jq -r '.choices[0].message.content')
+echo "$SUCCESS_RESULT"
+# Third-party tool completed.
+```
+
+The successful wire evaluation returned HTTP 200 at Agent entry and HTTP 200 from `GET /api/data`. The re-minted token accepted by the exchange decoded exactly as follows; `azp` is the `researcher` DCR client, while `sub` remains the requesting user:
+
+```json .noeval
+{
+  "aud": "token-exchange-broker",
+  "azp": "85be1caf-30b9-4236-87b2-fae29613d86d",
+  "sub": "c9df7bbc-c015-4095-b39e-7b5ed1a3f5e9",
+  "iss": "http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos"
+}
+```
+
+AIB ext_proc exchanges that token for the user's vaulted provider token only on `github-mock-egress`. Internal routes keep the original user token and have no ext_proc attachment.
+
+Finally, terminate the provider session and retry. The delete returns HTTP 200 with `session terminated successfully`; the next Agent call again returns `third_party_reauth_required`, while ext_proc records broker HTTP 400 `invalid_grant`.
+
+```bash .noeval
+USER_SUB=$(echo "$USER_TOKEN" | cut -d. -f2 | tr '_-' '/+' | base64 -d 2>/dev/null | jq -r .sub)
+SERVICE_ID=$(echo "$REAUTH_PATH" | cut -d/ -f4)
+
+curl -fsS -X DELETE "$AIB_URL/api/third-party/$SERVICE_ID/session" \
+  -H "X-Remote-User: $USER_SUB"
+# {"message":"session terminated successfully"}
 
 curl -fsS "$GATEWAY_URL/token-exchange-demo/agent/researcher/v1/chat/completions" \
   -H "Authorization: Bearer $USER_TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"model":"researcher","messages":[{"role":"user","content":"Show my GitHub profile"}]}' \
+  -d '{"model":"researcher","messages":[{"role":"user","content":"Call the third-party service"}]}' \
   | jq -r '.choices[0].message.content'
-# GitHub user: alice (Alice Example)
+# Access to the requested resource requires re-authentication (third_party_reauth_required).
+# Please reconnect at /api/third-party/<service-id>/oauth2/authorize and try again.
 ```
 
-On the successful call, `Authorization` reaches the declared route with the re-minted Keycloak token (`iss` is the KAOS realm, `sub` is Alice, `azp` is `researcher`'s DCR client, and `aud` is only `token-exchange-broker`). `x-agent-authorization` still carries `researcher`'s normal actor token. AIB ext_proc replaces only the first header with Alice's vaulted GitHub token. If consent or the vault session later expires or is revoked, the same URL outcome is surfaced and the caller repeats the approval and retry steps.
+`X-Remote-User` above matches the evaluation-only AIB pre-auth configuration. A production AIB deployment must authenticate the user at this endpoint instead of trusting a caller-supplied header.
