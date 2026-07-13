@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	gatewayv1 "sigs.k8s.io/gateway-api/apis/v1"
 
 	"github.com/axsaucedo/kaos/operator/internal/projection"
@@ -334,6 +335,11 @@ func (p *ExchangeProjector) reconcileOrigin(ctx context.Context, owner *corev1.C
 	if err := p.Client.Patch(ctx, route, client.Apply, client.FieldOwner(exchangeFieldOwner), client.ForceOwnership); err != nil {
 		return fmt.Errorf("reconciling HTTPRoute %s/%s: %w", owner.Namespace, name, err)
 	}
+	if err := security.ReconcileSecurityPolicy(ctx, p.Client, p.Scheme, owner, security.PolicyParams{
+		Name: name, Namespace: owner.Namespace, RouteName: name, Labels: managedLabels(serviceID),
+	}, security.GetConfig(), log.FromContext(ctx)); err != nil {
+		return fmt.Errorf("reconciling SecurityPolicy %s/%s: %w", owner.Namespace, name, err)
+	}
 
 	policy, err := constructExtProcPolicy(route, p.ExtProcName, p.ExtProcNamespace, p.ExtProcPort)
 	if err != nil {
@@ -477,7 +483,7 @@ func (p *ExchangeProjector) prune(ctx context.Context, state map[string]reflecte
 			}
 		}
 	}
-	for _, gvk := range []schema.GroupVersionKind{backendGVK, extensionPolicyGVK} {
+	for _, gvk := range []schema.GroupVersionKind{backendGVK, extensionPolicyGVK, security.SecurityPolicyGVK} {
 		list := &unstructured.UnstructuredList{}
 		list.SetGroupVersionKind(gvk.GroupVersion().WithKind(gvk.Kind + "List"))
 		if err := p.Client.List(ctx, list, client.MatchingLabels{exchangeManagedLabel: "true"}); err != nil {
