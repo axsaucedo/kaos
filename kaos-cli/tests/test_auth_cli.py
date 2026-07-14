@@ -8,7 +8,7 @@ import yaml
 from typer.testing import CliRunner
 
 from kaos_cli.agent.invoke import plain_access_reason
-from kaos_cli.auth.grant import build_access_grant
+from kaos_cli.auth.grant import _format_grants, build_access_grant
 from kaos_cli.main import app
 
 
@@ -41,6 +41,46 @@ def test_agent_grant_accepts_comma_separated_resources():
     )
     assert grant["spec"]["subjects"] == [{"kind": "Agent", "name": "researcher"}]
     assert [item["kind"] for item in grant["spec"]["resources"]] == ["MCPServer", "ModelAPI"]
+
+
+def test_grant_list_formats_enforced_condition():
+    output = _format_grants({
+        "items": [
+            {
+                "metadata": {"name": "research-access"},
+                "spec": {
+                    "subjects": [{"name": "researchers"}],
+                    "resources": [{"name": "researcher"}],
+                },
+                "status": {
+                    "conditions": [
+                        {"type": "Ready", "status": "True"},
+                        {"type": "Enforced", "status": "True", "reason": "Enforced"},
+                    ]
+                },
+            },
+            {
+                "metadata": {"name": "alice-access"},
+                "spec": {
+                    "subjects": [{"name": "alice"}],
+                    "resources": [{"name": "chat-model"}],
+                },
+                "status": {
+                    "conditions": [{
+                        "type": "Enforced",
+                        "status": "False",
+                        "reason": "NoUserIdentityProvider",
+                    }]
+                },
+            },
+        ]
+    })
+
+    assert output == (
+        "NAME             SUBJECTS     RESOURCES   ENFORCED\n"
+        "research-access  researchers  researcher  True (Enforced)\n"
+        "alice-access     alice        chat-model  False (NoUserIdentityProvider)"
+    )
 
 
 def test_reason_to_plain_english_mapping():

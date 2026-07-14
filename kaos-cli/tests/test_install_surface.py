@@ -27,6 +27,23 @@ def test_new_install_flags_wire_existing_auth_behavior(tmp_path):
     assert kwargs["user_auth"] is True
 
 
+def test_keycloak_agent_auth_alias_wires_oidc_behavior():
+    with patch("kaos_cli.system.install_command") as install:
+        oidc_result = runner.invoke(
+            app,
+            ["system", "install", "--agent-auth", "oidc"],
+        )
+        oidc_kwargs = install.call_args.kwargs
+        keycloak_result = runner.invoke(
+            app,
+            ["system", "install", "--agent-auth", "keycloak"],
+        )
+        keycloak_kwargs = install.call_args.kwargs
+    assert oidc_result.exit_code == 0, oidc_result.output
+    assert keycloak_result.exit_code == 0, keycloak_result.output
+    assert keycloak_kwargs == oidc_kwargs
+
+
 def test_create_cli_config_contents(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     with patch("kaos_cli.system.install_command"):
