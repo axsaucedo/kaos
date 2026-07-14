@@ -19,6 +19,13 @@ RESOURCE_KINDS = {
 }
 
 
+class _IndentDumper(yaml.SafeDumper):
+    """Indent sequences beneath mapping keys for readable CLI YAML."""
+
+    def increase_indent(self, flow=False, indentless=False):
+        return super().increase_indent(flow, False)
+
+
 def _resources(values: list[str]) -> list[dict[str, str]]:
     result = []
     for value in values:
@@ -84,7 +91,7 @@ def create_grant_command(
     except ValueError as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(1)
-    content = yaml.safe_dump(grant, sort_keys=False)
+    content = yaml.dump(grant, Dumper=_IndentDumper, sort_keys=False)
     if dry_run:
         typer.echo(content.rstrip())
         return

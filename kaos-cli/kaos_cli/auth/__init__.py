@@ -19,7 +19,12 @@ app.add_typer(grant_app, name="grant")
 @app.command(name="login")
 def login(
     user: str = typer.Argument(..., help="User name to log in as."),
-    password: str | None = typer.Option(None, "--password", help="OIDC password (prompts when omitted)."),
+    password: str | None = typer.Option(
+        None,
+        "--password",
+        hidden=True,
+        help="OIDC password (prompts when omitted).",
+    ),
 ) -> None:
     """Log in through the configured OIDC service and cache the token."""
     login_command(user, password)

@@ -47,7 +47,9 @@ def status_command(namespace: str) -> None:
             desired = deployment.get("spec", {}).get("replicas", 1)
             ready = deployment.get("status", {}).get("readyReplicas", 0)
             state = "ready" if desired > 0 and ready >= desired else "not ready"
-            detail = f"   ({ready}/{desired} replicas)"
-            if label == "login service" and "keycloak" in deployment["metadata"]["name"]:
-                detail = "   (keycloak)" if state == "ready" else detail
+            detail = ""
+            if label == "access-control":
+                detail = f"   ({ready}/{desired} replicas)"
+            elif label == "login service" and "keycloak" in deployment["metadata"]["name"]:
+                detail = "   (keycloak)"
         typer.echo(f"{label:<18}{state}{detail}")
