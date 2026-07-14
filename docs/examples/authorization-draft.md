@@ -15,14 +15,6 @@ KAOS answers both on every request, at a single gateway every call passes throug
 
 The **control plane** is the set of components that establish identity and decide the rules. None of them carry your agents' actual traffic; they answer the two questions above about it. Here they are on one map. The greyed pieces belong to [Part 5](#5-agents-acting-on-behalf-of-users-on-outside-services) and can be ignored for now.
 
-<!-- D-CP-A: components-only base. Copy of D-CP base; edges MUST stay in this order (linkStyle is positional); only classDef/linkStyle/labels change across variants.
-Canonical edge order (components base, used by D-CP-A and D-CP-D):
-0 UA <--> AZ
-1 AZ <--> AA
-2 U --> GW
-3 GW --> AZ
-4 GW --> RES
-(D-CP-D appends its operator edges 5-8 after these.) -->
 ```mermaid
 flowchart TB
   subgraph idp["Identity providers"]
@@ -68,19 +60,6 @@ The whole point of the operator is that these components never drift from each o
 
 Here is the same map with a request traced across it, step by step. Steps 0 and 1 happen before the request (the identities exist first); steps 7–9 are the greyed Part 5 flow:
 
-<!-- D-CP-B: numbered-flow variant. Copy of D-CP base; edges MUST stay in this order (linkStyle is positional); only classDef/linkStyle/labels change across variants.
-Canonical edge order (numbered-flow base, shared by D-CP-B and D-CP-C):
-0 AA --> RES   "0. provides agent identity"
-1 UA --> U     "1. authenticates"
-2 U --> GW     "2. sends request"
-3 GW --> AZ    "4. verifies user + agent access"
-4 AZ --> UA    "5. verifies user"
-5 AZ --> AA    "6. verifies agent"
-6 GW --> AIB   "7. third-party access"      (Part 5)
-7 TP --> AIB   "8. token granted"           (Part 5)
-8 TP --> U     "9. user consents"           (Part 5)
-9 GW --> RES   "10. routes request"
-Step 3 ("validates the token") is the Gateway Mesh's own step and lives in its node label. -->
 ```mermaid
 flowchart TB
   subgraph idp["Identity providers"]
@@ -199,13 +178,6 @@ The **data plane** is the actual agent traffic: users invoking agents, agents ca
 
 The rules: the `researchers` group may use the `researcher` agent; the `researcher` agent may reach `notes-mcp` and `chat-model`; the autonomous `nightly-reporter` may reach `chat-model`. Everything else is denied — including bob:
 
-<!-- D-DP-1: data-plane base. Edges MUST stay in this order (linkStyle is positional); variants (2.3 re-show, D-DP-2a/b/c) change only classDef/linkStyle/labels.
-Canonical edge order:
-0 alice --> RES
-1 bob   --> RES
-2 RES   --> MCP
-3 RES   --> MODEL
-4 NR    --> MODEL -->
 ```mermaid
 flowchart LR
   alice["alice<br/><i>group: researchers</i>"]
@@ -472,7 +444,6 @@ kaos auth grant create --group researchers --resource agent/researcher
 
 Those three grants are the *only* rules that exist. Here is the same map from the start of this section, this time with each green edge labelled by the AccessGrant that makes it green. Everything not drawn green is denied:
 
-<!-- Re-show of D-DP-1 with grant names. Copy of D-DP-1 base; edges MUST stay in this order (linkStyle is positional); only classDef/linkStyle/labels change. Canonical edge order: 0 alice->RES, 1 bob->RES, 2 RES->MCP, 3 RES->MODEL, 4 NR->MODEL. -->
 ```mermaid
 flowchart LR
   alice["alice<br/><i>group: researchers</i>"]
@@ -530,7 +501,6 @@ Researcher echo response
 
 Same agent, same request. The only difference is who's behind it. alice's token carries `researchers`, which the `researchers-to-researcher` grant allows; bob's carries `support`, which nothing grants, so he's refused at the door. alice's request lights up the granted path:
 
-<!-- D-DP-2a: alice's path. Copy of D-DP-1 base; edges MUST stay in this order (linkStyle is positional); only classDef/linkStyle/labels change. Canonical edge order: 0 alice->RES, 1 bob->RES, 2 RES->MCP, 3 RES->MODEL, 4 NR->MODEL. -->
 ```mermaid
 flowchart LR
   alice["alice<br/><i>group: researchers</i>"]
@@ -557,7 +527,6 @@ flowchart LR
 
 ...while bob's request never gets past the first edge:
 
-<!-- D-DP-2b: bob's path. Copy of D-DP-1 base; edges MUST stay in this order (linkStyle is positional); only classDef/linkStyle/labels change. Canonical edge order: 0 alice->RES, 1 bob->RES, 2 RES->MCP, 3 RES->MODEL, 4 NR->MODEL. -->
 ```mermaid
 flowchart LR
   alice["alice<br/><i>group: researchers</i>"]
@@ -604,7 +573,6 @@ Nightly reporter echo response
 ✓ allowed — request permitted
 ```
 
-<!-- D-DP-2c: autonomous path. Copy of D-DP-1 base; edges MUST stay in this order (linkStyle is positional); only classDef/linkStyle/labels change. Canonical edge order: 0 alice->RES, 1 bob->RES, 2 RES->MCP, 3 RES->MODEL, 4 NR->MODEL. -->
 ```mermaid
 flowchart LR
   alice["alice<br/><i>group: researchers</i>"]
@@ -663,17 +631,6 @@ The example above is the *what*. This section is the *how*, one capability at a 
 
 How does the gateway know which agent is calling — even when no person started it? That is Agent Auth's job, and it is the one place on the Part 1 map where the KAOS Operator's out-of-band work is easiest to see. Here is the same map from the operator's point of view, with the sync work drawn in:
 
-<!-- D-CP-D: operator/sync-focus variant. Copy of D-CP base (components-only edge order, see D-CP-A); edges MUST stay in this order (linkStyle is positional); only classDef/linkStyle/labels change — EXCEPT this variant appends the four operator edges (5-8), which exist only here.
-Canonical edge order:
-0 UA <--> AZ
-1 AZ <--> AA
-2 U --> GW
-3 GW --> AZ
-4 GW --> RES
-5 OP -.-> UA   "provisions users/groups at install"
-6 OP -.-> AA   "registers each agent as a client (DCR)"
-7 OP -.-> AZ   "projects AccessGrant data"
-8 OP -.-> AIB  "keeps agent logical names current (Part 5)" -->
 ```mermaid
 flowchart TB
   subgraph idp["Identity providers"]
@@ -758,7 +715,6 @@ With this provider the operator registers each agent's client via dynamic client
 
 Who is this person, and which groups are they in? When a person is behind a request, User Auth (Keycloak in our example) proves who they are and **which groups** they're in. That group membership is what access rules match on. `alice` isn't granted access personally; her *group* `researchers` is. The intuition in one picture:
 
-<!-- D-KC-1: Keycloak intuition (standalone chart). -->
 ```mermaid
 flowchart LR
   subgraph realm["Keycloak realm: kaos"]
@@ -939,19 +895,6 @@ The component that holds each user's real credential is the **Agent Exchange Ser
 
 **Nothing new is installed here.** Every component in this part went in with the single install command in 1.1 (`--agent-auth keycloak`, `--token-exchange-enabled`). On the Part 1 map, the greyed pieces simply light up, and it is everything *else* that goes grey:
 
-<!-- D-CP-C: token-exchange highlight. Copy of D-CP base; edges MUST stay in this order (linkStyle is positional); only classDef/linkStyle/labels change across variants.
-Canonical edge order (numbered-flow base, shared by D-CP-B and D-CP-C):
-0 AA --> RES   "0. provides agent identity"
-1 UA --> U     "1. authenticates"
-2 U --> GW     "2. sends request"
-3 GW --> AZ    "4. verifies user + agent access"
-4 AZ --> UA    "5. verifies user"
-5 AZ --> AA    "6. verifies agent"
-6 GW --> AIB   "7. third-party access"
-7 TP --> AIB   "8. token granted"
-8 TP --> U     "9. user consents"
-9 GW --> RES   "10. routes request"
-Solid in this variant: GW, RES, TP, AIB and edges 7-10 (indices 6-9); everything else greyed. -->
 ```mermaid
 flowchart TB
   subgraph idp["Identity providers"]
@@ -1036,7 +979,6 @@ Inside the cluster, nothing about the earlier checks changes: alice still has to
 
 The very first time alice asks for something on GitHub there's no approval on file, so the request is refused with an instruction. alice approves once, the AIB stores her token, and from then on it just works, until she revokes it:
 
-<!-- D-CF-1: consent flow (standalone chart, strictly linear, no back-edges). -->
 ```mermaid
 flowchart TB
   S1["1. kaos agent invoke researcher --user alice<br/><i>refused: needs approval — no token on file</i>"]
