@@ -7,6 +7,7 @@ import time
 import signal
 import typer
 
+from kaos_cli.cluster_http import local_service_url
 from kaos_cli.config import load_config, session_token
 
 
@@ -43,6 +44,26 @@ def _response_content(response) -> str:
         return response.text
 
 
+def _access_control_ready(namespace: str) -> bool:
+    result = subprocess.run(
+        [
+            "kubectl",
+            "get",
+            "deployment/kaos-pdp",
+            "-n",
+            namespace,
+            "-o",
+            "jsonpath={.status.readyReplicas}/{.spec.replicas}",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return False
+    ready, _, desired = result.stdout.partition("/")
+    return bool(ready) and ready == desired and desired != "0"
+
+
 def _invoke_gateway(name: str, namespace: str | None, message: str, user: str | None) -> None:
     """Invoke an agent through the configured gateway and print its verdict."""
     import httpx
@@ -53,16 +74,17 @@ def _invoke_gateway(name: str, namespace: str | None, message: str, user: str | 
     if not address:
         typer.echo("✗ denied — no gateway address configured")
         return
-    token = session_token(config, user)
+    token = session_token(config, user) if user else None
     headers = {"Authorization": f"Bearer {token}"} if token else {}
     try:
-        response = httpx.post(
-            f"{address}/{namespace}/agent/{name}/v1/chat/completions",
-            headers=headers,
-            json={"messages": [{"role": "user", "content": message}], "stream": False},
-            timeout=120.0,
-        )
-    except httpx.HTTPError as exc:
+        with local_service_url(address) as local_address:
+            response = httpx.post(
+                f"{local_address}/{namespace}/agent/{name}/v1/chat/completions",
+                headers=headers,
+                json={"messages": [{"role": "user", "content": message}], "stream": False},
+                timeout=120.0,
+            )
+    except (httpx.HTTPError, RuntimeError) as exc:
         typer.echo(f"Error: {exc}", err=True)
         return
     content = _response_content(response)
@@ -73,12 +95,34 @@ def _invoke_gateway(name: str, namespace: str | None, message: str, user: str | 
     if not reason:
         if response.status_code in (401, 403) and not token:
             reason = "missing token"
+        elif response.status_code in (401, 403) and not _access_control_ready(namespace):
+            reason = "access-control unreachable"
+        elif response.status_code in (401, 403) and token:
+            reason = "user_grant_required"
         elif response.status_code >= 500:
             reason = "access-control unreachable"
         else:
             reason = "request permitted" if allowed else f"HTTP {response.status_code}"
     mark = "✓ allowed" if allowed else "✗ denied"
     typer.echo(f"{mark} — {plain_access_reason(reason)}")
+
+
+def _is_autonomous(name: str, namespace: str) -> bool:
+    result = subprocess.run(
+        [
+            "kubectl",
+            "get",
+            "agent",
+            name,
+            "-n",
+            namespace,
+            "-o",
+            "jsonpath={.spec.config.autonomous.goal}",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    return result.returncode == 0 and bool(result.stdout.strip())
 
 
 def invoke_command(
@@ -93,9 +137,14 @@ def invoke_command(
     import httpx
 
     config = load_config()
-    if user or config["gateway"].get("through_gateway"):
+    configured_namespace = namespace or config.get("namespace") or "default"
+    if user or (
+        config["gateway"].get("through_gateway")
+        and not _is_autonomous(name, configured_namespace)
+    ):
         _invoke_gateway(name, namespace, message, user)
         return
+    namespace = configured_namespace
 
     # Find the service for this Agent
     cmd = [
@@ -195,6 +244,7 @@ def invoke_command(
                         typer.echo(content)
                     else:
                         typer.echo(json.dumps(result, indent=2))
+                    typer.echo("✓ allowed — request permitted")
                 else:
                     typer.echo(
                         f"Error: HTTP {response.status_code}: {response.text}", err=True

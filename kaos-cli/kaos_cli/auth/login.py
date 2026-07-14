@@ -2,11 +2,16 @@
 
 import base64
 import json
+from urllib.parse import urlsplit
 
 import httpx
 import typer
 
+from kaos_cli.cluster_http import local_service_url
 from kaos_cli.config import cache_session, load_config
+
+
+_KEYCLOAK_DEV_CLIENT_SECRET = "kaos-dev-secret"
 
 
 def _token_claims(token: str) -> dict:
@@ -30,19 +35,21 @@ def login_command(user: str, password: str | None = None) -> None:
     password = password or typer.prompt("Password", hide_input=True)
     endpoint = issuer if issuer.endswith("/token") else f"{issuer}/protocol/openid-connect/token"
     try:
-        response = httpx.post(
-            endpoint,
-            data={
-                "grant_type": "password",
-                "client_id": client_id,
-                "username": user,
-                "password": password,
-                "scope": "openid profile email",
-            },
-            timeout=30.0,
-        )
+        with local_service_url(endpoint) as local_endpoint:
+            response = httpx.post(
+                local_endpoint,
+                headers={"Host": urlsplit(endpoint).netloc},
+                data={
+                    "grant_type": "password",
+                    "client_id": client_id,
+                    "client_secret": _KEYCLOAK_DEV_CLIENT_SECRET,
+                    "username": user,
+                    "password": password,
+                },
+                timeout=30.0,
+            )
         response.raise_for_status()
-    except httpx.HTTPError as exc:
+    except (httpx.HTTPError, RuntimeError) as exc:
         typer.echo(f"Error: login failed: {exc}", err=True)
         raise typer.Exit(1)
     token = response.json().get("access_token")

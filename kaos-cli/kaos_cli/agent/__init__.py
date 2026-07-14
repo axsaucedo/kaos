@@ -318,7 +318,7 @@ def deploy_agent_cmd(
 def invoke_agent(
     name: str = typer.Argument(..., help="Name of the Agent."),
     message: str = typer.Option(
-        ..., "--message", "-m", help="Message to send to the agent."
+        "Hello", "--message", "-m", help="Message to send to the agent."
     ),
     namespace: str = typer.Option(
         None,

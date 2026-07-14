@@ -65,3 +65,14 @@ def test_system_status_component_table():
     assert "login service     ready   (keycloak)" in result.output
     assert "access-control    ready   (2/2 replicas)" in result.output
     assert "sync service      ready" in result.output
+
+
+def test_access_control_off_scales_pdp_to_zero():
+    completed = SimpleNamespace(returncode=0, stdout="", stderr="")
+    with patch("kaos_cli.system.subprocess.run", return_value=completed) as run:
+        result = runner.invoke(app, ["system", "access-control", "--off"])
+    assert result.exit_code == 0, result.output
+    assert result.output.strip() == "✓ access-control off"
+    assert run.call_args_list[0].args[0] == [
+        "kubectl", "scale", "deployment/kaos-pdp", "-n", "kaos-system", "--replicas=0"
+    ]

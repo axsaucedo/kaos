@@ -38,7 +38,7 @@ spec:
   container:
     env:
       - name: DEBUG_MOCK_RESPONSES
-        value: '["Researcher echo response"]'
+        value: '["{\"tool_calls\": [{\"id\": \"call_1\", \"name\": \"echo\", \"arguments\": {\"message\": \"authorization note\"}}]}", "Researcher echo response"]'
   agentNetwork:
     expose: true
 
@@ -62,31 +62,3 @@ spec:
         value: '["Nightly reporter echo response"]'
   agentNetwork:
     expose: true
-
----
-apiVersion: kaos.tools/v1alpha1
-kind: AccessGrant
-metadata:
-  name: researchers-to-researcher
-spec:
-  subjects:
-    - kind: Group
-      name: researchers
-  resources:
-    - kind: Agent
-      name: researcher
-
----
-apiVersion: kaos.tools/v1alpha1
-kind: AccessGrant
-metadata:
-  name: researcher-to-notes-mcp-and-chat-model
-spec:
-  subjects:
-    - kind: Agent
-      name: researcher
-  resources:
-    - kind: MCPServer
-      name: notes-mcp
-    - kind: ModelAPI
-      name: chat-model

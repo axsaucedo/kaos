@@ -60,6 +60,52 @@ app = typer.Typer(
 )
 
 
+@app.command(name="access-control")
+def access_control(
+    turn_on: bool = typer.Option(False, "--on", help="Start access control."),
+    turn_off: bool = typer.Option(False, "--off", help="Stop access control."),
+    namespace: str = typer.Option("kaos-system", "--namespace", "-n"),
+) -> None:
+    """Start or stop the access-control service."""
+    if turn_on == turn_off:
+        typer.echo("Error: specify exactly one of --on or --off", err=True)
+        raise typer.Exit(1)
+    state = "on" if turn_on else "off"
+    replicas = "2" if turn_on else "0"
+    result = subprocess.run(
+        [
+            "kubectl",
+            "scale",
+            "deployment/kaos-pdp",
+            "-n",
+            namespace,
+            f"--replicas={replicas}",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        typer.echo(result.stderr.strip() or "Error: unable to scale access control", err=True)
+        raise typer.Exit(result.returncode)
+    rollout = subprocess.run(
+        [
+            "kubectl",
+            "rollout",
+            "status",
+            "deployment/kaos-pdp",
+            "-n",
+            namespace,
+            "--timeout=60s",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if rollout.returncode != 0:
+        typer.echo(rollout.stderr.strip() or "Error: access-control rollout timed out", err=True)
+        raise typer.Exit(rollout.returncode)
+    typer.echo(f"✓ access-control {state}")
+
+
 @app.command(name="install")
 def install(
     namespace: str = typer.Option(
