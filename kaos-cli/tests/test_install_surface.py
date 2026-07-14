@@ -43,6 +43,8 @@ def test_create_cli_config_contents(monkeypatch, tmp_path):
     assert data["gateway"]["address"].startswith("http://kaos-gateway.")
     assert data["auth"]["client_id"] == "kaos"
     assert data["auth"]["realm"] == "kaos"
+    assert data["auth"]["broker_url"].endswith(":8000")
+    assert data["auth"]["broker_admin_url"].endswith(":14000/api")
     assert data["namespace"] == "kaos-system"
 
 

@@ -2,7 +2,7 @@ import base64
 from contextlib import contextmanager
 import json
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import ANY, patch
 
 import yaml
 from typer.testing import CliRunner
@@ -50,11 +50,63 @@ def test_reason_to_plain_english_mapping():
     assert plain_access_reason("missing token") == "no valid identity"
 
 
-def test_consent_stub_receives_arguments():
+def test_connect_receives_arguments():
     with patch("kaos_cli.auth.consent_command") as consent:
         result = runner.invoke(app, ["auth", "connect", "github", "--user", "alice"])
     assert result.exit_code == 0
     consent.assert_called_once_with("github", "alice", disconnect=False)
+
+
+def test_disconnect_receives_arguments():
+    with patch("kaos_cli.auth.consent_command") as consent:
+        result = runner.invoke(app, ["auth", "disconnect", "github", "--user", "alice"])
+    assert result.exit_code == 0
+    consent.assert_called_once_with("github", "alice", disconnect=True)
+
+
+def test_connect_requires_user():
+    result = runner.invoke(app, ["auth", "connect", "github"])
+    assert result.exit_code == 2
+    assert "--user" in result.output
+
+
+def test_reauth_url_parses_header_and_runtime_outcome():
+    from kaos_cli.auth.consent import reauth_url, service_id_from_reauth_url
+
+    url = "http://aib/api/third-party/service-id/oauth2/authorize"
+    header_response = SimpleNamespace(headers={"x-kaos-reauth-url": url})
+    assert reauth_url(header_response) == url
+
+    outcome_response = SimpleNamespace(
+        headers={},
+        json=lambda: {
+            "choices": [{"message": {"content": f"Please reconnect at {url}."}}]
+        },
+    )
+    assert reauth_url(outcome_response) == url
+    assert service_id_from_reauth_url(url) == "service-id"
+
+
+def test_connect_completes_mock_oauth_and_confirms_session(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".kaos-config.yaml").write_text(
+        "auth:\n  broker_url: http://aib:8000\n"
+        "  broker_admin_url: http://aib:14000/api\n"
+        "sessions:\n  alice:\n    token: " + _jwt({"sub": "alice-id"}) + "\n"
+    )
+    service = {"id": "service-id", "display_name": "GitHub Mock"}
+    with (
+        patch("kaos_cli.auth.consent._services", return_value=[service]),
+        patch("kaos_cli.auth.consent._authorize") as authorize,
+        patch("kaos_cli.auth.consent._active", return_value=True) as active,
+    ):
+        result = runner.invoke(app, ["auth", "connect", "github", "--user", "alice"])
+    assert result.exit_code == 0, result.output
+    authorize.assert_called_once_with(ANY, "alice-id", "service-id")
+    active.assert_called_once_with(ANY, "alice-id", "service-id")
+    assert result.output.strip() == (
+        "✓ connected — alice can now use github through their agents"
+    )
 
 
 def _jwt(claims):

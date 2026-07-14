@@ -9,6 +9,12 @@ import typer
 
 from kaos_cli.cluster_http import local_service_url
 from kaos_cli.config import load_config, session_token
+from kaos_cli.auth.consent import (
+    active_service_alias,
+    reauth_url,
+    service_alias,
+    service_id_from_reauth_url,
+)
 
 
 REASON_TEXT = {
@@ -88,6 +94,17 @@ def _invoke_gateway(name: str, namespace: str | None, message: str, user: str | 
         typer.echo(f"Error: {exc}", err=True)
         return
     content = _response_content(response)
+    approval_url = reauth_url(response)
+    if approval_url:
+        service_id = service_id_from_reauth_url(approval_url)
+        try:
+            service = service_alias(config, service_id or "")
+        except (httpx.HTTPError, RuntimeError, ValueError):
+            service = "service"
+        typer.echo(
+            f"✗ needs approval — run: kaos auth connect {service} --user {user}"
+        )
+        return
     if content:
         typer.echo(content)
     reason = response.headers.get("x-kaos-access-reason", "")
@@ -103,6 +120,14 @@ def _invoke_gateway(name: str, namespace: str | None, message: str, user: str | 
             reason = "access-control unreachable"
         else:
             reason = "request permitted" if allowed else f"HTTP {response.status_code}"
+    if allowed and user:
+        try:
+            service = active_service_alias(config, user, message)
+        except (httpx.HTTPError, RuntimeError, ValueError):
+            service = None
+        if service:
+            typer.echo(f"✓ allowed — acting as {user} on {service}")
+            return
     mark = "✓ allowed" if allowed else "✗ denied"
     typer.echo(f"{mark} — {plain_access_reason(reason)}")
 

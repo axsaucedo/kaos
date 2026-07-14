@@ -696,7 +696,10 @@ flowchart TB
 Turn it on at install time:
 
 ```bash
-kaos system install … --agent-auth oidc --token-exchange-enabled --wait
+kaos system install --gateway-enabled --gateway-strict --authz-enabled \
+  --user-auth keycloak --agent-auth oidc --token-exchange-enabled \
+  --create-cli-config --wait --chart-path operator/chart \
+  --aib-chart-path agentic-identity-broker/charts/agentic-identity-broker
 ```
 
 ### Declare the outside service (in the broker)
@@ -741,7 +744,7 @@ Now walk it for real. alice asks the researcher to do something on GitHub. The f
 kaos agent invoke researcher --user alice -m "list my GitHub repos"
 ```
 ```text
-✗ denied — user not in a granted group
+✗ needs approval — run: kaos auth connect github --user alice
 ```
 
 alice approves — the CLI opens GitHub's approval screen, she clicks allow, and the broker stores her token:
@@ -750,7 +753,7 @@ alice approves — the CLI opens GitHub's approval screen, she clicks allow, and
 kaos auth connect github --user alice
 ```
 ```text
-TODO: cannot connect github for alice: the token-exchange broker consent endpoint is not configured
+✓ connected — alice can now use github through their agents
 ```
 
 *(On a local demo cluster the approval is completed automatically against a mock GitHub, so the notebook runs without a real browser; in production alice clicks "allow" in her browser — that's the only difference.)*
@@ -761,7 +764,8 @@ Retry — now it works, **as alice**:
 kaos agent invoke researcher --user alice -m "list my GitHub repos"
 ```
 ```text
-✗ denied — user not in a granted group
+Third-party tool completed.
+✓ allowed — acting as alice on github
 ```
 
 Approval is revocable; afterwards the agent is refused again until re-approved:
@@ -771,8 +775,8 @@ kaos auth disconnect github --user alice
 kaos agent invoke researcher --user alice -m "list my GitHub repos"
 ```
 ```text
-TODO: cannot disconnect github for alice: the token-exchange broker consent endpoint is not configured
-✗ denied — user not in a granted group
+✓ disconnected
+✗ needs approval — run: kaos auth connect github --user alice
 ```
 
 Under the hood: the agent's in-cluster identity is exchanged, via the broker, for alice's real GitHub token, which is swapped onto the outbound request at the gateway — so only alice's own token ever reaches GitHub, and the agent never sees a long-lived credential. But you don't have to think about any of that: `connect` once, then `invoke --user` as normal.

@@ -17,6 +17,8 @@ from kaos_cli.install import (
     DEFAULT_RELEASE_NAME,
     MONITORING_BACKENDS,
     _expand_auth_flags,
+    _default_auth_admin_url,
+    _default_auth_issuer,
     _default_user_auth_issuer,
     DEFAULT_USER_AUTH_CLIENT_ID,
     DEFAULT_USER_AUTH_REALM,
@@ -369,6 +371,8 @@ def install(
                 "issuer": _default_user_auth_issuer(keycloak_namespace, "keycloak"),
                 "client_id": DEFAULT_USER_AUTH_CLIENT_ID,
                 "realm": DEFAULT_USER_AUTH_REALM,
+                "broker_url": _default_auth_issuer(auth_namespace, "aib"),
+                "broker_admin_url": _default_auth_admin_url(auth_namespace, "aib"),
             }
         path = save_config(cli_config, output_path)
         typer.echo(f"✓ wrote CLI config {path}")

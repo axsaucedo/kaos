@@ -14,11 +14,19 @@ CONFIG_KEYS = {
     "auth.issuer",
     "auth.client_id",
     "auth.realm",
+    "auth.broker_url",
+    "auth.broker_admin_url",
     "namespace",
 }
 DEFAULT_CONFIG = {
     "gateway": {"address": "", "through_gateway": False},
-    "auth": {"issuer": "", "client_id": "", "realm": ""},
+    "auth": {
+        "issuer": "",
+        "client_id": "",
+        "realm": "",
+        "broker_url": "",
+        "broker_admin_url": "",
+    },
     "namespace": "default",
     "sessions": {},
 }
