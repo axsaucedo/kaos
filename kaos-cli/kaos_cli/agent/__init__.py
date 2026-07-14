@@ -338,10 +338,16 @@ def invoke_agent(
         "-s",
         help="Stream the response.",
     ),
+    user: str | None = typer.Option(
+        None,
+        "--user",
+        help="Invoke through the gateway with this user's cached token.",
+    ),
 ) -> None:
-    """Send a message to an Agent via port-forward."""
+    """Send a message to an Agent directly or through the configured gateway."""
     invoke_command(
-        name=name, namespace=namespace, message=message, port=port, stream=stream
+        name=name, namespace=namespace, message=message, port=port, stream=stream,
+        user=user,
     )
 
 

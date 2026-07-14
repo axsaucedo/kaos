@@ -7,6 +7,79 @@ import time
 import signal
 import typer
 
+from kaos_cli.config import load_config, session_token
+
+
+REASON_TEXT = {
+    "platform_grant_missing": "not granted",
+    "user_grant_required": "user not in a granted group",
+    "access-control unreachable": "access-control unavailable (failing closed)",
+    "access_control_unreachable": "access-control unavailable (failing closed)",
+    "missing token": "no valid identity",
+    "missing_token": "no valid identity",
+}
+
+
+def plain_access_reason(reason: str) -> str:
+    """Translate gateway reason codes into concise user-facing text."""
+    normalized = reason.strip().lower()
+    if normalized in REASON_TEXT:
+        return REASON_TEXT[normalized]
+    if "access-control" in normalized and "unreachable" in normalized:
+        return REASON_TEXT["access-control unreachable"]
+    if "missing" in normalized and "token" in normalized:
+        return REASON_TEXT["missing token"]
+    return reason.replace("_", " ") or "request permitted"
+
+
+def _response_content(response) -> str:
+    try:
+        data = response.json()
+        choices = data.get("choices", [])
+        if choices:
+            return choices[0].get("message", {}).get("content", "")
+        return json.dumps(data, indent=2)
+    except (ValueError, AttributeError):
+        return response.text
+
+
+def _invoke_gateway(name: str, namespace: str | None, message: str, user: str | None) -> None:
+    """Invoke an agent through the configured gateway and print its verdict."""
+    import httpx
+
+    config = load_config()
+    address = config["gateway"].get("address", "").rstrip("/")
+    namespace = namespace or config.get("namespace") or "default"
+    if not address:
+        typer.echo("✗ denied — no gateway address configured")
+        return
+    token = session_token(config, user)
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    try:
+        response = httpx.post(
+            f"{address}/{namespace}/agent/{name}/v1/chat/completions",
+            headers=headers,
+            json={"messages": [{"role": "user", "content": message}], "stream": False},
+            timeout=120.0,
+        )
+    except httpx.HTTPError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        return
+    content = _response_content(response)
+    if content:
+        typer.echo(content)
+    reason = response.headers.get("x-kaos-access-reason", "")
+    allowed = response.status_code < 400
+    if not reason:
+        if response.status_code in (401, 403) and not token:
+            reason = "missing token"
+        elif response.status_code >= 500:
+            reason = "access-control unreachable"
+        else:
+            reason = "request permitted" if allowed else f"HTTP {response.status_code}"
+    mark = "✓ allowed" if allowed else "✗ denied"
+    typer.echo(f"{mark} — {plain_access_reason(reason)}")
+
 
 def invoke_command(
     name: str,
@@ -14,9 +87,15 @@ def invoke_command(
     message: str,
     port: int,
     stream: bool,
+    user: str | None = None,
 ) -> None:
     """Send a message to an Agent via port-forward."""
     import httpx
+
+    config = load_config()
+    if user or config["gateway"].get("through_gateway"):
+        _invoke_gateway(name, namespace, message, user)
+        return
 
     # Find the service for this Agent
     cmd = [
