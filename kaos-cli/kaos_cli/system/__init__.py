@@ -162,7 +162,7 @@ def install(
     agent_auth: str | None = typer.Option(
         None,
         "--agent-auth",
-        help="Agent identity mode: serviceaccount or oidc.",
+        help="Agent identity mode: serviceaccount|oidc|keycloak.",
     ),
     user_auth: str | None = typer.Option(
         None,
@@ -267,15 +267,21 @@ def install(
     if user_auth_enabled is not None and user_auth is not None:
         typer.echo("Error: use only one of --user-auth and --user-auth-enabled", err=True)
         raise typer.Exit(1)
-    if agent_auth not in (None, "serviceaccount", "oidc"):
-        typer.echo("Error: --agent-auth must be serviceaccount or oidc", err=True)
+    if agent_auth not in (None, "serviceaccount", "oidc", "keycloak"):
+        typer.echo(
+            "Error: --agent-auth must be serviceaccount, oidc, or keycloak", err=True
+        )
         raise typer.Exit(1)
     if user_auth not in (None, "keycloak", "none"):
         typer.echo("Error: --user-auth must be keycloak or none", err=True)
         raise typer.Exit(1)
 
     selected_agent_auth = (
-        {"serviceaccount": "service-account", "oidc": "keycloak"}.get(agent_auth)
+        {
+            "serviceaccount": "service-account",
+            "oidc": "keycloak",
+            "keycloak": "keycloak",
+        }.get(agent_auth)
         if agent_auth is not None
         else agent_auth_enabled
     )

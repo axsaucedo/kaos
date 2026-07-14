@@ -1,5 +1,6 @@
 """AccessGrant generation and kubectl operations."""
 
+import json
 import subprocess
 from typing import Any
 
@@ -106,10 +107,7 @@ def create_grant_command(
 
 
 def list_grants_command(namespace: str | None) -> None:
-    args = [
-        "kubectl", "get", "accessgrants",
-        "-o", "custom-columns=NAME:.metadata.name,SUBJECTS:.spec.subjects[*].name,RESOURCES:.spec.resources[*].name",
-    ]
+    args = ["kubectl", "get", "accessgrants", "-o", "json"]
     namespace = namespace or load_config().get("namespace")
     if namespace:
         args.extend(["-n", namespace])
@@ -117,7 +115,32 @@ def list_grants_command(namespace: str | None) -> None:
     if result.returncode != 0:
         typer.echo(result.stderr or result.stdout, err=True)
         raise typer.Exit(result.returncode)
-    typer.echo(result.stdout.rstrip())
+    typer.echo(_format_grants(json.loads(result.stdout)))
+
+
+def _format_grants(data: dict[str, Any]) -> str:
+    headers = ["NAME", "SUBJECTS", "RESOURCES", "ENFORCED"]
+    rows = []
+    for item in data.get("items", []):
+        conditions = item.get("status", {}).get("conditions", [])
+        enforced = next(
+            (condition for condition in conditions if condition.get("type") == "Enforced"),
+            {},
+        )
+        status = enforced.get("status", "<none>")
+        reason = enforced.get("reason")
+        rows.append([
+            item["metadata"]["name"],
+            ",".join(subject["name"] for subject in item["spec"].get("subjects", [])),
+            ",".join(resource["name"] for resource in item["spec"].get("resources", [])),
+            f"{status} ({reason})" if reason else status,
+        ])
+
+    widths = [max(len(row[index]) for row in [headers, *rows]) for index in range(4)]
+    return "\n".join(
+        "  ".join(value.ljust(widths[index]) for index, value in enumerate(row)).rstrip()
+        for row in [headers, *rows]
+    )
 
 
 def delete_grant_command(name: str, namespace: str | None) -> None:
