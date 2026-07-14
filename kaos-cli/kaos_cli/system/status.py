@@ -1,82 +1,53 @@
-"""KAOS system status command."""
+"""KAOS system component status."""
 
+import json
 import subprocess
-import sys
+
 import typer
 
 
-def status_command(namespace: str) -> None:
-    """Show KAOS operator status."""
-    typer.echo(f"KAOS System Status (operator namespace: {namespace})")
-    typer.echo("=" * 50)
+COMPONENTS = (
+    ("gateway", ("envoy-gateway",)),
+    ("login service", ("keycloak",)),
+    ("access-control", ("kaos-pdp", "access-control")),
+    ("sync service", ("kaos-operator", "controller-manager")),
+)
 
-    # Check operator deployment
-    typer.echo("\n📦 Operator:")
+
+def _find_deployment(items: list[dict], names: tuple[str, ...]) -> dict | None:
+    for item in items:
+        name = item.get("metadata", {}).get("name", "").lower()
+        if any(part in name for part in names):
+            return item
+    return None
+
+
+def status_command(namespace: str) -> None:
+    """Print readiness for the authorization path's four components."""
     try:
         result = subprocess.run(
-            [
-                "kubectl",
-                "get",
-                "deployment",
-                "-n",
-                namespace,
-                "-l",
-                "app.kubernetes.io/name=kaos-operator",
-                "-o",
-                "wide",
-            ],
+            ["kubectl", "get", "deployment", "--all-namespaces", "-o", "json"],
             capture_output=True,
             text=True,
         )
-        if result.returncode == 0 and result.stdout.strip():
-            typer.echo(result.stdout)
-        else:
-            typer.echo("  Not found or not running")
     except FileNotFoundError:
         typer.echo("Error: kubectl not found", err=True)
-        sys.exit(1)
+        raise typer.Exit(1)
+    if result.returncode != 0:
+        typer.echo(result.stderr or "Error: unable to read system status", err=True)
+        raise typer.Exit(result.returncode)
 
-    # Check CRDs
-    typer.echo("\n📋 Custom Resource Definitions:")
-    result = subprocess.run(
-        ["kubectl", "get", "crd", "-o", "name"],
-        capture_output=True,
-        text=True,
-    )
-    crds = ["agents.kaos.tools", "mcpservers.kaos.tools", "modelapis.kaos.tools"]
-    for crd in crds:
-        if f"customresourcedefinition.apiextensions.k8s.io/{crd}" in result.stdout:
-            typer.echo(f"  ✅ {crd}")
+    items = json.loads(result.stdout or "{}").get("items", [])
+    for label, names in COMPONENTS:
+        deployment = _find_deployment(items, names)
+        if deployment is None:
+            state = "not installed"
+            detail = ""
         else:
-            typer.echo(f"  ❌ {crd} (not installed)")
-
-    # Count resources (across all namespaces)
-    typer.echo("\n📊 Resources (all namespaces):")
-    for kind, name in [
-        ("Agent", "agents"),
-        ("MCPServer", "mcpservers"),
-        ("ModelAPI", "modelapis"),
-    ]:
-        result = subprocess.run(
-            ["kubectl", "get", name, "--all-namespaces", "--no-headers"],
-            capture_output=True,
-            text=True,
-        )
-        count = len(result.stdout.strip().split("\n")) if result.stdout.strip() else 0
-        typer.echo(f"  {kind}: {count}")
-
-    # Check Gateway
-    typer.echo("\n🌐 Gateway:")
-    result = subprocess.run(
-        ["kubectl", "get", "gateway", "-n", "envoy-gateway-system", "-o", "wide"],
-        capture_output=True,
-        text=True,
-    )
-    if (
-        result.returncode == 0
-        and result.stdout.strip()
-        and "No resources found" not in result.stdout
-    ):
-        typer.echo(result.stdout)
-    else:
-        typer.echo("  No gateway found in envoy-gateway-system")
+            desired = deployment.get("spec", {}).get("replicas", 1)
+            ready = deployment.get("status", {}).get("readyReplicas", 0)
+            state = "ready" if desired > 0 and ready >= desired else "not ready"
+            detail = f"   ({ready}/{desired} replicas)"
+            if label == "login service" and "keycloak" in deployment["metadata"]["name"]:
+                detail = "   (keycloak)" if state == "ready" else detail
+        typer.echo(f"{label:<18}{state}{detail}")
