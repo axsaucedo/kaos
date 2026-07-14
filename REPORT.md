@@ -1,88 +1,71 @@
-# Implementation report — delegated third-party access via AIB token exchange
+# Implementation report — AIB-native delegated third-party access
 
-This stacked feature adds opt-in delegated access to OAuth-protected third-party services. A requesting user's Keycloak token is re-minted for the acting Agent, AIB exchanges it for that user's vaulted provider token on one declared egress route, and the runtime surfaces consent/reconnection as a controlled URL outcome. The full flow passed on the wire on `feat/kaos-token-exchange` at `991db3b6`; the example documentation was then aligned with that evidence in `d7d4acb3`.
+This branch ships opt-in delegated access to OAuth-protected third-party services through an AIB-native integration. AIB is exchange-only: third-party services, permission sets, and Agent bindings are administered in AIB, not through a KAOS CRD. The operator reflects that AIB state into generated, fail-closed egress plumbing and bound-Agent runtime configuration. The final annotation-free design passed the full consent, exchange, denial, revocation, and internal-route isolation flow on the wire.
 
-## Task overview
-
-| Task | Status | Commit |
-|---|---|---|
-| Add the gated CLI install path for Keycloak + self-managed AIB/ext_proc | Complete | `d06f5e48` |
-| Add the namespaced `ThirdPartyService` declaration, CRD, sample, and RBAC | Complete | `d65e7d58` |
-| Project real AIB services, Agent registrations, and Agent-to-service permission sets | Complete | `d7c6dcd8` |
-| Attach AIB ext_proc only to each declared third-party `HTTPRoute` | Complete | `cef3ea07` |
-| Inject declared third-party targets into bound Agent runtimes | Complete | `7a8b6be6` |
-| Re-mint delegated user tokens in `kaos_identity` for external calls | Complete | `e6834292` |
-| Surface AIB consent/re-authentication URLs as controlled runtime outcomes | Complete | `739c739a` |
-| Add the initial `.noeval` delegated-access walkthrough | Complete | `b5d26657` |
-| Keep runtime `ty` validation clean | Complete | `ea6c5e5b` |
-| Reconcile removal of an Agent egress binding | Complete | `36f90089` |
-| Align the walkthrough with the passing wire evidence | Complete | `d7d4acb3` |
+The branch originally implemented and validated a `ThirdPartyService` CRD design. That implementation was real, but it was superseded after the 2026-07-13 architecture decision made AIB the single declaration surface. No `ThirdPartyService` CRD remains in the shipped design.
 
 ## Model as shipped
 
-- Token exchange is feature-gated and off by default. `kaos system install --token-exchange-enabled --aib-chart-path <chart>` requires both Agent and user identity to use Keycloak; static provider credentials remain the default.
-- AIB is exchange-only. It is not an Agent identity issuer and it does not authorize internal KAOS traffic.
-- `ThirdPartyService` declares the provider `clientID`/`clientSecretRef`, issuer or explicit OAuth endpoints, scopes, protected resource URLs, one dedicated egress `routeRef`, and namespaced Agent/scope `access` bindings.
-- The operator projects only exchange-enabled Agents, real third-party services, and real permission sets into AIB. It generates an `EnvoyExtensionPolicy` only for the declared egress route.
-- For a declared external target, the runtime exchanges the normal user token through Keycloak using the acting Agent's DCR credential. The result keeps the user `sub`, changes `azp` to the Agent client, and has only `aud=token-exchange-broker`.
-- AIB ext_proc validates the exchange inputs, grant, permission set, and vault session, then swaps the outbound authorization credential for the user's third-party token.
-- Missing/expired/revoked consent is an expected failure contract: `third_party_reauth_required` plus an authorization URL. The caller completes OAuth and retries; the runtime does not silently retry or grant access.
-- Internal calls retain the existing actor + propagated-user-token model and never traverse ext_proc.
+- Token exchange is feature-gated and off by default. `kaos system install --token-exchange-enabled --aib-chart-path <chart>` requires Keycloak user and Agent identity and enables Envoy Gateway's Backend extension API for new installations.
+- AIB is used only for third-party token exchange, consent, and vaulted provider credentials. It does not issue KAOS Agent identity and does not authorize internal KAOS traffic.
+- Administrators create services and permission sets in AIB and bind them to the Agent's stable logical key, `kaos/<namespace>/<name>`. There is no KAOS third-party-service CRD, annotation, or administrator-authored egress route.
+- The operator registers or patches the corresponding AIB Agent record and keeps its `client_id` aligned with the Agent's current Keycloak DCR client while preserving AIB-administered permission-set bindings.
+- On a 45-second poll, the operator reads AIB Agents, services, and permission sets and generates namespace-local `Backend`, `HTTPRoute`, fail-closed `SecurityPolicy`, and fail-closed `EnvoyExtensionPolicy` resources. The ext_proc policy can target only operator-generated token-exchange routes.
+- Only bound Agents receive per-Agent `KAOS_TOKEN_EXCHANGE_CONFIG`, derived from AIB protected resources. Unbound Agents receive no exchange target configuration.
+- Session B runtime behavior is unchanged by the AIB-native rework: the runtime re-mints the requesting user's Keycloak token as the acting Agent, preserving the user `sub`, setting `azp` to the Agent DCR client, and emitting only `aud=token-exchange-broker`. AIB ext_proc exchanges that token for the user's vaulted provider token.
+- Missing, expired, or revoked consent remains a controlled `third_party_reauth_required` result with an authorization URL. The user completes OAuth and retries. Internal Agent, MCPServer, ModelAPI, and MemoryStore traffic retains the original user token and never traverses ext_proc.
 
-## Live wire evidence
+## Implementation arc
 
-| Check | Result |
-|---|---|
-| User entry to `researcher` after consent | HTTP 200; `Third-party tool completed.` |
-| Dedicated egress request | `GET /api/data`, HTTP 200, `response_code_details=via_upstream`, mock API independently logged the request |
-| Re-minted token issuer | `http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos` |
-| Re-minted token user | `sub=c9df7bbc-c015-4095-b39e-7b5ed1a3f5e9` |
-| Re-minted token Agent | `azp=85be1caf-30b9-4236-87b2-fae29613d86d` |
-| Re-minted token audience | `aud=token-exchange-broker` |
-| Claim assertions | `azp` PASS, `sub` PASS, `aud` PASS |
-| Vault revocation | Delete HTTP 200, `session terminated successfully`; subsequent list HTTP 200 with `sessions=[]` |
-| Retry after revocation | Agent entry HTTP 200 with controlled `third_party_reauth_required`; ext_proc observed broker HTTP 400 `invalid_grant` and surfaced `/api/third-party/e535ec5d-f544-4403-b044-576c87ab317e/oauth2/authorize` |
-| Internal Agent call | Entry HTTP 200; target `GET /health` HTTP 200; `Internal tool completed.` |
-| Internal subject invariant | Original user token preserved (`azp=kaos`, same `sub`); no ext_proc event |
-| Route invariant | Sole `EnvoyExtensionPolicy` targeted `github-mock-egress`; internal routes had ordinary `SecurityPolicy` attachments only |
-
-The passing verification is recorded at `tmp/te-eval/evidence/verify/RESULT.md` in the evaluation workspace. The first attempt was invalidated by Docker-host pressure from four concurrent KIND clusters. The next attempt exposed a permanent in-process runtime deadlock. After the fixes below, the same flow completed promptly; no cluster work was repeated during this documentation/PR phase.
-
-## Evaluation-found fixes
-
-| Finding | Root cause and resolution | Commit |
+| Phase | Outcome | Commits |
 |---|---|---|
-| AIB Helm install rejected duplicate ext_proc environment names | The CLI duplicated chart-owned token endpoint/TLS variables; remove the duplicates | `11223b59` |
-| Missing regression coverage for ext_proc wiring | Assert the rendered environment has one owner/value per setting | `711d1e1c` |
-| Custom Agent did not retain KAOS-added toolsets | Extend the custom Agent's `_user_toolsets`, not the derived `_toolsets` collection | `840ac013` |
-| Missing custom-Agent toolset regression coverage | Prove custom Agents receive the delegation/tool additions | `abc88da0` |
-| Delegated calls deadlocked before network I/O | Globally patched `httpx.send` injected headers by minting an actor token under a non-reentrant lock; the mint itself re-entered the patch and attempted the same lock. Suppress instrumentation for identity-manager-owned mint requests | `d94f0946` |
-| Missing deadlock regression coverage | Exercise managed mint under the global httpx patch and prove it completes | `f3d913cb` |
-| Generic PDP denied valid external delegated traffic | Permit only verified actor + verified user-issuer subject with broker audience when no internal target exists; retain internal-route denial | `72026524` |
-| Fresh Keycloak/AIB identity wiring was inconsistent | Enable Keycloak 26 exchange features, add the broker assertion audience, and validate the configured shared caller identity consistently | `991db3b6` |
+| Feature gate and initial CRD implementation | Added token-exchange installation, the `ThirdPartyService` CRD, AIB projection, route-scoped ext_proc, per-Agent targets, runtime re-mint, consent handling, and removal reconciliation. This design was built and validated, then superseded. | `d06f5e48`, `d65e7d58`, `d7c6dcd8`, `cef3ea07`, `7a8b6be6`, `e6834292`, `739c739a`, `b5d26657`, `ea6c5e5b`, `36f90089` |
+| First live-flow fixes | Fixed AIB chart environment wiring, custom-Agent toolset attachment, re-entrant actor-token minting, delegated-egress PDP handling, and Keycloak/AIB identity setup; aligned the original walkthrough with its passing wire evidence. | `11223b59`–`d7d4acb3` |
+| AIB-native rework | Removed the CRD and its samples/controllers, reflected AIB-administered Agents/services/permission sets, generated egress resources, kept Agent DCR identity current by stable key, and isolated projector failures. | `35144981`, `50ba5d04`, `d0c4c594`, `5719e94a`, `b8c14fb8` |
+| Install support | Enabled Envoy Gateway's Backend extension API for token-exchange installations and aligned CLI tests/samples with the removed CRD. | `8578e782`, `9d4acee7`, `bc036a6a` |
+| Egress hardening | Bound the delegated token's `azp` to the verified actor's projected DCR client and attached the normal fail-closed `SecurityPolicy` to every generated egress route. | `e4636fbb`, `e68e76da`, `34dfce3f`, `73401a0d` |
+| Upstream-origin annotation detour | Tried a Service annotation to separate the Agent-facing hostname from the Backend origin and added coverage. Live testing worked, but this reintroduced a second declaration surface. | `d477e3f7`, `711de63b` |
+| Final annotation-free design | Removed annotation support, derived both routing and Backend origin from the AIB protected resource, proved the single-name KIND rig through a test-only DNS split, and documented the manual AIB-native flow. | `f297c3b9`, `545ad81f`, `aee67830` |
 
-## Keycloak 26 and AIB dependency notes
+The add-then-remove annotation commits remain in history intentionally; the branch was not rebased or squashed because it is stacked.
 
-- Keycloak 26.0 requires `--features=token-exchange,admin-fine-grained-authz`. Without them the exchange endpoint returns HTTP 400 `unsupported_grant_type`.
-- The `token-exchange-broker` target client must exist with management permissions enabled and a client policy/permission allowing each exchange-enabled Agent DCR client. Without it Keycloak returns HTTP 403 `Client not allowed to exchange`.
-- The target exchange must produce exactly `aud=token-exchange-broker`, and the subject mapper must preserve the requesting user's `sub`.
-- The shared ext_proc client assertion also needs the broker audience. The CLI wires this for new installs, but per-Agent exchange permissions remain an explicit deployment dependency.
-- The evaluated Keycloak and AIB used ephemeral development state. Restarting Keycloak erased target-client/DCR permission state and rotated JWKS; production requires persistent state and declarative permission/mapper management.
-- The AIB chart must include ext_proc. The feature currently requires a local unpublished chart path.
+## Final live wire evidence
 
-## Test state
+The final run reused `kind-kaos-te-eval` and contained no `ThirdPartyService` CRD, third-party annotation, or administrator-authored egress Kubernetes object.
 
-- PAIS: 349 passed, 10 skipped; `ty`: all checks passed.
-- CLI: 125 passed.
-- Rego parity: 28/28 passed with OPA 1.18.1, including delegated-egress allow, wrong-audience deny, and internal-route deny.
-- Operator `make test-unit`: passed using Go 1.26; integration suite 45/45 and all packages passed.
-- VitePress: `npm run build` passed after the wire-aligned example update.
-- All `uv.lock` churn was reverted.
+| Check | Final annotation-free result |
+|---|---|
+| Reflected resources | Operator generated `Backend`, `HTTPRoute`, `SecurityPolicy`, and `EnvoyExtensionPolicy`; the Backend used the AIB protected-resource origin and the route reported `ResolvedRefs=True`. |
+| Bound configuration | `agent-researcher` received `KAOS_TOKEN_EXCHANGE_CONFIG`; `agent-unbound` did not. |
+| Consent flow | Empty vault produced application HTTP 200 with `third_party_reauth_required` and the AIB authorization URL; the S256 PKCE flow created the encrypted provider session. |
+| Successful retry | Agent returned HTTP 200 with `Third-party tool completed.` |
+| Re-minted claims | `azp=85be1caf-30b9-4236-87b2-fae29613d86d` (the researcher DCR client), `sub=c9df7bbc-c015-4095-b39e-7b5ed1a3f5e9`, and `aud=token-exchange-broker`. |
+| Provider-token swap | The mock received `GET /api/data` with the exchanged token, decoded as `azp=mock-third-party-client`, `sub=mock-third-party-user`, `aud=mock-api`, scope `read`; it did not receive the Keycloak token. |
+| Proven path | `researcher -> gateway -> PDP -> ext_proc -> generated Backend -> mock-api:80`, HTTP 200, with no routing loop. |
+| Unbound Agent | Direct generated-route request returned HTTP 403 `ext_authz_denied`; ext_proc and the mock saw no request. |
+| Vault revocation | Session deletion succeeded and left the vault empty; retry returned `third_party_reauth_required`, ext_proc observed broker HTTP 400 `invalid_grant`, and nothing reached the mock. |
+| Internal traffic | Internal Agent-to-Agent call returned HTTP 200 with the original token (`azp=kaos`, same user `sub`); it was not re-minted or swapped and produced no ext_proc event. |
+| Route isolation | The sole token-exchange `EnvoyExtensionPolicy` targeted only the operator-generated egress route. No internal route had ext_proc attached. |
 
-## Deferred / not yet proven
+## Dependencies and limitations
 
-- The passing provider was a mock. Real GitHub scopes, refresh behavior, and provider-side revocation remain to be exercised.
-- ServiceAccount-primary Agents still need a secondary Keycloak exchange credential or a different exchange trust design.
-- Stronger hardening should cross-check the delegated subject's Agent `azp` against the verified actor identity at the PDP/AIB boundary.
-- The KAOS UI consent wrapper is deferred; the raw fail-with-URL -> authorize -> retry contract is shipped.
-- A separate live unbound-Agent denial was not captured in the final verification, although projection and Rego tests cover missing bindings and invalid delegated inputs.
+- Keycloak 26 must enable `token-exchange` and `admin-fine-grained-authz`. The `token-exchange-broker` target client needs management permissions, an explicit permission for each exchange-enabled Agent DCR client, and an audience mapper that emits exactly `aud=token-exchange-broker`. Missing configuration surfaces as exchange-time HTTP 400/403 failures.
+- AIB owns the service, permission-set, consent, and vaulted-provider state. Production deployments require persistent AIB storage; KAOS does not store provider tokens.
+- Reflection polls AIB every 45 seconds because AIB has no watch API. Changes converge on the next poll and remain fail-static while AIB is unreachable.
+- AIB-side mistakes surface through operator events and runtime HTTP 403/reauthorization outcomes rather than a KAOS CRD status, because the AIB-native design deliberately has no third-party CRD.
+- Exchange-enabled Agents require a Keycloak client for re-minting. ServiceAccount-primary Agents need a secondary Keycloak exchange credential or another explicitly designed trust path.
+- The provider proven live was a mock OAuth/API service. Real-provider scope, refresh, and provider-side revocation behavior remain deployment-specific.
+- The KIND-only single-name rig used Agent-pod `hostAliases` so the Agent resolved the protected hostname to the gateway while Envoy resolved that same hostname through CoreDNS to the mock Service. This is test infrastructure, not product configuration or an alternate-origin feature.
+
+## Final validation state
+
+The final rework reports record:
+
+- Operator: `make test-unit` passed with Go 1.26.0 and OPA 1.18.2, including Rego tests and controller integration `45/45`.
+- KAOS CLI: `126 passed` under pytest.
+- Pydantic AI server: `349 passed, 10 skipped` under pytest.
+- Pydantic AI server `ty`: all checks passed.
+- Documentation: VitePress build passed.
+- Generated lockfile churn was reverted; no product code changed during this report/PR refresh.
+
+The manual production procedure and the clearly separated KIND-only rig are in `docs/examples/authorization.md` under **Manual AIB-native token-exchange runbook**. Detailed validation records are in `tmp/p20-rework-REPORT.md`, `tmp/p20-egress-REPORT.md`, and `tmp/p20-deannotate-REPORT.md`.
