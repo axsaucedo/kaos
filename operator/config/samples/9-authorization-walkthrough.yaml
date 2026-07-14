@@ -1,0 +1,92 @@
+# Authorization walkthrough with user-facing and autonomous echo agents, an echo MCP tool, and a mock model
+---
+apiVersion: kaos.tools/v1alpha1
+kind: ModelAPI
+metadata:
+  name: chat-model
+spec:
+  mode: Proxy
+  proxyConfig:
+    models:
+      - "*"
+
+---
+apiVersion: kaos.tools/v1alpha1
+kind: MCPServer
+metadata:
+  name: notes-mcp
+spec:
+  runtime: python-string
+  params: |
+    def echo(message: str) -> str:
+        """Echo a note for the authorization walkthrough."""
+        return f"Notes echo: {message}"
+
+---
+apiVersion: kaos.tools/v1alpha1
+kind: Agent
+metadata:
+  name: researcher
+spec:
+  modelAPI: chat-model
+  model: echo
+  mcpServers:
+    - notes-mcp
+  config:
+    description: User-facing echo agent for authorization checks
+    instructions: Echo the user's request and use notes-mcp when asked about notes.
+  container:
+    env:
+      - name: DEBUG_MOCK_RESPONSES
+        value: '["Researcher echo response"]'
+  agentNetwork:
+    expose: true
+
+---
+apiVersion: kaos.tools/v1alpha1
+kind: Agent
+metadata:
+  name: nightly-reporter
+spec:
+  modelAPI: chat-model
+  model: echo
+  config:
+    description: Autonomous echo agent for authorization checks
+    instructions: Echo a short nightly report.
+    autonomous:
+      goal: Produce the nightly echo report.
+      intervalSeconds: 3600
+  container:
+    env:
+      - name: DEBUG_MOCK_RESPONSES
+        value: '["Nightly reporter echo response"]'
+  agentNetwork:
+    expose: true
+
+---
+apiVersion: kaos.tools/v1alpha1
+kind: AccessGrant
+metadata:
+  name: researchers-to-researcher
+spec:
+  subjects:
+    - kind: Group
+      name: researchers
+  resources:
+    - kind: Agent
+      name: researcher
+
+---
+apiVersion: kaos.tools/v1alpha1
+kind: AccessGrant
+metadata:
+  name: researcher-to-notes-mcp-and-chat-model
+spec:
+  subjects:
+    - kind: Agent
+      name: researcher
+  resources:
+    - kind: MCPServer
+      name: notes-mcp
+    - kind: ModelAPI
+      name: chat-model
