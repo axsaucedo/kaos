@@ -36,5 +36,25 @@ func GrantData(state DesiredState) map[string][]string {
 		sort.Strings(resources)
 		grants[agent.ExternalID()] = resources
 	}
+	for _, grant := range state.AccessGrants {
+		resources := resolveGrantResources(grant, state.Resources)
+		for _, subject := range grant.Subjects {
+			if subject.Kind != "Agent" {
+				continue
+			}
+			key := AgentExternalID(grant.Namespace, subject.Name)
+			seen := make(map[string]bool, len(grants[key])+len(resources))
+			for _, resource := range grants[key] {
+				seen[resource] = true
+			}
+			for _, resource := range resources {
+				if !seen[resource] {
+					grants[key] = append(grants[key], resource)
+					seen[resource] = true
+				}
+			}
+			sort.Strings(grants[key])
+		}
+	}
 	return grants
 }
