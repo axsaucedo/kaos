@@ -178,7 +178,7 @@ It's also worth noting that if the authz service *can't be reached at all*, the 
 
 ### 2.2 Deploy the agents and tools
 
-Everything the example needs, both agents, the tool, and the model is bundled as a single sample. We will deploy it with a single command, but then we'll walk through each resource and create it step by step.
+Everything the example needs, both agents, the tool, the model, and the access rules that connect them, is bundled as a single sample. We will deploy it with a single command, then walk through each object and create it step by step.
 
 Here's the one line deploy command:
 
@@ -190,12 +190,15 @@ modelapi.kaos.tools/model-api serverside-applied
 mcpserver.kaos.tools/echo-mcp serverside-applied
 agent.kaos.tools/researcher serverside-applied
 agent.kaos.tools/autobot serverside-applied
+accessgrant.kaos.tools/researchers-to-researcher serverside-applied
+accessgrant.kaos.tools/researcher-to-echo-mcp-and-model-api serverside-applied
+accessgrant.kaos.tools/autobot-to-model-api serverside-applied
 
 
 Deployed sample '8-authorization-walkthrough'
 ```
 
-The tool's single function is an echo, and the model's responses are mocked, so every result is deterministic and the walkthrough exercises *access control* rather than model behaviour. Four resources, each a plain Kubernetes object:
+The tool's single function is an echo, and the model's responses are mocked, so every result is deterministic and the walkthrough exercises *access control* rather than model behaviour. The four resources first, each a plain Kubernetes object (the three access rules follow in [2.3](#23-grant-access)):
 
 | Resource | Kind | What it is |
 |---|---|---|
@@ -310,7 +313,7 @@ spec:
 
 ### 2.3 Grant access
 
-At this point the resources exist but no one can reach anything. With access control on and no rules declared, every request fails closed. Access rules are plain, reviewable objects called **AccessGrants**. Each one binds a **subject** (who) to one or more **resources** (what). `kaos auth grant create` writes them; `--dry-run` *shows* you the object instead of applying it, so you can see exactly what a rule is before it takes effect:
+The sample deployed three more objects alongside the resources: the **AccessGrants**, the rules for who may reach what. With access control on, nothing is reachable until a grant names it, so these are what make the example work. Each one binds a **subject** (who) to one or more **resources** (what). Just like the resources, you can write them yourself with `kaos auth grant create`; `--dry-run` *shows* you the object instead of applying it, so you can see exactly what a rule is:
 
 ```bash
 kaos auth grant create --group researchers --resource agent/researcher --dry-run
@@ -331,7 +334,7 @@ spec:
 
 A `subject` has a `kind` of **Group** (matched against the groups in the user's token), **User** (matched against the user's subject or email), or **Agent** (matched against an agent's own identity, which is how an autonomous agent or an agent-to-tool rule is expressed). A `resource` names a `kind` (`Agent`, `MCPServer`, `ModelAPI`, or `MemoryStore`) and a `name`, or, if you prefer, a label `selector` to match many resources at once. Both lists can hold more than one entry, which is how the agent-to-tools rule grants two resources in a single object.
 
-Apply the three rules the example needs (drop `--dry-run` to apply):
+Here are the three the sample applied, each with the command that creates it (drop `--dry-run` to write your own):
 
 ```bash
 # 1. the researchers group may use the researcher agent

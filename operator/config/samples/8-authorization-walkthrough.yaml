@@ -62,3 +62,47 @@ spec:
         value: '["Autobot echo response"]'
   agentNetwork:
     expose: true
+
+---
+# Who may use the researcher agent: the "researchers" group.
+apiVersion: kaos.tools/v1alpha1
+kind: AccessGrant
+metadata:
+  name: researchers-to-researcher
+spec:
+  subjects:
+    - kind: Group
+      name: researchers
+  resources:
+    - kind: Agent
+      name: researcher
+
+---
+# What the researcher agent may reach: the echo tool and the model.
+apiVersion: kaos.tools/v1alpha1
+kind: AccessGrant
+metadata:
+  name: researcher-to-echo-mcp-and-model-api
+spec:
+  subjects:
+    - kind: Agent
+      name: researcher
+  resources:
+    - kind: MCPServer
+      name: echo-mcp
+    - kind: ModelAPI
+      name: model-api
+
+---
+# What the autonomous autobot may reach: the model it runs on.
+apiVersion: kaos.tools/v1alpha1
+kind: AccessGrant
+metadata:
+  name: autobot-to-model-api
+spec:
+  subjects:
+    - kind: Agent
+      name: autobot
+  resources:
+    - kind: ModelAPI
+      name: model-api
