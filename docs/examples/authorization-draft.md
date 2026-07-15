@@ -18,121 +18,67 @@ We will walk through a concrete example where we will deploy a multi-component a
 
 The **control plane** is the set of components that establish identity and decide the rules. None of them carry your agents' actual traffic; they answer the two questions above about it. Here they are on one map. The greyed pieces belong to [Part 5](#5-agents-acting-on-behalf-of-users-on-outside-services) and can be ignored for now.
 
-```mermaid
-flowchart TB
-  subgraph idp["Identity providers"]
-    direction LR
-    UA["User Auth<br/>(Keycloak)"]
-    AZ["KAOS Authz Service"]
-    AA["Agent Auth<br/>(ServiceAccount / Keycloak)"]
-  end
-  subgraph req["Request path"]
-    direction LR
-    U["Users"]
-    GW["Gateway Mesh"]
-    RES["KAOS Resources<br/>(Agents, MCP, Models)"]
-  end
-  subgraph oob["Part 5 + out-of-band"]
-    direction LR
-    TP["3rd-Party Service<br/>(GitHub, ...)"]
-    AIB["Agent Exchange Service<br/>(AIB)"]
-    OP["KAOS Operator<br/>(auth sync)"]
-  end
-
-  UA <--> AZ
-  AZ <--> AA
-  U --> GW
-  GW --> AZ
-  GW --> RES
-
-  classDef part5 fill:#eeeeee,stroke:#bbbbbb,color:#999999,stroke-dasharray:4 3
-  class TP,AIB part5
-```
-
-A few of these names deserve a gloss on first meeting. The **Gateway Mesh** is a single gateway every request passes through — including agent-to-tool and agent-to-model calls, which is what makes it a mesh; after this introduction we'll often just say "the gateway". The **KAOS Authz Service** (authz, short for authorization) is the service that answers allow/deny. **User Auth** is the user authentication service — the login service; KAOS uses [Keycloak](https://www.keycloak.org/) as the example. And the **KAOS Operator** is the component that reconciles what you declared into the other components.
-
-| Component | Responsibility |
-|---|---|
-| **User Auth (Keycloak)** | Proves who a **user** is and which **groups** they belong to (like "Sign in with..."). Keycloak is the example; any standard OIDC provider works. |
-| **Agent Auth (ServiceAccount / Keycloak)** | Gives each **agent** its own identity, so the gateway knows which agent is calling. Two providers: Kubernetes ServiceAccounts (the default) or Keycloak (used in this guide — see [4.1](#41-agent-identity-how-does-an-agent-prove-who-it-is)). |
-| **KAOS Authz Service** | Given who is asking, answers *yes/no* to "is this allowed?". Runs inside the cluster as its own always-on service; the gateway consults it on every request. |
-| **KAOS Operator (auth sync)** | You declare agents, tools, and rules as ordinary Kubernetes objects. The operator keeps the other components aligned with those declarations, so you never configure them by hand. |
-| **Agent Exchange Service (AIB)** | Lets an agent act on an **outside** service (like GitHub) **as the user**, by exchanging in-cluster identity for the user's real third-party token. Introduced in [Part 5](#5-agents-acting-on-behalf-of-users-on-outside-services). |
-
-The whole point of the operator is that these components never drift from each other. You write down *what should be true*, "this group exists", "this agent may reach that tool", as Kubernetes objects, and the KAOS Operator is responsible for making User Auth, Agent Auth, and the Authz Service reflect exactly that. There is no separate admin console to keep in step by hand, and nothing to forget to update when you delete an agent.
-
-Here is the same map with a request traced across it, step by step. Steps 0 and 1 happen before the request (the identities exist first); steps 7–9 are the greyed Part 5 flow:
 
 ```mermaid
 flowchart TB
-  subgraph idp["Identity providers"]
-    direction LR
-    UA["User Auth<br/>(Keycloak)"]
-    AZ["KAOS Authz Service"]
-    AA["Agent Auth<br/>(ServiceAccount / Keycloak)"]
-  end
+  U["Users"]
+  GW["Gateway Mesh"]
+  UAuth["User Identity Service<br>(Keycloak, OIDC, etc)"]
+  AAuth["Agent Identity Service<br>(ServiceAcct, OIDC, etc)"]
+  Authz["KAOS Authz Service<br>(User+Agent Resource Access)"]
+  TPE["Agent Impersonation Broker<br>(AIB - Covered in Part 5)"]
+  KAOS["KAOS Resources<br>(Agents, MCPs, Models)"]
+  OP["⠀<br><b>KAOS Operator</b><br><br>(Syncs Identity<br> Tokens & Authorization<br> Graphs)<br>⠀"]
+
   subgraph req["Request path"]
-    direction LR
-    U["Users"]
-    GW["Gateway Mesh<br/><i>3. validates the token</i>"]
-    RES["KAOS Resources<br/>(Agents, MCP, Models)"]
-  end
-  subgraph oob["Part 5 + out-of-band"]
-    direction LR
-    TP["3rd-Party Service<br/>(GitHub, ...)"]
-    AIB["Agent Exchange Service<br/>(AIB)"]
-    OP["KAOS Operator<br/>(auth sync)"]
+    U --> GW
+    GW --> KAOS
   end
 
-  AA -->|"0. provides agent identity"| RES
-  UA -->|"1. authenticates"| U
-  U -->|"2. sends request"| GW
-  GW -->|"4. verifies user + agent access"| AZ
-  AZ -->|"5. verifies user"| UA
-  AZ -->|"6. verifies agent"| AA
-  GW -->|"7. third-party access"| AIB
-  TP -->|"8. token granted"| AIB
-  TP -->|"9. user consents"| U
-  GW -->|"10. routes request"| RES
+  subgraph auth["Auth & Identity Providers"]
+    UAuth ~~~ AAuth
+    Authz ~~~ TPE
+  end
+
+  req <--> auth
 
   classDef part5 fill:#eeeeee,stroke:#bbbbbb,color:#999999,stroke-dasharray:4 3
-  class TP,AIB part5
-  linkStyle 6 stroke:#bbbbbb,color:#999999,stroke-dasharray:4 3
-  linkStyle 7 stroke:#bbbbbb,color:#999999,stroke-dasharray:4 3
-  linkStyle 8 stroke:#bbbbbb,color:#999999,stroke-dasharray:4 3
+  class TPE part5
 ```
 
-The KAOS Operator has no numbered edge because it is not on the request path at all: it works out-of-band, reconciling identities and grants before any request arrives (its edges appear in [4.1](#41-agent-identity-how-does-an-agent-prove-who-it-is)).
+There are quite a few components in this overview, so let's walk through them:
+
+* **Gateway Mesh**: The single gateway every request passes through — including agent-to-tool, agent-to-model and agent-to-agent calls, which is what makes it a mesh.
+* **User Identity Service**: Authenticates users, proves who they are and which groups they belong to; supports OIDC compatible services so we use [Keycloak](https://www.keycloak.org/) here. 
+* **Agent Identity Service**: Gives each agent their identity through secure credentials; the default uses k8s Service Accounts, but also supports OIDC compatible services; we also configure Keycloak in this example.
+* **KAOS Authz Service**: This is the authorization (authz) service that KAOS uses to allow/deny requests based on the "user" calling the "agent" accessing the "resource".
+* **Agent Impersonation Broker**: Lets an agent act on an outside service (like GitHub) as the user by exchanging third-party token such as github/slack/etc through a consent mechanism. We use AIB for this, and it deserves it's own section, covered in Part 5.
+* **KAOS Operator**: This component synchronises auth & identity bidirectionaly; it registers the KAOS resources on upstream auth services, and injects identities and secrets across KAOS resources.
+
+Before we show how this all fits together with an example, let's configure our kubernetes cluster with this setup.
 
 ### 1.1 Install it in one command
 
-A single command stands up everything on the map — the Gateway Mesh, User Auth, Agent Auth, the KAOS Authz Service, the KAOS Operator, and the Agent Exchange Service — and wires them together:
+We use the [KAOS CLI]() to install the Gateway Mesh, User Auth, Agent Auth, the KAOS Authz Service, the KAOS Operator, and the Agent Exchange Service.
 
-```bash
+This command wires everything together in a new cluster:
+
+```perl
 kaos system install \
-  --gateway-enabled \
-  --gateway-strict \
-  --authz-enabled \
-  --user-auth keycloak \
-  --agent-auth keycloak \
-  --token-exchange-enabled \
-  --aib-chart-path agentic-identity-broker/charts/agentic-identity-broker \
-  --create-cli-config
+  --gateway-strict \         # Traffic can only go through gateway
+  --authz-enabled \          # KAOS Authorization service enabled
+  --user-auth keycloak \     # Use Keycloak for User auth (alt: OIDC)
+  --agent-auth keycloak \    # Use Keycloak for Agent Auth (alt: Service Accts. or OIDC)
+  --token-exchange-enabled \ # Use AIB for token exchange
+
+                         # Other flags
+  --wait \               # Block until everything is ready
+  --create-cli-config    # In-folder config file for cli
 ```
-
-What each flag does:
-
-- **`--gateway-enabled` and `--gateway-strict`** work as a pair and are worth dwelling on. The first puts the gateway *on the path*, but on its own a workload could still be reached directly by its in-cluster address, sidestepping the checks. `--gateway-strict` closes that door: it turns on network isolation so the gateway becomes the *only* way in, and rewrites the addresses agents use so their calls to tools, models, and each other are routed back through the gateway too. Enable both together and there is no unchecked path left.
-- **`--authz-enabled`** turns on the KAOS Authz Service and fail-closed enforcement.
-- **`--user-auth keycloak`** stands up Keycloak as User Auth and connects it.
-- **`--agent-auth keycloak`** selects how agents prove who they are (`serviceaccount`, `oidc`, or `keycloak`). This guide uses `keycloak` because [Part 5](#5-agents-acting-on-behalf-of-users-on-outside-services) needs it; the trade-off, and the `serviceaccount` default, are explained in [4.1](#41-agent-identity-how-does-an-agent-prove-who-it-is).
-- **`--token-exchange-enabled`** enables delegated third-party access via the Agent Exchange Service (Part 5). It requires the two `keycloak` flags above, plus `--aib-chart-path`.
-- **`--aib-chart-path`** points at the Agent Exchange Service's Helm chart, which is installed as its own release. The path shown is a local dev path (the chart is vendored during development); a real install points at the published chart.
-- **`--create-cli-config`** writes `.kaos-config.yaml` so every CLI command talks through the gateway.
 
 `kaos system install --help` lists everything else (image tags, resource limits, replica counts, realm names, observability backends); the Helm values behind each flag are shown per-component in [section 4](#4-how-each-piece-works).
 
-Confirm the pieces are healthy:
+Let's confirm the pieces are healthy:
 
 ```bash
 kaos system status
@@ -144,11 +90,9 @@ access-control    ready   (2/2 replicas)
 sync service      ready
 ```
 
-The status output uses the CLI's own short labels: `gateway` is the Gateway Mesh, `login service` is User Auth (Keycloak), `access-control` is the KAOS Authz Service, and `sync service` is the KAOS Operator.
+And let's make sure that everything is configured correctly:
 
-`--create-cli-config` wrote `.kaos-config.yaml` in the current folder, recording the gateway address and login details, so every command below automatically goes **through the gateway**, the same path real traffic takes. Inspect or change it with `kaos config show`:
-
-```bash
+``` perl
 kaos config show
 ```
 ```text
@@ -165,21 +109,23 @@ namespace: kaos-system
 sessions: {}
 ```
 
-(The two `broker_*` entries point at the Agent Exchange Service; they matter only in Part 5.)
-
 ---
 
 ## 2. The data plane
 
-The **data plane** is the actual agent traffic: users invoking agents, agents calling tools and models. Every one of those calls travels through the Gateway Mesh and is checked before it is let through. To make that concrete, the rest of this guide uses one small cast:
+The **data plane** is the actual agent traffic: users invoking agents, agents calling tools and models. Every one of those calls travels through the Gateway Mesh and is checked before it is let through. 
+
+We will use a hands on example with a set of configured resources as follows:
 
 - two users: **alice** (group `researchers`) and **bob** (group `support`)
-- two agents: **researcher** (user-facing — it needs a person behind it) and **nightly-reporter** (autonomous — it runs on its own and acts as itself)
-- one tool: **notes-mcp** (an MCP server inside the cluster)
+- two agents: **researcher** (user-activated) and **nightly-reporter** (autonomous agent)
+- one MCP tool: **notes-mcp**
 - one model: **chat-model** (a model endpoint both agents may use)
-- *(for Part 5)* one external service: **GitHub** — external; not a cluster resource; no `MCPServer`, no `AccessGrant` will ever name it
+- one external service: **GitHub** — covered in Part 5
 
-The rules: the `researchers` group may use the `researcher` agent; the `researcher` agent may reach `notes-mcp` and `chat-model`; the autonomous `nightly-reporter` may reach `chat-model`. Everything else is denied — including bob:
+The rules: the `researchers` group may use the `researcher` agent; the `researcher` agent may reach `notes-mcp` and `chat-model`; the autonomous `nightly-reporter` may reach `chat-model`. Everything else is denied — including bob (poor bob).
+
+Here's a chart that shows what we'll try to accomplish:
 
 ```mermaid
 flowchart LR
@@ -203,39 +149,38 @@ flowchart LR
   linkStyle 4 stroke:#2e7d32,stroke-width:2px
 ```
 
-That map is the reference the Part 3 walkthrough checks off, row by row:
-
-| Requester | Target | Verdict | Why |
-|---|---|---|---|
-| alice (`researchers`) | researcher | **allow** | `researchers` is granted the researcher agent |
-| bob (`support`) | researcher | **deny** | `support` is named in no grant |
-| researcher | notes-mcp | **allow** | the agent is granted the tool |
-| researcher | chat-model | **allow** | the agent is granted the model |
-| researcher (no user) | researcher | **deny** | no valid identity is behind the call |
-| nightly-reporter (itself) | chat-model | **allow** | the autonomous agent is granted its model |
-| *researcher* | *github* | *(Part 5)* | *delegated third-party access, covered later* |
 
 ### 2.1 How identity flows through a request
 
-Every call, a user reaching an agent, or an agent reaching a tool or model, travels **through the Gateway Mesh**, which does two checks before letting it through:
+Every call, a user/agent reaching an agent, or a user/agent reaching a tool or model, travels **through the Gateway Mesh**, which does two checks before letting it through:
 
 ```mermaid
 flowchart LR
-  REQ["Request<br/>+ signed token"] --> GW["Gateway Mesh"]
-  GW --> C1{"1. valid identity?"}
+  REQ["Request<br/>+ signed token<br><br>(From User+Agent)"] --> GW["Gateway Mesh"]
+  GW --> C1{"1. valid identity?<br><br> (For User+Agent)"}
   C1 -->|"no"| DENY["Denied"]
-  C1 -->|"yes"| C2{"2. Authz Service says allowed?"}
+  C1 -->|"yes"| C2{"2. Authz Service <br>says allowed?"}
   C2 -->|"no / unreachable"| DENY
   C2 -->|"yes"| DEST["Agent · Tool · Model"]
 ```
 
-A *signed token* is an ID card an identity provider issued: tamper-proof, and it names the holder — for a person, User Auth issues it and it carries their groups; for an agent, Agent Auth does. The gateway does the two checks in order. First it confirms the token is genuine and unexpired (identity), then it asks the KAOS Authz Service whether that identity is allowed to do this (permission) — which is steps 4–6 on the Part 1 map, where the Authz Service verifies the user against User Auth and the agent against Agent Auth. Only if both pass does the request reach its destination.
+A *signed token* is like an ID card issued by the identity provider, and it's held by both the user and the agent. 
 
-Note the second check fails **closed**: if the Authz Service says no, *or can't be reached at all*, the request is denied, never waved through. A common failure mode in home-grown setups is "the checker was down, so we let everything past." KAOS does the opposite: no answer means no.
+User Auth issues signed tokens for human users and it carries their groups.
+
+Agent Auth also issues signed tokens, but these are provided as secrets for agents, which then are exchanged for signed tokens.
+
+The gateway does the two checks in order; first it confirms the token is genuine and unexpired (identity), then it asks the KAOS Authz Service whether that identity is allowed to do this (permission).
+
+Only if both pass does the request reach its destination.
+
+It's also worth noting that if the authz service *can't be reached at all*, the request is denied, never waved through. This is configured by design and it is possible to loosen via config params (but not recommended), that's why authz service is designed as highly available.
 
 ### 2.2 Deploy the agents and tools
 
-Everything the example needs, both agents, the tool, and the model, is bundled as a single sample. Deploy it with one command:
+Everything the example needs, both agents, the tool, and the model is bundled as a single sample. We will deploy it with a single command, but then we'll walk through each resource and create it step by step.
+
+Here's the one line deploy command:
 
 ```bash
 kaos samples deploy 9-authorization-walkthrough -n kaos-system
