@@ -787,7 +787,9 @@ The fail-closed behaviour isn't a setting you turn on. It's how the gateway trea
 
 ## 5. Agents acting on behalf of users - on outside services
 
-What happens when the researcher needs GitHub? Whose GitHub account does it act on? Everything so far stays inside the cluster; this last capability lets an agent call a **real outside service, GitHub, say, as the specific user**, not as a shared bot account.
+What happens when the researcher agent needs to access GitHub on behalf of the user? Whose GitHub account does it act on? 
+
+Everything so far focuses on identity for access control, but so far we don't have the mechanisms to access **external oauth services like GitHub as the specific user**, as opposed to using a shared bot account.
 
 ### 5.1 The intuition
 

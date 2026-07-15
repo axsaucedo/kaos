@@ -123,8 +123,7 @@ export default withMermaid(defineConfig({
           { text: 'Authorization', link: '/security/authorization' },
           { text: 'Agent identity', link: '/security/walkthrough-agent-identity' },
           { text: 'User identity', link: '/security/walkthrough-user-identity' },
-          { text: 'Auth', link: '/security/walkthrough-auth' },
-          { text: 'Live validation', link: '/examples/authorization' }
+          { text: 'Auth', link: '/security/walkthrough-auth' }
         ]
       },
       {
