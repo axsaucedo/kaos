@@ -1,510 +1,989 @@
+# Agentic Security & Identity: who they are, and what they're allowed to do
+
+What is Agentic Security & Identity? In this practical walkthrough we cover this topic by diving into 3 key questions:
+
+1. **User Identity** - What user called the agent? What if it's an autonomous agent?
+2. **Agent Identity** - What is the identity of the agent? Is the Agent able to act on the user's behalf?
+3. **Access Control** Can *this* user use *this* agent, and can *this* agent reach *that* tool or model?
+
+KAOS answers these questions on every request in the system. 
+
+This guide explains the why, what and how; we configure a cluster with KAOS for the agent orchestration integrated with Keycloak for authentication and the Agent Identity Broker for identity exchange.
+
+We will walk through a concrete example where we will deploy a multi-component agentic system and show how calls from different users (or autonomous agents) succeed or fail.
+
 ---
-jupyter:
-  jupytext:
-    cell_metadata_filter: -all
-    text_representation:
-      extension: .md
-      format_name: markdown
-      format_version: '1.3'
-      jupytext_version: 1.19.1
-  kernelspec:
-    display_name: Python 3 (ipykernel)
-    language: python
-    name: python3
+
+## 1. The control plane
+
+The **control plane** is the set of components that establish identity and decide the rules. None of them carry your agents' actual traffic; they answer the two questions above about it. Here they are on one map. The greyed pieces belong to [Part 5](#5-agents-acting-on-behalf-of-users-on-outside-services) and can be ignored for now.
+
+
+```mermaid
+flowchart TB
+  U["Users"]
+  GW["Gateway Mesh"]
+  UAuth["User Identity Service<br>(Keycloak, OIDC, etc)"]
+  AAuth["Agent Identity Service<br>(ServiceAcct, OIDC, etc)"]
+  Authz["KAOS Authz Service<br>(User+Agent Resource Access)"]
+  TPE["Agent Impersonation Broker<br>(AIB - Covered in Part 5)"]
+  KAOS["KAOS Resources<br>(Agents, MCPs, Models)"]
+  OP["⠀<br><b>KAOS Operator</b><br><br>(Syncs Identity<br> Tokens & Authorization<br> Graphs)<br>⠀"]
+
+  subgraph req["Request path"]
+    U --> GW
+    GW --> KAOS
+  end
+
+  subgraph auth["Auth & Identity Providers"]
+    UAuth ~~~ AAuth
+    Authz ~~~ TPE
+  end
+
+  req <--> auth
+
+  classDef part5 fill:#eeeeee,stroke:#bbbbbb,color:#999999,stroke-dasharray:4 3
+  class TPE part5
+```
+
+There are quite a few components in this overview, so let's walk through them:
+
+* **Gateway Mesh**: The single gateway every request passes through — including agent-to-tool, agent-to-model and agent-to-agent calls, which is what makes it a mesh.
+* **User Identity Service**: Authenticates users, proves who they are and which groups they belong to; supports OIDC compatible services so we use [Keycloak](https://www.keycloak.org/) here. 
+* **Agent Identity Service**: Gives each agent their identity through secure credentials; the default uses k8s Service Accounts, but also supports OIDC compatible services; we also configure Keycloak in this example.
+* **KAOS Authz Service**: This is the authorization (authz) service that KAOS uses to allow/deny requests based on the "user" calling the "agent" accessing the "resource".
+* **Agent Impersonation Broker**: Lets an agent act on an outside service (like GitHub) as the user by exchanging third-party token such as github/slack/etc through a consent mechanism. We use AIB for this, and it deserves it's own section, covered in Part 5.
+* **KAOS Operator**: This component synchronises auth & identity bidirectionaly; it registers the KAOS resources on upstream auth services, and injects identities and secrets across KAOS resources.
+
+Before we show how this all fits together with an example, let's configure our kubernetes cluster with this setup.
+
+### 1.1 Install it in one command
+
+We use the [KAOS CLI]() to install the Gateway Mesh, User Auth, Agent Auth, the KAOS Authz Service, the KAOS Operator, and the Agent Exchange Service.
+
+This command wires everything together in a new cluster:
+
+```perl
+kaos system install \
+  --gateway-strict \         # Traffic can only go through gateway
+  --authz-enabled \          # KAOS Authorization service enabled
+  --user-auth keycloak \     # Use Keycloak for User auth (alt: OIDC)
+  --agent-auth keycloak \    # Use Keycloak for Agent Auth (alt: Service Accts. or OIDC)
+  --token-exchange-enabled \ # Use AIB for token exchange
+
+                         # Other flags
+  --wait \               # Block until everything is ready
+  --create-cli-config    # In-folder config file for cli
+```
+
+`kaos system install --help` lists everything else (image tags, resource limits, replica counts, realm names, observability backends); the Helm values behind each flag are shown per-component in [section 4](#4-how-each-piece-works).
+
+Let's confirm the pieces are healthy:
+
+```bash
+kaos system status
+```
+```text
+gateway           ready
+login service     ready   (keycloak)
+access-control    ready   (2/2 replicas)
+sync service      ready
+```
+
+And let's make sure that everything is configured correctly:
+
+``` perl
+kaos config show
+```
+```text
+gateway:
+  address: http://kaos-gateway.kaos-system.svc.cluster.local
+  through_gateway: true
+auth:
+  issuer: http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos
+  client_id: kaos
+  realm: kaos
+  broker_url: http://aib-agentic-identity-broker.aib-system.svc.cluster.local:8000
+  broker_admin_url: http://aib-agentic-identity-broker.aib-system.svc.cluster.local:14000/api
+namespace: kaos-system
+sessions: {}
+```
+
 ---
 
-# Gateway Authorization
+## 2. The data plane
 
-This example proves that an autonomous Agent needs both a valid actor identity and the required subject identity before it can reach a granted resource. The executable section covers the ServiceAccount agent plane: a granted request succeeds, ungranted and malformed identities are denied, and the gateway fails closed when the policy decision point (PDP) is unavailable.
+The **data plane** is the actual agent traffic: users invoking agents, agents calling tools and models. Every one of those calls travels through the Gateway Mesh and is checked before it is let through. 
 
-The later user-plane and gateway-bypass sections are read-only examples. They show the complete Keycloak, OIDC dynamic client registration (DCR), and Calico strict-routing flow, but Jupytext does not run them in CI.
+We will use a hands on example with a set of configured resources as follows:
 
-## Agent plane: executed in CI
+- two users: **alice** (group `researchers`) and **bob** (group `support`)
+- two agents: **researcher** (user-activated) and **autobot** (autonomous agent)
+- one MCP tool: **echo-mcp**
+- one model: **model-api** (a model endpoint both agents may use)
+- one external service: **GitHub** — covered in Part 5
 
-Install KAOS with gateway authorization backed by projected Kubernetes ServiceAccount tokens:
+The rules: the `researchers` group may use the `researcher` agent; the `researcher` agent may reach `echo-mcp` and `model-api`; the autonomous `autobot` may reach `model-api`. Everything else is denied — including bob (poor bob).
+
+Here's a chart that shows what we'll try to accomplish:
+
+```mermaid
+flowchart LR
+  alice["alice<br/><i>group: researchers</i>"]
+  bob["bob<br/><i>group: support</i>"]
+  RES["researcher<br/><i>agent</i>"]
+  NR["autobot<br/><i>autonomous agent</i>"]
+  MCP["echo-mcp<br/><i>tool</i>"]
+  MODEL["model-api<br/><i>model</i>"]
+
+  alice -->|"(has access)"| RES
+  bob -->|"(no access)"| RES
+  RES -->|"(has access)"| MCP
+  RES -->|"(has access)"| MODEL
+  NR -->|"(has access)"| MODEL
+
+  linkStyle 0 stroke:#2e7d32,stroke-width:2px
+  linkStyle 1 stroke:#c62828,stroke-width:2px,stroke-dasharray:5 4
+  linkStyle 2 stroke:#2e7d32,stroke-width:2px
+  linkStyle 3 stroke:#2e7d32,stroke-width:2px
+  linkStyle 4 stroke:#2e7d32,stroke-width:2px
+```
+
+
+### 2.1 How identity flows through a request
+
+Every call, a user/agent reaching an agent, or a user/agent reaching a tool or model, travels **through the Gateway Mesh**, which does two checks before letting it through:
+
+```mermaid
+flowchart LR
+  REQ["Request<br/>+ signed token<br><br>(From User+Agent)"] --> GW["Gateway Mesh"]
+  GW --> C1{"1. valid identity?<br><br> (For User+Agent)"}
+  C1 -->|"no"| DENY["Denied"]
+  C1 -->|"yes"| C2{"2. Authz Service <br>says allowed?"}
+  C2 -->|"no / unreachable"| DENY
+  C2 -->|"yes"| DEST["Agent · Tool · Model"]
+```
+
+A *signed token* is like an ID card issued by the identity provider, and it's held by both the user and the agent. 
+
+User Auth issues signed tokens for human users and it carries their groups.
+
+Agent Auth also issues signed tokens, but these are provided as secrets for agents, which then are exchanged for signed tokens.
+
+The gateway does the two checks in order; first it confirms the token is genuine and unexpired (identity), then it asks the KAOS Authz Service whether that identity is allowed to do this (permission).
+
+Only if both pass does the request reach its destination.
+
+It's also worth noting that if the authz service *can't be reached at all*, the request is denied, never waved through. This is configured by design and it is possible to loosen via config params (but not recommended), that's why authz service is designed as highly available.
+
+### 2.2 Deploy the agents and tools
+
+Everything the example needs, both agents, the tool, the model, and the access rules that connect them, is bundled as a single sample. We will deploy it with a single command, then walk through each object and create it step by step.
+
+Here's the one line deploy command:
 
 ```bash
-set -euo pipefail
-REPO_ROOT=$(git rev-parse --show-toplevel)
-kaos system install --gateway-enabled --metallb-enabled \
-  --agent-auth-enabled service-account \
-  --chart-path "$REPO_ROOT/operator/chart" --wait
+kaos samples deploy 8-authorization-walkthrough -n kaos-system
+```
+```text
+modelapi.kaos.tools/model-api serverside-applied
+mcpserver.kaos.tools/echo-mcp serverside-applied
+agent.kaos.tools/researcher serverside-applied
+agent.kaos.tools/autobot serverside-applied
+accessgrant.kaos.tools/researchers-to-researcher serverside-applied
+accessgrant.kaos.tools/researcher-to-echo-mcp-and-model-api serverside-applied
+accessgrant.kaos.tools/autobot-to-model-api serverside-applied
+
+
+Deployed sample '8-authorization-walkthrough'
 ```
 
-Apply the self-contained sample and wait for its workloads. The autonomous Agent is granted only `granted-model`; `unrelated-agent` exists to make the deny side visible.
+The tool's single function is an echo, and the model's responses are mocked, so every result is deterministic and the walkthrough exercises *access control* rather than model behaviour. The four resources first, each a plain Kubernetes object (the three access rules follow in [2.3](#23-grant-access)):
+
+| Resource | Kind | What it is |
+|---|---|---|
+| **model-api** | `ModelAPI` | A model endpoint both agents may call. |
+| **echo-mcp** | `MCPServer` | A tool (an MCP server) exposing a single `echo` function the `researcher` may use. |
+| **researcher** | `Agent` | A user-facing agent. It needs a person behind it and carries that person's identity through to whatever it calls. |
+| **autobot** | `Agent` | An *autonomous* agent. No user behind it; it runs on a schedule and acts as itself. |
+
+#### Reproduce it yourself
+
+Each resource has its own `kaos ... create` command, so you can build an equivalent setup by hand and see the shape of each object. The model and tool first:
 
 ```bash
-set -euo pipefail
-REPO_ROOT=$(git rev-parse --show-toplevel)
-kubectl apply -f "$REPO_ROOT/operator/config/samples/8-access-grant.yaml"
+# a small in-cluster model endpoint
+kaos modelapi create model-api \
+  --mode hosted \
+  --model "smollm2:135m"
 
-kubectl wait --for=condition=available deployment/modelapi-granted-model \
-  -n authz-demo --timeout=180s
-kubectl wait --for=condition=available deployment/modelapi-ungranted-model \
-  -n authz-demo --timeout=180s
-kubectl wait --for=condition=available deployment/agent-autonomous-researcher \
-  -n authz-demo --timeout=180s
-kubectl wait --for=condition=available deployment/agent-unrelated-agent \
-  -n authz-demo --timeout=180s
+# an echo tool exposed as an MCP server
+kaos mcp create echo-mcp \
+  --runtime python-string \
+  --params 'def echo(message: str) -> str:
+      """Echo a note for the authorization walkthrough."""
+      return f"Echo: {message}"'
 ```
 
-Mint a short-lived projected token with the gateway audience, port-forward Envoy, and assert the authorization matrix. The first request retries while the policy projection settles; every other request checks the returned status immediately.
+Then the two agents. The user-facing one references the model and tool it should use:
 
 ```bash
-set -euo pipefail
-
-assert_status() {
-  expected=$1
-  description=$2
-  shift 2
-  code=$(curl -sS -o /dev/null -w '%{http_code}' "$@" || true)
-  [ "$code" = "$expected" ] || {
-    echo "$description: expected $expected got $code"
-    exit 1
-  }
-  echo "$description: $code"
-}
-
-wait_for_status() {
-  expected=$1
-  description=$2
-  shift 2
-  for _ in $(seq 1 60); do
-    code=$(curl -sS -o /dev/null -w '%{http_code}' "$@" || true)
-    if [ "$code" = "$expected" ]; then
-      echo "$description: $code"
-      return 0
-    fi
-    sleep 2
-  done
-  echo "$description: expected $expected got $code"
-  return 1
-}
-
-ENVOY_SERVICE=$(kubectl get service -n envoy-gateway-system \
-  -l gateway.envoyproxy.io/owning-gateway-name=kaos-gateway \
-  -o jsonpath='{.items[0].metadata.name}')
-GATEWAY_URL=http://127.0.0.1:18888
-TMP_DIR=$(git rev-parse --show-toplevel)/tmp
-mkdir -p "$TMP_DIR"
-ORIGINAL_PDP_REPLICAS=$(kubectl get deployment/kaos-pdp -n kaos-system \
-  -o jsonpath='{.spec.replicas}')
-
-kubectl port-forward -n envoy-gateway-system \
-  "service/$ENVOY_SERVICE" 18888:80 >"$TMP_DIR/authorization-port-forward.log" 2>&1 &
-PORT_FORWARD_PID=$!
-cleanup() {
-  kubectl scale deployment/kaos-pdp -n kaos-system \
-    --replicas="${ORIGINAL_PDP_REPLICAS:-2}" >/dev/null 2>&1 || true
-  kill "$PORT_FORWARD_PID" >/dev/null 2>&1 || true
-}
-trap cleanup EXIT
-
-for _ in $(seq 1 30); do
-  curl -s -o /dev/null "$GATEWAY_URL" && break
-  sleep 1
-done
-kill -0 "$PORT_FORWARD_PID"
-
-TOKEN=$(kubectl create token kaos-agent-autonomous-researcher \
-  -n authz-demo --audience=kaos-gateway --duration=10m)
-WRONG_AUDIENCE_TOKEN=$(kubectl create token kaos-agent-autonomous-researcher \
-  -n authz-demo --audience=not-kaos-gateway --duration=10m)
-
-GRANTED_URL="$GATEWAY_URL/authz-demo/modelapi/granted-model/health/liveliness"
-UNGRANTED_URL="$GATEWAY_URL/authz-demo/modelapi/ungranted-model/health/liveliness"
-
-wait_for_status 200 "granted resource" \
-  -H "x-agent-authorization: Bearer $TOKEN" \
-  -H "Authorization: Bearer $TOKEN" \
-  "$GRANTED_URL"
-assert_status 403 "ungranted resource" \
-  -H "x-agent-authorization: Bearer $TOKEN" \
-  -H "Authorization: Bearer $TOKEN" \
-  "$UNGRANTED_URL"
-assert_status 403 "missing subject" \
-  -H "x-agent-authorization: Bearer $TOKEN" \
-  "$GRANTED_URL"
-assert_status 403 "wrong-audience token" \
-  -H "x-agent-authorization: Bearer $WRONG_AUDIENCE_TOKEN" \
-  -H "Authorization: Bearer $WRONG_AUDIENCE_TOKEN" \
-  "$GRANTED_URL"
-
-kubectl scale deployment/kaos-pdp -n kaos-system --replicas=0
-kubectl wait --for=delete pod -n kaos-system \
-  -l app.kubernetes.io/name=kaos-pdp --timeout=120s
-wait_for_status 403 "PDP unavailable" \
-  -H "x-agent-authorization: Bearer $TOKEN" \
-  -H "Authorization: Bearer $TOKEN" \
-  "$GRANTED_URL"
-
-kubectl scale deployment/kaos-pdp -n kaos-system \
-  --replicas="${ORIGINAL_PDP_REPLICAS:-2}"
-kubectl rollout status deployment/kaos-pdp -n kaos-system --timeout=180s
-wait_for_status 200 "PDP restored" \
-  -H "x-agent-authorization: Bearer $TOKEN" \
-  -H "Authorization: Bearer $TOKEN" \
-  "$GRANTED_URL"
+kaos agent create researcher \
+  --modelapi model-api \
+  --mcp echo-mcp \
+  --instructions "Echo the user's request and use echo-mcp when asked."
 ```
 
-The important distinction is the two headers: `x-agent-authorization` identifies the calling Agent, while `Authorization` supplies the subject on whose behalf it acts. For an autonomous Agent, both can carry the same projected identity, but omitting the subject is still denied.
+The autonomous one adds an `autonomous` goal so it runs on its own interval instead of waiting for a person:
 
-## Full Keycloak user and agent planes
-
-The remaining cells are intentionally marked `.noeval`: they are rendered for readers but skipped by CI. Start with a Calico KIND cluster because Kubernetes `NetworkPolicy` objects only prove gateway-only routing when the cluster CNI enforces them.
-
-```bash .noeval
-mkdir -p tmp
-cat > tmp/authz-kind.yaml <<'EOF'
-kind: Cluster
-apiVersion: kind.x-k8s.io/v1alpha4
-networking:
-  disableDefaultCNI: true
-  podSubnet: 192.168.0.0/16
-nodes:
-  - role: control-plane
-EOF
-
-kind create cluster --name kaos-authz --config tmp/authz-kind.yaml
-kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.32.1/manifests/tigera-operator.yaml
-kubectl wait --for=condition=Established crd/installations.operator.tigera.io --timeout=180s
-kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.32.1/manifests/custom-resources.yaml
-kubectl wait --for=condition=Available tigerastatus/calico --timeout=600s
-kubectl wait --for=condition=Ready node --all --timeout=300s
+```bash
+kaos agent create autobot \
+  --modelapi model-api \
+  --autonomous-goal "Produce the automated echo report." \
+  --autonomous-interval 3600
 ```
 
-First create the grant without a user identity provider. Its `Enforced` condition is `False/NoUserIdentityProvider`; the grant cannot affect policy until the user plane exists.
+<details>
+<summary>[Collapsed section] Expand to see the equivalent Kubernetes objects</summary>
 
-```bash .noeval
-set -euo pipefail
-kaos system install --gateway-enabled --metallb-enabled --gateway-api-strict \
-  --agent-auth-enabled service-account --user-auth-enabled none --wait
-kubectl apply -f operator/config/samples/8-access-grant.yaml
-kubectl run bypass-client -n authz-demo --image=curlimages/curl:8.12.1 \
-  --command -- sleep infinity
-kubectl wait --for=condition=Ready pod/bypass-client -n authz-demo --timeout=120s
+`kaos ... create` writes ordinary KAOS objects; this is what the sample applies. The `ModelAPI` runs in `Proxy` mode and each agent carries `DEBUG_MOCK_RESPONSES`, so the echo replies are deterministic. Note `autobot` differs from `researcher` mainly by its `autonomous` block. That single field is what makes it act as itself rather than needing a user.
 
-condition=$(kubectl get accessgrant researchers-enter-autonomous -n authz-demo \
-  -o jsonpath='{.status.conditions[?(@.type=="Enforced")].status}/{.status.conditions[?(@.type=="Enforced")].reason}')
-[ "$condition" = "False/NoUserIdentityProvider" ] || {
-  echo "expected False/NoUserIdentityProvider got $condition"
-  exit 1
-}
+```yaml
+apiVersion: kaos.tools/v1alpha1
+kind: ModelAPI
+metadata:
+  name: model-api
+spec:
+  mode: Proxy
+  proxyConfig:
+    models:
+      - "*"
+---
+apiVersion: kaos.tools/v1alpha1
+kind: MCPServer
+metadata:
+  name: echo-mcp
+spec:
+  runtime: python-string
+  params: |
+    def echo(message: str) -> str:
+        """Echo a note for the authorization walkthrough."""
+        return f"Echo: {message}"
+---
+apiVersion: kaos.tools/v1alpha1
+kind: Agent
+metadata:
+  name: researcher
+spec:
+  modelAPI: model-api
+  model: echo
+  mcpServers:
+    - echo-mcp
+  config:
+    description: User-facing echo agent for authorization checks
+    instructions: Echo the user's request and use echo-mcp when asked.
+  container:
+    env:
+      - name: DEBUG_MOCK_RESPONSES
+        value: '["{\"tool_calls\": [{\"id\": \"call_1\", \"name\": \"echo\", \"arguments\": {\"message\": \"authorization note\"}}]}", "Researcher echo response"]'
+  agentNetwork:
+    expose: true
+---
+apiVersion: kaos.tools/v1alpha1
+kind: Agent
+metadata:
+  name: autobot
+spec:
+  modelAPI: model-api
+  model: echo
+  config:
+    description: Autonomous echo agent for authorization checks
+    instructions: Echo a short automated report.
+    autonomous:
+      goal: Produce the automated echo report.
+      intervalSeconds: 3600
+  container:
+    env:
+      - name: DEBUG_MOCK_RESPONSES
+        value: '["Autobot echo response"]'
+  agentNetwork:
+    expose: true
+```
+</details>
+
+### 2.3 Grant access
+
+The sample deployed three more objects alongside the resources: the **AccessGrants**, the rules for who may reach what. With access control on, nothing is reachable until a grant names it, so these are what make the example work. Each one binds a **subject** (who) to one or more **resources** (what). Just like the resources, you can write them yourself with `kaos auth grant create`; `--dry-run` *shows* you the object instead of applying it, so you can see exactly what a rule is:
+
+```bash
+kaos auth grant create --group researchers --resource agent/researcher --dry-run
+```
+```yaml
+apiVersion: kaos.tools/v1alpha1
+kind: AccessGrant
+metadata:
+  name: researchers-to-researcher
+spec:
+  subjects:
+    - kind: Group
+      name: researchers
+  resources:
+    - kind: Agent
+      name: researcher
 ```
 
-Upgrade to Keycloak for both planes. The operator waits for an initial-access token before it can dynamically register Agent clients, so mint that token through Keycloak's in-cluster hostname, create the bootstrap Secret, and restart the operator.
+A `subject` has a `kind` of **Group** (matched against the groups in the user's token), **User** (matched against the user's subject or email), or **Agent** (matched against an agent's own identity, which is how an autonomous agent or an agent-to-tool rule is expressed). A `resource` names a `kind` (`Agent`, `MCPServer`, `ModelAPI`, or `MemoryStore`) and a `name`, or, if you prefer, a label `selector` to match many resources at once. Both lists can hold more than one entry, which is how the agent-to-tools rule grants two resources in a single object.
 
-```bash .noeval
-set -euo pipefail
-kaos system install --gateway-enabled --metallb-enabled --gateway-api-strict \
-  --agent-auth-enabled keycloak --user-auth-enabled keycloak
+Here are the three the sample applied, each with the command that creates it (drop `--dry-run` to write your own):
 
-KC=http://keycloak.keycloak.svc.cluster.local:8080
-ADMIN=$(kubectl exec -n authz-demo bypass-client -- curl -fsS -X POST \
-  "$KC/realms/master/protocol/openid-connect/token" \
-  -H 'Content-Type: application/x-www-form-urlencoded' \
-  --data-urlencode client_id=admin-cli \
-  --data-urlencode username=admin \
-  --data-urlencode password=admin \
-  --data-urlencode grant_type=password | jq -r .access_token)
+```bash
+# 1. the researchers group may use the researcher agent
+kaos auth grant create --group researchers --resource agent/researcher
 
-IAT=$(kubectl exec -n authz-demo bypass-client -- curl -fsS -X POST \
-  "$KC/admin/realms/kaos/clients-initial-access" \
-  -H "Authorization: Bearer $ADMIN" \
-  -H 'Content-Type: application/json' \
-  -d '{"expiration":86400,"count":100}' | jq -r .token)
+# 2. the researcher agent may reach the echo tool and the model
+kaos auth grant create --agent researcher --resource mcp/echo-mcp,modelapi/model-api
 
-kubectl create secret generic kaos-oidc-registration -n kaos-system \
-  --from-literal=token="$IAT"
-kubectl rollout restart deployment/kaos-kaos-operator-controller-manager -n kaos-system
-kubectl rollout status deployment/kaos-kaos-operator-controller-manager \
-  -n kaos-system --timeout=180s
-
-for _ in $(seq 1 45); do
-  condition=$(kubectl get accessgrant researchers-enter-autonomous -n authz-demo \
-    -o jsonpath='{.status.conditions[?(@.type=="Enforced")].status}/{.status.conditions[?(@.type=="Enforced")].reason}')
-  [ "$condition" = "True/Enforced" ] && break
-  sleep 2
-done
-[ "$condition" = "True/Enforced" ] || {
-  echo "expected True/Enforced got $condition"
-  exit 1
-}
+# 3. the autonomous autobot may reach the model it runs on
+kaos auth grant create --agent autobot --resource modelapi/model-api
+```
+```text
+✓ created AccessGrant researchers-to-researcher
+✓ created AccessGrant researcher-to-echo-mcp-and-model-api
+✓ created AccessGrant autobot-to-model-api
 ```
 
-Port-forward Envoy as in the executed section. The managed `kaos-user` belongs to `researchers`, so its user token can enter the granted Agent but not the unrelated one.
+The second grant is the interesting one. Its subject is the *agent itself*, and it lists two resources:
 
-```bash .noeval
-set -euo pipefail
-ENVOY_SERVICE=$(kubectl get service -n envoy-gateway-system \
-  -l gateway.envoyproxy.io/owning-gateway-name=kaos-gateway \
-  -o jsonpath='{.items[0].metadata.name}')
-kubectl port-forward -n envoy-gateway-system \
-  "service/$ENVOY_SERVICE" 18888:80 >tmp/authorization-keycloak-port-forward.log 2>&1 &
-GATEWAY_URL=http://127.0.0.1:18888
+<details>
+<summary>[Collapsed section] Expand to see the agent-to-tools AccessGrant it wrote</summary>
 
-USER_TOKEN=$(kubectl exec -n authz-demo bypass-client -- curl -fsS -X POST \
-  "$KC/realms/kaos/protocol/openid-connect/token" \
-  -H 'Content-Type: application/x-www-form-urlencoded' \
-  --data-urlencode client_id=kaos \
-  --data-urlencode client_secret=kaos-dev-secret \
-  --data-urlencode username=kaos-user \
-  --data-urlencode password=kaos-password \
-  --data-urlencode grant_type=password | jq -r .access_token)
+```yaml
+apiVersion: kaos.tools/v1alpha1
+kind: AccessGrant
+metadata:
+  name: researcher-to-echo-mcp-and-model-api
+spec:
+  subjects:
+    - kind: Agent
+      name: researcher
+  resources:
+    - kind: MCPServer
+      name: echo-mcp
+    - kind: ModelAPI
+      name: model-api
+```
+</details>
 
-code=$(curl -sS -o /dev/null -w '%{http_code}' \
-  -H "Authorization: Bearer $USER_TOKEN" \
-  "$GATEWAY_URL/authz-demo/agent/autonomous-researcher/health")
-[ "$code" = "200" ] || { echo "expected entry 200 got $code"; exit 1; }
+List or remove them like any resource:
 
-code=$(curl -sS -o /dev/null -w '%{http_code}' \
-  -H "Authorization: Bearer $USER_TOKEN" \
-  "$GATEWAY_URL/authz-demo/agent/unrelated-agent/health")
-[ "$code" = "403" ] || { echo "expected ungranted 403 got $code"; exit 1; }
+```bash
+kaos auth grant list
+```
+```text
+NAME                                     SUBJECTS          RESOURCES              ENFORCED
+researcher-to-echo-mcp-and-model-api   researcher        echo-mcp,model-api   True
+researchers-to-researcher                researchers       researcher             True
+autobot-to-model-api           autobot  model-api             True
 ```
 
-Each Agent receives a DCR-created Secret. Exchange those client credentials for an actor token and prove the autonomous Agent still reaches only its granted ModelAPI.
+The `ENFORCED` column is the KAOS Operator reporting back. `True` means it has projected the rule into the Authz Service and the gateway is enforcing it. If it read `False`, the column would name the reason (for example that access control isn't enabled, or that no user login provider is configured). Removing a grant is symmetric; here we drop one and re-create it, since the rest of the walkthrough depends on it:
 
-```bash .noeval
-set -euo pipefail
-CLIENT_ID=$(kubectl get secret kaos-oidc-autonomous-researcher -n authz-demo \
-  -o jsonpath='{.data.client_id}' | base64 -d)
-CLIENT_SECRET=$(kubectl get secret kaos-oidc-autonomous-researcher -n authz-demo \
-  -o jsonpath='{.data.client_secret}' | base64 -d)
-ACTOR_TOKEN=$(kubectl exec -n authz-demo bypass-client -- curl -fsS -X POST \
-  "$KC/realms/kaos/protocol/openid-connect/token" \
-  -H 'Content-Type: application/x-www-form-urlencoded' \
-  --data-urlencode grant_type=client_credentials \
-  --data-urlencode client_id="$CLIENT_ID" \
-  --data-urlencode client_secret="$CLIENT_SECRET" | jq -r .access_token)
-
-code=$(curl -sS -o /dev/null -w '%{http_code}' \
-  -H "x-agent-authorization: Bearer $ACTOR_TOKEN" \
-  -H "Authorization: Bearer $ACTOR_TOKEN" \
-  "$GATEWAY_URL/authz-demo/modelapi/granted-model/health/liveliness")
-[ "$code" = "200" ] || { echo "expected DCR actor 200 got $code"; exit 1; }
+```bash
+kaos auth grant delete researchers-to-researcher
+kaos auth grant create --group researchers --resource agent/researcher
 ```
 
-## Prove the gateway cannot be bypassed
+Those three grants are the *only* rules that exist. Here is the same map from the start of this section, this time with each green edge labelled by the AccessGrant that makes it green. Everything not drawn green is denied:
 
-Strict mode creates ingress policies for protected workloads and the PDP. A valid token sent directly to either ClusterIP must time out with curl exit code 28, while the same request through Envoy remains allowed.
+```mermaid
+flowchart LR
+  alice["alice<br/><i>group: researchers</i>"]
+  bob["bob<br/><i>group: support</i>"]
+  RES["researcher<br/><i>agent</i>"]
+  NR["autobot<br/><i>autonomous agent</i>"]
+  MCP["echo-mcp<br/><i>tool</i>"]
+  MODEL["model-api<br/><i>model</i>"]
 
-```bash .noeval
-set -euo pipefail
-set +e
-kubectl exec -n authz-demo bypass-client -- curl -sS -o /dev/null \
-  --connect-timeout 3 --max-time 5 \
-  -H "x-agent-authorization: Bearer $ACTOR_TOKEN" \
-  -H "Authorization: Bearer $ACTOR_TOKEN" \
-  http://modelapi-granted-model:8000/health/liveliness
-modelapi_rc=$?
+  alice -->|"researchers-to-researcher"| RES
+  bob -->|"(no grant)"| RES
+  RES -->|"researcher-to-echo-mcp-and-model-api"| MCP
+  RES -->|"researcher-to-echo-mcp-and-model-api"| MODEL
+  NR -->|"autobot-to-model-api"| MODEL
 
-kubectl exec -n authz-demo bypass-client -- curl -sS -o /dev/null \
-  --connect-timeout 3 --max-time 5 \
-  http://kaos-pdp.kaos-system.svc:9191
-pdp_rc=$?
-set -e
-
-[ "$modelapi_rc" = "28" ] || {
-  echo "expected direct ModelAPI timeout (28) got $modelapi_rc"
-  exit 1
-}
-[ "$pdp_rc" = "28" ] || {
-  echo "expected direct PDP timeout (28) got $pdp_rc"
-  exit 1
-}
-
-code=$(curl -sS -o /dev/null -w '%{http_code}' \
-  -H "x-agent-authorization: Bearer $ACTOR_TOKEN" \
-  -H "Authorization: Bearer $ACTOR_TOKEN" \
-  "$GATEWAY_URL/authz-demo/modelapi/granted-model/health/liveliness")
-[ "$code" = "200" ] || { echo "expected gateway 200 got $code"; exit 1; }
+  linkStyle 0 stroke:#2e7d32,stroke-width:2px
+  linkStyle 1 stroke:#c62828,stroke-width:2px,stroke-dasharray:5 4
+  linkStyle 2 stroke:#2e7d32,stroke-width:2px
+  linkStyle 3 stroke:#2e7d32,stroke-width:2px
+  linkStyle 4 stroke:#2e7d32,stroke-width:2px
 ```
 
-Authorization projection and mounted OPA data are eventually consistent. After a grant, issuer, or DCR mapping changes, allow up to 90 seconds for the new policy to appear before treating a denial as final.
+---
 
-## Manual AIB-native token-exchange runbook
+## 3. Walk the example
 
-This final walkthrough is `.noeval`. It is a manual production runbook for a self-managed AIB deployment and mirrors the passing wire evaluation. The `researcher` Agent must have a tool that calls the protected resource configured below.
+### 3.1 Log in as the users
 
-### Production flow
+`kaos auth login` gets a token from the login service and remembers it, printing what that login proves:
 
-Install KAOS with Keycloak for user and Agent identity and enable the self-managed AIB integration. `--token-exchange-enabled` makes the operator reflect AIB data; it does not create AIB services or permission sets.
-
-```bash .noeval
-set -euo pipefail
-REPO_ROOT=$(git rev-parse --show-toplevel)
-AIB_CHART_PATH=/path/to/agentic-identity-broker/chart
-
-kaos system install --gateway-enabled --metallb-enabled \
-  --agent-auth-enabled keycloak --user-auth-enabled keycloak \
-  --token-exchange-enabled --aib-chart-path "$AIB_CHART_PATH" \
-  --chart-path "$REPO_ROOT/operator/chart" --wait
+```bash
+kaos auth login alice --password kaos-password
+kaos auth login bob --password kaos-password
+```
+```text
+✓ logged in as alice — groups: researchers
+✓ logged in as bob — groups: support
 ```
 
-Keycloak 26 must have the `token-exchange` and `admin-fine-grained-authz` features enabled. Create the `token-exchange-broker` target client, allow the `researcher` DCR client to exchange to it, and configure its audience mapper to emit exactly `aud=token-exchange-broker`. A missing feature returns `400 unsupported_grant_type`; a missing per-client permission returns `403 Client not allowed to exchange`.
+The "groups" it prints aren't decoration. They're the exact claim the gateway will read out of the token on every request, and the exact thing an AccessGrant's `Group` subject matches against. alice carries `researchers`; bob carries `support`. Nothing about alice as an individual is granted anything; her *group* is.
 
-Set the production service values. The protected-resource hostname is both the Agent-facing hostname matched by the generated route and the generated Backend origin. Production infrastructure must force the Agent's request through the gateway while Envoy resolves the same hostname to the internet.
+### 3.2 Run the requests
 
-```bash .noeval
-NAMESPACE=token-exchange-demo
-AGENT=researcher
-PROTECTED_RESOURCE=https://api.github.com/user
-THIRD_PARTY_ISSUER=https://github.com
-THIRD_PARTY_AUTHORIZE_ENDPOINT=https://github.com/login/oauth/authorize
-THIRD_PARTY_TOKEN_ENDPOINT=https://github.com/login/oauth/access_token
-THIRD_PARTY_SCOPE=read:user
-THIRD_PARTY_CLIENT_ID='replace-with-github-oauth-client-id'
-THIRD_PARTY_CLIENT_SECRET='replace-with-github-oauth-client-secret'
+`--user` sends the call **through the gateway as that person**, and the CLI prints the plain result:
+
+```bash
+kaos agent invoke researcher --user alice -m "summarise repo X"
+kaos agent invoke researcher --user bob -m "summarise repo X"
+```
+```text
+Researcher echo response
+✓ allowed — request permitted
+✗ denied — user not in a granted group
 ```
 
-Administer the service, permission set, and Agent binding through AIB's admin API. The local port-forward and `X-Remote-User` header below match the self-managed evaluation configuration; use authenticated admin access in production.
+Same agent, same request. The only difference is who's behind it. alice's token carries `researchers`, which the `researchers-to-researcher` grant allows; bob's carries `support`, which nothing grants, so he's refused at the door. alice's request lights up the granted path:
 
-```bash .noeval
-kubectl port-forward -n aib-system svc/aib-agentic-identity-broker 14000:14000 >./tmp/aib-admin-port-forward.log 2>&1 &
-AIB_ADMIN=http://localhost:14000/api
-ADMIN_HEADER='X-Remote-User: kaos-operator'
+```mermaid
+flowchart LR
+  alice["alice<br/><i>group: researchers</i>"]
+  bob["bob<br/><i>group: support</i>"]
+  RES["researcher<br/><i>agent</i>"]
+  NR["autobot<br/><i>autonomous agent</i>"]
+  MCP["echo-mcp<br/><i>tool</i>"]
+  MODEL["model-api<br/><i>model</i>"]
 
-SERVICE_ID=$(curl --max-time 60 -fsS -X POST "$AIB_ADMIN/services" \
-  -H "$ADMIN_HEADER" -H 'Content-Type: application/json' \
-  -d "$(jq -n \
-    --arg client_id "$THIRD_PARTY_CLIENT_ID" \
-    --arg client_secret "$THIRD_PARTY_CLIENT_SECRET" \
-    --arg issuer "$THIRD_PARTY_ISSUER" \
-    --arg authorize "$THIRD_PARTY_AUTHORIZE_ENDPOINT" \
-    --arg token "$THIRD_PARTY_TOKEN_ENDPOINT" \
-    --arg scope "$THIRD_PARTY_SCOPE" \
-    --arg resource "$PROTECTED_RESOURCE" \
-    '{display_name:"GitHub",client_id:$client_id,client_secret:$client_secret,oauth2_flavor:"github",issuer_uri:$issuer,discovery:{enable_discovery:false},endpoints:{authorize_endpoint:$authorize,token_endpoint:$token},scopes:[{scope_value:$scope,description:"Read the GitHub user profile"}],protected_resources:[$resource]}')" \
-  | jq -r .id)
+  alice -->|"allow"| RES
+  bob --> RES
+  RES -->|"allow"| MCP
+  RES -->|"allow"| MODEL
+  NR --> MODEL
 
-PERMISSION_SET_ID=$(curl --max-time 60 -fsS -X POST "$AIB_ADMIN/permission-sets" \
-  -H "$ADMIN_HEADER" -H 'Content-Type: application/json' \
-  -d "$(jq -n --arg service_id "$SERVICE_ID" --arg scope "$THIRD_PARTY_SCOPE" \
-    '{name:"github-read-user",description:"Read the GitHub user profile",service_scopes:[{service_id:$service_id,scopes:[$scope],requirement_type:"mandatory"}]}')" \
-  | jq -r .id)
-
-RESEARCHER_CLIENT_ID=$(kubectl get secret -n "$NAMESPACE" "kaos-oidc-$AGENT" -o jsonpath='{.data.client_id}' | base64 -d)
-
-curl --max-time 60 -fsS -X POST "$AIB_ADMIN/agents" \
-  -H "$ADMIN_HEADER" -H 'Content-Type: application/json' \
-  -d "$(jq -n \
-    --arg client_id "$RESEARCHER_CLIENT_ID" \
-    --arg external_id "kaos/$NAMESPACE/$AGENT" \
-    --arg permission_set_id "$PERMISSION_SET_ID" \
-    '{client_id:$client_id,external_id:$external_id,display_name:"researcher",description:"KAOS exchange-enabled Agent",permission_sets:[{permission_set_id:$permission_set_id,requirement_type:"mandatory"}]}')"
+  classDef dim fill:#eeeeee,stroke:#bbbbbb,color:#999999
+  class bob,NR dim
+  linkStyle 0 stroke:#2e7d32,stroke-width:2px
+  linkStyle 1 stroke:#dddddd,color:#bbbbbb
+  linkStyle 2 stroke:#2e7d32,stroke-width:2px
+  linkStyle 3 stroke:#2e7d32,stroke-width:2px
+  linkStyle 4 stroke:#dddddd,color:#bbbbbb
 ```
 
-Wait for the next reflection pass, which runs every 45 seconds by default. The operator generates the FQDN Backend, HTTPRoute, fail-closed SecurityPolicy, and ext_proc policy from AIB alone, updates the AIB Agent's DCR `client_id`, and injects `KAOS_TOKEN_EXCHANGE_CONFIG` only into the bound Agent. Do not create a Service, Backend, HTTPRoute, ThirdPartyService, or annotation for this integration.
+...while bob's request never gets past the first edge:
 
-```bash .noeval
-sleep 50
-kubectl get backend,httproute,securitypolicy,envoyextensionpolicy \
-  -n "$NAMESPACE" -l kaos.tools/token-exchange-managed=true
+```mermaid
+flowchart LR
+  alice["alice<br/><i>group: researchers</i>"]
+  bob["bob<br/><i>group: support</i>"]
+  RES["researcher<br/><i>agent</i>"]
+  NR["autobot<br/><i>autonomous agent</i>"]
+  MCP["echo-mcp<br/><i>tool</i>"]
+  MODEL["model-api<br/><i>model</i>"]
 
-ROUTE_NAME=$(kubectl get httproute -n "$NAMESPACE" \
-  -l kaos.tools/token-exchange-managed=true -o jsonpath='{.items[0].metadata.name}')
+  alice --> RES
+  bob -->|"deny"| RES
+  RES --> MCP
+  RES --> MODEL
+  NR --> MODEL
 
-kubectl get httproute "$ROUTE_NAME" -n "$NAMESPACE" \
-  -o jsonpath='{.spec.hostnames[0]}{" ResolvedRefs="}{.status.parents[0].conditions[?(@.type=="ResolvedRefs")].status}{"\n"}'
-kubectl get backend "$ROUTE_NAME" -n "$NAMESPACE" \
-  -o jsonpath='{.spec.endpoints[0].fqdn.hostname}{":"}{.spec.endpoints[0].fqdn.port}{"\n"}'
-kubectl get envoyextensionpolicy "$ROUTE_NAME" -n "$NAMESPACE" \
-  -o jsonpath='{.spec.targetRefs[0].kind}{"/"}{.spec.targetRefs[0].name}{" failOpen="}{.spec.extProc[0].failOpen}{"\n"}'
-
-kubectl get deployment "agent-$AGENT" -n "$NAMESPACE" -o json \
-  | jq '[.spec.template.spec.containers[0].env[] | select(.name=="KAOS_TOKEN_EXCHANGE_CONFIG")]'
+  classDef dim fill:#eeeeee,stroke:#bbbbbb,color:#999999
+  class alice,NR,MCP,MODEL dim
+  linkStyle 0 stroke:#dddddd,color:#bbbbbb
+  linkStyle 1 stroke:#c62828,stroke-width:2px,stroke-dasharray:5 4
+  linkStyle 2 stroke:#dddddd,color:#bbbbbb
+  linkStyle 3 stroke:#dddddd,color:#bbbbbb
+  linkStyle 4 stroke:#dddddd,color:#bbbbbb
 ```
 
-Mint the user's normal Keycloak token and call the Agent. The first call without a live AIB vault session returns application HTTP 200 with the controlled `third_party_reauth_required` result and an AIB authorization URL; the third-party request has not reached its Backend.
+The agent using its granted tool and model:
 
-```bash .noeval
-KEYCLOAK_URL=https://keycloak.example.com
-GATEWAY_URL=https://gateway.example.com
-KAOS_USER_PASSWORD=kaos-password
-
-USER_TOKEN=$(curl --max-time 60 -fsS -X POST \
-  "$KEYCLOAK_URL/realms/kaos/protocol/openid-connect/token" \
-  -H 'Content-Type: application/x-www-form-urlencoded' \
-  --data-urlencode client_id=kaos \
-  --data-urlencode client_secret=kaos-dev-secret \
-  --data-urlencode username=kaos-user \
-  --data-urlencode password="$KAOS_USER_PASSWORD" \
-  --data-urlencode grant_type=password | jq -r .access_token)
-
-call_researcher() {
-  curl --max-time 60 -fsS "$GATEWAY_URL/$NAMESPACE/agent/$AGENT/v1/chat/completions" \
-    -H "Authorization: Bearer $USER_TOKEN" \
-    -H 'Content-Type: application/json' \
-    -d '{"model":"researcher","messages":[{"role":"user","content":"Call the third-party service"}]}'
-}
-
-FIRST_RESULT=$(call_researcher | jq -r '.choices[0].message.content')
-echo "$FIRST_RESULT"
-# Access to api.github.com requires re-authentication (third_party_reauth_required).
-# Please reconnect at https://<aib>/api/third-party/<service-id>/oauth2/authorize and try again.
+```bash
+kaos agent invoke researcher --user alice -m "read echo-mcp and ask model-api"
+```
+```text
+Researcher echo response
+✓ allowed — request permitted
 ```
 
-Open the returned URL as the requesting user. Complete the provider's S256 PKCE authorization-code flow and approve the permission in AIB. The redirect finishes at the AIB consent UI, and AIB stores the provider access and refresh tokens in its encrypted vault; KAOS does not store them.
+This exercises the *second* kind of rule. alice got in (first check), and now the agent reaches out to `echo-mcp` and `model-api`. Each of those hops is itself a request through the gateway, checked against the `researcher-to-echo-mcp-and-model-api` grant. Both are listed, so both succeed — they are the two right-hand green edges on alice's diagram above.
 
-```bash .noeval
-REAUTH_URL=$(echo "$FIRST_RESULT" | grep -Eo 'https?://[^ ]+/api/third-party/[^ ]+/oauth2/authorize')
-open "$REAUTH_URL"  # use xdg-open on Linux
+The autonomous agent acts as **itself** (no user), allowed only what *it* was granted:
 
-SUCCESS_RESULT=$(call_researcher | jq -r '.choices[0].message.content')
-echo "$SUCCESS_RESULT"
-# Third-party tool completed.
+```bash
+kaos agent invoke autobot -m "run the automated report"
+```
+```text
+Autobot echo response
+✓ allowed — request permitted
 ```
 
-The successful wire path is `Agent -> gateway -> PDP -> ext_proc -> generated Backend -> third party`. The Agent re-mints the user's Keycloak token before egress; the live evaluation decoded these exact claims, where `azp` is the `researcher` DCR client and `sub` remains the requesting user:
+```mermaid
+flowchart LR
+  alice["alice<br/><i>group: researchers</i>"]
+  bob["bob<br/><i>group: support</i>"]
+  RES["researcher<br/><i>agent</i>"]
+  NR["autobot<br/><i>autonomous agent</i>"]
+  MCP["echo-mcp<br/><i>tool</i>"]
+  MODEL["model-api<br/><i>model</i>"]
 
-```json .noeval
+  alice --> RES
+  bob --> RES
+  RES --> MCP
+  RES --> MODEL
+  NR -->|"allow (as itself)"| MODEL
+
+  classDef dim fill:#eeeeee,stroke:#bbbbbb,color:#999999
+  class alice,bob,RES,MCP dim
+  linkStyle 0 stroke:#dddddd,color:#bbbbbb
+  linkStyle 1 stroke:#dddddd,color:#bbbbbb
+  linkStyle 2 stroke:#dddddd,color:#bbbbbb
+  linkStyle 3 stroke:#dddddd,color:#bbbbbb
+  linkStyle 4 stroke:#2e7d32,stroke-width:2px
+```
+
+There is no `--user` here, yet the call is allowed, while the very next example (a user-facing agent with no `--user`) is denied. That is not a hole in fail-closed; it is fail-closed working. The autonomous agent presents its *own* identity, which is valid, and grant 3 lets that identity reach `model-api`. A user-facing agent invoked with no `--user` has *no* identity behind it at all:
+
+```bash
+kaos agent invoke researcher -m "summarise repo X"      # no --user
+```
+```text
+✗ denied — no valid identity
+```
+
+And the fails-closed guarantee. `kaos system access-control` scales the KAOS Authz Service up or down; with it gone, the gateway denies rather than guesses:
+
+```bash
+kaos system access-control --off
+kaos agent invoke researcher --user alice -m "hi"
+kaos system access-control --on
+```
+```text
+✓ access-control off
+✗ denied — access-control unavailable (failing closed)
+✓ access-control on
+```
+
+Every row of the Part 2 table, proven with plain commands, and nothing was configured by hand in User Auth or the Authz Service; the KAOS Operator kept them aligned with the objects you declared.
+
+---
+
+## 4. How each piece works
+
+The example above is the *what*. This section is the *how*, one capability at a time. Each sub-section ends with the actual configuration behind it: declared objects and Helm values.
+
+### 4.1 Agent identity: how does an agent prove who it is?
+
+How does the gateway know which agent is calling — even when no person started it? That is Agent Auth's job, and it is the one place on the Part 1 map where the KAOS Operator's out-of-band work is easiest to see. Here is the same map from the operator's point of view, with the sync work drawn in:
+
+```mermaid
+flowchart TB
+  subgraph idp["Identity providers"]
+    direction LR
+    UA["User Auth<br/>(Keycloak)"]
+    AZ["KAOS Authz Service"]
+    AA["Agent Auth<br/>(ServiceAccount / Keycloak)"]
+  end
+  subgraph req["Request path"]
+    direction LR
+    U["Users"]
+    GW["Gateway Mesh"]
+    RES["KAOS Resources<br/>(Agents, MCP, Models)"]
+  end
+  subgraph oob["Part 5 + out-of-band"]
+    direction LR
+    TP["3rd-Party Service<br/>(GitHub, ...)"]
+    AIB["Agent Exchange Service<br/>(AIB)"]
+    OP["KAOS Operator<br/>(auth sync)"]
+  end
+
+  UA <--> AZ
+  AZ <--> AA
+  U --> GW
+  GW --> AZ
+  GW --> RES
+  OP -.->|"provisions users/groups at install"| UA
+  OP -.->|"registers each agent as a client (DCR)"| AA
+  OP -.->|"projects AccessGrant data"| AZ
+  OP -.->|"keeps agent logical names current (Part 5)"| AIB
+
+  classDef dim fill:#eeeeee,stroke:#bbbbbb,color:#999999
+  classDef part5 fill:#eeeeee,stroke:#bbbbbb,color:#999999,stroke-dasharray:4 3
+  class UA,AZ,AA,U,GW,RES dim
+  class TP,AIB part5
+  linkStyle 0 stroke:#dddddd
+  linkStyle 1 stroke:#dddddd
+  linkStyle 2 stroke:#dddddd
+  linkStyle 3 stroke:#dddddd
+  linkStyle 4 stroke:#dddddd
+  linkStyle 8 stroke:#bbbbbb,color:#999999,stroke-dasharray:4 3
+```
+
+Every agent gets an identity so the gateway knows who is calling. **By default that identity is a Kubernetes ServiceAccount.** When an agent's pod starts, KAOS mounts a short-lived ServiceAccount token into it, scoped so it's only valid for the gateway (its *audience* is `kaos-gateway`). Every call the agent makes carries that token; the gateway reads it to learn which agent is calling, then checks that agent's grants. The token expires and is refreshed automatically, so there's no long-lived secret sitting in the pod. The operator registers each agent so the Authz Service recognises it.
+
+This guide selected `keycloak` at install instead, because delegated third-party access (Part 5) needs each agent to hold a login-service identity. With `keycloak`, the operator registers each agent as its *own client* in User Auth automatically, using dynamic client registration (DCR) — the "registers each agent as a client" edge on the chart. No one creates those clients by hand. The stored Kubernetes Secret holding the agent's client credentials is the idempotency key: if the Secret is present the agent is already registered, and deleting it forces a clean re-registration on the next reconcile. Timing differs by subject too, as the chart's other edges show: users and groups are provisioned once at install, while each agent's client is created when the agent is reconciled. For everything in Parts 1 to 4, `serviceaccount` is simpler and preferred; only Part 5 requires `keycloak`.
+
+An **autonomous** agent (like `autobot`) has no user behind it, so it acts **as itself**. Its own identity is the "who asked", and it can reach only what that identity was granted. A user-facing agent (like `researcher`) instead carries the *user's* identity through to whatever it calls, so downstream checks see the real person.
+
+<details>
+<summary>[Collapsed section] Expand to see the Helm values that drive agent identity</summary>
+
+Agent identity is a single `provider` choice under `security.agentAuth.identity`. The default provider is Kubernetes-native:
+
+```yaml
+security:
+  agentAuth:
+    gatewayJwtOptional: true
+    identity:
+      provider: serviceaccount        # the default
+      serviceAccount:
+        audience: kaos-gateway
+        expirationSeconds: 3600
+        tokenPath: /var/run/secrets/kaos-agent/token
+```
+
+`gatewayJwtOptional: true` means that for agent tokens, the Authz Service performs the full identity check; the gateway's own user-token check does not block agent calls. This is required for autonomous agents: their Kubernetes-issued ServiceAccount token is not a user login token, and the user login provider would otherwise reject it before the access check ever runs. The `serviceAccount` block is the short-lived mounted token described above: valid only for the gateway (`audience`), auto-refreshed (`expirationSeconds`), read from `tokenPath`.
+
+Switching the provider is the whole difference between the two modes — this is what `--agent-auth keycloak` sets:
+
+```yaml
+security:
+  agentAuth:
+    identity:
+      provider: keycloak     # each agent becomes its own login-service client
+```
+
+With this provider the operator registers each agent's client via dynamic client registration and stores its credentials in a Kubernetes Secret — the idempotency key described above; delete it to force re-registration on the next reconcile. This is heavier than `serviceaccount`, and needed only when the agent must present a login-service identity to the Agent Exchange Service (Part 5).
+</details>
+
+### 4.2 User identity: who is this person, and what groups are they in?
+
+Who is this person, and which groups are they in? When a person is behind a request, User Auth (Keycloak in our example) proves who they are and **which groups** they're in. That group membership is what access rules match on. `alice` isn't granted access personally; her *group* `researchers` is. The intuition in one picture:
+
+```mermaid
+flowchart LR
+  subgraph realm["Keycloak realm: kaos"]
+    direction TB
+    G["groups<br/>researchers · support"]
+    US["users<br/>alice · bob"]
+  end
+  US -->|"kaos auth login"| TOK["signed token<br/><i>sub=alice, groups=[researchers]</i>"]
+  G -.->|"membership stamped<br/>as a claim"| TOK
+  TOK -->|"sent with every request"| GWK["Gateway Mesh<br/>reads the groups claim"]
+```
+
+`kaos auth login` ran the standard login exchange and cached alice's token; the groups it printed are the same ones the gateway will read on every request. The one thing KAOS requires of the login service is that issued tokens carry a **groups** claim (and a stable **subject** claim naming the user). Everything else about your identity provider, how people actually authenticate, where the groups come from, is up to you.
+
+<details>
+<summary>[Collapsed section] Expand to see the Keycloak realm KAOS configures</summary>
+
+The installer creates a realm with the users, the `researchers`/`support` groups, and, critically, a set of *protocol mappers* that stamp the right claims onto every issued token. The mappers are the load-bearing part: without the groups mapper, tokens wouldn't carry group membership and group-based AccessGrants couldn't match. This is the shape KAOS provisions (trimmed to the relevant pieces):
+
+```json
 {
-  "aud": "token-exchange-broker",
-  "azp": "85be1caf-30b9-4236-87b2-fae29613d86d",
-  "sub": "c9df7bbc-c015-4095-b39e-7b5ed1a3f5e9",
-  "iss": "http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos"
+  "realm": "kaos",
+  "enabled": true,
+  "groups": [
+    { "name": "researchers" },
+    { "name": "support" }
+  ],
+  "users": [
+    {
+      "username": "alice",
+      "email": "alice@example.com",
+      "enabled": true,
+      "groups": ["researchers"],
+      "credentials": [{ "type": "password", "value": "…", "temporary": false }]
+    },
+    {
+      "username": "bob",
+      "email": "bob@example.com",
+      "enabled": true,
+      "groups": ["support"],
+      "credentials": [{ "type": "password", "value": "…", "temporary": false }]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "kaos",
+      "publicClient": false,
+      "secret": "kaos-dev-secret",
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": true,
+      "protocolMappers": [
+        {
+          "name": "kaos-groups",
+          "protocolMapper": "oidc-group-membership-mapper",
+          "config": {
+            "claim.name": "groups",
+            "full.path": "false",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "kaos-subject",
+          "protocolMapper": "oidc-usermodel-property-mapper",
+          "config": {
+            "user.attribute": "id",
+            "claim.name": "sub",
+            "access.token.claim": "true"
+          }
+        },
+        {
+          "name": "kaos-audience",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "kaos",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ]
 }
 ```
 
-The PDP binds that `azp` to the verified Agent actor. AIB ext_proc then swaps the re-minted token for the vaulted provider token, and only the provider token reaches the third party. An unbound Agent receives HTTP 403 before ext_proc. Internal Agent, MCPServer, ModelAPI, and MemoryStore routes retain the original user token and never receive ext_proc.
+The gateway is told where to find this realm and what audience to expect through two Helm values:
 
-Revoke the provider session and retry. The evaluation-only pre-auth header below stands in for the authenticated production user. The delete returns HTTP 200, and the next Agent call returns `third_party_reauth_required` again while ext_proc records broker `invalid_grant` and sends nothing upstream.
-
-```bash .noeval
-kubectl port-forward -n aib-system svc/aib-agentic-identity-broker 8000:8000 >./tmp/aib-user-port-forward.log 2>&1 &
-AIB_URL=http://localhost:8000
-USER_SUB=$(printf '%s' "$USER_TOKEN" | cut -d. -f2 | tr '_-' '/+' | base64 -d 2>./tmp/dev/null | jq -r .sub)
-
-curl --max-time 60 -fsS -X DELETE "$AIB_URL/api/third-party/$SERVICE_ID/session" \
-  -H "X-Remote-User: $USER_SUB"
-# {"message":"session terminated successfully"}
-
-call_researcher | jq -r '.choices[0].message.content'
-# Access to api.github.com requires re-authentication (third_party_reauth_required).
+```yaml
+security:
+  userAuth:
+    issuer: http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos
+    audience: kaos      # tokens must be minted for this audience
 ```
 
-### KIND-only single-name rig split
+In production you point `--user-auth` at your own OIDC provider instead, and map your existing directory groups into the `groups` claim. KAOS doesn't care *how* the claim gets populated, only that it's there.
+</details>
 
-This subsection is only for a local mock on KIND. It is not product configuration and must not be copied into production. The mock reuses one in-cluster hostname, so the test pod needs a split view: the Agent resolves the hostname to the gateway LoadBalancer through `hostAliases`, while Envoy's normal CoreDNS resolution sends the generated Backend to the mock Service. The AIB protected resource still contains that one hostname, and there is no alternate-origin annotation.
+### 4.3 Access control: the rules and their enforcement
 
-```bash .noeval
-NAMESPACE=token-exchange-demo
-MOCK_HOST=mock-api.$NAMESPACE.svc.cluster.local
-GATEWAY_IP=$(kubectl get service -n envoy-gateway-system \
-  -l gateway.envoyproxy.io/owning-gateway-name=kaos-gateway \
-  -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}')
+This is where "is it allowed?" is answered. Two kinds of rule:
 
-# The real mock Service exposes HTTP 80 and forwards to the mock container on 9000.
-kubectl patch service mock-api -n "$NAMESPACE" --type=merge \
-  -p '{"spec":{"ports":[{"name":"http","port":80,"targetPort":9000}]}}'
+- **Who may use a resource.** An `AccessGrant` binds a **group** (or user) to a resource: *"`researchers` may use `researcher`."* This gates a person reaching an agent.
+- **What an agent may reach.** An `AccessGrant` binds an **agent** to tools/models: *"`researcher` may reach `echo-mcp` and `model-api`."* This gates movement between components.
 
-# Agent-facing resolution only: the same hostname enters the gateway.
-kubectl patch agent researcher -n "$NAMESPACE" --type=merge \
-  -p "{\"spec\":{\"podSpec\":{\"containers\":[{\"name\":\"agent\"}],\"hostAliases\":[{\"ip\":\"$GATEWAY_IP\",\"hostnames\":[\"$MOCK_HOST\"]}]}}}"
+Both are the same object type; only the subject differs (a group/user vs. an agent). That uniformity is deliberate: there's one rule format to learn, one place to look, and one `kaos auth grant list` that shows every permission in the cluster.
 
-# Use this value in the AIB service and in the Agent tool.
-PROTECTED_RESOURCE=http://$MOCK_HOST/api/data
+Enforcement lives at the gateway, which asks the **KAOS Authz Service** on every request. That service:
+
+- runs **in-cluster as its own always-on service** (multiple replicas, so it's highly available),
+- **fails closed**: if it says no, or can't be reached, the request is denied (you saw this with `--off`), and
+- is only reachable *through the gateway* when `--gateway-strict` is set, so a workload can't sidestep it by calling a resource directly.
+
+```mermaid
+flowchart LR
+  P["alice / an agent"] -->|"request"| GW["Gateway Mesh"]
+  GW -->|"who + what"| AZ["KAOS Authz Service"]
+  AZ -->|"check rules"| GRANTS[("AccessGrants<br/>you declared")]
+  AZ -->|"allow"| GW
+  GW --> DEST["researcher / echo-mcp / model-api"]
+  AZ -.->|"deny / unreachable"| STOP["denied"]
 ```
 
-With that KIND-only split, the proved path was `researcher -> gateway -> PDP -> ext_proc -> generated Backend -> mock-api:80`, with `ResolvedRefs=True`, no loop, and no administrator-authored egress Kubernetes object.
+The Authz Service never reads your AccessGrant objects directly. The KAOS Operator is the go-between: it watches the objects, compiles them into the data the Authz Service evaluates, and keeps that projection current as you add and remove grants. This is what the `ENFORCED` column reported: the operator confirming the rule is live.
+
+Autonomous agents fit the same model. Their *own* identity is the subject, so `autobot` needs a grant for anything it touches, exactly like a user does.
+
+<details>
+<summary>[Collapsed section] Expand to see the Helm values that drive enforcement</summary>
+
+Enforcement is the KAOS Authz Service (stock OPA behind Envoy's authorization plugin) plus the operator's projection of your grants into it:
+
+```yaml
+security:
+  pdp:
+    enabled: true                 # the KAOS Authz Service
+    image: openpolicyagent/opa:1.18.1-envoy-static
+    replicas: 2                   # highly available
+  agentAuth:
+    authorization:
+      # "automated": the KAOS Operator projects grant data from your
+      # AccessGrant objects. You never author decision-service policy by hand.
+      policyDataSource: automated
+    projection:
+      # prune removes stale grant data when an Agent or AccessGrant is deleted,
+      # so permissions never outlive the object that declared them.
+      prune: true
+  # the "gateway is the only path" posture, so the check can't be bypassed
+  strictGatewayApi:
+    enabled: true
+  networkPolicy:
+    enabled: true                 # deny direct workload-to-workload traffic
+  gatewayRouting:
+    enabled: true                 # route agent -> tool/model/peer calls via the gateway
+```
+
+The fail-closed behaviour isn't a setting you turn on. It's how the gateway treats an authorization backend that says no *or* doesn't answer. Denying on "no answer" is the default and can't be relaxed into "allow on error".
+</details>
+
+---
+
+## 5. Agents acting on behalf of users - on outside services
+
+What happens when the researcher needs GitHub? Whose GitHub account does it act on? Everything so far stays inside the cluster; this last capability lets an agent call a **real outside service, GitHub, say, as the specific user**, not as a shared bot account.
+
+### 5.1 The intuition
+
+The naive way to let an agent use GitHub is to give it a single bot account's token and let every user's request ride on it. That's the default failure mode because it is the *easy* thing to build: one token in a Secret, one HTTP client, done. But it's a shared credential: GitHub sees one identity for everyone, you can't tell whose request was whose, and revoking one person's access means rotating the token for all of them. Worse, that durable token now lives somewhere the agent can read.
+
+And nothing from Parts 1–4 can fix it, because an in-cluster `AccessGrant` cannot express "GitHub as alice". The cluster has no authority over GitHub's tokens: it can decide *whether* a request leaves, but it cannot make GitHub see alice instead of the bot. Bridging that gap needs a component that holds each user's *real* GitHub credential — issued by GitHub, consented to by the user — and puts the right one on each outbound call.
+
+KAOS does the opposite of the shared bot on all three counts:
+
+- **Acting as the user, never a shared bot.** When alice asks the researcher to touch GitHub, GitHub receives *alice's own* token and sees alice. bob's requests go out as bob. Permissions and audit on the GitHub side are per-person, exactly as if each user called GitHub directly.
+- **The agent never sees a durable credential.** The agent only ever holds its own short-lived in-cluster identity. The real GitHub token is swapped onto the outbound request at the gateway; the agent code never touches it.
+- **Revocation is per user.** alice can withdraw her approval at any time without affecting anyone else.
+
+### 5.2 Enter the Agent Exchange Service (AIB)
+
+The component that holds each user's real credential is the **Agent Exchange Service** (AIB; deployed from the `agentic-identity-broker` chart). It runs as its own self-managed Helm release alongside the cluster, much like Keycloak — the KAOS operator deploys none of it. What it holds: each user's real third-party tokens, in a vault, put there when the user consents (5.4). What it does: exactly one thing — **exchange**. Present it proof of who the user is and which agent is acting, and it returns that user's stored third-party token. It never issues anyone's identity; agents get theirs from Agent Auth, users from User Auth, and the AIB only ever trades one proven identity for a stored credential.
+
+**Nothing new is installed here.** Every component in this part went in with the single install command in 1.1 (`--agent-auth keycloak`, `--token-exchange-enabled`). On the Part 1 map, the greyed pieces simply light up, and it is everything *else* that goes grey:
+
+```mermaid
+flowchart TB
+  subgraph idp["Identity providers"]
+    direction LR
+    UA["User Auth<br/>(Keycloak)"]
+    AZ["KAOS Authz Service"]
+    AA["Agent Auth<br/>(ServiceAccount / Keycloak)"]
+  end
+  subgraph req["Request path"]
+    direction LR
+    U["Users"]
+    GW["Gateway Mesh"]
+    RES["KAOS Resources<br/>(Agents, MCP, Models)"]
+  end
+  subgraph oob["Part 5 + out-of-band"]
+    direction LR
+    TP["3rd-Party Service<br/>(GitHub, ...)"]
+    AIB["Agent Exchange Service<br/>(AIB)"]
+    OP["KAOS Operator<br/>(auth sync)"]
+  end
+
+  AA -->|"0. provides agent identity"| RES
+  UA -->|"1. authenticates"| U
+  U -->|"2. sends request"| GW
+  GW -->|"4. verifies user + agent access"| AZ
+  AZ -->|"5. verifies user"| UA
+  AZ -->|"6. verifies agent"| AA
+  GW -->|"7. third-party access"| AIB
+  TP -->|"8. token granted"| AIB
+  TP -->|"9. user consents"| U
+  GW -->|"10. routes request"| RES
+
+  classDef dim fill:#eeeeee,stroke:#bbbbbb,color:#999999
+  class UA,AZ,AA,OP dim
+  linkStyle 0 stroke:#dddddd,color:#bbbbbb
+  linkStyle 1 stroke:#dddddd,color:#bbbbbb
+  linkStyle 2 stroke:#dddddd,color:#bbbbbb
+  linkStyle 3 stroke:#dddddd,color:#bbbbbb
+  linkStyle 4 stroke:#dddddd,color:#bbbbbb
+  linkStyle 5 stroke:#dddddd,color:#bbbbbb
+```
+
+This is also why the install needed `--agent-auth keycloak`: the AIB must be able to tie an exchange request to a specific agent, and for that the agent needs a login-service identity rather than a ServiceAccount. The KAOS Operator keeps the connection current from the other side — it registers each agent in the AIB under a stable **logical name** (`kaos/<namespace>/<name>`) and keeps that record's client id up to date across re-registrations, the greyed operator edge on the 4.1 chart.
+
+### 5.3 Register GitHub and create a permission set
+
+Here the graded introduction of GitHub ends and the contrast matters, so let's state it plainly. `echo-mcp` is a tool **inside** the cluster — a KAOS resource, gated by AccessGrants. GitHub is a service **outside** it. You could wrap GitHub in an internal MCP server with a shared bot token — that is exactly the anti-pattern the intuition section described. Instead, GitHub is declared **in the AIB**, and each call goes out as the real user.
+
+Outside services are administered in the AIB itself, not as cluster objects, because the AIB is what actually holds the user's third-party tokens. The declaration has three parts: the **service** (GitHub — its API hostname and OAuth endpoints), a **permission set** (the scopes an agent may request on it), and the **agent link** (which agent may use that permission set, keyed by the agent's stable logical name). The operator keeps that logical name and the agent's login-service client current, and *reflects* the declaration into the cluster plumbing it implies. The safety property that makes this trustworthy: the token swap exists only on the GitHub route; internal traffic never touches the AIB.
+
+<details>
+<summary>[Collapsed section] Expand to see the outside-service declaration in the AIB</summary>
+
+The declaration is AIB-native. There is no third-party YAML in your Git repo; the AIB is the config authority, and it is where third-party access is audited (the accepted trade-off for keeping it out of the cluster API).
+
+```yaml
+# Administered in the AIB, not as a Kubernetes object.
+service:
+  name: github
+  hostnames: ["api.github.com"]
+  oauth:
+    authorization_url: https://github.com/login/oauth/authorize
+    token_url: https://github.com/login/oauth/access_token
+  scopes: ["repo", "read:user"]
+
+permission_set:
+  service: github
+  scopes: ["repo", "read:user"]
+
+agent:
+  logical_name: kaos/kaos-system/researcher
+  client_id: <keycloak-dcr-uuid>
+  permission_sets: ["github"]
+```
+
+The `logical_name` is the stable agent name the operator maintains; `client_id` is the agent's login-service client (the DCR UUID from 4.1), kept current across re-registrations. From this declaration the operator materializes the egress route to `api.github.com`, attaches the AIB's token-swap filter to *only* that generated route, and injects the exchange target into the bound agent. Nothing here touches the internal access-control path.
+</details>
+
+Inside the cluster, nothing about the earlier checks changes: alice still has to be allowed to use the researcher, and the researcher still has to be granted its tools. The new part is only the *last hop*, the outbound call to GitHub.
+
+### 5.4 The request and consent flow
+
+The very first time alice asks for something on GitHub there's no approval on file, so the request is refused with an instruction. alice approves once, the AIB stores her token, and from then on it just works, until she revokes it:
+
+```mermaid
+flowchart TB
+  S1["1. kaos agent invoke researcher --user alice<br/><i>refused: needs approval — no token on file</i>"]
+  S2["2. kaos auth connect github --user alice<br/><i>alice consents on GitHub; the AIB stores her token</i>"]
+  S3["3. retry the invoke<br/><i>allowed — acting as alice on github</i>"]
+  S1 --> S2
+  S2 --> S3
+```
+
+Walk it for real. The first time, there's no approval yet:
+
+```bash
+kaos agent invoke researcher --user alice -m "list my GitHub repos"
+```
+```text
+✗ needs approval — run: kaos auth connect github --user alice
+```
+
+alice approves. The CLI opens GitHub's approval screen, she clicks allow, and the AIB stores her token:
+
+```bash
+kaos auth connect github --user alice
+```
+```text
+✓ connected — alice can now use github through their agents
+```
+
+*(On a local demo cluster the approval is completed automatically against a mock GitHub, so the notebook runs without a real browser; in production alice clicks "allow" in her browser. That's the only difference.)*
+
+Retry. Now it works, **as alice**:
+
+```bash
+kaos agent invoke researcher --user alice -m "list my GitHub repos"
+```
+```text
+Third-party tool completed.
+✓ allowed — acting as alice on github
+```
+
+Approval is revocable, and revocation simply returns you to step 1 of the flow: after a disconnect the agent is refused again until re-approved:
+
+```bash
+kaos auth disconnect github --user alice
+kaos agent invoke researcher --user alice -m "list my GitHub repos"
+```
+```text
+✓ disconnected
+✗ needs approval — run: kaos auth connect github --user alice
+```
+
+**Under the hood**, that successful call is three moves:
+
+1. The agent runtime **re-mints alice's own token so it also names the acting agent**. This is a standard token exchange against User Auth, authenticated with the agent's own client credentials, and it produces a token with `sub=alice`, `azp=researcher`, `aud=token-exchange-broker` — one token that proves both who the user is and which agent is acting.
+2. On the outbound GitHub route — and **only** on that route — the gateway presents the re-minted token, together with the agent's own credential, to the AIB. The AIB validates both, checks that alice consented, and returns alice's real GitHub token from its vault.
+3. The gateway swaps alice's GitHub token onto the outbound request. GitHub receives it and sees alice — steps 7–10 on the 5.2 map.
+
+The token swap can never leak onto internal paths, because the swap filter is attached only to the egress route the operator generated for the declared service. Only alice's own token ever reaches GitHub, and the agent never sees a long-lived credential. But you don't have to think about any of that: `connect` once, then `invoke --user` as normal.
