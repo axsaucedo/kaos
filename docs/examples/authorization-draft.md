@@ -118,12 +118,12 @@ The **data plane** is the actual agent traffic: users invoking agents, agents ca
 We will use a hands on example with a set of configured resources as follows:
 
 - two users: **alice** (group `researchers`) and **bob** (group `support`)
-- two agents: **researcher** (user-activated) and **nightly-reporter** (autonomous agent)
-- one MCP tool: **notes-mcp**
-- one model: **chat-model** (a model endpoint both agents may use)
+- two agents: **researcher** (user-activated) and **autobot** (autonomous agent)
+- one MCP tool: **echo-mcp**
+- one model: **model-api** (a model endpoint both agents may use)
 - one external service: **GitHub** — covered in Part 5
 
-The rules: the `researchers` group may use the `researcher` agent; the `researcher` agent may reach `notes-mcp` and `chat-model`; the autonomous `nightly-reporter` may reach `chat-model`. Everything else is denied — including bob (poor bob).
+The rules: the `researchers` group may use the `researcher` agent; the `researcher` agent may reach `echo-mcp` and `model-api`; the autonomous `autobot` may reach `model-api`. Everything else is denied — including bob (poor bob).
 
 Here's a chart that shows what we'll try to accomplish:
 
@@ -132,9 +132,9 @@ flowchart LR
   alice["alice<br/><i>group: researchers</i>"]
   bob["bob<br/><i>group: support</i>"]
   RES["researcher<br/><i>agent</i>"]
-  NR["nightly-reporter<br/><i>autonomous agent</i>"]
-  MCP["notes-mcp<br/><i>tool</i>"]
-  MODEL["chat-model<br/><i>model</i>"]
+  NR["autobot<br/><i>autonomous agent</i>"]
+  MCP["echo-mcp<br/><i>tool</i>"]
+  MODEL["model-api<br/><i>model</i>"]
 
   alice -->|"(has access)"| RES
   bob -->|"(no access)"| RES
@@ -183,26 +183,26 @@ Everything the example needs, both agents, the tool, and the model is bundled as
 Here's the one line deploy command:
 
 ```bash
-kaos samples deploy 9-authorization-walkthrough -n kaos-system
+kaos samples deploy 8-authorization-walkthrough -n kaos-system
 ```
 ```text
-modelapi.kaos.tools/chat-model serverside-applied
-mcpserver.kaos.tools/notes-mcp serverside-applied
+modelapi.kaos.tools/model-api serverside-applied
+mcpserver.kaos.tools/echo-mcp serverside-applied
 agent.kaos.tools/researcher serverside-applied
-agent.kaos.tools/nightly-reporter serverside-applied
+agent.kaos.tools/autobot serverside-applied
 
 
-Deployed sample '9-authorization-walkthrough'
+Deployed sample '8-authorization-walkthrough'
 ```
 
 The tool's single function is an echo, and the model's responses are mocked, so every result is deterministic and the walkthrough exercises *access control* rather than model behaviour. Four resources, each a plain Kubernetes object:
 
 | Resource | Kind | What it is |
 |---|---|---|
-| **chat-model** | `ModelAPI` | A model endpoint both agents may call. |
-| **notes-mcp** | `MCPServer` | A tool (an MCP server) exposing a single `echo` function the `researcher` may use. |
+| **model-api** | `ModelAPI` | A model endpoint both agents may call. |
+| **echo-mcp** | `MCPServer` | A tool (an MCP server) exposing a single `echo` function the `researcher` may use. |
 | **researcher** | `Agent` | A user-facing agent. It needs a person behind it and carries that person's identity through to whatever it calls. |
-| **nightly-reporter** | `Agent` | An *autonomous* agent. No user behind it; it runs on a schedule and acts as itself. |
+| **autobot** | `Agent` | An *autonomous* agent. No user behind it; it runs on a schedule and acts as itself. |
 
 #### Reproduce it yourself
 
@@ -210,46 +210,46 @@ Each resource has its own `kaos ... create` command, so you can build an equival
 
 ```bash
 # a small in-cluster model endpoint
-kaos modelapi create chat-model \
+kaos modelapi create model-api \
   --mode hosted \
   --model "smollm2:135m"
 
 # an echo tool exposed as an MCP server
-kaos mcp create notes-mcp \
+kaos mcp create echo-mcp \
   --runtime python-string \
   --params 'def echo(message: str) -> str:
       """Echo a note for the authorization walkthrough."""
-      return f"Notes echo: {message}"'
+      return f"Echo: {message}"'
 ```
 
 Then the two agents. The user-facing one references the model and tool it should use:
 
 ```bash
 kaos agent create researcher \
-  --modelapi chat-model \
-  --mcp notes-mcp \
-  --instructions "Echo the user's request and use notes-mcp when asked about notes."
+  --modelapi model-api \
+  --mcp echo-mcp \
+  --instructions "Echo the user's request and use echo-mcp when asked."
 ```
 
 The autonomous one adds an `autonomous` goal so it runs on its own interval instead of waiting for a person:
 
 ```bash
-kaos agent create nightly-reporter \
-  --modelapi chat-model \
-  --autonomous-goal "Produce the nightly echo report." \
+kaos agent create autobot \
+  --modelapi model-api \
+  --autonomous-goal "Produce the automated echo report." \
   --autonomous-interval 3600
 ```
 
 <details>
 <summary>[Collapsed section] Expand to see the equivalent Kubernetes objects</summary>
 
-`kaos ... create` writes ordinary KAOS objects; this is what the sample applies. The `ModelAPI` runs in `Proxy` mode and each agent carries `DEBUG_MOCK_RESPONSES`, so the echo replies are deterministic. Note `nightly-reporter` differs from `researcher` mainly by its `autonomous` block. That single field is what makes it act as itself rather than needing a user.
+`kaos ... create` writes ordinary KAOS objects; this is what the sample applies. The `ModelAPI` runs in `Proxy` mode and each agent carries `DEBUG_MOCK_RESPONSES`, so the echo replies are deterministic. Note `autobot` differs from `researcher` mainly by its `autonomous` block. That single field is what makes it act as itself rather than needing a user.
 
 ```yaml
 apiVersion: kaos.tools/v1alpha1
 kind: ModelAPI
 metadata:
-  name: chat-model
+  name: model-api
 spec:
   mode: Proxy
   proxyConfig:
@@ -259,26 +259,26 @@ spec:
 apiVersion: kaos.tools/v1alpha1
 kind: MCPServer
 metadata:
-  name: notes-mcp
+  name: echo-mcp
 spec:
   runtime: python-string
   params: |
     def echo(message: str) -> str:
         """Echo a note for the authorization walkthrough."""
-        return f"Notes echo: {message}"
+        return f"Echo: {message}"
 ---
 apiVersion: kaos.tools/v1alpha1
 kind: Agent
 metadata:
   name: researcher
 spec:
-  modelAPI: chat-model
+  modelAPI: model-api
   model: echo
   mcpServers:
-    - notes-mcp
+    - echo-mcp
   config:
     description: User-facing echo agent for authorization checks
-    instructions: Echo the user's request and use notes-mcp when asked about notes.
+    instructions: Echo the user's request and use echo-mcp when asked.
   container:
     env:
       - name: DEBUG_MOCK_RESPONSES
@@ -289,20 +289,20 @@ spec:
 apiVersion: kaos.tools/v1alpha1
 kind: Agent
 metadata:
-  name: nightly-reporter
+  name: autobot
 spec:
-  modelAPI: chat-model
+  modelAPI: model-api
   model: echo
   config:
     description: Autonomous echo agent for authorization checks
-    instructions: Echo a short nightly report.
+    instructions: Echo a short automated report.
     autonomous:
-      goal: Produce the nightly echo report.
+      goal: Produce the automated echo report.
       intervalSeconds: 3600
   container:
     env:
       - name: DEBUG_MOCK_RESPONSES
-        value: '["Nightly reporter echo response"]'
+        value: '["Autobot echo response"]'
   agentNetwork:
     expose: true
 ```
@@ -337,16 +337,16 @@ Apply the three rules the example needs (drop `--dry-run` to apply):
 # 1. the researchers group may use the researcher agent
 kaos auth grant create --group researchers --resource agent/researcher
 
-# 2. the researcher agent may reach the notes tool and the chat model
-kaos auth grant create --agent researcher --resource mcp/notes-mcp,modelapi/chat-model
+# 2. the researcher agent may reach the echo tool and the model
+kaos auth grant create --agent researcher --resource mcp/echo-mcp,modelapi/model-api
 
-# 3. the autonomous nightly-reporter may reach the chat model it runs on
-kaos auth grant create --agent nightly-reporter --resource modelapi/chat-model
+# 3. the autonomous autobot may reach the model it runs on
+kaos auth grant create --agent autobot --resource modelapi/model-api
 ```
 ```text
 ✓ created AccessGrant researchers-to-researcher
-✓ created AccessGrant researcher-to-notes-mcp-and-chat-model
-✓ created AccessGrant nightly-reporter-to-chat-model
+✓ created AccessGrant researcher-to-echo-mcp-and-model-api
+✓ created AccessGrant autobot-to-model-api
 ```
 
 The second grant is the interesting one. Its subject is the *agent itself*, and it lists two resources:
@@ -358,16 +358,16 @@ The second grant is the interesting one. Its subject is the *agent itself*, and 
 apiVersion: kaos.tools/v1alpha1
 kind: AccessGrant
 metadata:
-  name: researcher-to-notes-mcp-and-chat-model
+  name: researcher-to-echo-mcp-and-model-api
 spec:
   subjects:
     - kind: Agent
       name: researcher
   resources:
     - kind: MCPServer
-      name: notes-mcp
+      name: echo-mcp
     - kind: ModelAPI
-      name: chat-model
+      name: model-api
 ```
 </details>
 
@@ -378,9 +378,9 @@ kaos auth grant list
 ```
 ```text
 NAME                                     SUBJECTS          RESOURCES              ENFORCED
-researcher-to-notes-mcp-and-chat-model   researcher        notes-mcp,chat-model   True
+researcher-to-echo-mcp-and-model-api   researcher        echo-mcp,model-api   True
 researchers-to-researcher                researchers       researcher             True
-nightly-reporter-to-chat-model           nightly-reporter  chat-model             True
+autobot-to-model-api           autobot  model-api             True
 ```
 
 The `ENFORCED` column is the KAOS Operator reporting back. `True` means it has projected the rule into the Authz Service and the gateway is enforcing it. If it read `False`, the column would name the reason (for example that access control isn't enabled, or that no user login provider is configured). Removing a grant is symmetric; here we drop one and re-create it, since the rest of the walkthrough depends on it:
@@ -397,15 +397,15 @@ flowchart LR
   alice["alice<br/><i>group: researchers</i>"]
   bob["bob<br/><i>group: support</i>"]
   RES["researcher<br/><i>agent</i>"]
-  NR["nightly-reporter<br/><i>autonomous agent</i>"]
-  MCP["notes-mcp<br/><i>tool</i>"]
-  MODEL["chat-model<br/><i>model</i>"]
+  NR["autobot<br/><i>autonomous agent</i>"]
+  MCP["echo-mcp<br/><i>tool</i>"]
+  MODEL["model-api<br/><i>model</i>"]
 
   alice -->|"researchers-to-researcher"| RES
   bob -->|"(no grant)"| RES
-  RES -->|"researcher-to-notes-mcp-and-chat-model"| MCP
-  RES -->|"researcher-to-notes-mcp-and-chat-model"| MODEL
-  NR -->|"nightly-reporter-to-chat-model"| MODEL
+  RES -->|"researcher-to-echo-mcp-and-model-api"| MCP
+  RES -->|"researcher-to-echo-mcp-and-model-api"| MODEL
+  NR -->|"autobot-to-model-api"| MODEL
 
   linkStyle 0 stroke:#2e7d32,stroke-width:2px
   linkStyle 1 stroke:#c62828,stroke-width:2px,stroke-dasharray:5 4
@@ -454,9 +454,9 @@ flowchart LR
   alice["alice<br/><i>group: researchers</i>"]
   bob["bob<br/><i>group: support</i>"]
   RES["researcher<br/><i>agent</i>"]
-  NR["nightly-reporter<br/><i>autonomous agent</i>"]
-  MCP["notes-mcp<br/><i>tool</i>"]
-  MODEL["chat-model<br/><i>model</i>"]
+  NR["autobot<br/><i>autonomous agent</i>"]
+  MCP["echo-mcp<br/><i>tool</i>"]
+  MODEL["model-api<br/><i>model</i>"]
 
   alice -->|"allow"| RES
   bob --> RES
@@ -480,9 +480,9 @@ flowchart LR
   alice["alice<br/><i>group: researchers</i>"]
   bob["bob<br/><i>group: support</i>"]
   RES["researcher<br/><i>agent</i>"]
-  NR["nightly-reporter<br/><i>autonomous agent</i>"]
-  MCP["notes-mcp<br/><i>tool</i>"]
-  MODEL["chat-model<br/><i>model</i>"]
+  NR["autobot<br/><i>autonomous agent</i>"]
+  MCP["echo-mcp<br/><i>tool</i>"]
+  MODEL["model-api<br/><i>model</i>"]
 
   alice --> RES
   bob -->|"deny"| RES
@@ -502,22 +502,22 @@ flowchart LR
 The agent using its granted tool and model:
 
 ```bash
-kaos agent invoke researcher --user alice -m "read notes-mcp and ask chat-model"
+kaos agent invoke researcher --user alice -m "read echo-mcp and ask model-api"
 ```
 ```text
 Researcher echo response
 ✓ allowed — request permitted
 ```
 
-This exercises the *second* kind of rule. alice got in (first check), and now the agent reaches out to `notes-mcp` and `chat-model`. Each of those hops is itself a request through the gateway, checked against the `researcher-to-notes-mcp-and-chat-model` grant. Both are listed, so both succeed — they are the two right-hand green edges on alice's diagram above.
+This exercises the *second* kind of rule. alice got in (first check), and now the agent reaches out to `echo-mcp` and `model-api`. Each of those hops is itself a request through the gateway, checked against the `researcher-to-echo-mcp-and-model-api` grant. Both are listed, so both succeed — they are the two right-hand green edges on alice's diagram above.
 
 The autonomous agent acts as **itself** (no user), allowed only what *it* was granted:
 
 ```bash
-kaos agent invoke nightly-reporter -m "run the nightly summary"
+kaos agent invoke autobot -m "run the automated report"
 ```
 ```text
-Nightly reporter echo response
+Autobot echo response
 ✓ allowed — request permitted
 ```
 
@@ -526,9 +526,9 @@ flowchart LR
   alice["alice<br/><i>group: researchers</i>"]
   bob["bob<br/><i>group: support</i>"]
   RES["researcher<br/><i>agent</i>"]
-  NR["nightly-reporter<br/><i>autonomous agent</i>"]
-  MCP["notes-mcp<br/><i>tool</i>"]
-  MODEL["chat-model<br/><i>model</i>"]
+  NR["autobot<br/><i>autonomous agent</i>"]
+  MCP["echo-mcp<br/><i>tool</i>"]
+  MODEL["model-api<br/><i>model</i>"]
 
   alice --> RES
   bob --> RES
@@ -545,7 +545,7 @@ flowchart LR
   linkStyle 4 stroke:#2e7d32,stroke-width:2px
 ```
 
-There is no `--user` here, yet the call is allowed, while the very next example (a user-facing agent with no `--user`) is denied. That is not a hole in fail-closed; it is fail-closed working. The autonomous agent presents its *own* identity, which is valid, and grant 3 lets that identity reach `chat-model`. A user-facing agent invoked with no `--user` has *no* identity behind it at all:
+There is no `--user` here, yet the call is allowed, while the very next example (a user-facing agent with no `--user`) is denied. That is not a hole in fail-closed; it is fail-closed working. The autonomous agent presents its *own* identity, which is valid, and grant 3 lets that identity reach `model-api`. A user-facing agent invoked with no `--user` has *no* identity behind it at all:
 
 ```bash
 kaos agent invoke researcher -m "summarise repo X"      # no --user
@@ -626,7 +626,7 @@ Every agent gets an identity so the gateway knows who is calling. **By default t
 
 This guide selected `keycloak` at install instead, because delegated third-party access (Part 5) needs each agent to hold a login-service identity. With `keycloak`, the operator registers each agent as its *own client* in User Auth automatically, using dynamic client registration (DCR) — the "registers each agent as a client" edge on the chart. No one creates those clients by hand. The stored Kubernetes Secret holding the agent's client credentials is the idempotency key: if the Secret is present the agent is already registered, and deleting it forces a clean re-registration on the next reconcile. Timing differs by subject too, as the chart's other edges show: users and groups are provisioned once at install, while each agent's client is created when the agent is reconciled. For everything in Parts 1 to 4, `serviceaccount` is simpler and preferred; only Part 5 requires `keycloak`.
 
-An **autonomous** agent (like `nightly-reporter`) has no user behind it, so it acts **as itself**. Its own identity is the "who asked", and it can reach only what that identity was granted. A user-facing agent (like `researcher`) instead carries the *user's* identity through to whatever it calls, so downstream checks see the real person.
+An **autonomous** agent (like `autobot`) has no user behind it, so it acts **as itself**. Its own identity is the "who asked", and it can reach only what that identity was granted. A user-facing agent (like `researcher`) instead carries the *user's* identity through to whatever it calls, so downstream checks see the real person.
 
 <details>
 <summary>[Collapsed section] Expand to see the Helm values that drive agent identity</summary>
@@ -763,7 +763,7 @@ In production you point `--user-auth` at your own OIDC provider instead, and map
 This is where "is it allowed?" is answered. Two kinds of rule:
 
 - **Who may use a resource.** An `AccessGrant` binds a **group** (or user) to a resource: *"`researchers` may use `researcher`."* This gates a person reaching an agent.
-- **What an agent may reach.** An `AccessGrant` binds an **agent** to tools/models: *"`researcher` may reach `notes-mcp` and `chat-model`."* This gates movement between components.
+- **What an agent may reach.** An `AccessGrant` binds an **agent** to tools/models: *"`researcher` may reach `echo-mcp` and `model-api`."* This gates movement between components.
 
 Both are the same object type; only the subject differs (a group/user vs. an agent). That uniformity is deliberate: there's one rule format to learn, one place to look, and one `kaos auth grant list` that shows every permission in the cluster.
 
@@ -779,13 +779,13 @@ flowchart LR
   GW -->|"who + what"| AZ["KAOS Authz Service"]
   AZ -->|"check rules"| GRANTS[("AccessGrants<br/>you declared")]
   AZ -->|"allow"| GW
-  GW --> DEST["researcher / notes-mcp / chat-model"]
+  GW --> DEST["researcher / echo-mcp / model-api"]
   AZ -.->|"deny / unreachable"| STOP["denied"]
 ```
 
 The Authz Service never reads your AccessGrant objects directly. The KAOS Operator is the go-between: it watches the objects, compiles them into the data the Authz Service evaluates, and keeps that projection current as you add and remove grants. This is what the `ENFORCED` column reported: the operator confirming the rule is live.
 
-Autonomous agents fit the same model. Their *own* identity is the subject, so `nightly-reporter` needs a grant for anything it touches, exactly like a user does.
+Autonomous agents fit the same model. Their *own* identity is the subject, so `autobot` needs a grant for anything it touches, exactly like a user does.
 
 <details>
 <summary>[Collapsed section] Expand to see the Helm values that drive enforcement</summary>
@@ -889,7 +889,7 @@ This is also why the install needed `--agent-auth keycloak`: the AIB must be abl
 
 ### 5.3 Register GitHub and create a permission set
 
-Here the graded introduction of GitHub ends and the contrast matters, so let's state it plainly. `notes-mcp` is a tool **inside** the cluster — a KAOS resource, gated by AccessGrants. GitHub is a service **outside** it. You could wrap GitHub in an internal MCP server with a shared bot token — that is exactly the anti-pattern the intuition section described. Instead, GitHub is declared **in the AIB**, and each call goes out as the real user.
+Here the graded introduction of GitHub ends and the contrast matters, so let's state it plainly. `echo-mcp` is a tool **inside** the cluster — a KAOS resource, gated by AccessGrants. GitHub is a service **outside** it. You could wrap GitHub in an internal MCP server with a shared bot token — that is exactly the anti-pattern the intuition section described. Instead, GitHub is declared **in the AIB**, and each call goes out as the real user.
 
 Outside services are administered in the AIB itself, not as cluster objects, because the AIB is what actually holds the user's third-party tokens. The declaration has three parts: the **service** (GitHub — its API hostname and OAuth endpoints), a **permission set** (the scopes an agent may request on it), and the **agent link** (which agent may use that permission set, keyed by the agent's stable logical name). The operator keeps that logical name and the agent's login-service client current, and *reflects* the declaration into the cluster plumbing it implies. The safety property that makes this trustworthy: the token swap exists only on the GitHub route; internal traffic never touches the AIB.
 

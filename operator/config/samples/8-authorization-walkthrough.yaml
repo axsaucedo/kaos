@@ -1,9 +1,9 @@
-# Authorization walkthrough with user-facing and autonomous echo agents, an echo MCP tool, and a mock model
+# Authorization walkthrough: user-facing and autonomous echo agents, an echo MCP tool, and a mock model
 ---
 apiVersion: kaos.tools/v1alpha1
 kind: ModelAPI
 metadata:
-  name: chat-model
+  name: model-api
 spec:
   mode: Proxy
   proxyConfig:
@@ -14,13 +14,13 @@ spec:
 apiVersion: kaos.tools/v1alpha1
 kind: MCPServer
 metadata:
-  name: notes-mcp
+  name: echo-mcp
 spec:
   runtime: python-string
   params: |
     def echo(message: str) -> str:
-        """Echo a note for the authorization walkthrough."""
-        return f"Notes echo: {message}"
+        """Echo a message for the authorization walkthrough."""
+        return f"Echo: {message}"
 
 ---
 apiVersion: kaos.tools/v1alpha1
@@ -28,13 +28,13 @@ kind: Agent
 metadata:
   name: researcher
 spec:
-  modelAPI: chat-model
+  modelAPI: model-api
   model: echo
   mcpServers:
-    - notes-mcp
+    - echo-mcp
   config:
     description: User-facing echo agent for authorization checks
-    instructions: Echo the user's request and use notes-mcp when asked about notes.
+    instructions: Echo the user's request and use echo-mcp when asked.
   container:
     env:
       - name: DEBUG_MOCK_RESPONSES
@@ -46,19 +46,19 @@ spec:
 apiVersion: kaos.tools/v1alpha1
 kind: Agent
 metadata:
-  name: nightly-reporter
+  name: autobot
 spec:
-  modelAPI: chat-model
+  modelAPI: model-api
   model: echo
   config:
     description: Autonomous echo agent for authorization checks
-    instructions: Echo a short nightly report.
+    instructions: Echo a short automated report.
     autonomous:
-      goal: Produce the nightly echo report.
+      goal: Produce the automated echo report.
       intervalSeconds: 3600
   container:
     env:
       - name: DEBUG_MOCK_RESPONSES
-        value: '["Nightly reporter echo response"]'
+        value: '["Autobot echo response"]'
   agentNetwork:
     expose: true

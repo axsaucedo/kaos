@@ -17,5 +17,4 @@ resources:
 - 5-proxy-external-api.yaml
 - 6-autonomous-monitor.yaml
 - 7-memory-agent.yaml
-- 8-access-grant.yaml
-- 9-authorization-walkthrough.yaml
+- 8-authorization-walkthrough.yaml
