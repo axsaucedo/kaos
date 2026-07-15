@@ -1,13 +1,16 @@
-# Securing agents: who they are, and what they're allowed to do
+# Agentic Security & Identity: who they are, and what they're allowed to do
 
-When an agent calls a tool, two questions must be answered before anything runs:
+What is Agentic Security & Identity? In this practical walkthrough we cover this topic by diving into 3 key questions:
 
-1. **Who is asking?** The agent itself, and, if a person started it, which person.
-2. **Is that allowed?** Can *this* user use *this* agent, and can *this* agent reach *that* tool or model?
+1. **User Identity** - What user called the agent? What if it's an autonomous agent?
+2. **Agent Identity** - What is the identity of the agent? Is the Agent able to act on the user's behalf?
+3. **Access Control** Can *this* user use *this* agent, and can *this* agent reach *that* tool or model?
 
-KAOS answers both on every request, at a single gateway every call passes through, before the request reaches anything. This guide explains how, installs it end to end, then walks a concrete example where some calls succeed and others are correctly refused.
+KAOS answers these questions on every request in the system. 
 
-> No security background needed. Each term is introduced in plain language the first time it appears, and the KAOS CLI does the fiddly parts (logging in, calling through the gateway) for you.
+This guide explains the why, what and how; we configure a cluster with KAOS for the agent orchestration integrated with Keycloak for authentication and the Agent Identity Broker for identity exchange.
+
+We will walk through a concrete example where we will deploy a multi-component agentic system and show how calls from different users (or autonomous agents) succeed or fail.
 
 ---
 
