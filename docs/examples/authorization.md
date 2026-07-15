@@ -178,7 +178,7 @@ It's also worth noting that if the authz service *can't be reached at all*, the 
 
 ### 2.2 Deploy the agents and tools
 
-Everything the example needs, both agents, the tool, the model, and the access rules that connect them, is bundled as a single sample. We will deploy it with a single command, then walk through each object and create it step by step.
+Everything the example needs, both agents, the tool, the model, and the access rule for who may use them, is bundled as a single sample. We will deploy it with a single command, then walk through each object and create it step by step.
 
 Here's the one line deploy command:
 
@@ -191,14 +191,12 @@ mcpserver.kaos.tools/echo-mcp serverside-applied
 agent.kaos.tools/researcher serverside-applied
 agent.kaos.tools/autobot serverside-applied
 accessgrant.kaos.tools/researchers-to-researcher serverside-applied
-accessgrant.kaos.tools/researcher-to-echo-mcp-and-model-api serverside-applied
-accessgrant.kaos.tools/autobot-to-model-api serverside-applied
 
 
 Deployed sample '8-authorization-walkthrough'
 ```
 
-The tool's single function is an echo, and the model's responses are mocked, so every result is deterministic and the walkthrough exercises *access control* rather than model behaviour. The four resources first, each a plain Kubernetes object (the three access rules follow in [2.3](#23-grant-access)):
+The tool's single function is an echo, and the model's responses are mocked, so every result is deterministic and the walkthrough exercises *access control* rather than model behaviour. The four resources first, each a plain Kubernetes object (the access rule follows in [2.3](#23-grant-access)):
 
 | Resource | Kind | What it is |
 |---|---|---|
@@ -313,7 +311,7 @@ spec:
 
 ### 2.3 Grant access
 
-The sample deployed three more objects alongside the resources: the **AccessGrants**, the rules for who may reach what. With access control on, nothing is reachable until a grant names it, so these are what make the example work. Each one binds a **subject** (who) to one or more **resources** (what). Just like the resources, you can write them yourself with `kaos auth grant create`; `--dry-run` *shows* you the object instead of applying it, so you can see exactly what a rule is:
+The sample deployed one more object alongside the resources: an **AccessGrant**, the rule for who may reach what. Access control is on, so nothing is reachable until it is authorized, and this grant is what lets alice's group in. It binds a **subject** (who) to one or more **resources** (what). Like the resources, you can write it yourself with `kaos auth grant create`; `--dry-run` *shows* you the object instead of applying it:
 
 ```bash
 kaos auth grant create --group researchers --resource agent/researcher --dry-run
@@ -332,68 +330,32 @@ spec:
       name: researcher
 ```
 
-A `subject` has a `kind` of **Group** (matched against the groups in the user's token), **User** (matched against the user's subject or email), or **Agent** (matched against an agent's own identity, which is how an autonomous agent or an agent-to-tool rule is expressed). A `resource` names a `kind` (`Agent`, `MCPServer`, `ModelAPI`, or `MemoryStore`) and a `name`, or, if you prefer, a label `selector` to match many resources at once. Both lists can hold more than one entry, which is how the agent-to-tools rule grants two resources in a single object.
-
-Here are the three the sample applied, each with the command that creates it (drop `--dry-run` to write your own):
+A `subject` has a `kind` of **Group** (matched against the groups in the user's token), **User** (matched against the user's subject or email), or **Agent**. A `resource` names a `kind` (`Agent`, `MCPServer`, `ModelAPI`, or `MemoryStore`) and a `name`, or a label `selector` to match many at once. Apply it (drop `--dry-run`):
 
 ```bash
-# 1. the researchers group may use the researcher agent
 kaos auth grant create --group researchers --resource agent/researcher
-
-# 2. the researcher agent may reach the echo tool and the model
-kaos auth grant create --agent researcher --resource mcp/echo-mcp,modelapi/model-api
-
-# 3. the autonomous autobot may reach the model it runs on
-kaos auth grant create --agent autobot --resource modelapi/model-api
 ```
 ```text
 ✓ created AccessGrant researchers-to-researcher
-✓ created AccessGrant researcher-to-echo-mcp-and-model-api
-✓ created AccessGrant autobot-to-model-api
 ```
 
-The second grant is the interesting one. Its subject is the *agent itself*, and it lists two resources:
+That is the *only* grant we write, which may surprise you: the `researcher` agent reaches `echo-mcp` and `model-api`, and `autobot` reaches `model-api`, yet we grant neither. An agent's access to its own tools and model is **derived from the agent itself**. When you declared `researcher` with `modelAPI: model-api` and `mcpServers: [echo-mcp]`, the KAOS Operator projected those links straight into the enforcement data, the declaration *is* the authorization. There is no separate AccessGrant to write for it, and none shows up in `kubectl get accessgrant`. The one thing that has no home in the agent spec is which **users** may enter an agent, so that is the single grant you create.
 
-<details>
-<summary>[Collapsed section] Expand to see the agent-to-tools AccessGrant it wrote</summary>
-
-```yaml
-apiVersion: kaos.tools/v1alpha1
-kind: AccessGrant
-metadata:
-  name: researcher-to-echo-mcp-and-model-api
-spec:
-  subjects:
-    - kind: Agent
-      name: researcher
-  resources:
-    - kind: MCPServer
-      name: echo-mcp
-    - kind: ModelAPI
-      name: model-api
-```
-</details>
-
-List or remove them like any resource:
+So the grant list is short:
 
 ```bash
 kaos auth grant list
 ```
 ```text
-NAME                                     SUBJECTS          RESOURCES              ENFORCED
-researcher-to-echo-mcp-and-model-api   researcher        echo-mcp,model-api   True
-researchers-to-researcher                researchers       researcher             True
-autobot-to-model-api           autobot  model-api             True
+NAME                        SUBJECTS      RESOURCES     ENFORCED
+researchers-to-researcher   researchers   researcher    True
 ```
 
-The `ENFORCED` column is the KAOS Operator reporting back. `True` means it has projected the rule into the Authz Service and the gateway is enforcing it. If it read `False`, the column would name the reason (for example that access control isn't enabled, or that no user login provider is configured). Removing a grant is symmetric; here we drop one and re-create it, since the rest of the walkthrough depends on it:
+The `ENFORCED` column is the KAOS Operator reporting back: `True` means it has projected the rule into the Authz Service and the gateway is enforcing it. `False` would name the reason, for example that access control is not enabled or that no user login provider is configured.
 
-```bash
-kaos auth grant delete researchers-to-researcher
-kaos auth grant create --group researchers --resource agent/researcher
-```
+If you ever need an agent to reach something it did *not* declare, you can add an `--agent` grant (`kaos auth grant create --agent <agent> --resource ...`). That AccessGrant is merged *on top of* the derived access, it never replaces it. For the common case, declaring the dependency is all you need.
 
-Those three grants are the *only* rules that exist. Here is the same map from the start of this section, this time with each green edge labelled by the AccessGrant that makes it green. Everything not drawn green is denied:
+Those permissions, the one grant you wrote plus the ones derived from the agent specs, are the *only* access that exists. Here is the same map, each green edge labelled with where its permission comes from. Everything not green is denied:
 
 ```mermaid
 flowchart LR
@@ -404,11 +366,11 @@ flowchart LR
   MCP["echo-mcp<br/><i>tool</i>"]
   MODEL["model-api<br/><i>model</i>"]
 
-  alice -->|"researchers-to-researcher"| RES
+  alice -->|"AccessGrant"| RES
   bob -->|"(no grant)"| RES
-  RES -->|"researcher-to-echo-mcp-and-model-api"| MCP
-  RES -->|"researcher-to-echo-mcp-and-model-api"| MODEL
-  NR -->|"autobot-to-model-api"| MODEL
+  RES -->|"declared on the agent"| MCP
+  RES -->|"declared on the agent"| MODEL
+  NR -->|"declared on the agent"| MODEL
 
   linkStyle 0 stroke:#2e7d32,stroke-width:2px
   linkStyle 1 stroke:#c62828,stroke-width:2px,stroke-dasharray:5 4
@@ -417,7 +379,6 @@ flowchart LR
   linkStyle 4 stroke:#2e7d32,stroke-width:2px
 ```
 
----
 
 ## 3. Walk the example
 
@@ -512,7 +473,7 @@ Researcher echo response
 ✓ allowed — request permitted
 ```
 
-This exercises the *second* kind of rule. alice got in (first check), and now the agent reaches out to `echo-mcp` and `model-api`. Each of those hops is itself a request through the gateway, checked against the `researcher-to-echo-mcp-and-model-api` grant. Both are listed, so both succeed — they are the two right-hand green edges on alice's diagram above.
+This exercises the *second* kind of rule. alice got in (first check), and now the agent reaches out to `echo-mcp` and `model-api`. Each of those hops is itself a request through the gateway, checked against the access `researcher` *declared* on its own spec (`mcpServers: [echo-mcp]`, `modelAPI: model-api`). Both are declared, so both succeed — they are the two right-hand green edges on alice's diagram above.
 
 The autonomous agent acts as **itself** (no user), allowed only what *it* was granted:
 
