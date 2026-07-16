@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 from dataclasses import dataclass
@@ -31,6 +32,14 @@ from kaos_evals.contract import (
     RunResult,
 )
 from kaos_evals.gates import evaluate_gates
+from kaos_evals.telemetry import (
+    case_span,
+    current_context,
+    current_trace_id,
+    evaluator_span,
+    record_evaluation_result,
+    run_span,
+)
 
 
 @dataclass
@@ -39,6 +48,7 @@ class HarnessOutput:
     duration_seconds: float = 0
     usage: dict[str, float | int] | None = None
     trace_id: str | None = None
+    otel_context: Any = None
 
 
 @dataclass(repr=False)
@@ -49,39 +59,43 @@ class BuiltinEvaluator(Evaluator[EvalCase, HarnessOutput, dict[str, Any]]):
         return self.spec.name
 
     def evaluate(self, ctx: EvaluatorContext[EvalCase, HarnessOutput, dict[str, Any]]):
-        output = ctx.output.output
-        config = self.spec.config
-        if self.spec.kind == EvaluatorKind.CONTAINS:
-            expected = config["value"]
-            actual = str(output)
-            if not config.get("caseSensitive", True):
-                expected, actual = expected.lower(), actual.lower()
-            passed = expected in actual
-            reason = f"output {'contains' if passed else 'does not contain'} {config['value']!r}"
-        elif self.spec.kind == EvaluatorKind.EQUALS:
-            passed = output == config["value"]
-            reason = f"output {'equals' if passed else 'does not equal'} expected value"
-        elif self.spec.kind == EvaluatorKind.REGEX:
-            flags = 0
-            for flag in config.get("flags", ""):
-                flags |= {"i": re.IGNORECASE, "m": re.MULTILINE, "s": re.DOTALL}.get(flag, 0)
-            passed = re.search(config["pattern"], str(output), flags) is not None
-            reason = f"output {'matches' if passed else 'does not match'} {config['pattern']!r}"
-        elif self.spec.kind == EvaluatorKind.IS_JSON:
-            try:
-                json.loads(output if isinstance(output, str) else json.dumps(output))
-                passed, reason = True, "output is valid JSON"
-            except (TypeError, ValueError):
-                passed, reason = False, "output is not valid JSON"
-        elif self.spec.kind == EvaluatorKind.MAX_DURATION:
-            passed = ctx.output.duration_seconds <= float(config["seconds"])
-            reason = (
-                f"duration {ctx.output.duration_seconds:.3f}s "
-                f"{'is within' if passed else 'exceeds'} {float(config['seconds']):.3f}s"
-            )
-        else:  # pragma: no cover - construction routes judges to JudgeEvaluator
-            raise ValueError(f"unsupported evaluator kind: {self.spec.kind}")
-        return EvaluationReason(value=passed, reason=reason)
+        with evaluator_span(self.spec.name, ctx.output.otel_context) as span:
+            output = ctx.output.output
+            config = self.spec.config
+            if self.spec.kind == EvaluatorKind.CONTAINS:
+                expected = config["value"]
+                actual = str(output)
+                if not config.get("caseSensitive", True):
+                    expected, actual = expected.lower(), actual.lower()
+                passed = expected in actual
+                reason = (
+                    f"output {'contains' if passed else 'does not contain'} {config['value']!r}"
+                )
+            elif self.spec.kind == EvaluatorKind.EQUALS:
+                passed = output == config["value"]
+                reason = f"output {'equals' if passed else 'does not equal'} expected value"
+            elif self.spec.kind == EvaluatorKind.REGEX:
+                flags = 0
+                for flag in config.get("flags", ""):
+                    flags |= {"i": re.IGNORECASE, "m": re.MULTILINE, "s": re.DOTALL}.get(flag, 0)
+                passed = re.search(config["pattern"], str(output), flags) is not None
+                reason = f"output {'matches' if passed else 'does not match'} {config['pattern']!r}"
+            elif self.spec.kind == EvaluatorKind.IS_JSON:
+                try:
+                    json.loads(output if isinstance(output, str) else json.dumps(output))
+                    passed, reason = True, "output is valid JSON"
+                except (TypeError, ValueError):
+                    passed, reason = False, "output is not valid JSON"
+            elif self.spec.kind == EvaluatorKind.MAX_DURATION:
+                passed = ctx.output.duration_seconds <= float(config["seconds"])
+                reason = (
+                    f"duration {ctx.output.duration_seconds:.3f}s "
+                    f"{'is within' if passed else 'exceeds'} {float(config['seconds']):.3f}s"
+                )
+            else:  # pragma: no cover - construction routes judges to JudgeEvaluator
+                raise ValueError(f"unsupported evaluator kind: {self.spec.kind}")
+            record_evaluation_result(span, self.spec.name, passed, reason)
+            return EvaluationReason(value=passed, reason=reason)
 
 
 @dataclass(repr=False)
@@ -93,33 +107,35 @@ class JudgeEvaluator(Evaluator[EvalCase, HarnessOutput, dict[str, Any]]):
         return self.spec.name
 
     async def evaluate(self, ctx: EvaluatorContext[EvalCase, HarnessOutput, dict[str, Any]]):
-        config = self.spec.config
-        output = ctx.output.output
-        if config.get("includeInput"):
-            if config.get("includeExpectedOutput"):
-                grading = await judge_input_output_expected(
-                    ctx.inputs.input,
-                    output,
-                    ctx.expected_output,
-                    config["rubric"],
-                    self.model,
+        with evaluator_span(self.spec.name, ctx.output.otel_context) as span:
+            config = self.spec.config
+            output = ctx.output.output
+            if config.get("includeInput"):
+                if config.get("includeExpectedOutput"):
+                    grading = await judge_input_output_expected(
+                        ctx.inputs.input,
+                        output,
+                        ctx.expected_output,
+                        config["rubric"],
+                        self.model,
+                    )
+                else:
+                    grading = await judge_input_output(
+                        ctx.inputs.input, output, config["rubric"], self.model
+                    )
+            elif config.get("includeExpectedOutput"):
+                grading = await judge_output_expected(
+                    output, ctx.expected_output, config["rubric"], self.model
                 )
             else:
-                grading = await judge_input_output(
-                    ctx.inputs.input, output, config["rubric"], self.model
-                )
-        elif config.get("includeExpectedOutput"):
-            grading = await judge_output_expected(
-                output, ctx.expected_output, config["rubric"], self.model
-            )
-        else:
-            grading = await judge_output(output, config["rubric"], self.model)
-        if config.get("score"):
-            return {
-                self.spec.name: EvaluationReason(grading.score, grading.reason),
-                f"{self.spec.name}_pass": EvaluationReason(grading.pass_, grading.reason),
-            }
-        return EvaluationReason(grading.pass_, grading.reason)
+                grading = await judge_output(output, config["rubric"], self.model)
+            record_evaluation_result(span, self.spec.name, grading.score, grading.reason)
+            if config.get("score"):
+                return {
+                    self.spec.name: EvaluationReason(grading.score, grading.reason),
+                    f"{self.spec.name}_pass": EvaluationReason(grading.pass_, grading.reason),
+                }
+            return EvaluationReason(grading.pass_, grading.reason)
 
 
 def build_judge_model(
@@ -269,34 +285,46 @@ async def run_suite(
     judge_base_urls: Mapping[str, str] | None = None,
     judge_models: Mapping[str, Model] | None = None,
 ) -> RunResult:
-    dataset = build_dataset(
-        suite,
-        judge_base_urls=judge_base_urls,
-        judge_models=judge_models,
-    )
+    with run_span(suite.name):
+        run_context = current_context()
+        dataset = build_dataset(
+            suite,
+            judge_base_urls=judge_base_urls,
+            judge_models=judge_models,
+        )
+        repetitions: dict[str, int] = {}
+        repetition_lock = asyncio.Lock()
 
-    async def task(case: EvalCase) -> HarnessOutput:
-        response = target(case)
-        if hasattr(response, "__await__"):
-            response = await response
-        if isinstance(response, HarnessOutput):
-            return response
-        if hasattr(response, "output"):
-            return HarnessOutput(
-                output=response.output,
-                duration_seconds=getattr(response, "duration_seconds", 0),
-                usage=getattr(response, "usage", None),
-                trace_id=getattr(response, "trace_id", None),
-            )
-        return HarnessOutput(output=response)
+        async def task(case: EvalCase) -> HarnessOutput:
+            async with repetition_lock:
+                repetition = repetitions.get(case.id, 0) + 1
+                repetitions[case.id] = repetition
+            with case_span(case.id, repetition, run_context):
+                response = target(case)
+                if hasattr(response, "__await__"):
+                    response = await response
+                if isinstance(response, HarnessOutput):
+                    output = response
+                elif hasattr(response, "output"):
+                    output = HarnessOutput(
+                        output=response.output,
+                        duration_seconds=getattr(response, "duration_seconds", 0),
+                        usage=getattr(response, "usage", None),
+                        trace_id=getattr(response, "trace_id", None),
+                    )
+                else:
+                    output = HarnessOutput(output=response)
+                output.trace_id = output.trace_id or current_trace_id()
+                output.otel_context = current_context()
+                return output
 
-    report = await dataset.evaluate(
-        task,
-        max_concurrency=suite.run.max_concurrency,
-        repeat=suite.run.repeat,
-        progress=False,
-    )
-    return report_to_run_result(suite, report)
+        report = await dataset.evaluate(
+            task,
+            max_concurrency=suite.run.max_concurrency,
+            repeat=suite.run.repeat,
+            progress=False,
+        )
+        return report_to_run_result(suite, report)
 
 
 __all__ = [
