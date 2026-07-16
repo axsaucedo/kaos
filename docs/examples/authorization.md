@@ -10,7 +10,7 @@ We had to figure out how these questions had to be answered when introducing ide
 
 Here we walk through some of the architectural decisions, learnings and examples of agentic identity and authorization in KAOS. 
 
-We configure a cluster with KAOS for the agent orchestration integrated with Keycloak for identity * authentication, as well as the Agent Identity Broker for identity exchange.
+We configure a cluster with KAOS for the agent orchestration integrated with Keycloak for identity & authentication, as well as an agent impersonation service for identity exchange.
 
 We will walk through a concrete example where we will deploy a multi-component agentic system and show how calls from different users (or autonomous agents) succeed or fail.
 
@@ -18,7 +18,7 @@ We will walk through a concrete example where we will deploy a multi-component a
 
 ## 1. The control plane
 
-The **control plane** is the set of components that establish identity and decide the rules. None of them carry your agents' actual traffic; they answer the two questions above about it. Here they are on one map. The greyed pieces belong to [Part 5](#5-agents-acting-on-behalf-of-users-on-outside-services) and can be ignored for now.
+The **control plane** is the set of components that establish identity and decide the rules. None of them carry your agents' actual traffic; they answer the three questions above about it. Here they are on one map. The greyed pieces belong to [Part 5](#5-agents-acting-on-behalf-of-users-on-outside-services) and can be ignored for now.
 
 
 ```mermaid
@@ -28,7 +28,7 @@ flowchart TB
   UAuth["User Identity Service<br>(Keycloak, OIDC, etc)"]
   AAuth["Agent Identity Service<br>(ServiceAcct, OIDC, etc)"]
   Authz["KAOS Authz Service<br>(User+Agent Resource Access)"]
-  TPE["Agent Impersonation Broker<br>(AIB - Covered in Part 5)"]
+  TPE["Agent Impersonation Service<br>(Covered in Part 5)"]
   KAOS["KAOS Resources<br>(Agents, MCPs, Models)"]
   OP["⠀<br><b>KAOS Operator</b><br><br>(Syncs Identity<br> Tokens & Authorization<br> Graphs)<br>⠀"]
 
@@ -54,14 +54,14 @@ There are quite a few components in this overview, so let's walk through them:
 * **User Identity Service**: Authenticates users, proves who they are and which groups they belong to; supports OIDC compatible services so we use [Keycloak](https://www.keycloak.org/) here. 
 * **Agent Identity Service**: Gives each agent their identity through secure credentials; the default uses k8s Service Accounts, but also supports OIDC compatible services; we also configure Keycloak in this example.
 * **KAOS Authz Service**: This is the authorization (authz) service that KAOS uses to allow/deny requests based on the "user" calling the "agent" accessing the "resource".
-* **Agent Impersonation Broker**: Lets an agent act on an outside service (like GitHub) as the user by exchanging third-party token such as github/slack/etc through a consent mechanism. We use AIB for this, and it deserves it's own section, covered in Part 5.
+* **Agent Impersonation Service**: Lets an agent act on an outside service (like GitHub) as the user by exchanging third-party tokens (github/slack/etc) through a consent mechanism. The concrete tool we use is the **Agent Identity Broker (AIB)**, and it deserves its own section, covered in Part 5.
 * **KAOS Operator**: This component synchronises auth & identity bidirectionaly; it registers the KAOS resources on upstream auth services, and injects identities and secrets across KAOS resources.
 
 Before we show how this all fits together with an example, let's configure our kubernetes cluster with this setup.
 
 ### 1.1 Install it in one command
 
-We use the [KAOS CLI]() to install the Gateway Mesh, User Auth, Agent Auth, the KAOS Authz Service, the KAOS Operator, and the Agent Exchange Service.
+We use the [KAOS CLI]() to install the Gateway Mesh, User Auth, Agent Auth, the KAOS Authz Service, the KAOS Operator, and the Agent Identity Broker (AIB).
 
 This command wires everything together in a new cluster:
 
@@ -343,6 +343,8 @@ kaos auth grant create --group researchers --resource agent/researcher
 
 That is the *only* grant we write, which may surprise you: the `researcher` agent reaches `echo-mcp` and `model-api`, and `autobot` reaches `model-api`, yet we grant neither. An agent's access to its own tools and model is **derived from the agent itself**. When you declared `researcher` with `modelAPI: model-api` and `mcpServers: [echo-mcp]`, the KAOS Operator projected those links straight into the enforcement data, the declaration *is* the authorization. There is no separate AccessGrant to write for it, and none shows up in `kubectl get accessgrant`. The one thing that has no home in the agent spec is which **users** may enter an agent, so that is the single grant you create.
 
+> *The declaration is the authorization.*
+
 So the grant list is short:
 
 ```bash
@@ -562,7 +564,7 @@ flowchart TB
   subgraph oob["Part 5 + out-of-band"]
     direction LR
     TP["3rd-Party Service<br/>(GitHub, ...)"]
-    AIB["Agent Exchange Service<br/>(AIB)"]
+    AIB["Agent Identity Broker<br/>(AIB)"]
     OP["KAOS Operator<br/>(auth sync)"]
   end
 
@@ -622,7 +624,7 @@ security:
       provider: keycloak     # each agent becomes its own login-service client
 ```
 
-With this provider the operator registers each agent's client via dynamic client registration and stores its credentials in a Kubernetes Secret — the idempotency key described above; delete it to force re-registration on the next reconcile. This is heavier than `serviceaccount`, and needed only when the agent must present a login-service identity to the Agent Exchange Service (Part 5).
+With this provider the operator registers each agent's client via dynamic client registration and stores its credentials in a Kubernetes Secret — the idempotency key described above; delete it to force re-registration on the next reconcile. This is heavier than `serviceaccount`, and needed only when the agent must present a login-service identity to the Agent Identity Broker (Part 5).
 </details>
 
 ### 4.2 User identity: who is this person, and what groups are they in?
@@ -785,6 +787,9 @@ security:
 The fail-closed behaviour isn't a setting you turn on. It's how the gateway treats an authorization backend that says no *or* doesn't answer. Denying on "no answer" is the default and can't be relaxed into "allow on error".
 </details>
 
+> [!TIP]
+> **What we learned:** Fail-closed isn't a toggle you flip — it's treating "no answer" from the authz service as a *deny*, never an allow. That safe default costs availability, which is exactly why the Authz Service runs HA.
+
 **Further reading — the enforcement model.** Checking every hop at a gateway is a standard *zero-trust* shape: a policy enforcement point (the gateway) consulting a policy decision point (the Authz Service), the vocabulary formalised in [NIST SP 800-207](https://csrc.nist.gov/pubs/sp/800/207/final). The concrete mechanism — an Envoy external-authorization filter calling out to a policy engine — is documented in the [OPA-Envoy plugin](https://www.openpolicyagent.org/docs/envoy). And while agents here default to Kubernetes ServiceAccounts, the same workload-identity idea generalises beyond the cluster through [SPIFFE/SPIRE](https://spiffe.io/docs/latest/spiffe-about/spiffe-concepts/) and the emerging [IETF WIMSE](https://datatracker.ietf.org/doc/draft-ietf-wimse-arch/) work.
 
 ---
@@ -807,9 +812,9 @@ KAOS does the opposite of the shared bot on all three counts:
 - **The agent never sees a durable credential.** The agent only ever holds its own short-lived in-cluster identity. The real GitHub token is swapped onto the outbound request at the gateway; the agent code never touches it.
 - **Revocation is per user.** alice can withdraw her approval at any time without affecting anyone else.
 
-### 5.2 Enter the Agent Exchange Service (AIB)
+### 5.2 Enter the Agent Identity Broker (AIB)
 
-The component that holds each user's real credential is the **Agent Exchange Service** (AIB; deployed from the `agentic-identity-broker` chart). It runs as its own self-managed Helm release alongside the cluster, much like Keycloak — the KAOS operator deploys none of it. What it holds: each user's real third-party tokens, in a vault, put there when the user consents (5.4). What it does: exactly one thing — **exchange**. Present it proof of who the user is and which agent is acting, and it returns that user's stored third-party token. It never issues anyone's identity; agents get theirs from Agent Auth, users from User Auth, and the AIB only ever trades one proven identity for a stored credential.
+The component that holds each user's real credential is the **Agent Identity Broker** (AIB; deployed from the `agentic-identity-broker` chart). It runs as its own self-managed Helm release alongside the cluster, much like Keycloak — the KAOS operator deploys none of it. What it holds: each user's real third-party tokens, in a vault, put there when the user consents (5.4). What it does: exactly one thing — **exchange**. Present it proof of who the user is and which agent is acting, and it returns that user's stored third-party token. It never issues anyone's identity; agents get theirs from Agent Auth, users from User Auth, and the AIB only ever trades one proven identity for a stored credential.
 
 **Nothing new is installed here.** Every component in this part went in with the single install command in 1.1 (`--agent-auth keycloak`, `--token-exchange-enabled`). On the Part 1 map, the greyed pieces simply light up, and it is everything *else* that goes grey:
 
@@ -830,7 +835,7 @@ flowchart TB
   subgraph oob["Part 5 + out-of-band"]
     direction LR
     TP["3rd-Party Service<br/>(GitHub, ...)"]
-    AIB["Agent Exchange Service<br/>(AIB)"]
+    AIB["Agent Identity Broker<br/>(AIB)"]
     OP["KAOS Operator<br/>(auth sync)"]
   end
 
@@ -895,6 +900,8 @@ Inside the cluster, nothing about the earlier checks changes: alice still has to
 
 ### 5.4 The request and consent flow
 
+> *GitHub sees alice, not a bot: the user's identity travels all the way through the agent to GitHub, so every call goes out as the real user — never a shared bot token.*
+
 The very first time alice asks for something on GitHub there's no approval on file, so the request is refused with an instruction. alice approves once, the AIB stores her token, and from then on it just works, until she revokes it:
 
 ```mermaid
@@ -949,7 +956,7 @@ kaos agent invoke researcher --user alice -m "list my GitHub repos"
 
 **Under the hood**, that successful call is three moves:
 
-1. The agent runtime **re-mints alice's own token so it also names the acting agent**. This is a standard OAuth 2.0 token exchange ([RFC 8693](https://www.rfc-editor.org/rfc/rfc8693)) against User Auth, authenticated with the agent's own client credentials, and it produces a token with `sub=alice`, `azp=researcher`, `aud=token-exchange-broker` — one token that proves both who the user is and which agent is acting. In OAuth terms this is *delegation*, not impersonation: the exchange keeps both identities, so the action stays auditable as *alice via researcher* rather than the agent simply becoming alice.
+1. The agent runtime **re-mints alice's own token so it also names the acting agent**. This is a standard OAuth 2.0 token exchange ([RFC 8693](https://www.rfc-editor.org/rfc/rfc8693)) against User Auth, authenticated with the agent's own client credentials, and it produces a token with `sub=alice`, `azp=researcher`, `aud=token-exchange-broker` — one token that proves both who the user is and which agent is acting. This is what it means for the agent to *impersonate* the user, or act *on its behalf* (the terms are used interchangeably): the exchanged token keeps *both* identities, so the action stays auditable as *alice via researcher* rather than an anonymous bot.
 2. On the outbound GitHub route — and **only** on that route — the gateway presents the re-minted token, together with the agent's own credential, to the AIB. The AIB validates both, checks that alice consented, and returns alice's real GitHub token from its vault.
 3. The gateway swaps alice's GitHub token onto the outbound request. GitHub receives it and sees alice — steps 7–10 on the 5.2 map.
 
@@ -959,6 +966,34 @@ The token swap can never leak onto internal paths, because the swap filter is at
 
 **Further reading — acting on behalf of a user.** This pattern isn't bespoke; it's where the ecosystem is converging:
 
-- [RFC 8693: OAuth 2.0 Token Exchange](https://www.rfc-editor.org/rfc/rfc8693) — the standard behind the re-mint, including the delegation-versus-impersonation distinction and the `act` claim that names the acting agent.
+- [RFC 8693: OAuth 2.0 Token Exchange](https://www.rfc-editor.org/rfc/rfc8693) — the standard behind the re-mint, covering both impersonation and delegation semantics and the `act` claim that names the acting agent.
 - [Christian Posta — OAuth delegation and "on behalf of" for AI agents](https://blog.christianposta.com/explaining-on-behalf-of-for-ai-agents/) — the same gateway-mediated, preserve-both-identities model, argued from the agent-gateway world.
 - [IETF draft: On-Behalf-Of User Authorization for AI Agents](https://datatracker.ietf.org/doc/draft-oauth-ai-agents-on-behalf-of-user/) — an early standardisation attempt that adds an explicit user-consent step on top of token exchange, mirroring the AIB's connect/approve flow.
+
+---
+
+## 6. Wrapping up: what we built, and what we chose
+
+Three questions — who's the user, who's the agent, what may each reach — answered on every hop by one gateway that fails closed. That's the whole system in a sentence. Pulling back, here's what it adds up to.
+
+### The high-level picture
+
+- **Identity is two halves.** A user-facing agent carries the *user's* identity downstream (the user is the *subject*); an autonomous agent acts as *itself* (the agent is the *actor*). The gateway validates both — the user token from the login provider, the agent token from the AIB — on every request.
+- **Access is one question, keyed on the actor.** "Can *this* calling agent reach *that* resource?" is decided at the gateway from grant data. The user identity rides along for third-party delegation, but resource access is attributed to the *agent* — which is what keeps multi-agent chains correct.
+- **On-behalf-of is a per-user token swap.** When an agent touches GitHub it goes out as the *real user*, confined to the egress route — never a shared bot token.
+
+### If you're building agent identity yourself
+
+- **Put enforcement at the gateway, not in agent code.** The moment authorization lives in the runtime, every language and every custom server becomes a boundary you have to trust. One choke point enforces uniformly across SDK and non-SDK workloads.
+- **Two identities, not one.** "The agent" and "the user behind the agent" are different principals. Decide resource access on the *agent*; use the *user* for what the user personally delegated. Collapsing them breaks the instant one agent calls another.
+- **Fail-closed needs a second lock.** A deny-by-default gateway can still be walked around via direct cluster networking — so it's only as strong as the NetworkPolicy that forces traffic through it. The safe default is binary and costs availability; plan for HA.
+- **Model authorization as data first.** Explicit grant rows — requested, approved, delegated — go a long way before you need a policy language. Keep the decision behind a neutral contract so you can swap engines later.
+- **Identity ≠ safety.** Authorization decides whether an agent *may* call a tool; it says nothing about whether that tool's output is trustworthy. Prompt injection and tool poisoning are a separate surface — out of scope here, but not out of mind.
+
+### The architectural tradeoffs we chose
+
+- **Gateway enforcement over SDK enforcement.** We rejected in-code checks — they'd duplicate the decision per runtime and make security depend on application correctness. The cost: everything sits behind the gateway (plus NetworkPolicy), and off-gateway custom servers opt into their own checks.
+- **Data-first grants over a policy engine.** Simple grant tables, not a general policy/Rego layer by default — but behind the standard Envoy `ext_authz` contract, so OPA is a drop-in when real policy complexity arrives.
+- **Declared dependency = grant, for now.** Today an agent's declared `mcpServers`/`modelAPI` project straight into enforcement (fast, DRY). The target model adds an approval lifecycle on those requested edges; we took the bootstrap path deliberately and kept the distinction explicit.
+- **Coarse resource-boundary, not tool-granular.** The gateway decides "can this agent reach this resource," not "which tool, which arguments." Finer control stays a runtime concern.
+- **Workload identity stays Kubernetes-native.** mTLS / SPIFFE / service-mesh binding is out of scope, not deferred — the trust model is the AIB credential under Secret isolation plus NetworkPolicy. SPIFFE and WIMSE (further reading above) are where this generalises if a concrete cross-cluster need appears.
