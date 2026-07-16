@@ -11,6 +11,9 @@ dependencies = [
     "opentelemetry-api>=1.20.0",
 ]
 
+[project.scripts]
+kaos-evals-runner = "kaos_evals.runner:main"
+
 [project.optional-dependencies]
 runner = [
     "pydantic-evals==2.11.0",
