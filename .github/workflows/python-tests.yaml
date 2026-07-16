@@ -200,7 +200,7 @@ jobs:
         run: |
           uv venv
           source .venv/bin/activate
-          uv pip install -e .[runner,dev]
+          uv pip install -e ../kaos-memory[pydantic-ai] -e ../pydantic-ai-server -e .[runner,dev]
 
       - name: Run tests
         working-directory: kaos-evals
