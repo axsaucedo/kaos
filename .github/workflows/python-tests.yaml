@@ -7,6 +7,7 @@ on:
       - 'pydantic-ai-server/**'
       - 'kaos-cli/**'
       - 'kaos-memory/**'
+      - 'kaos-evals/**'
       - 'operator/config/samples/**'
       - '.github/workflows/python-tests.yaml'
   push:
@@ -15,6 +16,7 @@ on:
       - 'pydantic-ai-server/**'
       - 'kaos-cli/**'
       - 'kaos-memory/**'
+      - 'kaos-evals/**'
       - 'operator/config/samples/**'
       - '.github/workflows/python-tests.yaml'
   workflow_dispatch:
@@ -177,3 +179,37 @@ jobs:
           source .venv/bin/activate
           uv pip install -e .[service,dev]
           uv run pytest tests/ -v
+
+  kaos-evals-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install dependencies
+        working-directory: kaos-evals
+        run: |
+          uv venv
+          source .venv/bin/activate
+          uv pip install -e .[runner,dev]
+
+      - name: Run tests
+        working-directory: kaos-evals
+        run: uv run pytest tests/ -v
+
+      - name: Check formatting
+        working-directory: kaos-evals
+        run: uv run black --check .
+
+      - name: Run type checking
+        working-directory: kaos-evals
+        run: uvx ty@0.0.55 check

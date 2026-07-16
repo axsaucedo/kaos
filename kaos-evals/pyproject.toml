@@ -1,0 +1,42 @@
+[project]
+name = "kaos-evals"
+version = "0.6.1.dev0"
+description = "KAOS evaluation contracts, gates, target adapters, and runner"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }
+dependencies = [
+    "pydantic>=2.0.0",
+    "pyyaml>=6.0.0",
+    "opentelemetry-api>=1.20.0",
+]
+
+[project.optional-dependencies]
+runner = [
+    "pydantic-evals==2.11.0",
+    "pydantic-ai==2.11.0",
+    "httpx>=0.25.0",
+    "opentelemetry-sdk>=1.20.0",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=24.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["kaos_evals"]
+
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[tool.ty.rules]
+deprecated = "ignore"
