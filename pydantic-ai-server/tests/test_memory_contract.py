@@ -37,15 +37,15 @@ class TestMemoryScope:
         }
 
     def test_scope_level_values(self):
-        assert ScopeLevel.PRIVATE.value == "private"
+        assert ScopeLevel.AGENT.value == "agent"
         assert ScopeLevel.USER.value == "user"
-        assert ScopeLevel.SHARED.value == "shared"
+        assert ScopeLevel.GROUP.value == "group"
         assert ScopeLevel.SESSION.value == "session"
 
     def test_under_specified_scope_is_representable(self):
-        scope = MemoryScope(level=ScopeLevel.SHARED)
+        scope = MemoryScope(level=ScopeLevel.GROUP)
         assert scope.principal is None
-        assert scope.model_dump(mode="json")["level"] == "shared"
+        assert scope.model_dump(mode="json")["level"] == "group"
 
 
 class TestRecalledMemory:
@@ -92,7 +92,7 @@ class TestLongTermDefaultsAreNoOp:
 
     @pytest.mark.asyncio
     async def test_null_memory_long_term_noop(self):
-        scope = MemoryScope(level=ScopeLevel.PRIVATE, agent_client_id="a1")
+        scope = MemoryScope(level=ScopeLevel.AGENT, agent_client_id="a1")
         mem = NullMemory()
         assert (await mem.recall(scope, "q")).is_empty
         assert await mem.write(scope, [("user", "hi")]) is True

@@ -811,9 +811,9 @@ func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *
 			}
 		}
 
-		// Always inject the fully-qualified agent identity so private-scope memory
+		// Always inject the fully-qualified agent identity so agent-scoped memory
 		// is owned by a verifiable, unique principal rather than collapsing onto a
-		// shared partition when identity is absent.
+		// group partition when identity is absent.
 		env = append(env, corev1.EnvVar{
 			Name:  "AGENT_IDENTITY",
 			Value: fmt.Sprintf("kaos://agent/%s/%s", agent.Namespace, agent.Name),

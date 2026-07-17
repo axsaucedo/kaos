@@ -424,7 +424,7 @@ class AgentServerSettings(BaseSettings):
     memory_failure_mode: str = ""
     memory_short_term_token_budget: int = 0
     memory_rolling_summary: bool = True
-    # The agent's stable identity used as the owner of private/agent-scoped memory.
+    # The agent's stable identity used as the owner of agent-scoped memory.
     agent_identity: str = ""
 
     # Task store configuration

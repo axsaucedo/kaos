@@ -390,6 +390,15 @@ var _ = Describe("Agent memory binding", func() {
 		By("rejecting user scope without a memoryStore")
 		Expect(k8sClient.Create(ctx, makeAgent(&kaosv1alpha1.MemoryConfig{Scope: "user"}))).NotTo(Succeed())
 
+		By("rejecting group scope without a memoryStore")
+		Expect(k8sClient.Create(ctx, makeAgent(&kaosv1alpha1.MemoryConfig{Scope: "group"}))).NotTo(Succeed())
+
+		By("defaulting scope to agent")
+		defaulted := makeAgent(&kaosv1alpha1.MemoryConfig{})
+		Expect(k8sClient.Create(ctx, defaulted)).To(Succeed())
+		defer func() { k8sClient.Delete(ctx, defaulted) }()
+		Expect(defaulted.Spec.Config.Memory.Scope).To(Equal("agent"))
+
 		By("rejecting tools without a memoryStore")
 		Expect(k8sClient.Create(ctx, makeAgent(&kaosv1alpha1.MemoryConfig{Tools: "all"}))).NotTo(Succeed())
 	})
