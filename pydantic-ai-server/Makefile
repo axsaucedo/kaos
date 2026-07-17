@@ -27,7 +27,7 @@ test:
 # Run linting checks (same as CI)
 lint:
 	black --check .
-	uvx ty check
+	uvx ty@0.0.55 check
 
 # Format code with black
 format:
