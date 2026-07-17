@@ -33,7 +33,7 @@ class TestScopeFromDeps:
 
     def test_operator_agent_identity_overrides_actor(self):
         deps = _deps(principal="alice", actor="actor-token-subject")
-        scope = scope_from_deps(deps, level=ScopeLevel.PRIVATE, agent_identity="stable-agent-id")
+        scope = scope_from_deps(deps, level=ScopeLevel.AGENT, agent_identity="stable-agent-id")
         assert scope.agent_client_id == "stable-agent-id"
 
     def test_accepts_string_level(self):
@@ -43,21 +43,21 @@ class TestScopeFromDeps:
 
     def test_missing_security_context_yields_unset_owner_fields(self):
         deps = AgentDeps(session_id="sess-9", security_context=None)
-        scope = scope_from_deps(deps, level=ScopeLevel.SHARED)
+        scope = scope_from_deps(deps, level=ScopeLevel.GROUP)
         assert scope.principal is None
         assert scope.agent_client_id is None
         assert scope.session_id == "sess-9"
 
-    def test_private_scope_without_identity_fails_closed(self):
-        # A private scope with no agent identity would collapse every identity-less
-        # agent onto one shared-empty owner; refuse rather than cross-contaminate.
+    def test_agent_scope_without_identity_fails_closed(self):
+        # An agent scope with no identity would collapse every identity-less
+        # agent onto one empty owner; refuse rather than cross-contaminate.
         deps = AgentDeps(session_id="sess-1", security_context=None)
         with pytest.raises(ValueError):
-            scope_from_deps(deps, level=ScopeLevel.PRIVATE)
+            scope_from_deps(deps, level=ScopeLevel.AGENT)
 
-    def test_private_scope_uses_actor_when_no_operator_identity(self):
+    def test_agent_scope_uses_actor_when_no_operator_identity(self):
         deps = _deps(actor="agent-actor")
-        scope = scope_from_deps(deps, level=ScopeLevel.PRIVATE)
+        scope = scope_from_deps(deps, level=ScopeLevel.AGENT)
         assert scope.agent_client_id == "agent-actor"
 
     def test_helper_takes_no_scope_argument(self):
@@ -69,8 +69,8 @@ class TestScopeFromDeps:
     def test_model_supplied_fields_on_deps_are_ignored(self):
         # Even if extra attributes are attached, only the known identity fields are read.
         deps = _deps(principal="alice", actor="agent-1")
-        setattr(deps, "scope", "shared")  # would-be injected override
+        setattr(deps, "scope", "group")  # would-be injected override
         setattr(deps, "principal", "attacker")
-        scope = scope_from_deps(deps, level=ScopeLevel.PRIVATE)
-        assert scope.level is ScopeLevel.PRIVATE
+        scope = scope_from_deps(deps, level=ScopeLevel.AGENT)
+        assert scope.level is ScopeLevel.AGENT
         assert scope.principal == "alice"

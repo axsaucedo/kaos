@@ -36,12 +36,12 @@ Injected by the operator on memory-enabled agents. For the full model see [Memor
 | `MEMORY_ENABLED` | Enable/disable memory (uses NullMemory when disabled) | `true` |
 | `MEMORY_TYPE` | Backend: `local` (pod-local short-term) or `remote` (bound MemoryStore) | derived |
 | `MEMORY_STORE_ENDPOINT` | Memory service URL; injected only for `remote` (selects `RemoteMemory`) | — |
-| `MEMORY_SCOPE` | Long-term scope: `private`, `user`, `shared`, `session` | `private` |
+| `MEMORY_SCOPE` | Long-term scope: `agent`, `user`, `group`, `session` | `session` |
 | `MEMORY_TOOLS` | Explicit memory tools: `all`, `read`, `write` (unset = none) | — |
 | `MEMORY_FAILURE_MODE` | Write/forget failure mode: `soft` or `strict` | store default |
 | `MEMORY_SHORT_TERM_TOKEN_BUDGET` | Verbatim short-term window cap, in tokens | runtime default |
 | `MEMORY_ROLLING_SUMMARY` | Keep a medium-term rolling digest of evicted turns | `true` |
-| `AGENT_IDENTITY` | Verifiable agent principal (`kaos://agent/<ns>/<name>`) anchoring private scope | always set |
+| `AGENT_IDENTITY` | Verifiable agent principal (`kaos://agent/<ns>/<name>`) anchoring agent scope | always set |
 | `MEMORY_CONTEXT_LIMIT` | Recent history events replayed / forwarded on delegation (runtime default) | `6` |
 | `MEMORY_MAX_SESSIONS` | Max sessions kept (LocalMemory runtime default) | `1000` |
 | `MEMORY_MAX_SESSION_EVENTS` | Max events per session (LocalMemory runtime default) | `500` |

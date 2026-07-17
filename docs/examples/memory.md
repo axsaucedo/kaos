@@ -59,7 +59,7 @@ We deploy three resources: a `ModelAPI` (never actually called — the agent use
 The important part is the agent's `config.memory` block:
 
 - `memoryStore` binds the agent to the store.
-- `scope: shared` keeps a single memory shared across every session of this agent (see [scopes](#scopes) below).
+- `scope: group` keeps a single memory shared across every agent and session bound to this store (see [scopes](#scopes) below).
 - `tools: all` **enables the explicit memory tools** (`save_memory` and `search_memory`) on top of the automatic recall/persist baseline.
 
 `DEBUG_MOCK_RESPONSES` makes the agent return a canned reply instead of calling the model, so the run is deterministic.
@@ -120,7 +120,7 @@ spec:
     memory:
       type: remote
       memoryStore: shared-memory
-      scope: shared
+      scope: group
       tools: all
       failureMode: soft
   agentNetwork:
@@ -158,7 +158,7 @@ kaos agent invoke memory-agent -n "$NAMESPACE" \
 
 ## Step 4: Verify the Agent Wrote to the Store
 
-Now we confirm the integration by asking the **memory service** directly. The agent reaches the store at `memorystore-shared-memory:8080`; we port-forward it and recall the shared scope. The turns the agent just handled are there — proof the agent persisted the conversation to the central store:
+Now we confirm the integration by asking the **memory service** directly. The agent reaches the store at `memorystore-shared-memory:8080`; we port-forward it and recall the group scope. The turns the agent just handled are there — proof the agent persisted the conversation to the central store:
 
 ```bash
 kubectl port-forward -n "$NAMESPACE" svc/memorystore-shared-memory 18080:8080 \
@@ -167,7 +167,7 @@ PF=$!
 sleep 4
 curl -s http://localhost:18080/v1/recall \
   -H 'content-type: application/json' \
-  -d '{"scope": {"level": "shared"}, "query": "deployment port", "include_short_term": true}' \
+  -d '{"scope": {"level": "group"}, "query": "deployment port", "include_short_term": true}' \
   > recall-session1.json
 kill "$PF" 2>/dev/null || true
 cat recall-session1.json
@@ -202,7 +202,7 @@ PF=$!
 sleep 4
 curl -s http://localhost:18080/v1/recall \
   -H 'content-type: application/json' \
-  -d '{"scope": {"level": "shared"}, "query": "deployment port", "include_short_term": true}' \
+  -d '{"scope": {"level": "group"}, "query": "deployment port", "include_short_term": true}' \
   > recall-session2.json
 kill "$PF" 2>/dev/null || true
 ```
@@ -235,9 +235,9 @@ The tools never take a scope from the model — the scope is derived server-side
 Memory is partitioned by `scope`, set on the agent's `config.memory` block:
 
 - `session` — one conversation only.
-- `shared` — shared across every session on the store (used here).
+- `group` — shared by every agent and session on the store (used here).
 - `user` — all sessions for an authenticated principal.
-- `private` — only this specific agent.
+- `agent` — only this specific agent.
 
 ## Semantic Long-Term Recall (pgvector)
 

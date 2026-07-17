@@ -95,7 +95,7 @@ tmp/                       # Local work files (gitignored)
 ```
 
 ## CRDs Overview
-- **Agent**: AI agent with model API, MCP tools, sub-agent delegation, autonomous (self-looping) execution, and memory binding (`config.memory`: scope, tools, failureMode, clientParams)
+- **Agent**: AI agent with model API, MCP tools, sub-agent delegation, autonomous (self-looping) execution, and memory binding (`config.memory`: `agent`/`user`/`group`/`session` scope, tools, failureMode, clientParams)
 - **MCPServer**: MCP tool server with runtime-based architecture (python-string, fastmcp-codemode, pctx-codemode, kubernetes, slack, custom)
 - **ModelAPI**: LLM proxy (LiteLLM) or hosted (Ollama) mode
 - **MemoryStore**: central memory service backing long-term semantic memory (local or external pgvector storage; external defaults to 2 replicas + PDB; summarization/embedding model refs; `--pgvector-memory-enabled` installs dev Postgres)

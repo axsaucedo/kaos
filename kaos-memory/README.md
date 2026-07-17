@@ -30,12 +30,12 @@ A `Scope` names whose memory an operation touches and maps onto a Mem0 owner ide
 
 | Scope level | Mem0 owner key |
 | --- | --- |
-| `private` | `agent_id` (this agent) |
+| `agent` | `agent_id` (this agent) |
 | `user` | `user_id` (a principal) |
 | `session` | `run_id` (one run) |
-| `shared` | a reserved shared owner id on `agent_id` |
+| `group` | a reserved group owner id on `agent_id` |
 
-`shared` resolves to a reserved owner id rather than an empty filter because Mem0 rejects an owner-less search. This module ships only the correct translation; fail-closed enforcement is a later phase.
+`group` resolves to a reserved owner id rather than an empty filter because Mem0 rejects an owner-less search. This module ships only the correct translation; fail-closed enforcement is a later phase.
 
 ## Development
 

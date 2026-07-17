@@ -31,7 +31,7 @@ spec:
       enabled: true
       type: remote            # "remote" (bound MemoryStore) or "local" (pod-local)
       memoryStore: shared-memory
-      scope: user             # private | user | shared | session
+      scope: user             # agent | user | group | session
       tools: all              # all | read | write
       failureMode: soft       # soft | strict
 ```

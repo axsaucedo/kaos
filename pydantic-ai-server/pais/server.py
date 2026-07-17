@@ -756,7 +756,7 @@ def create_agent_server(
 ) -> AgentServer:
     """Create an AgentServer with optional sub-agents and MCP clients."""
     if not settings:
-        settings = AgentServerSettings()  # type: ignore[call-arg]  # ty: ignore[missing-argument]
+        settings = AgentServerSettings()  # type: ignore[call-arg]
 
     # Logging + OTel
     configure_logging(get_log_level(), otel_correlation=should_enable_otel())

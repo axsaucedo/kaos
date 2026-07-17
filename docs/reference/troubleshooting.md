@@ -363,7 +363,7 @@ kubectl logs -l app=my-agent -n my-namespace | grep -i "memory\|degraded\|recall
 
 **Common Causes:**
 
-1. **Scope mismatch** — long-term memory is keyed by `scope`. A `private` agent only sees its own facts; use `user` or `shared` to pool memory (both require a `memoryStore`).
+1. **Scope mismatch** — long-term memory is keyed by `scope`. An `agent` scope only sees that agent's facts; use `user` or `group` to pool memory (both require a `memoryStore`).
 2. **Extraction still pending** — long-term facts are extracted in the background off the response path, so they appear a moment after the turn, not synchronously.
 3. **`local` storage mode with no embedder configured** — semantic long-term recall needs the store's `embedding` ModelAPI; the short-term window works without it.
 

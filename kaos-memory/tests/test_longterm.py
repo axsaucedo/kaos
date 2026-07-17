@@ -70,7 +70,7 @@ def test_local_delete_scope_removes_only_that_owner(tmp_path, offline_models):
 
 def test_agent_and_session_scopes_isolated(tmp_path, offline_models):
     store = _local_store(tmp_path, offline_models)
-    agent = Scope(level=ScopeLevel.PRIVATE, agent_client_id="agent-a")
+    agent = Scope(level=ScopeLevel.AGENT, agent_client_id="agent-a")
     session = Scope(level=ScopeLevel.SESSION, session_id="run-1")
     store.add(agent, "agent private fact about ports", infer=False)
     store.add(session, "session ephemeral fact about ports", infer=False)
