@@ -179,7 +179,8 @@ security:
   # userAuth configures the human user identity provider (e.g. Keycloak) whose
   # subject tokens are verified at the gateway alongside agent actor tokens. When
   # issuer is unset, no user jwt provider is generated (agent-only/autonomous
-  # installs); the block is independent of agentAuth.
+  # installs). A non-empty issuer requires strictGatewayApi so verification cannot
+  # be bypassed through direct workload routing; the block is independent of agentAuth.
   userAuth:
     # issuer is the user-auth OIDC issuer URL. Example:
     # http://keycloak.kaos-system.svc.cluster.local:8080/realms/kaos

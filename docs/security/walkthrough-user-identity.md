@@ -4,7 +4,7 @@ The user identity plane carries the human subject independently of the agent act
 
 ## Gateway verification
 
-When `security.userAuth.issuer` is configured, the operator adds a `user` JWT provider to each protected gateway `SecurityPolicy`. The provider reads the standard header:
+When `security.userAuth.issuer` is configured, `security.strictGatewayApi.enabled=true` is required so direct workload routing cannot bypass the gateway. Strict mode includes gateway-routed internal URLs and NetworkPolicy isolation. The operator adds a `user` JWT provider to each protected gateway `SecurityPolicy`. The provider reads the standard header:
 
 ```http
 Authorization: Bearer <keycloak-user-jwt>

@@ -1238,6 +1238,7 @@ def _expand_auth_flags(agent_mode: str, user_mode: str, namespace: str) -> dict:
         **base,
         "identity_provider": identity_provider,
         "user_auth": user_mode == "keycloak",
+        "gateway_api_strict": user_mode == "keycloak",
     }
     if agent_mode == "keycloak":
         result.update(

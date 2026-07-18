@@ -37,7 +37,7 @@ Agent and user identity are selected independently:
 | `--agent-auth-enabled` | `service-account`, `aib`, `keycloak` | `service-account` |
 | `--user-auth-enabled` | `keycloak`, `none` | `keycloak` |
 
-With neither flag, security stays disabled. When either flag is present, the unspecified plane uses its default. `--user-auth-enabled none` disables the user plane. Enabled security includes the PDP, automated policy projection, internal gateway routing, and NetworkPolicy generation.
+With neither flag, security stays disabled. When either flag is present, the unspecified plane uses its default. `--user-auth-enabled none` disables the user plane. Enabled user authentication also enables strict Gateway API mode, which includes internal gateway routing and NetworkPolicy isolation; all authentication presets include the PDP and automated policy projection.
 
 The former presets map to the new flags as follows:
 
