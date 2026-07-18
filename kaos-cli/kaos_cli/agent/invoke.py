@@ -14,6 +14,7 @@ def invoke_command(
     message: str,
     port: int,
     stream: bool,
+    session: str | None = None,
 ) -> None:
     """Send a message to an Agent via port-forward."""
     import httpx
@@ -73,6 +74,7 @@ def invoke_command(
             sys.exit(1)
 
         typer.echo(f"Sending message: {message}")
+        headers = {"X-Session-ID": session} if session else None
 
         try:
             if stream:
@@ -84,6 +86,7 @@ def invoke_command(
                         "messages": [{"role": "user", "content": message}],
                         "stream": True,
                     },
+                    headers=headers,
                     timeout=120.0,
                 ) as response:
                     typer.echo("\n📤 Response:")
@@ -114,6 +117,7 @@ def invoke_command(
                         "messages": [{"role": "user", "content": message}],
                         "stream": False,
                     },
+                    headers=headers,
                     timeout=120.0,
                 )
 

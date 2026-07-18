@@ -304,13 +304,17 @@ kaos agent invoke NAME [OPTIONS]
 | Option | Short | Description |
 |--------|-------|-------------|
 | `--message` | `-m` | Message (required) |
+| `--namespace` | `-n` | Namespace of the Agent |
 | `--port` | `-p` | Local port (default: 9001) |
 | `--stream` | `-s` | Stream response |
+| `--session` | | Conversation session ID, sent as `X-Session-ID` |
 
 **Example:**
 ```bash
-kaos agent invoke my-agent --message "Hello, how are you?"
+kaos agent invoke my-agent -n my-namespace --session ticket-42 --message "Hello, how are you?"
 ```
+
+User identity is not selectable with an invoke flag. On OIDC-enabled clusters it comes from the verified bearer token presented through the gateway.
 
 ### kaos agent delete
 

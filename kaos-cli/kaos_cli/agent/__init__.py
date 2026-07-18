@@ -339,10 +339,20 @@ def invoke_agent(
         "-s",
         help="Stream the response.",
     ),
+    session: str = typer.Option(
+        None,
+        "--session",
+        help="Conversation session ID.",
+    ),
 ) -> None:
     """Send a message to an Agent via port-forward."""
     invoke_command(
-        name=name, namespace=namespace, message=message, port=port, stream=stream
+        name=name,
+        namespace=namespace,
+        message=message,
+        port=port,
+        stream=stream,
+        session=session,
     )
 
 
