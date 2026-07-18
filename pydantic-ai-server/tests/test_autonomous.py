@@ -2,7 +2,6 @@
 
 import json
 import os
-import time
 import pytest
 
 from pais.a2a import (
@@ -293,9 +292,6 @@ class TestStartupAutonomous:
         server.settings.autonomous_goal = "Monitor the system"
 
         async with server._lifespan(server.app):
-            import asyncio
-
-            await asyncio.sleep(0.5)
             tasks = [t for t in server.task_manager._tasks.values() if t.autonomous]
             assert len(tasks) >= 1
 

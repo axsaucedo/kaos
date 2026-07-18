@@ -109,6 +109,7 @@ The `kaos_identity` runtime propagates two identities across agent hops (ADR-KAO
 
 ### Memory (memory.py)
 - KAOS memory (Local/Remote/Null) persists across sessions — Pydantic AI has no built-in persistence
+- Long-term memory scopes are `agent` (default), `user`, `group`, and `session`
 - All implementations extend `Memory` ABC with `build_message_history()` and `store_pydantic_message()` as concrete methods
 - NullMemory is a no-op — always call memory methods regardless (no branching needed)
 - `build_message_history(session_id, context_limit)`: KAOS events → Pydantic AI `ModelRequest`/`ModelResponse` messages

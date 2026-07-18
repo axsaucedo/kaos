@@ -843,13 +843,12 @@ class TestPackageData:
         from kaos_cli.samples import _get_sample_files
 
         files = _get_sample_files()
-        assert len(files) == 9
+        assert len(files) == 8
         names = [f.stem for f in files]
         assert "1-simple-echo-agent" in names
         assert "5-proxy-external-api" in names
         assert "7-memory-agent" in names
         assert "8-authorization-walkthrough" in names
-        assert "9-authorization-walkthrough" in names
 
 
 # ─── Monitoring validation ──────────────────────────────────────────────
@@ -1648,6 +1647,7 @@ class TestAuthWiring:
             "policy_configmap_namespace": "kaos-system",
             "identity_provider": "aib",
             "user_auth": True,
+            "gateway_api_strict": True,
         }
 
     def test_expand_auth_flags_keycloak_oidc(self):
@@ -1668,6 +1668,7 @@ class TestAuthWiring:
             "oidc_registration_secret_name": "kaos-oidc-registration",
             "oidc_registration_secret_key": "token",
             "user_auth": True,
+            "gateway_api_strict": True,
         }
 
     def test_expand_auth_flags_kaos_internal(self):
@@ -1685,6 +1686,7 @@ class TestAuthWiring:
             "policy_configmap_namespace": "kaos-system",
             "identity_provider": "serviceaccount",
             "user_auth": False,
+            "gateway_api_strict": False,
         }
 
     def test_expand_auth_flags_aib_only(self):
@@ -1702,6 +1704,7 @@ class TestAuthWiring:
             "policy_configmap_namespace": "kaos-system",
             "identity_provider": "aib",
             "user_auth": False,
+            "gateway_api_strict": False,
         }
 
     @pytest.mark.parametrize(
@@ -1739,6 +1742,7 @@ class TestAuthWiring:
                     "security.userAuth.issuer=http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos",
                     "security.userAuth.audience=kaos",
                     "security.gatewayRouting.enabled=true",
+                    "security.strictGatewayApi.enabled=true",
                 },
                 False,
                 True,
@@ -1781,6 +1785,7 @@ class TestAuthWiring:
                     "security.userAuth.issuer=http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos",
                     "security.userAuth.audience=kaos",
                     "security.gatewayRouting.enabled=true",
+                    "security.strictGatewayApi.enabled=true",
                 },
                 True,
                 True,
@@ -1803,6 +1808,7 @@ class TestAuthWiring:
                     "security.userAuth.issuer=http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos",
                     "security.userAuth.audience=kaos",
                     "security.gatewayRouting.enabled=true",
+                    "security.strictGatewayApi.enabled=true",
                 },
                 False,
                 True,

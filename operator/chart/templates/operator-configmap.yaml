@@ -1,3 +1,6 @@
+{{- if and .Values.security.userAuth.issuer (not .Values.security.strictGatewayApi.enabled) }}
+{{- fail "security.userAuth.issuer requires security.strictGatewayApi.enabled=true; strict mode enforces security.gatewayRouting.enabled and security.networkPolicy.enabled" }}
+{{- end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:

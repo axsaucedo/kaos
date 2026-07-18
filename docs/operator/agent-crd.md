@@ -43,7 +43,7 @@ spec:
       enabled: true           # Enable/disable memory (default: true)
       type: remote            # "remote" (bound MemoryStore) or "local" (pod-local)
       memoryStore: shared-memory  # MemoryStore in the same namespace (remote)
-      scope: user             # private | user | shared | session
+      scope: user             # agent | user | group | session
       tools: all              # Expose memory tools: all | read | write
       failureMode: soft       # Override store default: soft | strict
       clientParams:
@@ -232,7 +232,7 @@ config:
     enabled: true               # Enable/disable memory (default: true)
     type: remote                # "remote" or "local" (derived from memoryStore when omitted)
     memoryStore: shared-memory  # MemoryStore in the same namespace (required for remote)
-    scope: user                 # private | user | shared | session (default: private)
+    scope: user                 # agent | user | group | session (default: agent)
     tools: all                  # Expose memory tools: all | read | write
     failureMode: soft           # Override store default write/forget mode: soft | strict
     clientParams:
@@ -245,16 +245,16 @@ config:
 | `enabled` | bool | `true` | Enable memory; when `false`, uses a no-op memory implementation |
 | `type` | string | derived | `remote` (bound MemoryStore) or `local` (pod-local short-term). Derived from `memoryStore` presence when omitted |
 | `memoryStore` | string | — | Name of a MemoryStore in the same namespace. Required for `remote`; forbidden for `local` |
-| `scope` | string | `private` | Whose memory the agent reads/writes: `private`, `user`, `shared`, `session`. `user` and `shared` require a `memoryStore` |
+| `scope` | string | `agent` | Whose memory the agent reads/writes: `agent`, `user`, `group`, `session`. `user` and `group` require a `memoryStore` |
 | `tools` | string | — | Explicit memory tools on top of automatic recall/write: `all` (save + search), `read` (search), `write` (save). Requires a `memoryStore` |
 | `failureMode` | string | store default | Override the store's write/forget failure mode: `soft` (tolerate) or `strict` (surface errors) |
 | `clientParams.tokenBudget` | int | runtime default | Cap on the verbatim short-term window replayed, in tokens |
 | `clientParams.rollingSummary` | bool | `true` | Maintain a rolling summary of evicted turns |
 
 **Memory scope (multi-tenancy):**
-- `private` (default) — memory is isolated to this single agent; each agent identity owns its own store partition.
+- `agent` (default) — memory is isolated to this single agent; each agent identity owns its own store partition.
 - `user` — memory is keyed by the calling principal, so any agent bound to the same store shares that user's memory across sessions. Requires a `memoryStore`.
-- `shared` — a single common partition read/written by every agent bound to the store. Requires a `memoryStore`.
+- `group` — a single common partition read/written by every agent bound to the store. Requires a `memoryStore`; the store defines the group.
 - `session` — memory is scoped to an individual conversation/session and not carried across sessions.
 
 **Remote memory:**

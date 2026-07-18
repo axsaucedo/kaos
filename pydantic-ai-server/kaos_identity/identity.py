@@ -207,9 +207,7 @@ class ActorTokenManager:
         for attempt in range(_MAX_ATTEMPTS):
             try:
                 with suppress_instrumentation():
-                    resp = httpx.post(
-                        self._token_endpoint, data=self._grant_params(), timeout=10.0
-                    )
+                    resp = httpx.post(self._token_endpoint, data=self._grant_params(), timeout=10.0)
                 if resp.status_code == 401:
                     self._credential.reload()
                 resp.raise_for_status()
@@ -253,9 +251,7 @@ class ActorTokenManager:
             try:
                 with suppress_instrumentation():
                     async with httpx.AsyncClient(timeout=10.0) as client:
-                        resp = await client.post(
-                            self._token_endpoint, data=self._grant_params()
-                        )
+                        resp = await client.post(self._token_endpoint, data=self._grant_params())
                 if resp.status_code == 401:
                     self._credential.reload()
                 resp.raise_for_status()

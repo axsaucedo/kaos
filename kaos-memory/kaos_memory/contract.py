@@ -20,10 +20,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field, model_validator
 
-#: Reserved owner id naming the store-wide shared namespace. It is mapped onto
+#: Reserved owner id naming the store-wide group namespace. It is mapped onto
 #: ``agent_id`` and is deliberately distinct from any real agent client id, so a
-#: ``shared`` operation never collides with a ``private`` (per-agent) one.
-SHARED_OWNER = "kaos:shared"
+#: ``group`` operation never collides with an ``agent``-scoped one.
+GROUP_OWNER = "kaos:group"
 
 #: A write/forget failure mode: ``"soft"`` swallows long-term errors and returns
 #: degraded; ``"strict"`` surfaces them. When omitted the service default applies.
@@ -33,15 +33,15 @@ FailureMode = str
 class ScopeLevel(str, Enum):
     """The memory scope an operation targets.
 
-    - ``PRIVATE``: only this agent (mapped to ``agent_id``).
+    - ``AGENT``: only this agent (mapped to ``agent_id``).
     - ``USER``: all agents acting for a principal (mapped to ``user_id``).
-    - ``SHARED``: every agent on the store (mapped to the reserved shared owner).
+    - ``GROUP``: every agent on the store (mapped to the reserved group owner).
     - ``SESSION``: a single run/conversation (mapped to ``run_id``).
     """
 
-    PRIVATE = "private"
+    AGENT = "agent"
     USER = "user"
-    SHARED = "shared"
+    GROUP = "group"
     SESSION = "session"
 
 
@@ -74,13 +74,13 @@ class Scope(BaseModel):
 
     def is_complete(self) -> bool:
         """Whether the field required by ``level`` is present (a usable owner key exists)."""
-        if self.level is ScopeLevel.PRIVATE:
+        if self.level is ScopeLevel.AGENT:
             return self.agent_client_id is not None
         if self.level is ScopeLevel.USER:
             return self.principal is not None
         if self.level is ScopeLevel.SESSION:
             return self.session_id is not None
-        return True  # SHARED always resolves to the reserved owner.
+        return True  # GROUP always resolves to the reserved owner.
 
     def owner_kwargs(self) -> Dict[str, Any]:
         """Return the Mem0 owner keyword arguments for a write/search at this scope.
@@ -89,9 +89,9 @@ class Scope(BaseModel):
         field required by ``level`` is missing, so an unusable scope never silently
         widens to another owner.
         """
-        if self.level is ScopeLevel.PRIVATE:
+        if self.level is ScopeLevel.AGENT:
             if self.agent_client_id is None:
-                raise ValueError("private scope requires agent_client_id")
+                raise ValueError("agent scope requires agent_client_id")
             return {"agent_id": self.agent_client_id}
         if self.level is ScopeLevel.USER:
             if self.principal is None:
@@ -101,7 +101,7 @@ class Scope(BaseModel):
             if self.session_id is None:
                 raise ValueError("session scope requires session_id")
             return {"run_id": self.session_id}
-        return {"agent_id": SHARED_OWNER}
+        return {"agent_id": GROUP_OWNER}
 
     def search_filters(self) -> Dict[str, Any]:
         """Return the Mem0 ``filters`` dict for a search at this scope.

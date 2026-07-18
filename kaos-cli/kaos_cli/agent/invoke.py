@@ -206,14 +206,25 @@ def invoke_command(
 
     signal.signal(signal.SIGINT, lambda s, f: (cleanup(), sys.exit(0)))
 
-    time.sleep(2)
-
-    if pf_process.poll() is not None:
-        stderr = pf_process.stderr.read().decode() if pf_process.stderr else ""
-        typer.echo(f"Error: Port-forward failed: {stderr}", err=True)
-        sys.exit(1)
-
     try:
+        last_error = "port-forward did not become ready"
+        for _ in range(90):
+            if pf_process.poll() is not None:
+                stderr = pf_process.stderr.read().decode() if pf_process.stderr else ""
+                typer.echo(f"Error: Port-forward failed: {stderr}", err=True)
+                sys.exit(1)
+            try:
+                health = httpx.get(f"http://localhost:{port}/health", timeout=2.0)
+                if health.status_code == 200:
+                    break
+                last_error = f"HTTP {health.status_code}"
+            except httpx.HTTPError as exc:
+                last_error = str(exc)
+            time.sleep(1)
+        else:
+            typer.echo(f"Error: Could not connect to Agent: {last_error}", err=True)
+            sys.exit(1)
+
         typer.echo(f"Sending message: {message}")
 
         try:
@@ -276,6 +287,7 @@ def invoke_command(
                     )
         except httpx.ConnectError:
             typer.echo("Error: Could not connect to Agent", err=True)
+            sys.exit(1)
         except Exception as e:
             typer.echo(f"Error: {e}", err=True)
     finally:

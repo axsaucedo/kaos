@@ -38,19 +38,19 @@ def scope_from_deps(
     widen or redirect the scope it is entitled to; the ``level`` is fixed by the
     agent's configuration, not by request content.
 
-    Fails closed on ambiguous ownership: a ``PRIVATE`` scope must resolve to a
+    Fails closed on ambiguous ownership: an ``AGENT`` scope must resolve to a
     concrete, agent-unique owner (the qualified ``kaos://agent/{namespace}/{name}``
     identity, threaded via ``agent_identity`` or the request actor). Without one,
     every agent lacking an identity would collapse onto the same empty owner and
-    silently share one private partition, so this raises rather than cross-contaminate.
+    silently share one agent partition, so this raises rather than cross-contaminate.
     """
     resolved_level = level if isinstance(level, ScopeLevel) else ScopeLevel(str(level))
     security_context = getattr(deps, "security_context", None) or {}
     agent_client_id = agent_identity or security_context.get("actor") or None
-    if resolved_level is ScopeLevel.PRIVATE and not agent_client_id:
+    if resolved_level is ScopeLevel.AGENT and not agent_client_id:
         raise ValueError(
-            "PRIVATE memory scope requires a stable agent identity; refusing to "
-            "operate on an ambiguously-owned private partition"
+            "AGENT memory scope requires a stable agent identity; refusing to "
+            "operate on an ambiguously-owned agent partition"
         )
     return Scope(
         level=resolved_level,

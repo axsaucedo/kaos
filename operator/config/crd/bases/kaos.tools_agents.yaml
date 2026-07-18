@@ -147,13 +147,14 @@ spec:
                           long-term tier for this agent.
                         type: string
                       scope:
+                        default: agent
                         description: |-
-                          Scope selects whose memory this agent reads and writes. "user" and "shared"
+                          Scope selects whose memory this agent reads and writes. "user" and "group"
                           require a bound memoryStore.
                         enum:
-                        - private
+                        - agent
                         - user
-                        - shared
+                        - group
                         - session
                         type: string
                       tools:
@@ -182,10 +183,10 @@ spec:
                       rule: '!has(self.type) || self.type != ''remote'' || has(self.memoryStore)'
                     - message: type 'local' must not set memoryStore
                       rule: '!has(self.type) || self.type != ''local'' || !has(self.memoryStore)'
-                    - message: scope 'user' or 'shared' requires memoryStore to be
+                    - message: scope 'user' or 'group' requires memoryStore to be
                         set
                       rule: '!has(self.scope) || (self.scope != ''user'' && self.scope
-                        != ''shared'') || has(self.memoryStore)'
+                        != ''group'') || has(self.memoryStore)'
                     - message: tools requires memoryStore to be set
                       rule: '!has(self.tools) || has(self.memoryStore)'
                   reasoningLoopMaxSteps:

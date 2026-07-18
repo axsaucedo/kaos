@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import ANY, patch
 
 import yaml
+from click.utils import strip_ansi
 from typer.testing import CliRunner
 
 from kaos_cli.agent.invoke import plain_access_reason
@@ -105,9 +106,9 @@ def test_disconnect_receives_arguments():
 
 
 def test_connect_requires_user():
-    result = runner.invoke(app, ["auth", "connect", "github"])
+    result = runner.invoke(app, ["auth", "connect", "github"], color=False)
     assert result.exit_code == 2
-    assert "--user" in result.output
+    assert "--user" in strip_ansi(result.output)
 
 
 def test_reauth_url_parses_header_and_runtime_outcome():

@@ -40,6 +40,25 @@ refute "disabled PDP does not enable operator enforcement" "$out" 'SECURITY_PDP_
 expect "ServiceAccount identity is default" "$out" 'SECURITY_AGENT_AUTH_IDENTITY_PROVIDER:\s*"serviceaccount"'
 expect "gateway JWT is optional by default" "$out" 'SECURITY_AGENT_AUTH_GATEWAY_JWT_OPTIONAL:\s*"true"'
 
+if unguarded_user_auth="$(helm template t "$CHART_DIR" \
+	--set security.userAuth.issuer=https://users.example.test 2>&1)"; then
+	echo "FAIL - user auth without strict gateway enforcement was accepted"
+	FAIL=1
+elif grep -q 'security.userAuth.issuer requires security.strictGatewayApi.enabled=true' <<<"$unguarded_user_auth"; then
+	echo "ok   - user auth without strict gateway enforcement rejected clearly"
+else
+	echo "FAIL - user auth enforcement error was unclear"
+	FAIL=1
+fi
+
+out="$(render \
+	--set security.userAuth.issuer=https://users.example.test \
+	--set security.strictGatewayApi.enabled=true \
+	--set security.gatewayRouting.enabled=false \
+	--set security.networkPolicy.enabled=false)"
+expect "strict gateway enforcement permits user auth" "$out" 'SECURITY_USER_AUTH_ISSUER:\s*"https://users.example.test"'
+expect "strict gateway enforcement reaches operator" "$out" 'SECURITY_STRICT_GATEWAY_API_ENABLED:\s*"true"'
+
 out="$(render --set security.agentAuth.gatewayJwtOptional=false)"
 expect "gateway JWT can be blocking" "$out" 'SECURITY_AGENT_AUTH_GATEWAY_JWT_OPTIONAL:\s*"false"'
 
@@ -195,6 +214,7 @@ out="$(render \
 	--set security.agentAuth.issuer=https://keycloak.example/realms/kaos \
 	--set security.agentAuth.projection.policyConfigMap.name=kaos-authz-policy \
 	--set security.agentAuth.projection.policyConfigMap.namespace=default \
+	--set security.strictGatewayApi.enabled=true \
 	--set security.userAuth.issuer=https://keycloak.example/realms/kaos)"
 expect "token exchange feature gate" "$out" 'TOKEN_EXCHANGE_ENABLED:\s*"true"'
 expect "exchange AIB admin URL" "$out" 'TOKEN_EXCHANGE_AIB_ADMIN_URL:\s*"http://aib:14000/api"'
@@ -215,6 +235,7 @@ if incompatible_exchange="$(helm template t "$CHART_DIR" \
 	--set security.agentAuth.identity.provider=serviceaccount \
 	--set security.agentAuth.projection.policyConfigMap.name=kaos-authz-policy \
 	--set security.agentAuth.projection.policyConfigMap.namespace=default \
+	--set security.strictGatewayApi.enabled=true \
 	--set security.userAuth.issuer=https://keycloak.example/realms/kaos 2>&1)"; then
 	echo "FAIL - service-account token exchange posture was accepted"
 	FAIL=1
