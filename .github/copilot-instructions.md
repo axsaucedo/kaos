@@ -78,6 +78,7 @@ kaos-cli/                  # CLI tool
 ├── kaos_cli/system/       # System commands (install, create-rbac)
 ├── kaos_cli/mcp/          # MCP commands (init, build, deploy)
 ├── kaos_cli/agent/        # Agent commands (deploy, invoke, a2a, status, memory)
+├── kaos_cli/memory/       # MemoryStore commands (semantic/list recall, scoped forget)
 ├── kaos_cli/modelapi/     # ModelAPI commands
 ├── kaos_cli/samples/      # Samples commands (list, deploy, delete)
 └── tests/                 # CLI integration tests (dry-run YAML validation)
@@ -115,7 +116,7 @@ Envoy Gateway verifies agent JWTs and calls the fail-closed `kaos-pdp` OPA Servi
 - `pydantic-ai-server/pais/a2a.py`: TaskManager ABC, LocalTaskManager, NullTaskManager, Task data model, JSON-RPC, autonomous execution, setup_a2a_routes
 - `pydantic-ai-server/pais/tools.py`: DelegationToolset (AbstractToolset), string-mode handler
 - `pydantic-ai-server/pais/memory.py`: RemoteMemory adapter over kaos-memory MemoryServiceClient (+ re-exports)
-- `kaos-memory/kaos_memory/contract.py`: scope/identity model + recall/write/forget types
+- `kaos-memory/kaos_memory/contract.py`: scope/identity model + recall/list/write/forget types
 - `kaos-memory/kaos_memory/client.py`: MemoryServiceClient (soft/strict failure mode)
 - `kaos-memory/kaos_memory/app.py`: MemoryService (Mem0 + FastAPI), BackgroundRunner
 - `operator/controllers/memorystore_controller.go`: MemoryStore reconciler (Deployment/Service/PDB, replica defaulting)

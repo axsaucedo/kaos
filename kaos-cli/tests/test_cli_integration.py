@@ -610,6 +610,48 @@ class TestSamples:
         assert "3-hierarchical-agents" in result.output
         assert "4-dev-ollama-proxy-agent" in result.output
         assert "5-proxy-external-api" in result.output
+        assert "memory" in result.output
+
+    def test_deploy_reusable_memory_sample_dry_run(self):
+        result = runner.invoke(
+            app,
+            [
+                "samples",
+                "deploy",
+                "memory",
+                "--namespace",
+                "support-demo",
+                "--model",
+                "gpt-test",
+                "--dry-run",
+            ],
+        )
+
+        assert result.exit_code == 0
+        docs = [doc for doc in yaml.safe_load_all(result.output) if doc]
+        assert {doc["metadata"]["namespace"] for doc in docs} == {"support-demo"}
+        assert [doc["kind"] for doc in docs].count("ModelAPI") == 1
+        assert [doc["kind"] for doc in docs].count("MemoryStore") == 1
+        assert [doc["kind"] for doc in docs].count("Agent") == 3
+
+        store = next(doc for doc in docs if doc["kind"] == "MemoryStore")
+        assert store["metadata"]["name"] == "support-memory"
+        assert store["spec"]["storage"]["type"] == "local"
+
+        agents = {
+            doc["metadata"]["name"]: doc for doc in docs if doc["kind"] == "Agent"
+        }
+        assert {agent["spec"]["model"] for agent in agents.values()} == {"gpt-test"}
+        assistant_memory = agents["assistant"]["spec"]["config"]["memory"]
+        assert assistant_memory["scope"] == "user"
+        assert assistant_memory["tools"] == "read"
+        assert assistant_memory["readScopes"] == ["session", "agent", "group"]
+        assert assistant_memory["clientParams"]["tokenBudget"] == 64
+        team_memory = agents["assistant-teamonly"]["spec"]["config"]["memory"]
+        assert team_memory["readScopes"] == ["session", "group"]
+        unrelated_memory = agents["unrelated-bot"]["spec"]["config"]["memory"]
+        assert unrelated_memory["scope"] == "agent"
+        assert "tools" not in unrelated_memory
 
     def test_deploy_memory_sample_dry_run(self):
         result = runner.invoke(
@@ -843,7 +885,7 @@ class TestPackageData:
         from kaos_cli.samples import _get_sample_files
 
         files = _get_sample_files()
-        assert len(files) == 8
+        assert len(files) == 9
         names = [f.stem for f in files]
         assert "1-simple-echo-agent" in names
         assert "5-proxy-external-api" in names

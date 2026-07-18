@@ -13,6 +13,8 @@ Subcommands:
 - `mcp` - MCPServer management
 - `agent` - Agent management  
 - `modelapi` - ModelAPI management
+- `memory` - MemoryStore recall and erasure
+- `samples` - Example deployment management
 - `ui` - Web UI
 
 ---
@@ -318,6 +320,14 @@ Delete an Agent.
 kaos agent delete NAME [OPTIONS]
 ```
 
+### kaos agent tools
+
+Show the tool names and JSON schemas an Agent presents to its model. This includes the entitled `level` enum on `search_memory`.
+
+```bash
+kaos agent tools NAME [-n NAMESPACE] [--json]
+```
+
 ### kaos agent a2a send
 
 Send a message to an Agent via A2A JSON-RPC protocol.
@@ -375,6 +385,46 @@ kaos agent a2a cancel NAME --task-id TASK_ID [OPTIONS]
 | `--namespace` | `-n` | Namespace of the Agent |
 | `--port` | `-p` | Local port for port-forwarding (default: 9004) |
 | `--json` | | Output raw JSON response |
+
+---
+
+## kaos memory
+
+Inspect or erase a central `MemoryStore` through a temporary Kubernetes port-forward. `--store` can be omitted when the namespace contains exactly one `MemoryStore`.
+
+### kaos memory recall
+
+Use `--query` for semantic recall or `--all` for a complete scoped list. Add `--short-term` to include the current session's verbatim window and rolling summary.
+
+```bash
+kaos memory recall --store support-memory --scope session --session SESSION_ID --query TEXT [OPTIONS]
+kaos memory recall --store support-memory --scope agent --agent AGENT --all [OPTIONS]
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--store` | | MemoryStore name; optional when exactly one exists |
+| `--scope` | | `session`, `agent`, `user`, or `group` (required) |
+| `--session` | | Session ID; required only for session scope |
+| `--agent` | | Agent name; required only for agent scope |
+| `--user` | | User principal; required only for user scope |
+| `--query` | | Semantic query; mutually exclusive with `--all` |
+| `--all` | | List every long-term record visible at the scope |
+| `--short-term` | | Include conversational tiers when the scope carries a session |
+| `--top-k` | | Maximum semantic results (default: 10) |
+| `--namespace` | `-n` | Kubernetes namespace |
+| `--json` | | Output JSON |
+
+Agent names are expanded to the stable `kaos://agent/<namespace>/<name>` identity before the service call.
+
+### kaos memory forget
+
+Erase every long-term record and attributed conversational session at a scope. The command prints the resolved scope and prompts for confirmation unless `--yes` is passed.
+
+```bash
+kaos memory forget --store support-memory --scope user --user alice [-n NAMESPACE]
+kaos memory forget --store support-memory --scope group --yes
+```
 
 ---
 
@@ -520,6 +570,7 @@ kaos samples deploy 3-hierarchical-agents --namespace my-ns
 kaos samples deploy 1-simple-echo-agent --model "llama3:8b" --dry-run
 kaos samples deploy 1-simple-echo-agent --api-secret nebius-secrets:api-key
 kaos samples deploy 1-simple-echo-agent -n my-ns --modelapi my-existing-api
+kaos samples deploy memory -n support-demo --model gpt-4o-mini
 ```
 
 ### kaos samples delete

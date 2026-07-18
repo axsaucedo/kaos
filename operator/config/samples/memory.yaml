@@ -1,0 +1,112 @@
+---
+# Memory: shared support memory with scope-specific read entitlements.
+# Deploy: kaos samples deploy memory -n <namespace>
+# Override the agent model with: kaos samples deploy memory --model <model>
+
+apiVersion: kaos.tools/v1alpha1
+kind: ModelAPI
+metadata:
+  name: support-modelapi
+spec:
+  mode: Proxy
+  proxyConfig:
+    models:
+    - "*"
+  container:
+    env:
+    - name: OPENAI_API_KEY
+      value: "sk-placeholder"
+
+---
+apiVersion: kaos.tools/v1alpha1
+kind: MemoryStore
+metadata:
+  name: support-memory
+spec:
+  engine: mem0
+  storage:
+    type: local
+    local:
+      provider: chroma
+      persistentVolume:
+        size: "1Gi"
+  models:
+    summarization:
+      modelAPI: support-modelapi
+      model: gpt-4o-mini
+    embedding:
+      modelAPI: support-modelapi
+      model: text-embedding-3-small
+  defaultFailureMode: soft
+
+---
+apiVersion: kaos.tools/v1alpha1
+kind: Agent
+metadata:
+  name: assistant
+spec:
+  modelAPI: support-modelapi
+  model: gpt-4o-mini
+  container:
+    env:
+    - name: DEBUG_MOCK_RESPONSES
+      value: '["Noted — your favourite deployment port is 8080."]'
+  config:
+    description: Support assistant with session, agent, and team memory reads
+    instructions: Help users and use entitled memory when prior context is useful.
+    memory:
+      type: remote
+      memoryStore: support-memory
+      scope: user
+      defaultReadScope: session
+      readScopes:
+      - session
+      - agent
+      - group
+      tools: read
+      clientParams:
+        tokenBudget: 64
+        rollingSummary: true
+
+---
+apiVersion: kaos.tools/v1alpha1
+kind: Agent
+metadata:
+  name: assistant-teamonly
+spec:
+  modelAPI: support-modelapi
+  model: gpt-4o-mini
+  config:
+    description: Support assistant limited to session and team memory reads
+    instructions: Help users using only conversation and shared team memory.
+    memory:
+      type: remote
+      memoryStore: support-memory
+      scope: user
+      defaultReadScope: session
+      readScopes:
+      - session
+      - group
+      tools: read
+      clientParams:
+        tokenBudget: 64
+        rollingSummary: true
+
+---
+apiVersion: kaos.tools/v1alpha1
+kind: Agent
+metadata:
+  name: unrelated-bot
+spec:
+  modelAPI: support-modelapi
+  model: gpt-4o-mini
+  config:
+    description: Agent-isolated bot without explicit memory tools
+    instructions: Answer independently without explicit memory searches.
+    memory:
+      type: remote
+      memoryStore: support-memory
+      scope: agent
+      clientParams:
+        tokenBudget: 64
+        rollingSummary: true

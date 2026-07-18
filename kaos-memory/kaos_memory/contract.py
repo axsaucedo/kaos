@@ -2,13 +2,13 @@
 
 This module is the single source of truth for the HTTP contract between the
 memory service and its clients. It carries no storage-engine or web-framework
-dependencies (only Pydantic), so both the service (which serves these schemas)
-and the client (which speaks them) import the same definitions rather than
-maintaining parallel copies that can drift.
+dependencies (only Pydantic), so the service, runtime client, and administrative
+callers import the same definitions rather than maintaining parallel copies that
+can drift.
 
 The scope value objects (:class:`ScopeLevel`, :class:`Scope`) identify whose
-memory an operation touches; the request/response models mirror the four
-endpoints (recall, write, forget). Owner-key mapping onto the storage engine is
+memory an operation touches; the request/response models mirror the operation
+endpoints (recall, list, write, forget). Owner-key mapping onto the storage engine is
 kept here on :class:`Scope` because it depends only on the scope fields, but it
 is exercised solely by the service.
 """
@@ -201,6 +201,14 @@ class RecallRequest(BaseModel):
     scope: Scope
     query: str
     top_k: int = 10
+    include_short_term: bool = True
+    short_term_token_budget: Optional[int] = None
+
+
+class ListRequest(BaseModel):
+    """List every long-term record visible at a scope, with optional conversation tiers."""
+
+    scope: Scope
     include_short_term: bool = True
     short_term_token_budget: Optional[int] = None
 

@@ -232,6 +232,7 @@ Pydantic AI runs `FunctionModel` handlers in a copied context — `ContextVar` s
 - `GET /health`: Health probe
 - `GET /ready`: Readiness probe
 - `GET /.well-known/agent.json`: A2A-compliant agent card (discovers tools from MCP servers)
+- `GET /tools`: model-facing tool names, descriptions, and JSON parameter schemas
 - `POST /v1/chat/completions`: OpenAI-compatible chat endpoint
 - `POST /`: A2A JSON-RPC 2.0 endpoint (SendMessage, ListTasks, GetTask, CancelTask + legacy aliases)
 - `GET /memory/events?session_id=X`: Memory events for a session

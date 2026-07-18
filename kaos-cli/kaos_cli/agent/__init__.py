@@ -12,6 +12,7 @@ from kaos_cli.agent.deploy import deploy_agent
 from kaos_cli.agent.invoke import invoke_command
 from kaos_cli.agent.status import status_command
 from kaos_cli.agent.memory import memory_command
+from kaos_cli.agent.tools import tools_command
 from kaos_cli.agent.init import init_command
 from kaos_cli.agent.build import build_command
 from kaos_cli.agent.run import run_command
@@ -417,3 +418,22 @@ def memory_agent(
         port=port,
         output_json=output_json,
     )
+
+
+@app.command(name="tools")
+def tools_agent(
+    name: str = typer.Argument(..., help="Name of the Agent."),
+    namespace: str = typer.Option(
+        None,
+        "--namespace",
+        "-n",
+        help="Namespace of the Agent.",
+    ),
+    output_json: bool = typer.Option(
+        False,
+        "--json",
+        help="Output in JSON format.",
+    ),
+) -> None:
+    """Show the tool definitions presented to the model."""
+    tools_command(name=name, namespace=namespace, output_json=output_json)

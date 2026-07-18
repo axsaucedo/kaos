@@ -9,6 +9,7 @@ from kaos_cli.system import app as system_app
 from kaos_cli.mcp import app as mcp_app
 from kaos_cli.agent import app as agent_app
 from kaos_cli.modelapi import app as modelapi_app
+from kaos_cli.memory import app as memory_app
 from kaos_cli.samples import app as samples_app
 from kaos_cli.utils import DEFAULT_MONITORING_BACKEND, preprocess_optional_value_flag
 
@@ -44,6 +45,7 @@ app.add_typer(system_app, name="system")
 app.add_typer(mcp_app, name="mcp")
 app.add_typer(agent_app, name="agent")
 app.add_typer(modelapi_app, name="modelapi")
+app.add_typer(memory_app, name="memory")
 app.add_typer(samples_app, name="samples")
 
 

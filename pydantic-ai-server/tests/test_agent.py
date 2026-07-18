@@ -72,6 +72,34 @@ class TestAgentCreationAndCard:
         assert isinstance(card_dict["capabilities"], dict)
         assert card_dict["capabilities"]["streaming"] is True
 
+    def test_tools_endpoint_returns_memory_entitlement_schema(self):
+        from fastapi.testclient import TestClient
+        from kaos_memory.contract import ScopeLevel
+        from kaos_memory.pydantic_ai.toolset import MemoryToolset
+
+        server = make_test_server(
+            name="entitled-agent",
+            model=TestModel(custom_output_text="test"),
+        )
+        server._agent._user_toolsets.append(
+            MemoryToolset(
+                ScopeLevel.USER,
+                [ScopeLevel.SESSION, ScopeLevel.GROUP],
+                expose_save=False,
+            )
+        )
+
+        response = TestClient(server.app).get("/tools")
+
+        assert response.status_code == 200
+        assert response.json()["agent"] == "entitled-agent"
+        tools = response.json()["tools"]
+        assert [tool["name"] for tool in tools] == ["search_memory"]
+        assert tools[0]["parameters_json_schema"]["properties"]["level"]["enum"] == [
+            "session",
+            "group",
+        ]
+
     @pytest.mark.asyncio
     async def test_agent_creation_requires_model_source(self):
         """Test _resolve_model raises ValueError when no model source is provided."""

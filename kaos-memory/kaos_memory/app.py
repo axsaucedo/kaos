@@ -37,6 +37,7 @@ from kaos_memory.contract import (
     FailureMode,
     ForgetRequest,
     ForgetResponse,
+    ListRequest,
     MediumTermContext,
     RecallRequest,
     RecallResponse,
@@ -227,6 +228,34 @@ class MemoryService:
                 degraded=degraded,
             )
 
+    def list_all(self, req: ListRequest) -> RecallResponse:
+        """List all long-term records visible at a scope and its conversation tiers."""
+        with tracer.start_as_current_span("kaos.memory.list") as span:
+            span.set_attribute("kaos.memory.scope_level", req.scope.level.value)
+            facts: list = []
+            degraded = False
+            try:
+                facts = self.longterm.get_all(req.scope)
+            except Exception:
+                degraded = True
+
+            summary, recent = "", []
+            if req.include_short_term and req.scope.session_id is not None:
+                summary = self.short_term.summary(req.scope)
+                recent = self.short_term.active_window(
+                    req.scope, token_budget=req.short_term_token_budget
+                )
+
+            span.set_attribute("kaos.memory.degraded", degraded)
+            span.set_attribute("kaos.memory.fact_count", len(facts))
+            return RecallResponse(
+                facts=facts,
+                short_term=ShortTermContext(recent=recent),
+                medium_term=MediumTermContext(summary=summary),
+                block=assemble_block(facts),
+                degraded=degraded,
+            )
+
     def write(self, req: WriteRequest) -> WriteResponse:
         """Append one or more turns to the short-term window synchronously; when the appends
         evict a batch, schedule long-term extraction of *that evicted batch* off the response
@@ -352,6 +381,15 @@ def create_app(service: MemoryService, request_concurrency: int = 8) -> FastAPI:
                 {"error": f"incomplete {req.scope.level.value} scope"}, status_code=400
             )
         return await _offload(lambda: app.state.memory.recall(req))
+
+    @app.post("/v1/list", response_model=RecallResponse)
+    async def list_all(req: ListRequest) -> RecallResponse | JSONResponse:
+        """List all long-term records and conversation tiers visible at a scope."""
+        if not req.scope.is_complete():
+            return JSONResponse(
+                {"error": f"incomplete {req.scope.level.value} scope"}, status_code=400
+            )
+        return await _offload(lambda: app.state.memory.list_all(req))
 
     @app.post("/v1/write", response_model=WriteResponse)
     async def write(req: WriteRequest) -> JSONResponse:
