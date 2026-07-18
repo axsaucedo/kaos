@@ -135,7 +135,7 @@ class TestMemoryToolset:
             memory=mem,
             security_context={"principal": "a", "actor": "agent-a"},
         )
-        ts = MemoryToolset(ScopeLevel.PRIVATE)
+        ts = MemoryToolset(ScopeLevel.AGENT)
         result = await ts.call_tool(SEARCH_MEMORY_TOOL, {"query": "x"}, _ctx(deps), cast(Any, None))
         assert "fact one" in result
 
@@ -147,7 +147,7 @@ class TestMemoryToolset:
             memory=mem,
             security_context={"principal": "a", "actor": "agent-a"},
         )
-        ts = MemoryToolset(ScopeLevel.PRIVATE)
+        ts = MemoryToolset(ScopeLevel.AGENT)
         result = await ts.call_tool(SEARCH_MEMORY_TOOL, {"query": "x"}, _ctx(deps), cast(Any, None))
         assert "No relevant memories" in result
 
@@ -161,13 +161,13 @@ class TestMemoryToolset:
             memory=mem,
             security_context={"principal": "alice", "actor": "agent-a"},
         )
-        ts = MemoryToolset(ScopeLevel.PRIVATE)
+        ts = MemoryToolset(ScopeLevel.AGENT)
         await ts.call_tool(
             SAVE_MEMORY_TOOL,
-            {"content": "x", "scope": "shared", "principal": "attacker"},
+            {"content": "x", "scope": "group", "principal": "attacker"},
             _ctx(deps),
             cast(Any, None),
         )
         scope = mem.writes[0][0]
-        assert scope.level is ScopeLevel.PRIVATE
+        assert scope.level is ScopeLevel.AGENT
         assert scope.principal == "alice"

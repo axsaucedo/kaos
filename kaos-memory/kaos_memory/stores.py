@@ -3,7 +3,7 @@
 This module is the whole storage layer, grouped by layer rather than split into
 many single-responsibility files (KEEP IT SIMPLE):
 
-- ``Scope`` / ``ScopeLevel`` / ``SHARED_OWNER`` — the identity every operation is
+- ``Scope`` / ``ScopeLevel`` / ``GROUP_OWNER`` — the identity every operation is
   keyed on, plus its translation to Mem0 owner identifiers.
 - ``count_tokens`` / ``scope_key`` / ``Summarizer`` — small helpers the short-term
   store needs.
@@ -38,7 +38,7 @@ from kaos_memory.config import (
     StorageConfig,
 )
 from kaos_memory.contract import (
-    SHARED_OWNER,
+    GROUP_OWNER,
     Scope,
     ScopeLevel,
     scope_key,

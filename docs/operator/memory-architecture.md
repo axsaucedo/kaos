@@ -48,16 +48,16 @@ Every operation carries a **scope** that decides whose memory is read or written
 
 | `scope` | Owner key applied | Isolation boundary |
 |---------|-------------------|--------------------|
-| `private` (default) | `agent_id = <agent identity>` | the single agent (its own `kaos://agent/<ns>/<name>` identity) |
+| `agent` (default) | `agent_id = <agent identity>` | the single agent (its own `kaos://agent/<ns>/<name>` identity) |
 | `user` | `user_id = <principal>` | every agent serving the same user principal |
-| `shared` | `agent_id = "kaos:shared"` (reserved constant) | every agent on the same `MemoryStore` |
+| `group` | `agent_id = "kaos:group"` (reserved constant) | every agent on the same `MemoryStore` |
 | `session` | `run_id = <session id>` | a single conversation/run |
 
-`private` and `shared` both use the `agent_id` key: the difference is the **value** — `private` uses the agent's own unique identity, while `shared` uses one reserved sentinel (`kaos:shared`) shared by all agents, deliberately distinct from any real agent identity so a shared write can never collide with an agent's private partition.
+`agent` and `group` both use the `agent_id` key: the difference is the **value** — `agent` uses the agent's own unique identity, while `group` uses one reserved sentinel (`kaos:group`) shared by all agents, deliberately distinct from any real agent identity so a group write can never collide with an agent's own partition.
 
 Design choices:
 
-- **The store is the group.** A logical group is the set of agents bound to the same `MemoryStore`; there is no separate group CRD. The four scope levels already express agent-private, per-user, fleet-shared, and per-session memory.
+- **The store is the group.** A logical group is the set of agents bound to the same `MemoryStore`; there is no separate group CRD. The four scope levels express per-agent, per-user, per-group, and per-session memory.
 - **Isolation strength is chosen by how many stores you deploy.** The default is a shared store with scope filtering; deploying one `MemoryStore` per tenant gives **physical** isolation (data is not co-located), so a filtering defect cannot leak across tenants. No isolation-mode field exists.
 - **Scope governs only the long-term tier.** The verbatim short-term window and medium-term digest are always session-scoped; `scope: user` does not create a user-wide conversational window.
 - **Enforcement is fail-closed at the service.** Scope is derived **server-side** from the authenticated agent identity and request context — never trusted from model- or tool-supplied arguments. An operation that cannot resolve a usable owner key fails rather than querying an unscoped store. Because the vector providers pre-filter during the query, a tenant's relevant memories are never dropped by an unfiltered nearest-neighbour window.
@@ -84,8 +84,8 @@ The Agent memory block selects a store by name and carries the agent-specific po
 
 Binding is fail-closed and degradation-aware:
 
-- `type: remote` requires a `memoryStore`; `type: local` forbids one. `user`/`shared` scope and any `tools` require a `memoryStore` (a pod-local store cannot serve cross-agent scopes or long-term tools), and are rejected rather than silently degraded.
-- A `private` owner is resolved from the injected `AGENT_IDENTITY` (`kaos://agent/<ns>/<name>`), never a name-only or empty owner, so identity-less agents cannot collapse onto one shared private partition.
+- `type: remote` requires a `memoryStore`; `type: local` forbids one. `user`/`group` scope and any `tools` require a `memoryStore` (a pod-local store cannot serve cross-agent scopes or long-term tools), and are rejected rather than silently degraded.
+- An `agent` owner is resolved from the injected `AGENT_IDENTITY` (`kaos://agent/<ns>/<name>`), never a name-only or empty owner, so identity-less agents cannot collapse onto one agent partition.
 - **Already-running** agents treat a missing/not-ready store as degraded: the operator surfaces a `MemoryDegraded` condition and keeps the pod Ready serving short-term-only — a store outage never removes a serving agent. Only **initial creation** is gated: with `waitForDependencies` (default) the agent stays `Waiting` until the bound store is Ready, so it never starts up degraded.
 
 ## Data plane (runtime)
