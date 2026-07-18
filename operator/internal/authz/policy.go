@@ -29,19 +29,25 @@ func Policy() string {
 	return policyRego
 }
 
-// DataDocument builds the OPA data document from the projected grant map and,
-// when verification is enabled, the issuer-keyed IdP JWKS and optional issuer
-// subject mappings. Without `data.kaos.jwks`, the policy fails closed.
-func DataDocument(grants map[string][]string, issuer string, jwks map[string]any, agents map[string]map[string]string) ([]byte, error) {
+// DataDocument builds the OPA data document from the projected grants,
+// issuer-keyed JWKS, agent mappings, and optional user identity provider.
+// Without `data.kaos.jwks`, the policy fails closed.
+func DataDocument(grants, userGrants map[string][]string, jwks map[string]any, agents map[string]map[string]any, user map[string]string) ([]byte, error) {
 	if grants == nil {
 		grants = map[string][]string{}
 	}
 	kaos := map[string]any{"grants": grants}
-	if jwks != nil && issuer != "" {
-		kaos["jwks"] = map[string]any{issuer: jwks}
+	if len(userGrants) > 0 {
+		kaos["user_grants"] = userGrants
+	}
+	if len(jwks) > 0 {
+		kaos["jwks"] = jwks
 	}
 	if len(agents) > 0 {
 		kaos["agents"] = agents
+	}
+	if len(user) > 0 {
+		kaos["user"] = user
 	}
 	doc := map[string]any{"kaos": kaos}
 	out, err := json.MarshalIndent(doc, "", "  ")
@@ -53,8 +59,8 @@ func DataDocument(grants map[string][]string, issuer string, jwks map[string]any
 
 // ConfigMapData returns the ConfigMap payload (policy + data) the operator
 // writes for the enforcement engine to mount and load.
-func ConfigMapData(grants map[string][]string, issuer string, jwks map[string]any, agents map[string]map[string]string) (map[string]string, error) {
-	data, err := DataDocument(grants, issuer, jwks, agents)
+func ConfigMapData(grants, userGrants map[string][]string, jwks map[string]any, agents map[string]map[string]any, user map[string]string) (map[string]string, error) {
+	data, err := DataDocument(grants, userGrants, jwks, agents, user)
 	if err != nil {
 		return nil, err
 	}

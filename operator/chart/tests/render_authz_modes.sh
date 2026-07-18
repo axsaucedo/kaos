@@ -38,6 +38,10 @@ refute "authorization provider selector removed" "$out" 'SECURITY_AUTHORIZATION_
 refute "PDP disabled by default" "$out" 'name: kaos-pdp'
 refute "disabled PDP does not enable operator enforcement" "$out" 'SECURITY_PDP_ENABLED'
 expect "ServiceAccount identity is default" "$out" 'SECURITY_AGENT_AUTH_IDENTITY_PROVIDER:\s*"serviceaccount"'
+expect "gateway JWT is optional by default" "$out" 'SECURITY_AGENT_AUTH_GATEWAY_JWT_OPTIONAL:\s*"true"'
+
+out="$(render --set security.agentAuth.gatewayJwtOptional=false)"
+expect "gateway JWT can be blocking" "$out" 'SECURITY_AGENT_AUTH_GATEWAY_JWT_OPTIONAL:\s*"false"'
 
 out="$(render \
 	--set security.agentAuth.identity.provider=aib \
@@ -66,12 +70,24 @@ refute "ServiceAccount identity omits credential Secret prefix" "$out" 'SECURITY
 out="$(render \
 	--set security.agentAuth.identity.provider=oidc \
 	--set security.agentAuth.issuer=https://issuer.example \
+	--set security.agentAuth.identity.oidc.registration.initialAccessTokenSecretRef.name=oidc-registration \
+	--set security.agentAuth.identity.oidc.registration.initialAccessTokenSecretRef.key=token \
 	--set security.agentAuth.adminUrl=http://ignored-admin \
 	--set security.agentAuth.credentialSecretPrefix=ignored-secret)"
 expect "OIDC identity selected" "$out" 'SECURITY_AGENT_AUTH_IDENTITY_PROVIDER:\s*"oidc"'
 expect "OIDC issuer rendered" "$out" 'SECURITY_AGENT_AUTH_ISSUER:\s*"https://issuer.example"'
 refute "OIDC identity omits AIB admin" "$out" 'AIB_ADMIN_URL'
-refute "OIDC identity omits credential Secret prefix" "$out" 'SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX'
+expect "OIDC credential Secret prefix rendered" "$out" 'SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX:\s*"ignored-secret"'
+expect "OIDC registration token uses Secret ref" "$out" 'name:\s*SECURITY_AGENT_AUTH_OIDC_REGISTRATION_TOKEN'
+expect "OIDC registration Secret name" "$out" 'name:\s*"oidc-registration"'
+expect "OIDC registration Secret key" "$out" 'key:\s*"token"'
+refute "OIDC registration token is not placed in ConfigMap" "$out" 'SECURITY_AGENT_AUTH_OIDC_REGISTRATION_TOKEN:'
+
+out="$(render \
+	--set security.agentAuth.identity.provider=oidc \
+	--set security.agentAuth.issuer=https://issuer.example)"
+expect "OIDC credential Secret prefix defaults" "$out" 'SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX:\s*"kaos-oidc"'
+refute "OIDC registration env omitted without Secret ref" "$out" 'name:\s*SECURITY_AGENT_AUTH_OIDC_REGISTRATION_TOKEN'
 
 if invalid_identity="$(helm template t "$CHART_DIR" --set security.agentAuth.identity.provider=invalid 2>&1)"; then
 	echo "FAIL - invalid identity provider was accepted"
@@ -102,6 +118,9 @@ expect "PDP enablement reaches operator" "$out" 'SECURITY_PDP_ENABLED:\s*"true"'
 expect "PDP ext_authz URL defaults to Service" "$out" 'SECURITY_AGENT_AUTH_EXT_AUTHZ_URL:\s*"kaos-pdp.kaos-system.svc:9191"'
 expect "PDP disruption budget rendered" "$out" 'kind: PodDisruptionBudget'
 expect "PDP disruption budget keeps one replica" "$out" 'minAvailable: 1'
+expect "PDP NetworkPolicy rendered" "$out" 'kind: NetworkPolicy'
+expect "PDP NetworkPolicy allows only gateway namespace" "$out" 'kubernetes.io/metadata.name: "envoy-gateway-system"'
+expect "PDP NetworkPolicy restricts ingress to gRPC port" "$out" 'port: 9191'
 
 out="$(render \
 	--namespace kaos-system \

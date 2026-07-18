@@ -128,7 +128,12 @@ class AgentServer:
         self._agent_identity = settings.agent_identity or settings.security_actor or ""
         if task_manager_type == "local":
             setup_fn = self._mock_state.reset if self._mock_state else None
-            self.task_manager: TaskManager = LocalTaskManager(self._run_agent, setup_fn=setup_fn)
+            local_actor = self.settings.security_actor or f"kaos://agent/{self.settings.agent_name}"
+            self.task_manager: TaskManager = LocalTaskManager(
+                self._run_agent,
+                setup_fn=setup_fn,
+                autonomous_principal=local_actor,
+            )
         else:
             self.task_manager = NullTaskManager()
 
@@ -744,7 +749,7 @@ def _setup_otel_instrumentation(settings: AgentServerSettings) -> None:
         instrumentation = InstrumentationSettings(
             tracer_provider=get_tracer_provider(),
             meter_provider=get_meter_provider(),
-            version=settings.otel_instrumentation_version,  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
+            version=settings.otel_instrumentation_version,  # type: ignore[arg-type]
         )
         PydanticAgent.instrument_all(instrumentation)
 
@@ -756,7 +761,7 @@ def create_agent_server(
 ) -> AgentServer:
     """Create an AgentServer with optional sub-agents and MCP clients."""
     if not settings:
-        settings = AgentServerSettings()  # type: ignore[call-arg]  # ty: ignore[missing-argument]
+        settings = AgentServerSettings()  # type: ignore[call-arg]
 
     # Logging + OTel
     configure_logging(get_log_level(), otel_correlation=should_enable_otel())

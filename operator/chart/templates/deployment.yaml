@@ -29,6 +29,15 @@ spec:
         env:
         - name: KUBERNETES_CLUSTER_DOMAIN
           value: {{ quote .Values.kubernetesClusterDomain }}
+        {{- $identityProvider := .Values.security.agentAuth.identity.provider | default "serviceaccount" }}
+        {{- $oidcRegistrationSecret := .Values.security.agentAuth.identity.oidc.registration.initialAccessTokenSecretRef }}
+        {{- if and (eq $identityProvider "oidc") $oidcRegistrationSecret.name $oidcRegistrationSecret.key }}
+        - name: SECURITY_AGENT_AUTH_OIDC_REGISTRATION_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ $oidcRegistrationSecret.name | quote }}
+              key: {{ $oidcRegistrationSecret.key | quote }}
+        {{- end }}
         envFrom:
         - configMapRef:
             name: kaos-operator-config

@@ -26,6 +26,7 @@ import (
 	"github.com/axsaucedo/kaos/operator/internal/aib"
 	"github.com/axsaucedo/kaos/operator/internal/authz"
 	"github.com/axsaucedo/kaos/operator/internal/authz/adapters"
+	"github.com/axsaucedo/kaos/operator/internal/authz/dcr"
 	"github.com/axsaucedo/kaos/operator/pkg/security"
 )
 
@@ -160,6 +161,21 @@ func main() {
 			Namespaces:   projectionNamespaces,
 		})
 	}
+	if cfg.IdentityProviderOrDefault() == security.IdentityProviderOIDC && cfg.AgentIssuer() != "" && cfg.OIDCRegistrationInitialAccessToken != "" {
+		httpClient := &http.Client{Timeout: 10 * time.Second}
+		projectors = append(projectors, &adapters.OIDCProjector{
+			Client: mgr.GetClient(),
+			Scheme: mgr.GetScheme(),
+			DCR: &dcr.Client{
+				Issuer:             cfg.AgentIssuer(),
+				InitialAccessToken: cfg.OIDCRegistrationInitialAccessToken,
+				HTTPClient:         httpClient,
+			},
+			SecretPrefix: cfg.CredentialSecretPrefixOrDefault(),
+			Prune:        getBoolWithDefault("AUTHZ_PROJECTION_PRUNE_ENABLED", true),
+			Namespaces:   projectionNamespaces,
+		})
+	}
 	if policyName != "" && policyNamespace != "" {
 		policyDataSource := cfg.PolicyDataSourceOrDefault()
 		projectors = append(projectors, &adapters.AuthzPolicyProjector{
@@ -168,22 +184,29 @@ func main() {
 			Namespace:          policyNamespace,
 			JWKSURI:            cfg.AuthzJWKSURI(),
 			Issuer:             cfg.AgentIssuer(),
+			UserIssuer:         cfg.UserIssuer,
+			UserAudience:       cfg.UserAudience,
+			UserJWKSURI:        cfg.UserJWKSURI(),
 			StaticJWKS:         cfg.AgentLocalJWKS(),
 			MapServiceAccounts: cfg.ServiceAccountIdentityEnabled(),
+			MapOIDCAgents:      cfg.IdentityProviderOrDefault() == security.IdentityProviderOIDC,
+			CredentialPrefix:   cfg.CredentialSecretPrefixOrDefault(),
 			WriteGrantData:     policyDataSource == security.PolicyDataAutomated && !cfg.PolicyRegoOverride,
 			Disabled:           policyDataSource == security.PolicyDataManual && !cfg.PolicyRegoOverride,
 		})
 	}
-	if len(projectors) > 0 {
-		if err = (&controllers.AuthzProjectionReconciler{
-			Client:     mgr.GetClient(),
-			Scheme:     mgr.GetScheme(),
-			Namespaces: projectionNamespaces,
-			Projectors: projectors,
-		}).SetupWithManager(mgr); err != nil {
-			setupLog.Error(err, "unable to create controller", "controller", "AuthzProjection")
-			os.Exit(1)
-		}
+	if err = (&controllers.AuthzProjectionReconciler{
+		Client:                   mgr.GetClient(),
+		Scheme:                   mgr.GetScheme(),
+		Namespaces:               projectionNamespaces,
+		Projectors:               projectors,
+		UserIssuer:               cfg.UserIssuer,
+		AuthorizationOperational: policyName != "" && policyNamespace != "",
+		AccessGrantProjection:    policyName != "" && policyNamespace != "" && cfg.PolicyDataSourceOrDefault() == security.PolicyDataAutomated && !cfg.PolicyRegoOverride,
+		Recorder:                 mgr.GetEventRecorderFor("kaos-authz-projection"),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "AuthzProjection")
+		os.Exit(1)
 	}
 
 	// Webhooks not implemented yet in this version

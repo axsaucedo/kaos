@@ -14,6 +14,8 @@ package projection
 import (
 	"fmt"
 	"strings"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
@@ -55,10 +57,30 @@ type Resource struct {
 	Kind        string
 	Namespace   string
 	Name        string
+	Labels      map[string]string
 	MCPServers  []string // spec.mcpServers (Agent only)
 	ModelAPI    string   // spec.modelAPI (Agent only)
 	MemoryStore string   // spec.config.memory.memoryStore (Agent only)
 	Access      []string // spec.agentNetwork.access -- peer agents this agent may call (Agent only)
+	Autonomous  bool     // spec.autonomous.goal is non-empty (Agent only)
+}
+
+// AccessGrant is the projection input for a namespaced user-plane grant.
+type AccessGrant struct {
+	Namespace string
+	Subjects  []AccessGrantSubject
+	Resources []AccessGrantResource
+}
+
+type AccessGrantSubject struct {
+	Kind string
+	Name string
+}
+
+type AccessGrantResource struct {
+	Kind     string
+	Name     string
+	Selector *metav1.LabelSelector
 }
 
 func logicalPath(namespace, name string) string {
@@ -164,6 +186,7 @@ type DesiredAgent struct {
 	Namespace          string
 	Name               string
 	PermissionSetNames []string
+	Autonomous         bool
 }
 
 // ExternalID is the stable external identity for the agent in the projected
@@ -177,6 +200,8 @@ type DesiredState struct {
 	Services       []DesiredService
 	PermissionSets []DesiredPermissionSet
 	Agents         []DesiredAgent
+	Resources      []Resource
+	AccessGrants   []AccessGrant
 }
 
 // Project turns a list of KAOS resources into the desired authorization graph.
@@ -186,7 +211,7 @@ type DesiredState struct {
 // kaos://<slug>/<ns>/<name>, so identities are unique by construction and need
 // no conflict resolution.
 func Project(resources []Resource) DesiredState {
-	var state DesiredState
+	state := DesiredState{Resources: resources}
 
 	services := map[string]DesiredService{}
 	permissionSets := map[string]DesiredPermissionSet{}
@@ -251,6 +276,7 @@ func Project(resources []Resource) DesiredState {
 			Namespace:          r.Namespace,
 			Name:               r.Name,
 			PermissionSetNames: psNames,
+			Autonomous:         r.Autonomous,
 		})
 	}
 

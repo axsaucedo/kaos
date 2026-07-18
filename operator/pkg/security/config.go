@@ -54,6 +54,10 @@ type Config struct {
 	// An empty value disables credential mounting into agent pods.
 	CredentialSecretPrefix string
 
+	// OIDCRegistrationInitialAccessToken authorizes RFC 7591 client
+	// registration with the selected OIDC provider.
+	OIDCRegistrationInitialAccessToken string
+
 	// UserIssuer is the user-auth OIDC issuer URL (userAuth.issuer): the identity
 	// provider (e.g. Keycloak) that issues human user subject tokens. When set, a
 	// user jwt_authn provider is emitted on protected routes. Empty means no user
@@ -68,6 +72,10 @@ type Config struct {
 	// (userAuth.jwksUri). When empty it is derived from UserIssuer using the
 	// standard OIDC realm path.
 	UserJWKSURIOverride string
+
+	// GatewayJWTOptional keeps gateway JWT verification non-blocking when the
+	// PDP is enabled so the PDP remains the sole authorization authority.
+	GatewayJWTOptional bool
 
 	// GatewayNamespace is the namespace of the Envoy Gateway data plane
 	// (security.gatewayNamespace). It is the ingress source allowed by the
@@ -163,6 +171,8 @@ const (
 	envServiceAccountJWKS       = "SECURITY_AGENT_AUTH_SERVICE_ACCOUNT_JWKS"
 	envIssuer                   = "SECURITY_AGENT_AUTH_ISSUER"
 	envCredentialSecretPrefix   = "SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX"
+	envOIDCRegistrationToken    = "SECURITY_AGENT_AUTH_OIDC_REGISTRATION_TOKEN"
+	envGatewayJWTOptional       = "SECURITY_AGENT_AUTH_GATEWAY_JWT_OPTIONAL"
 	envUserIssuer               = "SECURITY_USER_AUTH_ISSUER"
 	envUserAudience             = "SECURITY_USER_AUTH_AUDIENCE"
 	envUserJWKSURI              = "SECURITY_USER_AUTH_JWKS_URI"
@@ -215,9 +225,11 @@ func GetConfig() Config {
 		ExtAuthzURL:                          os.Getenv(envExtAuthzURL),
 		Issuer:                               os.Getenv(envIssuer),
 		CredentialSecretPrefix:               os.Getenv(envCredentialSecretPrefix),
+		OIDCRegistrationInitialAccessToken:   strings.TrimSpace(os.Getenv(envOIDCRegistrationToken)),
 		UserIssuer:                           os.Getenv(envUserIssuer),
 		UserAudience:                         os.Getenv(envUserAudience),
 		UserJWKSURIOverride:                  os.Getenv(envUserJWKSURI),
+		GatewayJWTOptional:                   parseBoolEnvDefault(envGatewayJWTOptional, true),
 		GatewayNamespace:                     os.Getenv(envGatewayNamespace),
 		OperatorNamespace:                    operatorNamespace,
 		NetworkPolicyDisabled:                parseBoolEnv(envNetworkPolicyDisabled),
@@ -240,6 +252,14 @@ func parseBoolEnv(key string) bool {
 	return v
 }
 
+func parseBoolEnvDefault(key string, defaultValue bool) bool {
+	v, err := strconv.ParseBool(strings.TrimSpace(os.Getenv(key)))
+	if err != nil {
+		return defaultValue
+	}
+	return v
+}
+
 // readEnumEnv reads a string environment variable, trimming whitespace and
 // lower-casing it so enum comparisons are case-insensitive. Validation and
 // defaulting happen in the typed accessors.
@@ -258,10 +278,20 @@ func normalizeEnum[T ~string](v T, allowed []T, def T) T {
 	return def
 }
 
+// Configured reports whether a string contains a non-whitespace value.
+func Configured(s string) bool {
+	return strings.TrimSpace(s) != ""
+}
+
 // IsOperational reports whether ext_authz enforcement is enabled through the
 // chart-managed PDP or an explicit backend override.
 func (c Config) IsOperational() bool {
-	return c.PDPEnabled || strings.TrimSpace(c.ExtAuthzURL) != ""
+	return c.PDPEnabled || Configured(c.ExtAuthzURL)
+}
+
+// UserPlaneEnabled reports whether a user identity provider is configured.
+func (c Config) UserPlaneEnabled() bool {
+	return Configured(c.UserIssuer)
 }
 
 // SecurityEnabled reports whether gateway authorization enforcement is configured.
@@ -270,10 +300,24 @@ func (c Config) SecurityEnabled() bool {
 }
 
 // CredentialMountingEnabled reports whether the operator should mount per-agent
-// AIB credentials into agent pods. This requires security to be enabled and a
+// OAuth credentials into agent pods. This requires security to be enabled and a
 // credential Secret prefix to be configured.
 func (c Config) CredentialMountingEnabled() bool {
-	return c.IdentityProviderOrDefault() == IdentityProviderAIB && c.SecurityEnabled() && strings.TrimSpace(c.CredentialSecretPrefix) != ""
+	provider := c.IdentityProviderOrDefault()
+	return (provider == IdentityProviderAIB || provider == IdentityProviderOIDC) && c.SecurityEnabled() && c.CredentialSecretPrefixOrDefault() != ""
+}
+
+// CredentialSecretPrefixOrDefault returns the configured credential Secret
+// prefix. OIDC uses a provider-specific default so DCR works from the bootstrap
+// Secret configuration alone; existing AIB configuration remains unchanged.
+func (c Config) CredentialSecretPrefixOrDefault() string {
+	if prefix := strings.TrimSpace(c.CredentialSecretPrefix); prefix != "" {
+		return prefix
+	}
+	if c.IdentityProviderOrDefault() == IdentityProviderOIDC {
+		return "kaos-oidc"
+	}
+	return ""
 }
 
 // IdentityProviderOrDefault returns the single configured issuer, preserving
@@ -328,7 +372,7 @@ func (c Config) ServiceAccountTokenFilename() string {
 // given agent, using the configured prefix. It matches the name the projection
 // controller writes, so the operator can mount it without coordination.
 func (c Config) CredentialSecretName(agentName string) string {
-	return CredentialSecretName(c.CredentialSecretPrefix, agentName)
+	return CredentialSecretName(c.CredentialSecretPrefixOrDefault(), agentName)
 }
 
 // TokenEndpoint returns the agent-auth token endpoint derived from the issuer, or an
@@ -337,6 +381,9 @@ func (c Config) TokenEndpoint() string {
 	issuer := strings.TrimRight(strings.TrimSpace(c.Issuer), "/")
 	if issuer == "" {
 		return ""
+	}
+	if c.IdentityProviderOrDefault() == IdentityProviderOIDC {
+		return issuer + "/protocol/openid-connect/token"
 	}
 	return issuer + "/oauth2/token"
 }
@@ -370,12 +417,12 @@ func (c Config) CredentialSecretFilePath() string {
 // is configured. This is independent of IsOperational (which gates ext_authz):
 // the jwt block is only rendered when at least one issuer is known.
 func (c Config) JWTEnabled() bool {
-	return c.AgentIssuer() != "" || strings.TrimSpace(c.UserIssuer) != ""
+	return Configured(c.AgentIssuer()) || c.UserPlaneEnabled()
 }
 
-// AgentJWKSURI returns the JWKS endpoint for the agent (actor) provider, derived
-// from the agent-auth issuer. The broker publishes its signing keys at
-// "<issuer>/oauth2/jwks.json". It returns an empty string when no issuer is set.
+// AgentJWKSURI returns the JWKS endpoint for the agent (actor) provider. AIB
+// publishes at /oauth2/jwks.json; the oidc-keycloak preset uses Keycloak's
+// standard realm certs endpoint. It returns an empty string when no issuer is set.
 func (c Config) AgentJWKSURI() string {
 	if c.ServiceAccountIdentityEnabled() {
 		return ""
@@ -383,6 +430,9 @@ func (c Config) AgentJWKSURI() string {
 	issuer := strings.TrimRight(strings.TrimSpace(c.Issuer), "/")
 	if issuer == "" {
 		return ""
+	}
+	if c.IdentityProviderOrDefault() == IdentityProviderOIDC {
+		return issuer + "/protocol/openid-connect/certs"
 	}
 	return issuer + "/oauth2/jwks.json"
 }

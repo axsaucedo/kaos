@@ -51,6 +51,50 @@ func TestAuthzPolicyProjectorWritesPolicyConfigMap(t *testing.T) {
 	}
 }
 
+func TestAuthzPolicyProjectorWritesUserGrantsWhenUserIssuerConfigured(t *testing.T) {
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			_, _ = w.Write([]byte(`{"issuer":"` + srv.URL + `","jwks_uri":"` + srv.URL + `/jwks"}`))
+		case "/jwks":
+			_, _ = w.Write([]byte(`{"keys":[{"kty":"RSA","kid":"user-key"}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	scheme := newTestScheme(t)
+	c := fake.NewClientBuilder().WithScheme(scheme).Build()
+	p := &AuthzPolicyProjector{
+		Client: c, Name: "kaos-authz-policy", Namespace: "aib-system", WriteGrantData: true,
+		Issuer: "https://agents.example", StaticJWKS: map[string]any{"keys": []any{map[string]any{"kty": "RSA", "kid": "agent-key"}}},
+		UserIssuer: srv.URL, UserAudience: "kaos-users",
+	}
+	desired := projection.DesiredState{AccessGrants: []projection.AccessGrant{{
+		Namespace: "demo",
+		Subjects:  []projection.AccessGrantSubject{{Kind: "User", Name: "alice"}},
+		Resources: []projection.AccessGrantResource{{Kind: "Agent", Name: "writer"}},
+	}}}
+
+	if err := p.Apply(context.Background(), desired); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	cm := &corev1.ConfigMap{}
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "aib-system", Name: "kaos-authz-policy"}, cm); err != nil {
+		t.Fatalf("get ConfigMap: %v", err)
+	}
+	if !contains(cm.Data["data.json"], `"user_grants"`) || !contains(cm.Data["data.json"], `"user:alice"`) {
+		t.Fatalf("data.json missing user grants: %s", cm.Data["data.json"])
+	}
+	for _, expected := range []string{`"user"`, `"audience": "kaos-users"`, `"kid": "agent-key"`, `"kid": "user-key"`} {
+		if !contains(cm.Data["data.json"], expected) {
+			t.Fatalf("data.json missing %s: %s", expected, cm.Data["data.json"])
+		}
+	}
+}
+
 func TestAuthzPolicyProjectorSkipsPolicyConfigMapWhenUnset(t *testing.T) {
 	scheme := newTestScheme(t)
 	agent := &kaosv1alpha1.Agent{
@@ -128,7 +172,41 @@ func TestAuthzPolicyProjectorInjectsServiceAccountIdentityData(t *testing.T) {
 		`"https://kubernetes.default.svc"`,
 		`"kaos://agent/demo/researcher"`,
 		`"issuer_sub": "system:serviceaccount:demo:kaos-agent-researcher"`,
+		`"autonomous": false`,
 		`"kid": "sa-key"`,
+	} {
+		if !contains(data, expected) {
+			t.Fatalf("data.json missing %s: %s", expected, data)
+		}
+	}
+}
+
+func TestAuthzPolicyProjectorInjectsOIDCClientIdentityData(t *testing.T) {
+	scheme := newTestScheme(t)
+	agent := &kaosv1alpha1.Agent{ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "researcher"}, Spec: kaosv1alpha1.AgentSpec{MCPServers: []string{"github"}}}
+	mcp := &kaosv1alpha1.MCPServer{ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "github"}}
+	credentials := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "kaos-oidc-researcher"},
+		Data:       map[string][]byte{credentialClientIDKey: []byte("keycloak-client-uuid")},
+	}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(agent, mcp, credentials).Build()
+	p := &AuthzPolicyProjector{
+		Client: c, Name: "kaos-authz-policy", Namespace: "kaos-system", WriteGrantData: true,
+		MapOIDCAgents: true, CredentialPrefix: "kaos-oidc",
+	}
+	desired := projection.Project([]projection.Resource{resourceFromAgent(agent), {Kind: projection.MCPServer.ResourceKind, Namespace: "demo", Name: "github"}})
+	if err := p.Apply(context.Background(), desired); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	cm := &corev1.ConfigMap{}
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "kaos-system", Name: "kaos-authz-policy"}, cm); err != nil {
+		t.Fatalf("get ConfigMap: %v", err)
+	}
+	data := cm.Data["data.json"]
+	for _, expected := range []string{
+		`"kaos://agent/demo/researcher"`,
+		`"issuer_azp": "keycloak-client-uuid"`,
+		`"autonomous": false`,
 	} {
 		if !contains(data, expected) {
 			t.Fatalf("data.json missing %s: %s", expected, data)

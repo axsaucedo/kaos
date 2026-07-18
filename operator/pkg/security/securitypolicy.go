@@ -112,7 +112,14 @@ func constructSecurityPolicy(params PolicyParams, cfg Config) (*unstructured.Uns
 
 	if cfg.JWTEnabled() {
 		if providers := constructJWTProviders(cfg); len(providers) > 0 {
-			_ = unstructured.SetNestedSlice(policy.Object, providers, "spec", "jwt", "providers")
+			jwt := map[string]interface{}{"providers": providers}
+			// The PDP verifies both raw tokens and is the enforcement point when
+			// ext_authz is enabled. Keep gateway JWT extraction best-effort so a
+			// missing token reaches the PDP for the authoritative decision.
+			if cfg.ExtAuthzEnabled() {
+				jwt["optional"] = cfg.GatewayJWTOptional
+			}
+			_ = unstructured.SetNestedMap(policy.Object, jwt, "spec", "jwt")
 			attached = true
 		}
 	}

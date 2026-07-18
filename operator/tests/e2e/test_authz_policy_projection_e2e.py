@@ -105,7 +105,11 @@ def _wait_for_service_account(namespace: str, name: str, timeout: int = 120) -> 
 
 
 def _wait_for_policy_data(
-    namespace: str, agents: list[str], timeout: int = 180
+    namespace: str,
+    agents: list[str],
+    autonomous_agent: str,
+    required_grant: str,
+    timeout: int = 180,
 ) -> dict:
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -121,9 +125,13 @@ def _wait_for_policy_data(
             )
             data = json.loads(str(raw))
             projected = data["kaos"]
-            if all(
-                f"kaos://agent/{namespace}/{name}" in projected["agents"]
-                for name in agents
+            if (
+                all(
+                    f"kaos://agent/{namespace}/{name}" in projected["agents"]
+                    for name in agents
+                )
+                and projected["agents"][autonomous_agent]["autonomous"] is True
+                and required_grant in projected["grants"][autonomous_agent]
             ):
                 assert projected["jwks"], "cluster JWKS was not projected"
                 return data
@@ -133,8 +141,18 @@ def _wait_for_policy_data(
     raise TimeoutError("ServiceAccount issuer data was not projected")
 
 
-def _request_until(url: str, token: str | None, expected, timeout: int = 120):
-    headers = {"x-agent-authorization": f"Bearer {token}"} if token else {}
+def _request_until(
+    url: str,
+    actor_token: str | None,
+    subject_token: str | None,
+    expected,
+    timeout: int = 120,
+):
+    headers = {}
+    if actor_token:
+        headers["x-agent-authorization"] = f"Bearer {actor_token}"
+    if subject_token:
+        headers["authorization"] = f"Bearer {subject_token}"
     deadline = time.time() + timeout
     last = None
     while time.time() < deadline:
@@ -182,6 +200,9 @@ def test_live_serviceaccount_authorization_matrix(
         "type": "remote",
         "memoryStore": memory_store,
     }
+    granted_resource["spec"]["config"]["autonomous"] = {
+        "goal": "Validate self-subjected authorization",
+    }
     granted_resource["spec"]["waitForDependencies"] = False
     create_custom_resource(granted_resource, namespace)
     create_custom_resource(
@@ -192,14 +213,19 @@ def test_live_serviceaccount_authorization_matrix(
     ungranted_sa = f"kaos-agent-{ungranted_agent}"
     _wait_for_service_account(namespace, granted_sa)
     _wait_for_service_account(namespace, ungranted_sa)
-    policy_data = _wait_for_policy_data(namespace, [granted_agent, ungranted_agent])
     memory_grant = f"kaos://memorystore/{namespace}/{memory_store}"
-    assert memory_grant in policy_data["kaos"]["grants"][
-        f"kaos://agent/{namespace}/{granted_agent}"
-    ]
+    granted_id = f"kaos://agent/{namespace}/{granted_agent}"
+    policy_data = _wait_for_policy_data(
+        namespace,
+        [granted_agent, ungranted_agent],
+        granted_id,
+        memory_grant,
+    )
+    assert memory_grant in policy_data["kaos"]["grants"][granted_id]
     assert memory_grant not in policy_data["kaos"]["grants"][
         f"kaos://agent/{namespace}/{ungranted_agent}"
     ]
+    assert policy_data["kaos"]["agents"][granted_id]["autonomous"] is True
 
     granted_token = str(
         kubectl(
@@ -228,13 +254,33 @@ def test_live_serviceaccount_authorization_matrix(
     )
 
     outcomes = {}
-    allowed = _request_until(target_url, granted_token, lambda status: status == 200)
-    outcomes["granted_valid_token"] = {"status": allowed.status_code}
+    allowed = _request_until(
+        target_url,
+        granted_token,
+        granted_token,
+        lambda status: status == 200,
+    )
+    outcomes["autonomous_self_subject_granted"] = {"status": allowed.status_code}
 
-    denied = _request_until(target_url, ungranted_token, lambda status: status == 403)
+    missing_subject = _request_until(
+        target_url,
+        granted_token,
+        None,
+        lambda status: status == 403,
+    )
+    outcomes["actor_without_subject"] = {"status": missing_subject.status_code}
+
+    denied = _request_until(
+        target_url,
+        ungranted_token,
+        granted_token,
+        lambda status: status == 403,
+    )
     outcomes["ungranted_valid_token"] = {"status": denied.status_code}
 
-    no_token = _request_until(target_url, None, lambda status: 400 <= status < 500)
+    no_token = _request_until(
+        target_url, None, None, lambda status: 400 <= status < 500
+    )
     outcomes["no_token"] = {"status": no_token.status_code}
 
     replicas = str(
@@ -261,7 +307,10 @@ def test_live_serviceaccount_authorization_matrix(
             "--timeout=120s",
         )
         pdp_down = _request_until(
-            target_url, granted_token, lambda status: status >= 400
+            target_url,
+            granted_token,
+            granted_token,
+            lambda status: status >= 400,
         )
         outcomes["pdp_down"] = {"status": pdp_down.status_code}
     finally:
@@ -281,6 +330,11 @@ def test_live_serviceaccount_authorization_matrix(
             "--timeout=180s",
         )
 
-    recovered = _request_until(target_url, granted_token, lambda status: status == 200)
+    recovered = _request_until(
+        target_url,
+        granted_token,
+        granted_token,
+        lambda status: status == 200,
+    )
     outcomes["pdp_recovered"] = {"status": recovered.status_code}
     _record_evidence(outcomes)

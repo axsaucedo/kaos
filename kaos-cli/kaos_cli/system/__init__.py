@@ -10,14 +10,13 @@ from kaos_cli.system.install import install_command, uninstall_command
 from kaos_cli.system.create_rbac import create_rbac_command
 from kaos_cli.system.status import status_command
 from kaos_cli.install import (
-    AUTH_PRESET_AIB_KEYCLOAK,
-    AUTH_PRESET_AIB_ONLY,
-    AUTH_PRESET_KAOS_INTERNAL,
-    AUTH_PRESETS,
-    DEFAULT_AUTH_PRESET,
+    AGENT_AUTH_MODES,
+    USER_AUTH_MODES,
+    DEFAULT_AGENT_AUTH_MODE,
+    DEFAULT_USER_AUTH_MODE,
     DEFAULT_RELEASE_NAME,
     MONITORING_BACKENDS,
-    _expand_auth_preset,
+    _expand_auth_flags,
 )
 from kaos_cli.system.runtimes import runtimes_command
 from kaos_cli.utils import DEFAULT_MONITORING_BACKEND, preprocess_optional_value_flag
@@ -32,11 +31,17 @@ class _SystemGroup(TyperGroup):
             original_parse = cmd.parse_args
 
             def patched_parse(ctx, args):
+                for flag in ("--agent-auth-enabled", "--user-auth-enabled"):
+                    if args.count(flag) > 1:
+                        raise typer.BadParameter(f"{flag} may only be specified once")
                 args = preprocess_optional_value_flag(
                     args, "--monitoring-enabled", DEFAULT_MONITORING_BACKEND
                 )
                 args = preprocess_optional_value_flag(
-                    args, "--auth-enabled", DEFAULT_AUTH_PRESET
+                    args, "--agent-auth-enabled", DEFAULT_AGENT_AUTH_MODE
+                )
+                args = preprocess_optional_value_flag(
+                    args, "--user-auth-enabled", DEFAULT_USER_AUTH_MODE
                 )
                 return original_parse(ctx, args)
 
@@ -90,7 +95,7 @@ def install(
         False,
         "--gateway-enabled",
         help="Install Gateway API (Envoy Gateway) and configure routing. Implied by "
-        "--auth-enabled.",
+        "an authentication flag.",
     ),
     metallb_enabled: bool = typer.Option(
         False,
@@ -102,14 +107,17 @@ def install(
         "--pgvector-memory-enabled",
         help="Provision a development pgvector Postgres for external-mode MemoryStores (dev-only).",
     ),
-    auth_enabled: str | None = typer.Option(
+    agent_auth_enabled: str | None = typer.Option(
         None,
-        "--auth-enabled",
-        help="Enable gateway policy enforcement by preset. Options: "
-        f"'{AUTH_PRESET_AIB_KEYCLOAK}' (default; AIB + Keycloak identity), "
-        f"'{AUTH_PRESET_KAOS_INTERNAL}' (cluster-issued agent identity), or "
-        f"'{AUTH_PRESET_AIB_ONLY}' (AIB agent identity). May "
-        "be passed without a value to select the default.",
+        "--agent-auth-enabled",
+        help=f"Enable agent authentication. Options: {', '.join(AGENT_AUTH_MODES)}. "
+        f"Defaults to {DEFAULT_AGENT_AUTH_MODE} when passed without a value.",
+    ),
+    user_auth_enabled: str | None = typer.Option(
+        None,
+        "--user-auth-enabled",
+        help=f"Enable user authentication. Options: {', '.join(USER_AUTH_MODES)}. "
+        f"Defaults to {DEFAULT_USER_AUTH_MODE} when passed without a value.",
     ),
     gateway_api_strict: bool = typer.Option(
         False,
@@ -141,8 +149,7 @@ def install(
         "--aib-chart-path",
         hidden=True,
         help="Path to a local identity broker Helm chart to install (unpublished/dev "
-        f"path). Required to install the broker for the {AUTH_PRESET_AIB_KEYCLOAK} "
-        f"and {AUTH_PRESET_AIB_ONLY} presets.",
+        "path). Used with --agent-auth-enabled aib.",
     ),
     aib_values_path: str | None = typer.Option(
         None,
@@ -167,15 +174,24 @@ def install(
         raise typer.Exit(1)
 
     auth_kwargs: dict = {}
-    if auth_enabled is not None:
-        if auth_enabled not in AUTH_PRESETS:
+    if agent_auth_enabled is not None or user_auth_enabled is not None:
+        agent_mode = agent_auth_enabled or DEFAULT_AGENT_AUTH_MODE
+        user_mode = user_auth_enabled or DEFAULT_USER_AUTH_MODE
+        if agent_mode not in AGENT_AUTH_MODES:
             typer.echo(
-                f"Error: Invalid auth preset '{auth_enabled}'. Options: "
-                f"{', '.join(AUTH_PRESETS)}",
+                f"Error: Invalid agent auth mode '{agent_mode}'. Options: "
+                f"{', '.join(AGENT_AUTH_MODES)}",
                 err=True,
             )
             raise typer.Exit(1)
-        auth_kwargs = _expand_auth_preset(auth_enabled, namespace)
+        if user_mode not in USER_AUTH_MODES:
+            typer.echo(
+                f"Error: Invalid user auth mode '{user_mode}'. Options: "
+                f"{', '.join(USER_AUTH_MODES)}",
+                err=True,
+            )
+            raise typer.Exit(1)
+        auth_kwargs = _expand_auth_flags(agent_mode, user_mode, namespace)
 
     call_kwargs = dict(
         namespace=namespace,

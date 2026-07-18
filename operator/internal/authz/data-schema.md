@@ -10,13 +10,18 @@ The shipped policy package is `kaos.authz`, and the Envoy plugin queries its `re
     "grants": {
       "<actor-id>": ["<resource-id>", "..."]
     },
+    "user_grants": {
+      "user:<sub-or-email>": ["<resource-id>", "..."],
+      "group:<name>": ["<resource-id>", "..."]
+    },
     "jwks": {
       "<issuer>": {
         "keys": [ { "kty": "RSA", "kid": "...", "alg": "RS256", "n": "...", "e": "AQAB" } ]
       }
     },
     "agents": {
-      "<actor-id>": { "issuer_sub": "<token-subject>" }
+      "<serviceaccount-actor-id>": { "issuer_sub": "<token-subject>", "autonomous": false },
+      "<oidc-actor-id>": { "issuer_azp": "<authorized-party>", "autonomous": false }
     }
   }
 }
@@ -35,6 +40,43 @@ The policy derives the target only from the operator-owned gateway path because 
 
 Maps the exact actor-token issuer to its JSON Web Key Set. The policy selects the issuer entry from the token `iss`, verifies the token with the server-side `RS256` allowlist, and requires the exact issuer plus the `kaos-gateway` audience before trusting its subject.
 
+## `kaos.user_grants`
+
+Maps verified user principals to the sorted, deduplicated resources they may enter. Keys use `user:<sub-or-email>` for a token's `sub` or `email`, and `group:<name>` for short names in its `groups` claim. The operator compiles enforced namespaced `AccessGrant` resources into this map.
+
+For example:
+
+```json
+{
+  "user:alice@example.com": ["kaos://agent/demo/writer"],
+  "group:researchers": ["kaos://agent/demo/researcher"]
+}
+```
+
+User grants gate entry requests. Internal movement is authorized through `kaos.grants` after the propagated subject is verified.
+
 ## `kaos.agents`
 
-Maps logical agent ids to issuer-specific token subjects. ServiceAccount mode uses `system:serviceaccount:<namespace>:<serviceaccount-name>` subjects, so this mapping resolves the verified token subject back to its KAOS actor id.
+Maps logical agent ids to issuer-specific token identities and an `autonomous` boolean. ServiceAccount mode uses `system:serviceaccount:<namespace>:<serviceaccount-name>` subjects, so `issuer_sub` resolves the verified token subject back to its KAOS actor id. Keycloak DCR client-credentials tokens use the registered `client_id` in the `azp` claim while assigning a separate service-account UUID to `sub`; OIDC mode therefore stores the exact registered client id as `issuer_azp`. `autonomous: true` permits that Agent to use its own verified agent token as the required subject for autonomous execution.
+
+For example:
+
+```json
+{
+  "kaos://agent/demo/researcher": {
+    "issuer_sub": "system:serviceaccount:demo:kaos-agent-researcher",
+    "autonomous": true
+  }
+}
+```
+
+An OIDC mapping uses the provider's exact authorized-party claim:
+
+```json
+{
+  "kaos://agent/demo/researcher": {
+    "issuer_azp": "0d146e02-0405-4948-b3cb-59efbb36c68c",
+    "autonomous": true
+  }
+}
+```

@@ -17,6 +17,7 @@ from __future__ import annotations
 import contextvars
 import os
 import uuid
+from contextlib import contextmanager
 from typing import Any, Callable, Dict, Iterator, MutableMapping, Optional
 
 # --- Header model -----------------------------------------------------
@@ -173,6 +174,23 @@ def _build_context(
         "scopes": scopes,
     }
     return {key: value for key, value in fields.items() if value}
+
+
+@contextmanager
+def autonomous_identity_context(actor_token: str, principal: str) -> Iterator[None]:
+    """Self-subject an autonomous agent for one execution iteration."""
+    token = ctx.replace(
+        _build_context(
+            principal=principal,
+            subject_token=actor_token,
+            actor=principal,
+            actor_token=actor_token,
+        )
+    )
+    try:
+        yield
+    finally:
+        ctx.reset(token)
 
 
 # --- Inbound boundary instrumentation -----------------------------------------------
@@ -456,6 +474,6 @@ def instrument_httpx() -> None:
         _raise_for_gateway_outcome(request, response)
         return response
 
-    httpx.Client.send = _patched_sync_send
-    httpx.AsyncClient.send = _patched_async_send
+    httpx.Client.send = _patched_sync_send  # ty: ignore[invalid-assignment]
+    httpx.AsyncClient.send = _patched_async_send  # ty: ignore[invalid-assignment]
     _httpx_patched = True

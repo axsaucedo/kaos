@@ -88,6 +88,26 @@ rules:
 - apiGroups:
   - kaos.tools
   resources:
+  - accessgrants
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - kaos.tools
+  resources:
+  - accessgrants/status
+  - agents/status
+  - mcpservers/status
+  - memorystores/status
+  - modelapis/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - kaos.tools
+  resources:
   - agents
   - mcpservers
   - memorystores
@@ -107,17 +127,6 @@ rules:
   - mcpservers/finalizers
   - modelapis/finalizers
   verbs:
-  - update
-- apiGroups:
-  - kaos.tools
-  resources:
-  - agents/status
-  - mcpservers/status
-  - memorystores/status
-  - modelapis/status
-  verbs:
-  - get
-  - patch
   - update
 - apiGroups:
   - networking.k8s.io

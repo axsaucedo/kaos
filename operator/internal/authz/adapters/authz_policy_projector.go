@@ -4,9 +4,11 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/axsaucedo/kaos/operator/internal/authz"
@@ -24,8 +26,13 @@ type AuthzPolicyProjector struct {
 	JWKSURI            string
 	JWKSClient         *http.Client
 	Issuer             string
+	UserIssuer         string
+	UserAudience       string
+	UserJWKSURI        string
 	StaticJWKS         map[string]any
 	MapServiceAccounts bool
+	MapOIDCAgents      bool
+	CredentialPrefix   string
 	WriteGrantData     bool
 	Disabled           bool
 }
@@ -39,24 +46,60 @@ func (p *AuthzPolicyProjector) Apply(ctx context.Context, desired projection.Des
 	data := map[string]string{authz.PolicyKey: authz.Policy()}
 	if p.WriteGrantData {
 		grants := projection.GrantData(desired)
-		jwks := p.StaticJWKS
+		issuerJWKS := map[string]any{}
+		agentJWKS := p.StaticJWKS
 		if p.JWKSURI != "" {
 			fetched, err := authz.FetchJWKS(ctx, p.JWKSClient, p.JWKSURI)
 			if err != nil {
 				return err
 			}
-			jwks = fetched
+			agentJWKS = fetched
 		}
-		var agents map[string]map[string]string
+		if agentJWKS != nil && security.Configured(p.Issuer) {
+			issuerJWKS[p.Issuer] = agentJWKS
+		}
+		var agents map[string]map[string]any
 		if p.MapServiceAccounts {
-			agents = map[string]map[string]string{}
+			agents = map[string]map[string]any{}
 			for _, agent := range desired.Agents {
-				agents[agent.ExternalID()] = map[string]string{
+				agents[agent.ExternalID()] = map[string]any{
 					"issuer_sub": fmt.Sprintf("system:serviceaccount:%s:%s", agent.Namespace, security.AgentServiceAccountName(agent.Name)),
+					"autonomous": agent.Autonomous,
 				}
 			}
 		}
-		dataDoc, err := authz.DataDocument(grants, p.Issuer, jwks, agents)
+		if p.MapOIDCAgents {
+			agents = map[string]map[string]any{}
+			for _, agent := range desired.Agents {
+				secret := &corev1.Secret{}
+				key := types.NamespacedName{Namespace: agent.Namespace, Name: security.CredentialSecretName(p.CredentialPrefix, agent.Name)}
+				if err := p.Client.Get(ctx, key, secret); err != nil {
+					return fmt.Errorf("reading OIDC credentials for %s: %w", agent.ExternalID(), err)
+				}
+				clientID := strings.TrimSpace(secretValue(secret, credentialClientIDKey))
+				if clientID == "" {
+					return fmt.Errorf("OIDC credentials for %s have no client_id", agent.ExternalID())
+				}
+				agents[agent.ExternalID()] = map[string]any{
+					"issuer_azp": clientID,
+					"autonomous": agent.Autonomous,
+				}
+			}
+		}
+		var userGrants map[string][]string
+		var user map[string]string
+		if (security.Config{UserIssuer: p.UserIssuer}).UserPlaneEnabled() {
+			userKeys, err := authz.DiscoverIssuerKeys(ctx, p.JWKSClient, p.UserIssuer, p.UserJWKSURI)
+			if err != nil {
+				return err
+			}
+			if _, agentIssuer := issuerJWKS[userKeys.Issuer]; !agentIssuer {
+				issuerJWKS[userKeys.Issuer] = userKeys.JWKS
+			}
+			userGrants = projection.UserGrantData(desired)
+			user = map[string]string{"issuer": strings.TrimSpace(p.UserIssuer), "audience": strings.TrimSpace(p.UserAudience)}
+		}
+		dataDoc, err := authz.DataDocument(grants, userGrants, issuerJWKS, agents, user)
 		if err != nil {
 			return err
 		}

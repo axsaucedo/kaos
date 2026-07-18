@@ -83,22 +83,45 @@ func TestIsOperationalIgnoresWhitespace(t *testing.T) {
 	}
 }
 
+func TestUserPlaneEnabled(t *testing.T) {
+	if !(Config{UserIssuer: "https://users.example"}).UserPlaneEnabled() {
+		t.Fatal("expected configured user issuer to enable the user plane")
+	}
+	if (Config{UserIssuer: "  "}).UserPlaneEnabled() {
+		t.Fatal("expected whitespace-only user issuer to leave the user plane disabled")
+	}
+}
+
+func TestGatewayJWTOptionalDefaultsTrue(t *testing.T) {
+	t.Setenv(envGatewayJWTOptional, "")
+	if !GetConfig().GatewayJWTOptional {
+		t.Fatal("expected gateway JWT to be optional by default")
+	}
+	t.Setenv(envGatewayJWTOptional, "false")
+	if GetConfig().GatewayJWTOptional {
+		t.Fatal("expected explicit false to make gateway JWT blocking")
+	}
+}
+
 func TestCredentialMountingEnabled(t *testing.T) {
 	cases := []struct {
 		name     string
+		provider IdentityProvider
 		extAuth  string
 		prefix   string
 		expected bool
 	}{
-		{"disabled when nothing set", "", "", false},
-		{"disabled without ext_authz", "", "kaos-aib", false},
-		{"disabled without prefix", "svc:9002", "", false},
-		{"disabled with whitespace prefix", "svc:9002", "  ", false},
-		{"enabled when both set", "svc:9002", "kaos-aib", true},
+		{"disabled when nothing set", IdentityProviderAIB, "", "", false},
+		{"disabled without ext_authz", IdentityProviderAIB, "", "kaos-aib", false},
+		{"AIB disabled without prefix", IdentityProviderAIB, "svc:9002", "", false},
+		{"AIB disabled with whitespace prefix", IdentityProviderAIB, "svc:9002", "  ", false},
+		{"AIB enabled when both set", IdentityProviderAIB, "svc:9002", "kaos-aib", true},
+		{"OIDC uses default prefix", IdentityProviderOIDC, "svc:9002", "", true},
+		{"ServiceAccount never mounts OAuth credentials", IdentityProviderServiceAccount, "svc:9002", "kaos-aib", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := Config{ExtAuthzURL: tc.extAuth, CredentialSecretPrefix: tc.prefix}
+			cfg := Config{IdentityProvider: tc.provider, ExtAuthzURL: tc.extAuth, CredentialSecretPrefix: tc.prefix}
 			if cfg.CredentialMountingEnabled() != tc.expected {
 				t.Errorf("CredentialMountingEnabled() = %v, want %v", !tc.expected, tc.expected)
 			}
@@ -115,17 +138,20 @@ func TestCredentialSecretName(t *testing.T) {
 
 func TestTokenEndpoint(t *testing.T) {
 	cases := []struct {
-		name   string
-		issuer string
-		want   string
+		name     string
+		provider IdentityProvider
+		issuer   string
+		want     string
 	}{
-		{"empty issuer", "", ""},
-		{"issuer without slash", "http://aib:8000", "http://aib:8000/oauth2/token"},
-		{"issuer with trailing slash", "http://aib:8000/", "http://aib:8000/oauth2/token"},
+		{"empty issuer", IdentityProviderAIB, "", ""},
+		{"AIB issuer", IdentityProviderAIB, "http://aib:8000", "http://aib:8000/oauth2/token"},
+		{"AIB issuer with trailing slash", IdentityProviderAIB, "http://aib:8000/", "http://aib:8000/oauth2/token"},
+		{"OIDC issuer", IdentityProviderOIDC, "http://keycloak:8080/realms/kaos", "http://keycloak:8080/realms/kaos/protocol/openid-connect/token"},
+		{"OIDC issuer with trailing slash", IdentityProviderOIDC, "http://keycloak:8080/realms/kaos/", "http://keycloak:8080/realms/kaos/protocol/openid-connect/token"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := (Config{Issuer: tc.issuer}).TokenEndpoint(); got != tc.want {
+			if got := (Config{IdentityProvider: tc.provider, Issuer: tc.issuer}).TokenEndpoint(); got != tc.want {
 				t.Errorf("TokenEndpoint() = %q, want %q", got, tc.want)
 			}
 		})
@@ -136,6 +162,7 @@ func TestGetConfigReadsAllFields(t *testing.T) {
 	t.Setenv(envExtAuthzURL, "aib-ext-authz.aib-system:9002")
 	t.Setenv(envIssuer, "http://aib-enduser.aib-system.svc.cluster.local:8000")
 	t.Setenv(envCredentialSecretPrefix, "kaos-aib")
+	t.Setenv(envOIDCRegistrationToken, "bootstrap-token")
 	t.Setenv(envUserIssuer, "http://keycloak.kaos-system.svc.cluster.local:8080/realms/kaos")
 	t.Setenv(envUserAudience, "kaos")
 	t.Setenv(envUserJWKSURI, "")
@@ -153,6 +180,19 @@ func TestGetConfigReadsAllFields(t *testing.T) {
 	}
 	if cfg.UserAudience != "kaos" {
 		t.Errorf("unexpected user audience %q", cfg.UserAudience)
+	}
+	if cfg.OIDCRegistrationInitialAccessToken != "bootstrap-token" {
+		t.Errorf("unexpected OIDC registration token %q", cfg.OIDCRegistrationInitialAccessToken)
+	}
+}
+
+func TestOIDCCredentialSecretPrefixDefault(t *testing.T) {
+	cfg := Config{IdentityProvider: IdentityProviderOIDC}
+	if got := cfg.CredentialSecretPrefixOrDefault(); got != "kaos-oidc" {
+		t.Fatalf("OIDC credential prefix = %q, want kaos-oidc", got)
+	}
+	if got := cfg.CredentialSecretName("researcher"); got != "kaos-oidc-researcher" {
+		t.Fatalf("OIDC credential Secret name = %q", got)
 	}
 }
 
@@ -244,6 +284,14 @@ func TestAgentJWKSURI(t *testing.T) {
 				t.Errorf("AgentJWKSURI() = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestAgentJWKSURIForOIDCKeycloak(t *testing.T) {
+	cfg := Config{IdentityProvider: IdentityProviderOIDC, Issuer: "http://keycloak:8080/realms/kaos"}
+	want := "http://keycloak:8080/realms/kaos/protocol/openid-connect/certs"
+	if got := cfg.AgentJWKSURI(); got != want {
+		t.Fatalf("AgentJWKSURI() = %q, want %q", got, want)
 	}
 }
 

@@ -18,7 +18,7 @@ func TestPolicyEmbedsRego(t *testing.T) {
 
 func TestDataDocumentWithoutJWKSOmitsJWKS(t *testing.T) {
 	grants := map[string][]string{"kaos://agent/demo/researcher": {"kaos://mcpserver/demo/github"}}
-	raw, err := DataDocument(grants, "", nil, nil)
+	raw, err := DataDocument(grants, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("DataDocument: %v", err)
 	}
@@ -37,8 +37,11 @@ func TestDataDocumentWithoutJWKSOmitsJWKS(t *testing.T) {
 }
 
 func TestDataDocumentVerifiedModeCarriesJWKS(t *testing.T) {
-	jwks := map[string]any{"keys": []any{map[string]any{"kty": "RSA", "kid": "x"}}}
-	raw, err := DataDocument(map[string][]string{}, "https://issuer.example", jwks, nil)
+	jwks := map[string]any{
+		"https://issuer.example": map[string]any{"keys": []any{map[string]any{"kty": "RSA", "kid": "agent"}}},
+		"https://users.example":  map[string]any{"keys": []any{map[string]any{"kty": "RSA", "kid": "user"}}},
+	}
+	raw, err := DataDocument(map[string][]string{}, nil, jwks, nil, nil)
 	if err != nil {
 		t.Fatalf("DataDocument: %v", err)
 	}
@@ -50,13 +53,19 @@ func TestDataDocumentVerifiedModeCarriesJWKS(t *testing.T) {
 	if _, ok := issuerJWKS["https://issuer.example"]; !ok {
 		t.Fatalf("verified mode must carry jwks: %v", doc)
 	}
+	if _, ok := issuerJWKS["https://users.example"]; !ok {
+		t.Fatalf("verified mode must carry user jwks: %v", doc)
+	}
 }
 
 func TestDataDocumentCarriesAgentIssuerSubjectMapping(t *testing.T) {
-	agents := map[string]map[string]string{
-		"kaos://agent/demo/researcher": {"issuer_sub": "system:serviceaccount:demo:kaos-agent-researcher"},
+	agents := map[string]map[string]any{
+		"kaos://agent/demo/researcher": {
+			"issuer_sub": "system:serviceaccount:demo:kaos-agent-researcher",
+			"autonomous": true,
+		},
 	}
-	raw, err := DataDocument(map[string][]string{}, "", nil, agents)
+	raw, err := DataDocument(map[string][]string{}, nil, nil, agents, nil)
 	if err != nil {
 		t.Fatalf("DataDocument: %v", err)
 	}
@@ -64,14 +73,17 @@ func TestDataDocumentCarriesAgentIssuerSubjectMapping(t *testing.T) {
 	if err := json.Unmarshal(raw, &doc); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	got := doc["kaos"].(map[string]any)["agents"].(map[string]any)["kaos://agent/demo/researcher"].(map[string]any)["issuer_sub"]
-	if got != "system:serviceaccount:demo:kaos-agent-researcher" {
-		t.Fatalf("issuer_sub = %v", got)
+	got := doc["kaos"].(map[string]any)["agents"].(map[string]any)["kaos://agent/demo/researcher"].(map[string]any)
+	if got["issuer_sub"] != "system:serviceaccount:demo:kaos-agent-researcher" {
+		t.Fatalf("issuer_sub = %v", got["issuer_sub"])
+	}
+	if autonomous, ok := got["autonomous"].(bool); !ok || !autonomous {
+		t.Fatalf("autonomous = %v (%T), want true bool", got["autonomous"], got["autonomous"])
 	}
 }
 
 func TestConfigMapDataCarriesPolicyAndData(t *testing.T) {
-	cm, err := ConfigMapData(map[string][]string{"a": {"b"}}, "", nil, nil)
+	cm, err := ConfigMapData(map[string][]string{"a": {"b"}}, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("ConfigMapData: %v", err)
 	}
@@ -80,5 +92,38 @@ func TestConfigMapDataCarriesPolicyAndData(t *testing.T) {
 	}
 	if !strings.Contains(cm[DataKey], "grants") {
 		t.Fatalf("data key missing grants")
+	}
+}
+
+func TestDataDocumentCarriesUserGrantsWhenPresent(t *testing.T) {
+	raw, err := DataDocument(nil, map[string][]string{"user:alice": {"kaos://agent/demo/a"}}, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("DataDocument: %v", err)
+	}
+	if !strings.Contains(string(raw), `"user_grants"`) || !strings.Contains(string(raw), `"user:alice"`) {
+		t.Fatalf("data missing user_grants: %s", raw)
+	}
+}
+
+func TestDataDocumentOmitsEmptyUserGrants(t *testing.T) {
+	raw, err := DataDocument(nil, map[string][]string{}, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("DataDocument: %v", err)
+	}
+	if strings.Contains(string(raw), `"user_grants"`) {
+		t.Fatalf("data must omit empty user_grants: %s", raw)
+	}
+}
+
+func TestDataDocumentCarriesUserProviderWhenConfigured(t *testing.T) {
+	raw, err := DataDocument(nil, nil, nil, nil, map[string]string{
+		"issuer":   "https://users.example",
+		"audience": "kaos-users",
+	})
+	if err != nil {
+		t.Fatalf("DataDocument: %v", err)
+	}
+	if !strings.Contains(string(raw), `"user"`) || !strings.Contains(string(raw), `"audience": "kaos-users"`) {
+		t.Fatalf("data missing user provider: %s", raw)
 	}
 }

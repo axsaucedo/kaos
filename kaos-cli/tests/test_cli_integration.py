@@ -843,11 +843,12 @@ class TestPackageData:
         from kaos_cli.samples import _get_sample_files
 
         files = _get_sample_files()
-        assert len(files) == 7
+        assert len(files) == 8
         names = [f.stem for f in files]
         assert "1-simple-echo-agent" in names
         assert "5-proxy-external-api" in names
         assert "7-memory-agent" in names
+        assert "8-access-grant" in names
 
 
 # ─── Monitoring validation ──────────────────────────────────────────────
@@ -900,7 +901,9 @@ class TestSystemInstallFlags:
         result = runner.invoke(app, ["system", "install", "--help"])
         assert result.exit_code == 0
         output = strip_ansi(result.output)
-        assert "--auth-enabled" in output
+        assert "--agent-auth-enabled" in output
+        assert "--user-auth-enabled" in output
+        assert "--auth-enabled" not in output
         # The fine-grained auth knobs are collapsed into the preset and no longer
         # exposed on the command surface.
         assert "--authz-provider" not in output
@@ -1068,8 +1071,10 @@ class TestAuthWiring:
                 [
                     "system",
                     "install",
-                    "--auth-enabled",
-                    "aib-keycloak",
+                    "--agent-auth-enabled",
+                    "aib",
+                    "--user-auth-enabled",
+                    "keycloak",
                     "--chart-path",
                     "operator/chart",
                 ],
@@ -1361,6 +1366,57 @@ class TestAuthWiring:
         clients = {c["clientId"]: c for c in realm["clients"]}
         assert set(clients) == {"kaos"}
         assert clients["kaos"]["secret"] == "kaos-dev-secret"
+        mappers = {
+            mapper["name"]: mapper for mapper in clients["kaos"]["protocolMappers"]
+        }
+        assert set(mappers) == {"kaos-audience", "kaos-groups", "kaos-subject"}
+        assert mappers["kaos-groups"] == {
+            "name": "kaos-groups",
+            "protocol": "openid-connect",
+            "protocolMapper": "oidc-group-membership-mapper",
+            "config": {
+                "claim.name": "groups",
+                "full.path": "false",
+                "id.token.claim": "false",
+                "access.token.claim": "true",
+                "userinfo.token.claim": "false",
+            },
+        }
+        assert mappers["kaos-subject"] == {
+            "name": "kaos-subject",
+            "protocol": "openid-connect",
+            "protocolMapper": "oidc-usermodel-property-mapper",
+            "config": {
+                "user.attribute": "id",
+                "claim.name": "sub",
+                "jsonType.label": "String",
+                "id.token.claim": "false",
+                "access.token.claim": "true",
+                "userinfo.token.claim": "false",
+            },
+        }
+        assert realm["groups"] == [{"name": "researchers"}]
+        assert realm["users"][0]["groups"] == ["researchers"]
+        assert realm["defaultDefaultClientScopes"] == ["kaos-agent-audience"]
+        assert realm["clientScopes"] == [
+            {
+                "name": "kaos-agent-audience",
+                "protocol": "openid-connect",
+                "attributes": {"include.in.token.scope": "false"},
+                "protocolMappers": [
+                    {
+                        "name": "kaos-agent-audience",
+                        "protocol": "openid-connect",
+                        "protocolMapper": "oidc-audience-mapper",
+                        "config": {
+                            "included.custom.audience": "kaos-gateway",
+                            "id.token.claim": "false",
+                            "access.token.claim": "true",
+                        },
+                    }
+                ],
+            }
+        ]
 
     def test_default_user_auth_issuer(self):
         from kaos_cli.install import _default_user_auth_issuer
@@ -1393,8 +1449,10 @@ class TestAuthWiring:
                 [
                     "system",
                     "install",
-                    "--auth-enabled",
-                    "aib-keycloak",
+                    "--agent-auth-enabled",
+                    "aib",
+                    "--user-auth-enabled",
+                    "keycloak",
                     "--chart-path",
                     "operator/chart",
                 ],
@@ -1402,7 +1460,10 @@ class TestAuthWiring:
 
         assert result.exit_code == 0, result.output
         joined = " ".join(captured.get("args", []))
-        assert "security.userAuth.issuer=" in joined
+        assert (
+            "security.userAuth.issuer="
+            "http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos" in joined
+        )
         assert "security.userAuth.audience=kaos" in joined
 
     def test_no_user_auth_omits_user_auth_values(self):
@@ -1432,8 +1493,10 @@ class TestAuthWiring:
                 [
                     "system",
                     "install",
-                    "--auth-enabled",
-                    "kaos-internal",
+                    "--agent-auth-enabled",
+                    "service-account",
+                    "--user-auth-enabled",
+                    "none",
                     "--chart-path",
                     "operator/chart",
                 ],
@@ -1471,8 +1534,10 @@ class TestAuthWiring:
                 [
                     "system",
                     "install",
-                    "--auth-enabled",
-                    "aib-keycloak",
+                    "--agent-auth-enabled",
+                    "aib",
+                    "--user-auth-enabled",
+                    "keycloak",
                     "--chart-path",
                     "operator/chart",
                 ],
@@ -1506,8 +1571,10 @@ class TestAuthWiring:
                 [
                     "system",
                     "install",
-                    "--auth-enabled",
-                    "aib-keycloak",
+                    "--agent-auth-enabled",
+                    "aib",
+                    "--user-auth-enabled",
+                    "keycloak",
                     "--keycloak-chart-path",
                     "charts/keycloak",
                     "--chart-path",
@@ -1520,10 +1587,10 @@ class TestAuthWiring:
         assert "charts/keycloak" in joined
         assert "realmImport.configMapName=keycloak-realm-import" in joined
 
-    def test_expand_auth_preset_keycloak_aib(self):
-        from kaos_cli.install import _expand_auth_preset
+    def test_expand_auth_flags_keycloak_aib(self):
+        from kaos_cli.install import _expand_auth_flags
 
-        kwargs = _expand_auth_preset("aib-keycloak", "kaos-system")
+        kwargs = _expand_auth_flags("aib", "keycloak", "kaos-system")
         assert kwargs == {
             "auth_enabled": True,
             "gateway_enabled": True,
@@ -1537,10 +1604,30 @@ class TestAuthWiring:
             "user_auth": True,
         }
 
-    def test_expand_auth_preset_kaos_internal(self):
-        from kaos_cli.install import _expand_auth_preset
+    def test_expand_auth_flags_keycloak_oidc(self):
+        from kaos_cli.install import _expand_auth_flags
 
-        kwargs = _expand_auth_preset("kaos-internal", "kaos-system")
+        kwargs = _expand_auth_flags("keycloak", "keycloak", "kaos-system")
+        assert kwargs == {
+            "auth_enabled": True,
+            "gateway_enabled": True,
+            "pdp_enabled": True,
+            "network_policy": True,
+            "gateway_routing": True,
+            "policy_data_source": "automated",
+            "policy_configmap_name": "kaos-authz-policy",
+            "policy_configmap_namespace": "kaos-system",
+            "identity_provider": "oidc",
+            "credential_secret_prefix": "kaos-oidc",
+            "oidc_registration_secret_name": "kaos-oidc-registration",
+            "oidc_registration_secret_key": "token",
+            "user_auth": True,
+        }
+
+    def test_expand_auth_flags_kaos_internal(self):
+        from kaos_cli.install import _expand_auth_flags
+
+        kwargs = _expand_auth_flags("service-account", "none", "kaos-system")
         assert kwargs == {
             "auth_enabled": True,
             "gateway_enabled": True,
@@ -1554,10 +1641,10 @@ class TestAuthWiring:
             "user_auth": False,
         }
 
-    def test_expand_auth_preset_aib_only(self):
-        from kaos_cli.install import _expand_auth_preset
+    def test_expand_auth_flags_aib_only(self):
+        from kaos_cli.install import _expand_auth_flags
 
-        kwargs = _expand_auth_preset("aib-only", "kaos-system")
+        kwargs = _expand_auth_flags("aib", "none", "kaos-system")
         assert kwargs == {
             "auth_enabled": True,
             "gateway_enabled": True,
@@ -1572,10 +1659,11 @@ class TestAuthWiring:
         }
 
     @pytest.mark.parametrize(
-        "preset,expected,installs_aib,installs_keycloak",
+        "agent_mode,user_mode,expected,installs_aib,installs_keycloak",
         [
             (
-                "kaos-internal",
+                "service-account",
+                "none",
                 {
                     "security.agentAuth.identity.provider=serviceaccount",
                     "security.pdp.enabled=true",
@@ -1591,7 +1679,27 @@ class TestAuthWiring:
                 False,
             ),
             (
-                "aib-only",
+                "service-account",
+                "keycloak",
+                {
+                    "security.agentAuth.identity.provider=serviceaccount",
+                    "security.pdp.enabled=true",
+                    "gatewayAPI.enabled=true",
+                    "gatewayAPI.createGateway=true",
+                    "gatewayAPI.gatewayClassName=envoy-gateway",
+                    "security.agentAuth.authorization.policyDataSource=automated",
+                    "security.agentAuth.projection.policyConfigMap.name=kaos-authz-policy",
+                    "security.agentAuth.projection.policyConfigMap.namespace=kaos-system",
+                    "security.userAuth.issuer=http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos",
+                    "security.userAuth.audience=kaos",
+                    "security.gatewayRouting.enabled=true",
+                },
+                False,
+                True,
+            ),
+            (
+                "aib",
+                "none",
                 {
                     "security.agentAuth.identity.provider=aib",
                     "security.pdp.enabled=true",
@@ -1610,7 +1718,8 @@ class TestAuthWiring:
                 False,
             ),
             (
-                "aib-keycloak",
+                "aib",
+                "keycloak",
                 {
                     "security.agentAuth.identity.provider=aib",
                     "security.pdp.enabled=true",
@@ -1630,10 +1739,52 @@ class TestAuthWiring:
                 True,
                 True,
             ),
+            (
+                "keycloak",
+                "keycloak",
+                {
+                    "security.agentAuth.identity.provider=oidc",
+                    "security.pdp.enabled=true",
+                    "gatewayAPI.enabled=true",
+                    "gatewayAPI.createGateway=true",
+                    "gatewayAPI.gatewayClassName=envoy-gateway",
+                    "security.agentAuth.issuer=http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos",
+                    "security.agentAuth.identity.oidc.registration.initialAccessTokenSecretRef.name=kaos-oidc-registration",
+                    "security.agentAuth.identity.oidc.registration.initialAccessTokenSecretRef.key=token",
+                    "security.agentAuth.authorization.policyDataSource=automated",
+                    "security.agentAuth.projection.policyConfigMap.name=kaos-authz-policy",
+                    "security.agentAuth.projection.policyConfigMap.namespace=kaos-system",
+                    "security.userAuth.issuer=http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos",
+                    "security.userAuth.audience=kaos",
+                    "security.gatewayRouting.enabled=true",
+                },
+                False,
+                True,
+            ),
+            (
+                "keycloak",
+                "none",
+                {
+                    "security.agentAuth.identity.provider=oidc",
+                    "security.pdp.enabled=true",
+                    "gatewayAPI.enabled=true",
+                    "gatewayAPI.createGateway=true",
+                    "gatewayAPI.gatewayClassName=envoy-gateway",
+                    "security.agentAuth.issuer=http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos",
+                    "security.agentAuth.identity.oidc.registration.initialAccessTokenSecretRef.name=kaos-oidc-registration",
+                    "security.agentAuth.identity.oidc.registration.initialAccessTokenSecretRef.key=token",
+                    "security.agentAuth.authorization.policyDataSource=automated",
+                    "security.agentAuth.projection.policyConfigMap.name=kaos-authz-policy",
+                    "security.agentAuth.projection.policyConfigMap.namespace=kaos-system",
+                    "security.gatewayRouting.enabled=true",
+                },
+                False,
+                True,
+            ),
         ],
     )
-    def test_auth_preset_exact_helm_values(
-        self, preset, expected, installs_aib, installs_keycloak
+    def test_auth_flag_combinations_exact_helm_values(
+        self, agent_mode, user_mode, expected, installs_aib, installs_keycloak
     ):
         from types import SimpleNamespace
         from unittest.mock import patch
@@ -1654,8 +1805,10 @@ class TestAuthWiring:
                 [
                     "system",
                     "install",
-                    "--auth-enabled",
-                    preset,
+                    "--agent-auth-enabled",
+                    agent_mode,
+                    "--user-auth-enabled",
+                    user_mode,
                     "--aib-chart-path",
                     "aib/chart",
                     "--chart-path",
@@ -1672,12 +1825,23 @@ class TestAuthWiring:
             mock_keycloak.assert_called_once()
         else:
             mock_keycloak.assert_not_called()
+        if agent_mode == "keycloak":
+            assert (
+                "kubectl create secret generic kaos-oidc-registration "
+                "-n kaos-system --from-literal=token=<token>" in result.output
+            )
         args = captured["operator"]
         rendered = {args[i + 1] for i, arg in enumerate(args) if arg == "--set"}
         assert rendered == expected
 
-    def test_auth_enabled_without_value_defaults_to_aib_keycloak(self):
-        """--auth-enabled with no value selects the keycloak-aib preset."""
+    @pytest.mark.parametrize(
+        "flag,expected",
+        [
+            ("--agent-auth-enabled", "security.agentAuth.identity.provider=serviceaccount"),
+            ("--user-auth-enabled", "security.userAuth.audience=kaos"),
+        ],
+    )
+    def test_auth_flags_without_values_use_independent_defaults(self, flag, expected):
         from unittest.mock import patch
         from types import SimpleNamespace
 
@@ -1701,7 +1865,7 @@ class TestAuthWiring:
                 [
                     "system",
                     "install",
-                    "--auth-enabled",
+                    flag,
                     "--chart-path",
                     "operator/chart",
                 ],
@@ -1709,13 +1873,70 @@ class TestAuthWiring:
 
         assert result.exit_code == 0, result.output
         joined = " ".join(captured.get("args", []))
-        assert "security.agentAuth.authorization.provider" not in joined
+        assert expected in joined
         assert "gatewayAPI.enabled=true" in joined
 
-    def test_auth_enabled_rejects_unknown_preset(self):
-        result = runner.invoke(app, ["system", "install", "--auth-enabled", "nonsense"])
+    @pytest.mark.parametrize(
+        "flag,message",
+        [
+            ("--agent-auth-enabled", "Invalid agent auth mode"),
+            ("--user-auth-enabled", "Invalid user auth mode"),
+        ],
+    )
+    def test_auth_flags_reject_unknown_modes(self, flag, message):
+        result = runner.invoke(app, ["system", "install", flag, "nonsense"])
         assert result.exit_code != 0
-        assert "Invalid auth preset" in strip_ansi(result.output)
+        assert message in strip_ansi(result.output)
+
+    def test_conflicting_values_for_one_auth_plane_are_rejected(self):
+        result = runner.invoke(
+            app,
+            [
+                "system",
+                "install",
+                "--user-auth-enabled",
+                "keycloak",
+                "--user-auth-enabled",
+                "none",
+            ],
+        )
+        assert result.exit_code != 0
+        assert "--user-auth-enabled may only be specified once" in strip_ansi(
+            result.output
+        )
+
+    def test_removed_auth_preset_flag_is_rejected(self):
+        result = runner.invoke(
+            app, ["system", "install", "--auth-enabled", "aib-keycloak"]
+        )
+        assert result.exit_code != 0
+        assert "No such option: --auth-enabled" in strip_ansi(result.output)
+
+    def test_install_without_auth_flags_emits_no_security_values(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        captured = {}
+
+        def fake_helm(args, check=True, **kwargs):
+            captured["operator"] = args
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with patch("kaos_cli.install.check_helm_installed", return_value=True), patch(
+            "kaos_cli.install.run_helm_command", side_effect=fake_helm
+        ):
+            result = runner.invoke(
+                app,
+                ["system", "install", "--chart-path", "operator/chart"],
+            )
+
+        assert result.exit_code == 0, result.output
+        rendered = {
+            captured["operator"][i + 1]
+            for i, arg in enumerate(captured["operator"])
+            if arg == "--set"
+        }
+        assert not any(value.startswith("security.") for value in rendered)
 
     def test_gateway_api_strict_standalone_without_auth(self):
         """--gateway-api-strict alone emits the strict value without an auth preset."""

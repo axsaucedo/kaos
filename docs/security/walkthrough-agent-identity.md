@@ -20,16 +20,25 @@ The configured AIB issuer is the token `iss` value used by all verifiers. Gatewa
 
 ## OIDC issuer
 
-`oidc` is the issuer-selection abstraction for agent OAuth clients. Dynamic Client Registration (DCR), including per-agent client creation and credential delivery, is forthcoming. It is not an operational agent-identity flow today.
+`oidc` provides agent OAuth identity through RFC 7591/7592 Dynamic Client Registration (DCR). Select it with `--agent-auth-enabled keycloak`; add `--user-auth-enabled keycloak` when Keycloak should also provide user identity.
 
-The existing abstraction reserves the same provider-neutral runtime contract used by broker credentials: an issuer and token endpoint plus per-agent client credentials. A complete OIDC/DCR implementation must mint short-lived actor tokens for the `kaos-gateway` audience and publish signing keys for gateway and PDP verification.
+The operator registers one confidential OAuth client per Agent, stores the returned client id, client secret, and registration metadata in a per-agent Secret, and delivers the provider-neutral token endpoint and credential settings to the Agent pod. The runtime uses `client_credentials` to obtain short-lived actor tokens for the `kaos-gateway` audience. An Agent finalizer keeps the owned credential Secret available during deletion; the operator sends the RFC 7592 client deletion first, removes the Secret second, and only then releases the Agent for garbage collection.
+
+DCR needs one manual bootstrap step: create an initial access token in Keycloak and place it in the configured Secret before the operator starts. The CLI prints the exact command during installation, for example:
+
+```bash
+kubectl create secret generic kaos-oidc-registration \
+  -n kaos-system --from-literal=token=<token>
+```
+
+The Secret name and key come from `security.agentAuth.identity.oidc.registration.initialAccessTokenSecretRef`. The operator pod remains pending until the Secret exists; the bootstrap credential is not created by KAOS.
 
 ## Actor identity data
 
 The operator publishes issuer data in the policy ConfigMap:
 
 - `data.kaos.jwks` maps the exact actor-token issuer to its JWKS. The PDP selects this entry from `iss` and verifies the signature, exact issuer, `RS256` algorithm, and `kaos-gateway` audience.
-- `data.kaos.agents` maps a logical actor id such as `kaos://agent/demo/researcher` to its issuer-specific `issuer_sub`. This resolves a verified token `sub` to the KAOS actor used by authorization.
+- `data.kaos.agents` maps a logical actor id such as `kaos://agent/demo/researcher` to its issuer-specific identity and `autonomous` status. ServiceAccount tokens use `issuer_sub`. Keycloak client-credentials tokens carry the DCR `client_id` in `azp` and a separate service-account UUID in `sub`, so OIDC mappings use `issuer_azp`. This resolves a verified token to the KAOS actor used by authorization and controls whether the Agent may self-subject.
 
 ServiceAccount subjects require this mapping because their Kubernetes subject is not a KAOS resource id. Issuers that use the logical actor id directly as `sub` can be resolved without a mapping when no agent map is present.
 

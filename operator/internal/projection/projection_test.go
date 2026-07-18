@@ -90,6 +90,22 @@ func TestModelAPIEdgeProjectedWithoutMCPServers(t *testing.T) {
 	}
 }
 
+func TestDesiredAgentCarriesAutonomous(t *testing.T) {
+	state := Project([]Resource{
+		{Kind: AgentKind, Namespace: "demo", Name: "autonomous", ModelAPI: "gpt", Autonomous: true},
+		{Kind: AgentKind, Namespace: "demo", Name: "plain", ModelAPI: "gpt"},
+	})
+	if len(state.Agents) != 2 {
+		t.Fatalf("agents = %d, want 2", len(state.Agents))
+	}
+	if !state.Agents[0].Autonomous {
+		t.Fatalf("autonomous agent Autonomous = false, want true")
+	}
+	if state.Agents[1].Autonomous {
+		t.Fatalf("plain agent Autonomous = true, want false")
+	}
+}
+
 func TestAgentWithoutAnyEdgeIsSkipped(t *testing.T) {
 	state := Project([]Resource{mcpserver("github"), agent("idle", nil, "")})
 	if len(state.Agents) != 0 {
