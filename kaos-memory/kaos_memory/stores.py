@@ -569,7 +569,25 @@ class LongTermStore:
 
     def delete_scope(self, scope: Scope) -> None:
         """Erase every memory owned by ``scope`` (the scope-targeted erasure primitive)."""
-        self._memory.delete_all(**scope.owner_kwargs())
+        if scope.level in (ScopeLevel.USER, ScopeLevel.AGENT):
+            self._memory.delete_all(**scope.owner_kwargs())
+            return
+
+        filters = scope.search_filters(self.group)
+        try:
+            self._memory.delete_all(filters=filters)
+            return
+        except (TypeError, NotImplementedError):
+            # Mem0 2.0.10 has no filtered delete_all surface. Keep the fallback
+            # on its public APIs so a future engine upgrade remains testable.
+            pass
+
+        while True:
+            memories = self._results(self._memory.get_all(filters=filters, top_k=1000))
+            if not memories:
+                return
+            for memory in memories:
+                self._memory.delete(memory["id"])
 
     def ping(self) -> None:
         """Probe vector-store reachability without embedding (no model call).
