@@ -347,6 +347,10 @@ def create_app(service: MemoryService, request_concurrency: int = 8) -> FastAPI:
     @app.post("/v1/recall", response_model=RecallResponse)
     async def recall(req: RecallRequest) -> RecallResponse:
         """Synchronous recall: assemble long-term facts and short-term context for a scope."""
+        if not req.scope.is_complete():
+            return JSONResponse(
+                {"error": f"incomplete {req.scope.level.value} scope"}, status_code=400
+            )
         return await _offload(lambda: app.state.memory.recall(req))
 
     @app.post("/v1/write", response_model=WriteResponse)
