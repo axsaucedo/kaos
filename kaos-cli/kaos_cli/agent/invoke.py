@@ -9,6 +9,7 @@ import typer
 
 from kaos_cli.cluster_http import local_service_url
 from kaos_cli.config import load_config, session_token
+from kaos_cli.utils import current_context_namespace
 from kaos_cli.auth.consent import (
     active_service_alias,
     reauth_url,
@@ -132,21 +133,18 @@ def _invoke_gateway(name: str, namespace: str | None, message: str, user: str | 
     typer.echo(f"{mark} — {plain_access_reason(reason)}")
 
 
-def _is_autonomous(name: str, namespace: str) -> bool:
-    result = subprocess.run(
-        [
-            "kubectl",
-            "get",
-            "agent",
-            name,
-            "-n",
-            namespace,
-            "-o",
-            "jsonpath={.spec.config.autonomous.goal}",
-        ],
-        capture_output=True,
-        text=True,
-    )
+def _is_autonomous(name: str, namespace: str | None) -> bool:
+    cmd = [
+        "kubectl",
+        "get",
+        "agent",
+        name,
+        "-o",
+        "jsonpath={.spec.config.autonomous.goal}",
+    ]
+    if namespace:
+        cmd.extend(["-n", namespace])
+    result = subprocess.run(cmd, capture_output=True, text=True)
     return result.returncode == 0 and bool(result.stdout.strip())
 
 
@@ -162,14 +160,14 @@ def invoke_command(
     import httpx
 
     config = load_config()
-    configured_namespace = namespace or config.get("namespace") or "default"
+    direct_namespace = namespace or current_context_namespace()
     if user or (
         config["gateway"].get("through_gateway")
-        and not _is_autonomous(name, configured_namespace)
+        and not _is_autonomous(name, direct_namespace)
     ):
         _invoke_gateway(name, namespace, message, user)
         return
-    namespace = configured_namespace
+    namespace = direct_namespace
 
     # Find the service for this Agent
     cmd = [

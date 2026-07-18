@@ -4,6 +4,8 @@ import subprocess
 import sys
 import typer
 
+from kaos_cli.utils import current_context_namespace
+
 
 def create_rbac_command(
     name: str,
@@ -21,22 +23,7 @@ def create_rbac_command(
     """
     # Get namespace from current context if not specified
     if namespace is None:
-        try:
-            result = subprocess.run(
-                [
-                    "kubectl",
-                    "config",
-                    "view",
-                    "--minify",
-                    "-o",
-                    "jsonpath={..namespace}",
-                ],
-                capture_output=True,
-                text=True,
-            )
-            namespace = result.stdout.strip() or "default"
-        except Exception:
-            namespace = "default"
+        namespace = current_context_namespace() or "default"
 
     if read_only:
         verbs = ["get", "list", "watch"]
