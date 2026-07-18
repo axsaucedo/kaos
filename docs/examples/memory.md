@@ -68,10 +68,7 @@ The important part is the agent's `config.memory` block:
 
 ```bash
 kaos samples deploy memory -n "$NAMESPACE"
-kaos agent tools assistant -n "$NAMESPACE" --json
 ```
-
-The tool output shows `search_memory.parameters_json_schema.properties.level.enum` as `session`, `agent`, and `group`. Run the same command for `assistant-teamonly` to see its narrower `session`, `group` entitlement.
 
 ## Step 2: Wait for the Store and the Agent
 
@@ -90,7 +87,10 @@ for i in $(seq 1 60); do
   sleep 2
 done
 kubectl wait --for=condition=available deployment/agent-assistant -n "$NAMESPACE" --timeout=180s
+kaos agent tools assistant -n "$NAMESPACE" --json
 ```
+
+The tool output shows `search_memory.parameters_json_schema.properties.level.enum` as `session`, `agent`, and `group`. Run the same command for `assistant-teamonly` to see its narrower `session`, `group` entitlement.
 
 ## Step 3: Session 1 — Talk to the Agent
 
