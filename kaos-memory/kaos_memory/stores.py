@@ -557,6 +557,10 @@ class LongTermStore:
         if system_prompt:
             config["custom_fact_extraction_prompt"] = system_prompt
         self._memory = Memory.from_config(config)
+        # Mem0's dedup candidate search and insert are separate operations. Keep
+        # them atomic within a service replica so overlapping session folds see
+        # records that just finished consolidating.
+        self._consolidation_lock = threading.Lock()
         # A MemoryStore is the group boundary. Its configured vector collection
         # is the service's existing, always-present binding identity.
         self.group = block.collection_name
@@ -568,7 +572,8 @@ class LongTermStore:
 
     def add(self, scope: Scope, messages: Any, infer: bool = True) -> List[Dict[str, Any]]:
         """Store ``messages`` under ``scope``. With ``infer`` the engine extracts facts."""
-        raw = self._memory.add(messages, infer=infer, **scope.write_kwargs(self.group))
+        with self._consolidation_lock:
+            raw = self._memory.add(messages, infer=infer, **scope.write_kwargs(self.group))
         return self._results(raw)
 
     def recall(self, scope: Scope, query: str, top_k: int = 10) -> List[Dict[str, Any]]:

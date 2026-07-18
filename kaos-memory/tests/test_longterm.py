@@ -1,6 +1,9 @@
 """Unit tests for the long-term Mem0 adapter (scope isolation + erasure)."""
 
+import threading
+import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -224,6 +227,57 @@ def test_add_uses_compound_attribution_and_collection_group(tmp_path, offline_mo
         "agent_id": "agent-a",
         "metadata": {"kaos_run": "run-1", "kaos_group": "store-team"},
     }
+
+
+def test_concurrent_cross_session_adds_share_dedup_candidates(
+    tmp_path, offline_models, monkeypatch
+):
+    class _RacingMemory:
+        def __init__(self):
+            self.calls = []
+            self.records = []
+            self.first_entered = threading.Event()
+            self.second_entered = threading.Event()
+
+        @classmethod
+        def from_config(cls, config):
+            return cls()
+
+        def add(self, messages, **kwargs):
+            existing = bool(self.records)
+            self.calls.append(kwargs)
+            if len(self.calls) == 1:
+                self.first_entered.set()
+                self.second_entered.wait(timeout=0.1)
+            else:
+                self.second_entered.set()
+            time.sleep(0.01)
+            if not existing:
+                self.records.append("same durable preference")
+            return {"results": list(self.records)}
+
+    monkeypatch.setattr("kaos_memory.stores.Memory", _RacingMemory)
+    storage = StorageConfig(
+        type="local",
+        local=LocalStorage(path=str(tmp_path), collection_name="store-team"),
+    )
+    store = LongTermStore(storage, offline_models["summarization"], offline_models["embedding"])
+    first = Scope(
+        level=ScopeLevel.AGENT,
+        principal="alice",
+        agent_client_id="agent-a",
+        session_id="run-1",
+    )
+    second = first.model_copy(update={"session_id": "run-2"})
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        list(executor.map(lambda scope: store.add(scope, "same fact"), (first, second)))
+
+    assert store._memory.records == ["same durable preference"]
+    assert [call["metadata"]["kaos_run"] for call in store._memory.calls] == ["run-1", "run-2"]
+    assert all(call["user_id"] == "alice" for call in store._memory.calls)
+    assert all(call["agent_id"] == "agent-a" for call in store._memory.calls)
+    assert all("run_id" not in call for call in store._memory.calls)
 
 
 def test_filtered_delete_prefers_native_mem0_support(tmp_path, offline_models, monkeypatch):
