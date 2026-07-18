@@ -637,6 +637,12 @@ class TestSamples:
         store = next(doc for doc in docs if doc["kind"] == "MemoryStore")
         assert store["metadata"]["name"] == "support-memory"
         assert store["spec"]["storage"]["type"] == "local"
+        store_env = {
+            item["name"]: item["value"]
+            for item in store["spec"]["container"]["env"]
+        }
+        assert store_env["KAOS_MEMORY_TOKEN_BUDGET"] == "64"
+        assert store_env["KAOS_MEMORY_ROLLING_SUMMARY"] == "true"
 
         agents = {
             doc["metadata"]["name"]: doc for doc in docs if doc["kind"] == "Agent"
