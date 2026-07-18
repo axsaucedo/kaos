@@ -73,8 +73,14 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
+	startupSecurityConfig := security.GetConfig()
+	if err := startupSecurityConfig.Validate(); err != nil {
+		setupLog.Error(err, "invalid security configuration")
+		os.Exit(1)
+	}
+
 	restConfig := ctrl.GetConfigOrDie()
-	if security.GetConfig().ServiceAccountIdentityEnabled() {
+	if startupSecurityConfig.ServiceAccountIdentityEnabled() {
 		issuerKeys, discoveryErr := authz.DiscoverServiceAccountIssuer(context.Background(), restConfig)
 		if discoveryErr != nil {
 			setupLog.Error(discoveryErr, "unable to discover Kubernetes ServiceAccount issuer")
