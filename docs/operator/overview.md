@@ -18,6 +18,7 @@ flowchart TB
         mr["ModelAPIReconciler"]
         mcpr["MCPServerReconciler"]
         msr["MemoryStoreReconciler"]
+        aibr["AIB token-exchange reflector"]
     end
     
     subgraph user["User Namespace"]
@@ -31,11 +32,13 @@ flowchart TB
     crd2 --> mr
     crd3 --> mcpr
     crd4 --> msr
+    AIB["AIB admin API"] --> aibr
     
     ar --> ad
     mr --> md
     mcpr --> mcpd
     msr --> msd
+    aibr --> egress["Generated egress Backends<br/>+ HTTPRoutes + ext_proc policies"]
 ```
 
 ## Controllers
@@ -125,6 +128,10 @@ Manages MemoryStore custom resources (the central memory service backing long-te
    - Report health and the service endpoint
 
 See [Memory Architecture](./memory-architecture.md) for the full design.
+
+### AIB token-exchange reflection
+
+When token exchange is enabled, third-party services and Agent permission-set bindings are administered in AIB rather than a KAOS CRD. The operator polls AIB, keeps each matching Agent record's stable `kaos/<namespace>/<name>` key and DCR `client_id` current, generates FQDN egress Backends and HTTPRoutes, attaches ext_proc only to those generated routes, and injects protected-resource targets only into bound Agent pods.
 
 ## Resource Dependencies
 

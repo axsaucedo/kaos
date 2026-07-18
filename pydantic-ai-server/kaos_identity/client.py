@@ -169,34 +169,50 @@ def outcome_from_response(
 ) -> Optional[AccessDecision]:
     """Map a KAOS-gateway enforcement response to a structured :class:`AccessDecision`.
 
-    Reads only response *headers* — never the body — so it is safe to call on any
-    instrumented outbound response, including streaming ones. Returns ``None`` for
-    any response without the gateway enforcement header (``x-kaos-access-reason``),
-    so ordinary traffic and non-KAOS 4xx/5xx responses are unaffected. When the
-    header is present the decision is always a denial: an ext_authz denial carries
-    the platform/user reason with no URL, while an ext_proc re-auth response carries
-    ``third_party_reauth_required`` plus a ``x-kaos-reauth-url``.
+    The normal gateway contract uses headers. AIB ext_proc instead returns an HTTP
+    200 JSON-RPC ``-32042`` URL elicitation body, which is also recognized when the
+    response body is already buffered. Streaming bodies are never consumed here.
     """
     headers = getattr(response, "headers", None)
-    if not headers:
+    if headers:
+        reason = headers.get(HEADER_ACCESS_REASON)
+        if reason:
+            return AccessDecision(
+                allowed=False,
+                reason=str(reason),
+                resource=resource,
+                action=action,
+                reauth_url=headers.get(HEADER_REAUTH_URL) or None,
+            )
+    if getattr(response, "is_stream_consumed", True) is False:
         return None
-    reason = headers.get(HEADER_ACCESS_REASON)
-    if not reason:
+    try:
+        data = response.json()
+        error = data.get("error", {})
+        elicitations = error.get("data", {}).get("elicitations", [])
+        elicitation = elicitations[0]
+        if error.get("code") != -32042 or elicitation.get("mode") != "url":
+            return None
+        reauth_url = elicitation.get("url")
+        if not reauth_url:
+            return None
+    except (AttributeError, IndexError, TypeError, ValueError):
         return None
     return AccessDecision(
         allowed=False,
-        reason=str(reason),
+        reason="third_party_reauth_required",
         resource=resource,
         action=action,
-        reauth_url=headers.get(HEADER_REAUTH_URL) or None,
+        reauth_url=str(reauth_url),
+        raw=data,
     )
 
 
 def raise_for_gateway_outcome(response: Any, *, resource: str = "", action: str = "") -> None:
     """Raise a typed outcome when ``response`` carries a KAOS-gateway denial.
 
-    A no-op for any response that does not carry the gateway enforcement header,
-    so it is safe to call unconditionally on every instrumented outbound response.
+    A no-op for responses that carry neither a gateway enforcement header nor an
+    AIB URL elicitation.
     A ``user_grant_required`` / ``platform_grant_missing`` ext_authz denial raises
     :class:`AccessDenied`; an ext_proc ``third_party_reauth_required`` (which carries
     a re-auth URL) raises :class:`ReauthenticationRequired`.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
+	"fmt"
 	"net/http"
 	"os"
 	"strconv"
@@ -44,6 +45,7 @@ var (
 //+kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gateways,verbs=get;list;watch
 //+kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=referencegrants,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=gateway.envoyproxy.io,resources=securitypolicies,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=gateway.envoyproxy.io,resources=backends;envoyextensionpolicies,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=networking.k8s.io,resources=networkpolicies,verbs=get;list;watch;create;update;patch;delete
 
 func init() {
@@ -176,6 +178,28 @@ func main() {
 			Namespaces:   projectionNamespaces,
 		})
 	}
+	if getBoolWithDefault("TOKEN_EXCHANGE_ENABLED", false) {
+		exchangeAdminURL := os.Getenv("TOKEN_EXCHANGE_AIB_ADMIN_URL")
+		if exchangeAdminURL == "" {
+			setupLog.Error(fmt.Errorf("TOKEN_EXCHANGE_AIB_ADMIN_URL is empty"), "invalid token exchange configuration")
+			os.Exit(1)
+		}
+		projectors = append(projectors, &adapters.ExchangeProjector{
+			Client: mgr.GetClient(),
+			Scheme: mgr.GetScheme(),
+			AIB: aib.New(
+				exchangeAdminURL,
+				getEnvWithDefault("TOKEN_EXCHANGE_AIB_PRINCIPAL", "kaos-operator"),
+				getEnvWithDefault("TOKEN_EXCHANGE_AIB_PRINCIPAL_HEADER", "X-Remote-User"),
+				getDurationWithDefault("AIB_REQUEST_TIMEOUT", 10*time.Second),
+			),
+			Enabled:          true,
+			OIDCSecretPrefix: cfg.CredentialSecretPrefixOrDefault(),
+			ExtProcName:      os.Getenv("TOKEN_EXCHANGE_EXTPROC_SERVICE_NAME"),
+			ExtProcNamespace: os.Getenv("TOKEN_EXCHANGE_EXTPROC_NAMESPACE"),
+			ExtProcPort:      getIntWithDefault("TOKEN_EXCHANGE_EXTPROC_PORT", 50051),
+		})
+	}
 	if policyName != "" && policyNamespace != "" {
 		policyDataSource := cfg.PolicyDataSourceOrDefault()
 		projectors = append(projectors, &adapters.AuthzPolicyProjector{
@@ -204,6 +228,7 @@ func main() {
 		AuthorizationOperational: policyName != "" && policyNamespace != "",
 		AccessGrantProjection:    policyName != "" && policyNamespace != "" && cfg.PolicyDataSourceOrDefault() == security.PolicyDataAutomated && !cfg.PolicyRegoOverride,
 		Recorder:                 mgr.GetEventRecorderFor("kaos-authz-projection"),
+		PollInterval:             tokenExchangePollInterval(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "AuthzProjection")
 		os.Exit(1)
@@ -226,6 +251,13 @@ func main() {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)
 	}
+}
+
+func tokenExchangePollInterval() time.Duration {
+	if !getBoolWithDefault("TOKEN_EXCHANGE_ENABLED", false) {
+		return 0
+	}
+	return getDurationWithDefault("TOKEN_EXCHANGE_POLL_INTERVAL", 45*time.Second)
 }
 
 func getEnvWithDefault(key, defaultValue string) string {
@@ -254,6 +286,14 @@ func getDurationWithDefault(key string, defaultValue time.Duration) time.Duratio
 	}
 	parsed, err := time.ParseDuration(v)
 	if err != nil {
+		return defaultValue
+	}
+	return parsed
+}
+
+func getIntWithDefault(key string, defaultValue int) int {
+	parsed, err := strconv.Atoi(strings.TrimSpace(os.Getenv(key)))
+	if err != nil || parsed <= 0 {
 		return defaultValue
 	}
 	return parsed

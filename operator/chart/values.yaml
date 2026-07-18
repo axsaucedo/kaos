@@ -74,6 +74,19 @@ gateway:
 # protected routes so requests are allowed or denied based on the calling
 # agent's granted permissions. Disabled by default — routing is unchanged.
 security:
+  # tokenExchange enables delegated third-party access through a self-managed
+  # AIB release. It requires OIDC agent identity and the Keycloak user plane.
+  # Static per-MCP credentials remain the default when disabled.
+  tokenExchange:
+    enabled: false
+    aib:
+      adminUrl: ""
+      adminPrincipal: "kaos-operator"
+      adminPrincipalHeader: "X-Remote-User"
+    extProc:
+      serviceName: ""
+      namespace: ""
+      port: 50051
   # pdp runs stock OPA with the Envoy ext_authz gRPC plugin. It is disabled
   # until gateway enforcement is enabled separately.
   pdp:

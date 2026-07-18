@@ -26,6 +26,16 @@ x-agent-authorization: Bearer <actor-jwt>
 
 The gateway's agent JWT provider validates the token against the selected issuer and requires audience `kaos-gateway`. ServiceAccount mode uses the discovered Kubernetes issuer and an inline JWKS. AIB mode uses the single configured AIB issuer URL and its JWKS; the broker must mint agent tokens with `kaos-gateway` in their audience claim.
 
+## Delegated third-party token exchange
+
+`kaos system install --token-exchange-enabled` is an optional Keycloak-only posture for agents acting as the requesting user against an external OAuth service. Services, scopes, protected-resource URL prefixes, and Agent permission-set bindings are administered in AIB. Every 45 seconds the operator reads AIB, keeps the bound Agent record keyed by `kaos/<namespace>/<name>` and its Keycloak DCR `client_id` current, generates the required FQDN `Backend`, `HTTPRoute`, and route `SecurityPolicy`, and injects re-mint targets only into bound Agents. It attaches AIB ext_proc only to routes carrying its generated-egress label; internal Agent, MCPServer, ModelAPI, and MemoryStore routes can never be selected. Static per-MCP credentials remain the default when the feature is off.
+
+The protected-resource hostname is both the hostname matched by the generated route and the origin used by its generated Backend. Infrastructure sends the Agent's request through the gateway while Envoy resolves that same hostname to the real third party. The operator derives all egress plumbing from AIB; administrators do not create Kubernetes Services, routes, or annotations for an integration.
+
+The operator never creates AIB services or permission sets. AIB is the declaration and audit surface; Kubernetes contains only reflected plumbing. Reflection is poll-based and fail-static when AIB is unavailable.
+
+The runtime re-mint is implemented separately. Its contract is an `Authorization: Bearer <token>` header containing a Keycloak token with the original user `sub`, the acting Agent's DCR client id in `azp`, and `token-exchange-broker` in `aud`. The PDP requires that `azp` to match the verified actor's projected DCR client id, so unbound or non-reminted egress is denied before ext_proc. The chart orders gateway filters as `jwt_authn`, then the PDP `ext_authz`, then `ext_proc`; ext_proc is fail closed and replaces that header only on the dedicated third-party route.
+
 ServiceAccount token subjects have the form `system:serviceaccount:<namespace>:<serviceaccount-name>`. The policy resolves that issuer subject to the logical actor id through `data.kaos.agents`.
 
 ### Resource identity

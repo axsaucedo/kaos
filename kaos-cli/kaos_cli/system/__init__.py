@@ -107,6 +107,12 @@ def install(
         "--pgvector-memory-enabled",
         help="Provision a development pgvector Postgres for external-mode MemoryStores (dev-only).",
     ),
+    token_exchange_enabled: bool = typer.Option(
+        False,
+        "--token-exchange-enabled",
+        help="Enable delegated third-party token exchange. Requires Keycloak agent "
+        "identity, the Keycloak user plane, and a self-managed AIB release.",
+    ),
     agent_auth_enabled: str | None = typer.Option(
         None,
         "--agent-auth-enabled",
@@ -174,8 +180,38 @@ def install(
         raise typer.Exit(1)
 
     auth_kwargs: dict = {}
-    if agent_auth_enabled is not None or user_auth_enabled is not None:
-        agent_mode = agent_auth_enabled or DEFAULT_AGENT_AUTH_MODE
+    if token_exchange_enabled:
+        if agent_auth_enabled not in (None, "keycloak"):
+            typer.echo(
+                "Error: --token-exchange-enabled requires "
+                "--agent-auth-enabled keycloak; service-account-only and AIB "
+                "identity postures cannot re-mint user tokens.",
+                err=True,
+            )
+            raise typer.Exit(1)
+        if user_auth_enabled not in (None, "keycloak"):
+            typer.echo(
+                "Error: --token-exchange-enabled requires "
+                "--user-auth-enabled keycloak.",
+                err=True,
+            )
+            raise typer.Exit(1)
+        if not aib_chart_path:
+            typer.echo(
+                "Error: --token-exchange-enabled requires --aib-chart-path so "
+                "the self-managed AIB release can be installed with ext_proc.",
+                err=True,
+            )
+            raise typer.Exit(1)
+
+    if (
+        agent_auth_enabled is not None
+        or user_auth_enabled is not None
+        or token_exchange_enabled
+    ):
+        agent_mode = agent_auth_enabled or (
+            "keycloak" if token_exchange_enabled else DEFAULT_AGENT_AUTH_MODE
+        )
         user_mode = user_auth_enabled or DEFAULT_USER_AUTH_MODE
         if agent_mode not in AGENT_AUTH_MODES:
             typer.echo(
@@ -203,6 +239,7 @@ def install(
         gateway_enabled=gateway_enabled,
         metallb_enabled=metallb_enabled,
         pgvector_memory_enabled=pgvector_memory_enabled,
+        token_exchange_enabled=token_exchange_enabled,
         chart_path=chart_path,
         auth_namespace=auth_namespace,
         keycloak_namespace=keycloak_namespace,

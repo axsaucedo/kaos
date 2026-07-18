@@ -34,7 +34,7 @@ func TestConstructAgentDeploymentUsesProjectedServiceAccountIdentity(t *testing.
 	t.Setenv("SECURITY_AGENT_AUTH_IDENTITY_PROVIDER", "serviceaccount")
 	t.Setenv("DEFAULT_AGENT_IMAGE", "example/agent:test")
 	agent := newAgent("demo", "researcher")
-	deployment, err := (&AgentReconciler{}).constructDeployment(agent, &kaosv1alpha1.ModelAPI{}, map[string]string{}, map[string]string{}, "")
+	deployment, err := (&AgentReconciler{}).constructDeployment(agent, &kaosv1alpha1.ModelAPI{}, map[string]string{}, map[string]string{}, "", "")
 	if err != nil {
 		t.Fatalf("constructDeployment: %v", err)
 	}

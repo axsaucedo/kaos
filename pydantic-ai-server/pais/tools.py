@@ -79,7 +79,7 @@ class DelegationToolset(AbstractToolset["AgentDeps"]):
                 )
             tool_name = f"{DELEGATION_TOOL_PREFIX}{name}"
             tools[tool_name] = ToolsetTool(
-                toolset=self,  # ty: ignore[invalid-argument-type]
+                toolset=self,
                 tool_def=ToolDefinition(
                     name=tool_name,
                     description=desc,

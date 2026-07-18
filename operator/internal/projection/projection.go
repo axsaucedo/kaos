@@ -109,6 +109,12 @@ func AgentExternalID(namespace, name string) string {
 	return ResolveLogicalID(AgentSlug, namespace, name)
 }
 
+// AIBAgentExternalID is the stable logical name used by the exchange broker.
+// It deliberately does not use the DCR client UUID or the internal kaos:// ID.
+func AIBAgentExternalID(namespace, name string) string {
+	return fmt.Sprintf("kaos/%s/%s", namespace, name)
+}
+
 // IsKAOSServiceClientID reports whether a broker service client_id was projected
 // by KAOS (and is therefore safe to prune).
 func IsKAOSServiceClientID(clientID string) bool {

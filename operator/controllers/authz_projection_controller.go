@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apiMeta "k8s.io/apimachinery/pkg/api/meta"
@@ -50,6 +51,7 @@ type AuthzProjectionReconciler struct {
 	AuthorizationOperational bool
 	AccessGrantProjection    bool
 	Recorder                 record.EventRecorder
+	PollInterval             time.Duration
 }
 
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
@@ -57,6 +59,7 @@ type AuthzProjectionReconciler struct {
 //+kubebuilder:rbac:groups=kaos.tools,resources=accessgrants/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=kaos.tools,resources=agents,verbs=get;list;watch;update;patch
 //+kubebuilder:rbac:groups=kaos.tools,resources=agents/finalizers,verbs=update;patch
+//+kubebuilder:rbac:groups="",resources=configmaps,verbs=get;list;watch;create;update;patch;delete
 
 // SetupWithManager registers the controller. Every watched-resource change funnels
 // to the sentinel request so bursts coalesce into a single whole-world reconcile.
@@ -119,7 +122,7 @@ func (r *AuthzProjectionReconciler) Reconcile(ctx context.Context, _ reconcile.R
 		}
 	}
 	if len(r.Projectors) == 0 {
-		return reconcile.Result{}, nil
+		return reconcile.Result{RequeueAfter: r.PollInterval}, nil
 	}
 	resources, err := r.listResources(ctx)
 	if err != nil {
@@ -131,18 +134,22 @@ func (r *AuthzProjectionReconciler) Reconcile(ctx context.Context, _ reconcile.R
 			desired.AccessGrants = append(desired.AccessGrants, accessGrantForProjection(&accessGrants[i]))
 		}
 	}
+	var projectorErrors []error
 	for _, projector := range r.Projectors {
 		if err := projector.Apply(ctx, desired); err != nil {
-			var statusErrors []error
-			for i := range accessGrants {
-				if r.AuthorizationOperational && hasUserProvider && r.AccessGrantProjection {
-					if statusErr := r.updateAccessGrantStatus(ctx, &accessGrants[i], metav1.ConditionFalse, "ProjectionFailed", "Policy projection failed; this AccessGrant is not currently enforced"); statusErr != nil {
-						statusErrors = append(statusErrors, fmt.Errorf("updating AccessGrant %s/%s failure status: %w", accessGrants[i].Namespace, accessGrants[i].Name, statusErr))
-					}
+			projectorErrors = append(projectorErrors, err)
+		}
+	}
+	if len(projectorErrors) > 0 {
+		var statusErrors []error
+		for i := range accessGrants {
+			if r.AuthorizationOperational && hasUserProvider && r.AccessGrantProjection {
+				if statusErr := r.updateAccessGrantStatus(ctx, &accessGrants[i], metav1.ConditionFalse, "ProjectionFailed", "Policy projection failed; this AccessGrant is not currently enforced"); statusErr != nil {
+					statusErrors = append(statusErrors, fmt.Errorf("updating AccessGrant %s/%s failure status: %w", accessGrants[i].Namespace, accessGrants[i].Name, statusErr))
 				}
 			}
-			return reconcile.Result{}, errors.Join(err, errors.Join(statusErrors...))
 		}
+		return reconcile.Result{}, errors.Join(errors.Join(projectorErrors...), errors.Join(statusErrors...))
 	}
 	if r.AuthorizationOperational && hasUserProvider && r.AccessGrantProjection {
 		for i := range accessGrants {
@@ -151,7 +158,7 @@ func (r *AuthzProjectionReconciler) Reconcile(ctx context.Context, _ reconcile.R
 			}
 		}
 	}
-	return reconcile.Result{}, nil
+	return reconcile.Result{RequeueAfter: r.PollInterval}, nil
 }
 
 // listResources reads every watched KAOS kind via the typed client and maps each

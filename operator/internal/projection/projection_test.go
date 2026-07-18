@@ -46,6 +46,9 @@ func TestEncodingConventions(t *testing.T) {
 	if got := AgentExternalID("demo", "researcher"); got != "kaos://agent/demo/researcher" {
 		t.Fatalf("agent external_id = %q", got)
 	}
+	if got := AIBAgentExternalID("demo", "researcher"); got != "kaos/demo/researcher" {
+		t.Fatalf("AIB agent external_id = %q", got)
+	}
 }
 
 func TestProjectFullGraph(t *testing.T) {

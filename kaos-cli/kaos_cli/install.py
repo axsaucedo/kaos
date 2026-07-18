@@ -37,6 +37,7 @@ DEFAULT_AUTH_RELEASE = "aib"
 DEFAULT_CREDENTIAL_SECRET_PREFIX = "kaos-aib"
 AUTH_ENDUSER_PORT = 8000
 AUTH_ADMIN_PORT = 14000
+AUTH_EXTPROC_PORT = 50051
 
 
 # Independent agent and user identity modes selected by the install flags.
@@ -54,6 +55,7 @@ KEYCLOAK_HTTP_PORT = 8080
 DEFAULT_USER_AUTH_REALM = "kaos"
 DEFAULT_USER_AUTH_AUDIENCE = "kaos"
 DEFAULT_USER_AUTH_CLIENT_ID = "kaos"
+DEFAULT_TOKEN_EXCHANGE_AUDIENCE = "token-exchange-broker"
 DEFAULT_OIDC_CREDENTIAL_SECRET_PREFIX = "kaos-oidc"
 DEFAULT_OIDC_REGISTRATION_SECRET_NAME = "kaos-oidc-registration"
 DEFAULT_OIDC_REGISTRATION_SECRET_KEY = "token"
@@ -107,7 +109,7 @@ def _run_kubectl(
     return subprocess.run(cmd, capture_output=True, text=True, check=check, **kwargs)
 
 
-def _install_gateway_api() -> bool:
+def _install_gateway_api(enable_backend: bool = False) -> bool:
     """Install Envoy Gateway (includes Gateway API CRDs) and create GatewayClass."""
     typer.echo(f"Installing Envoy Gateway ({ENVOY_GATEWAY_VERSION})...")
 
@@ -162,21 +164,22 @@ def _install_gateway_api() -> bool:
                 check=False,
             )
 
-    result = run_helm_command(
-        [
-            "upgrade",
-            "--install",
-            "envoy-gateway",
-            "oci://docker.io/envoyproxy/gateway-helm",
-            "--version",
-            ENVOY_GATEWAY_VERSION,
-            "--namespace",
-            "envoy-gateway-system",
-            "--create-namespace",
-        ]
-        + (["--skip-crds"] if crd_pre_applied else []),
-        check=False,
-    )
+    helm_args = [
+        "upgrade",
+        "--install",
+        "envoy-gateway",
+        "oci://docker.io/envoyproxy/gateway-helm",
+        "--version",
+        ENVOY_GATEWAY_VERSION,
+        "--namespace",
+        "envoy-gateway-system",
+        "--create-namespace",
+    ] + (["--skip-crds"] if crd_pre_applied else [])
+    if enable_backend:
+        helm_args.extend(
+            ["--set", "config.envoyGateway.extensionApis.enableBackend=true"]
+        )
+    result = run_helm_command(helm_args, check=False)
     if result.returncode != 0:
         typer.echo(f"Error installing Envoy Gateway: {result.stderr}", err=True)
         return False
@@ -810,6 +813,57 @@ def _build_aib_broker_public_url_args(public_url: str) -> list[str]:
     return ["--set", f"broker.server.enduser.publicUrl={public_url}"]
 
 
+def _build_token_exchange_aib_args(
+    auth_namespace: str,
+    auth_release: str,
+    keycloak_issuer: str,
+) -> list[str]:
+    """Configure the self-managed AIB release for Keycloak-backed exchange."""
+    aib_issuer = _default_auth_issuer(auth_namespace, auth_release)
+    keycloak_token_endpoint = f"{keycloak_issuer}/protocol/openid-connect/token"
+    keycloak_authorize_endpoint = f"{keycloak_issuer}/protocol/openid-connect/auth"
+    extra_env = [
+        {"name": "EXTPROC_OAUTH2_ISSUER", "value": keycloak_issuer},
+        {"name": "EXTPROC_OAUTH2_CLIENT_ID", "value": DEFAULT_USER_AUTH_CLIENT_ID},
+        {
+            "name": "EXTPROC_OAUTH2_CLIENT_SECRET",
+            "value": DEFAULT_USER_AUTH_CLIENT_SECRET,
+        },
+        {"name": "EXTPROC_OAUTH2_CLIENT_ASSERTION_TYPE", "value": "access_token"},
+    ]
+    return [
+        "--set",
+        f"broker.server.enduser.publicUrl={aib_issuer}",
+        "--set",
+        "broker.oauth2AuthorizationServer.mode=proxy",
+        "--set",
+        f"broker.oauth2AuthorizationServer.proxy.upstreamIssuerUri={keycloak_issuer}",
+        "--set",
+        "broker.oauth2AuthorizationServer.proxy.upstreamAuthorizeEndpoint="
+        f"{keycloak_authorize_endpoint}",
+        "--set",
+        f"broker.oauth2AuthorizationServer.proxy.upstreamTokenEndpoint={keycloak_token_endpoint}",
+        "--set",
+        f"broker.tokenExchange.expectedAudience={DEFAULT_TOKEN_EXCHANGE_AUDIENCE}",
+        "--set",
+        "broker.tokenExchange.claimExtraction.principalExpression=subject_token.sub",
+        "--set",
+        "broker.tokenExchange.claimExtraction.agentIdExpression="
+        "resolveAgentIdByClientId(subject_token.azp)",
+        "--set",
+        "broker.tokenExchange.authorization.type=cel",
+        "--set",
+        "broker.tokenExchange.authorization.cel.expression="
+        f'client_assertion.azp == "{DEFAULT_USER_AUTH_CLIENT_ID}"',
+        "--set",
+        "extProc.enabled=true",
+        "--set",
+        f"extProc.oauth2.clientCredentialsEndpoint={keycloak_token_endpoint}",
+        "--set-json",
+        f"extProc.extraEnv={json.dumps(extra_env, separators=(',', ':'))}",
+    ]
+
+
 def _keycloak_realm_json(
     realm: str,
     client_id: str,
@@ -866,6 +920,16 @@ def _keycloak_realm_json(
                         "protocolMapper": "oidc-audience-mapper",
                         "config": {
                             "included.client.audience": audience,
+                            "id.token.claim": "false",
+                            "access.token.claim": "true",
+                        },
+                    },
+                    {
+                        "name": "token-exchange-audience",
+                        "protocol": "openid-connect",
+                        "protocolMapper": "oidc-audience-mapper",
+                        "config": {
+                            "included.custom.audience": DEFAULT_TOKEN_EXCHANGE_AUDIENCE,
                             "id.token.claim": "false",
                             "access.token.claim": "true",
                         },
@@ -978,7 +1042,9 @@ def _bootstrap_keycloak_realm(
     return True
 
 
-def _keycloak_dev_manifests(namespace: str, release: str) -> list[dict]:
+def _keycloak_dev_manifests(
+    namespace: str, release: str, token_exchange_enabled: bool = False
+) -> list[dict]:
     """Self-contained Keycloak dev deployment (start-dev, H2 in-memory, no DB).
 
     Mounts the realm-import ConfigMap and runs with --import-realm so the
@@ -987,6 +1053,10 @@ def _keycloak_dev_manifests(namespace: str, release: str) -> list[dict]:
     """
     labels = {"app": release}
     configmap_name = _keycloak_realm_configmap_name(release)
+    args = ["start-dev", "--import-realm"]
+    if token_exchange_enabled:
+        args.append("--features=token-exchange,admin-fine-grained-authz")
+
     deployment = {
         "apiVersion": "apps/v1",
         "kind": "Deployment",
@@ -1001,7 +1071,7 @@ def _keycloak_dev_manifests(namespace: str, release: str) -> list[dict]:
                         {
                             "name": "keycloak",
                             "image": DEFAULT_KEYCLOAK_IMAGE,
-                            "args": ["start-dev", "--import-realm"],
+                            "args": args,
                             "env": [
                                 {
                                     "name": "KEYCLOAK_ADMIN",
@@ -1057,6 +1127,7 @@ def _install_keycloak(
     audience: str,
     chart_path: str | None,
     wait: bool,
+    token_exchange_enabled: bool = False,
 ) -> bool:
     """Install Keycloak as the human user identity provider.
 
@@ -1087,7 +1158,9 @@ def _install_keycloak(
             typer.echo(f"Error installing Keycloak: {result.stderr}", err=True)
             return False
     else:
-        for manifest in _keycloak_dev_manifests(namespace, release):
+        for manifest in _keycloak_dev_manifests(
+            namespace, release, token_exchange_enabled
+        ):
             result = _run_kubectl(
                 ["apply", "-f", "-"], check=False, input=json.dumps(manifest)
             )
@@ -1185,6 +1258,7 @@ def install_command(
     gateway_enabled: bool = False,
     metallb_enabled: bool = False,
     pgvector_memory_enabled: bool = False,
+    token_exchange_enabled: bool = False,
     chart_path: str | None = None,
     auth_enabled: bool = False,
     auth_namespace: str = DEFAULT_AUTH_NAMESPACE,
@@ -1231,7 +1305,7 @@ def install_command(
             typer.echo("Warning: MetalLB installation failed, continuing...", err=True)
 
     if gateway_enabled:
-        if not _install_gateway_api():
+        if not _install_gateway_api(enable_backend=token_exchange_enabled):
             typer.echo(
                 "Warning: Gateway API installation failed, continuing...", err=True
             )
@@ -1267,8 +1341,18 @@ def install_command(
 
         # Install the identity broker from a local chart when provided (it is
         # unpublished, so a chart path is required to install it here).
-        if identity_provider == "aib" and aib_chart_path:
-            aib_extra_set = _build_aib_broker_public_url_args(resolved_auth_issuer)
+        if (identity_provider == "aib" or token_exchange_enabled) and aib_chart_path:
+            if token_exchange_enabled:
+                keycloak_issuer = user_auth_issuer or _default_user_auth_issuer(
+                    keycloak_namespace, keycloak_release
+                )
+                aib_extra_set = _build_token_exchange_aib_args(
+                    auth_namespace,
+                    auth_release,
+                    keycloak_issuer,
+                )
+            else:
+                aib_extra_set = _build_aib_broker_public_url_args(resolved_auth_issuer)
             if not _install_aib(
                 auth_namespace,
                 auth_release,
@@ -1300,6 +1384,7 @@ def install_command(
                 user_auth_audience,
                 keycloak_chart_path,
                 wait,
+                token_exchange_enabled,
             ):
                 typer.echo(
                     "Warning: Keycloak installation failed, continuing...", err=True
@@ -1440,6 +1525,23 @@ def install_command(
                 policy_configmap_namespace=policy_configmap_namespace or "",
             )
         )
+        if token_exchange_enabled:
+            helm_args.extend(
+                [
+                    "--set",
+                    "security.tokenExchange.enabled=true",
+                    "--set",
+                    "security.tokenExchange.aib.adminUrl="
+                    f"{_default_auth_admin_url(auth_namespace, auth_release)}",
+                    "--set",
+                    "security.tokenExchange.extProc.serviceName="
+                    f"{auth_release}-agentic-identity-broker-extproc",
+                    "--set",
+                    f"security.tokenExchange.extProc.namespace={auth_namespace}",
+                    "--set",
+                    f"security.tokenExchange.extProc.port={AUTH_EXTPROC_PORT}",
+                ]
+            )
     elif gateway_api_strict:
         # Strict gateway-only traffic is a standalone posture: it applies even
         # without an authorization enforcement hook, so emit it directly when

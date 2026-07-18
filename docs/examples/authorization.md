@@ -322,3 +322,189 @@ code=$(curl -sS -o /dev/null -w '%{http_code}' \
 ```
 
 Authorization projection and mounted OPA data are eventually consistent. After a grant, issuer, or DCR mapping changes, allow up to 90 seconds for the new policy to appear before treating a denial as final.
+
+## Manual AIB-native token-exchange runbook
+
+This final walkthrough is `.noeval`. It is a manual production runbook for a self-managed AIB deployment and mirrors the passing wire evaluation. The `researcher` Agent must have a tool that calls the protected resource configured below.
+
+### Production flow
+
+Install KAOS with Keycloak for user and Agent identity and enable the self-managed AIB integration. `--token-exchange-enabled` makes the operator reflect AIB data; it does not create AIB services or permission sets.
+
+```bash .noeval
+set -euo pipefail
+REPO_ROOT=$(git rev-parse --show-toplevel)
+AIB_CHART_PATH=/path/to/agentic-identity-broker/chart
+
+kaos system install --gateway-enabled --metallb-enabled \
+  --agent-auth-enabled keycloak --user-auth-enabled keycloak \
+  --token-exchange-enabled --aib-chart-path "$AIB_CHART_PATH" \
+  --chart-path "$REPO_ROOT/operator/chart" --wait
+```
+
+Keycloak 26 must have the `token-exchange` and `admin-fine-grained-authz` features enabled. Create the `token-exchange-broker` target client, allow the `researcher` DCR client to exchange to it, and configure its audience mapper to emit exactly `aud=token-exchange-broker`. A missing feature returns `400 unsupported_grant_type`; a missing per-client permission returns `403 Client not allowed to exchange`.
+
+Set the production service values. The protected-resource hostname is both the Agent-facing hostname matched by the generated route and the generated Backend origin. Production infrastructure must force the Agent's request through the gateway while Envoy resolves the same hostname to the internet.
+
+```bash .noeval
+NAMESPACE=token-exchange-demo
+AGENT=researcher
+PROTECTED_RESOURCE=https://api.github.com/user
+THIRD_PARTY_ISSUER=https://github.com
+THIRD_PARTY_AUTHORIZE_ENDPOINT=https://github.com/login/oauth/authorize
+THIRD_PARTY_TOKEN_ENDPOINT=https://github.com/login/oauth/access_token
+THIRD_PARTY_SCOPE=read:user
+THIRD_PARTY_CLIENT_ID='replace-with-github-oauth-client-id'
+THIRD_PARTY_CLIENT_SECRET='replace-with-github-oauth-client-secret'
+```
+
+Administer the service, permission set, and Agent binding through AIB's admin API. The local port-forward and `X-Remote-User` header below match the self-managed evaluation configuration; use authenticated admin access in production.
+
+```bash .noeval
+kubectl port-forward -n aib-system svc/aib-agentic-identity-broker 14000:14000 >./tmp/aib-admin-port-forward.log 2>&1 &
+AIB_ADMIN=http://localhost:14000/api
+ADMIN_HEADER='X-Remote-User: kaos-operator'
+
+SERVICE_ID=$(curl --max-time 60 -fsS -X POST "$AIB_ADMIN/services" \
+  -H "$ADMIN_HEADER" -H 'Content-Type: application/json' \
+  -d "$(jq -n \
+    --arg client_id "$THIRD_PARTY_CLIENT_ID" \
+    --arg client_secret "$THIRD_PARTY_CLIENT_SECRET" \
+    --arg issuer "$THIRD_PARTY_ISSUER" \
+    --arg authorize "$THIRD_PARTY_AUTHORIZE_ENDPOINT" \
+    --arg token "$THIRD_PARTY_TOKEN_ENDPOINT" \
+    --arg scope "$THIRD_PARTY_SCOPE" \
+    --arg resource "$PROTECTED_RESOURCE" \
+    '{display_name:"GitHub",client_id:$client_id,client_secret:$client_secret,oauth2_flavor:"github",issuer_uri:$issuer,discovery:{enable_discovery:false},endpoints:{authorize_endpoint:$authorize,token_endpoint:$token},scopes:[{scope_value:$scope,description:"Read the GitHub user profile"}],protected_resources:[$resource]}')" \
+  | jq -r .id)
+
+PERMISSION_SET_ID=$(curl --max-time 60 -fsS -X POST "$AIB_ADMIN/permission-sets" \
+  -H "$ADMIN_HEADER" -H 'Content-Type: application/json' \
+  -d "$(jq -n --arg service_id "$SERVICE_ID" --arg scope "$THIRD_PARTY_SCOPE" \
+    '{name:"github-read-user",description:"Read the GitHub user profile",service_scopes:[{service_id:$service_id,scopes:[$scope],requirement_type:"mandatory"}]}')" \
+  | jq -r .id)
+
+RESEARCHER_CLIENT_ID=$(kubectl get secret -n "$NAMESPACE" "kaos-oidc-$AGENT" -o jsonpath='{.data.client_id}' | base64 -d)
+
+curl --max-time 60 -fsS -X POST "$AIB_ADMIN/agents" \
+  -H "$ADMIN_HEADER" -H 'Content-Type: application/json' \
+  -d "$(jq -n \
+    --arg client_id "$RESEARCHER_CLIENT_ID" \
+    --arg external_id "kaos/$NAMESPACE/$AGENT" \
+    --arg permission_set_id "$PERMISSION_SET_ID" \
+    '{client_id:$client_id,external_id:$external_id,display_name:"researcher",description:"KAOS exchange-enabled Agent",permission_sets:[{permission_set_id:$permission_set_id,requirement_type:"mandatory"}]}')"
+```
+
+Wait for the next reflection pass, which runs every 45 seconds by default. The operator generates the FQDN Backend, HTTPRoute, fail-closed SecurityPolicy, and ext_proc policy from AIB alone, updates the AIB Agent's DCR `client_id`, and injects `KAOS_TOKEN_EXCHANGE_CONFIG` only into the bound Agent. Do not create a Service, Backend, HTTPRoute, ThirdPartyService, or annotation for this integration.
+
+```bash .noeval
+sleep 50
+kubectl get backend,httproute,securitypolicy,envoyextensionpolicy \
+  -n "$NAMESPACE" -l kaos.tools/token-exchange-managed=true
+
+ROUTE_NAME=$(kubectl get httproute -n "$NAMESPACE" \
+  -l kaos.tools/token-exchange-managed=true -o jsonpath='{.items[0].metadata.name}')
+
+kubectl get httproute "$ROUTE_NAME" -n "$NAMESPACE" \
+  -o jsonpath='{.spec.hostnames[0]}{" ResolvedRefs="}{.status.parents[0].conditions[?(@.type=="ResolvedRefs")].status}{"\n"}'
+kubectl get backend "$ROUTE_NAME" -n "$NAMESPACE" \
+  -o jsonpath='{.spec.endpoints[0].fqdn.hostname}{":"}{.spec.endpoints[0].fqdn.port}{"\n"}'
+kubectl get envoyextensionpolicy "$ROUTE_NAME" -n "$NAMESPACE" \
+  -o jsonpath='{.spec.targetRefs[0].kind}{"/"}{.spec.targetRefs[0].name}{" failOpen="}{.spec.extProc[0].failOpen}{"\n"}'
+
+kubectl get deployment "agent-$AGENT" -n "$NAMESPACE" -o json \
+  | jq '[.spec.template.spec.containers[0].env[] | select(.name=="KAOS_TOKEN_EXCHANGE_CONFIG")]'
+```
+
+Mint the user's normal Keycloak token and call the Agent. The first call without a live AIB vault session returns application HTTP 200 with the controlled `third_party_reauth_required` result and an AIB authorization URL; the third-party request has not reached its Backend.
+
+```bash .noeval
+KEYCLOAK_URL=https://keycloak.example.com
+GATEWAY_URL=https://gateway.example.com
+KAOS_USER_PASSWORD=kaos-password
+
+USER_TOKEN=$(curl --max-time 60 -fsS -X POST \
+  "$KEYCLOAK_URL/realms/kaos/protocol/openid-connect/token" \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode client_id=kaos \
+  --data-urlencode client_secret=kaos-dev-secret \
+  --data-urlencode username=kaos-user \
+  --data-urlencode password="$KAOS_USER_PASSWORD" \
+  --data-urlencode grant_type=password | jq -r .access_token)
+
+call_researcher() {
+  curl --max-time 60 -fsS "$GATEWAY_URL/$NAMESPACE/agent/$AGENT/v1/chat/completions" \
+    -H "Authorization: Bearer $USER_TOKEN" \
+    -H 'Content-Type: application/json' \
+    -d '{"model":"researcher","messages":[{"role":"user","content":"Call the third-party service"}]}'
+}
+
+FIRST_RESULT=$(call_researcher | jq -r '.choices[0].message.content')
+echo "$FIRST_RESULT"
+# Access to api.github.com requires re-authentication (third_party_reauth_required).
+# Please reconnect at https://<aib>/api/third-party/<service-id>/oauth2/authorize and try again.
+```
+
+Open the returned URL as the requesting user. Complete the provider's S256 PKCE authorization-code flow and approve the permission in AIB. The redirect finishes at the AIB consent UI, and AIB stores the provider access and refresh tokens in its encrypted vault; KAOS does not store them.
+
+```bash .noeval
+REAUTH_URL=$(echo "$FIRST_RESULT" | grep -Eo 'https?://[^ ]+/api/third-party/[^ ]+/oauth2/authorize')
+open "$REAUTH_URL"  # use xdg-open on Linux
+
+SUCCESS_RESULT=$(call_researcher | jq -r '.choices[0].message.content')
+echo "$SUCCESS_RESULT"
+# Third-party tool completed.
+```
+
+The successful wire path is `Agent -> gateway -> PDP -> ext_proc -> generated Backend -> third party`. The Agent re-mints the user's Keycloak token before egress; the live evaluation decoded these exact claims, where `azp` is the `researcher` DCR client and `sub` remains the requesting user:
+
+```json .noeval
+{
+  "aud": "token-exchange-broker",
+  "azp": "85be1caf-30b9-4236-87b2-fae29613d86d",
+  "sub": "c9df7bbc-c015-4095-b39e-7b5ed1a3f5e9",
+  "iss": "http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos"
+}
+```
+
+The PDP binds that `azp` to the verified Agent actor. AIB ext_proc then swaps the re-minted token for the vaulted provider token, and only the provider token reaches the third party. An unbound Agent receives HTTP 403 before ext_proc. Internal Agent, MCPServer, ModelAPI, and MemoryStore routes retain the original user token and never receive ext_proc.
+
+Revoke the provider session and retry. The evaluation-only pre-auth header below stands in for the authenticated production user. The delete returns HTTP 200, and the next Agent call returns `third_party_reauth_required` again while ext_proc records broker `invalid_grant` and sends nothing upstream.
+
+```bash .noeval
+kubectl port-forward -n aib-system svc/aib-agentic-identity-broker 8000:8000 >./tmp/aib-user-port-forward.log 2>&1 &
+AIB_URL=http://localhost:8000
+USER_SUB=$(printf '%s' "$USER_TOKEN" | cut -d. -f2 | tr '_-' '/+' | base64 -d 2>./tmp/dev/null | jq -r .sub)
+
+curl --max-time 60 -fsS -X DELETE "$AIB_URL/api/third-party/$SERVICE_ID/session" \
+  -H "X-Remote-User: $USER_SUB"
+# {"message":"session terminated successfully"}
+
+call_researcher | jq -r '.choices[0].message.content'
+# Access to api.github.com requires re-authentication (third_party_reauth_required).
+```
+
+### KIND-only single-name rig split
+
+This subsection is only for a local mock on KIND. It is not product configuration and must not be copied into production. The mock reuses one in-cluster hostname, so the test pod needs a split view: the Agent resolves the hostname to the gateway LoadBalancer through `hostAliases`, while Envoy's normal CoreDNS resolution sends the generated Backend to the mock Service. The AIB protected resource still contains that one hostname, and there is no alternate-origin annotation.
+
+```bash .noeval
+NAMESPACE=token-exchange-demo
+MOCK_HOST=mock-api.$NAMESPACE.svc.cluster.local
+GATEWAY_IP=$(kubectl get service -n envoy-gateway-system \
+  -l gateway.envoyproxy.io/owning-gateway-name=kaos-gateway \
+  -o jsonpath='{.items[0].status.loadBalancer.ingress[0].ip}')
+
+# The real mock Service exposes HTTP 80 and forwards to the mock container on 9000.
+kubectl patch service mock-api -n "$NAMESPACE" --type=merge \
+  -p '{"spec":{"ports":[{"name":"http","port":80,"targetPort":9000}]}}'
+
+# Agent-facing resolution only: the same hostname enters the gateway.
+kubectl patch agent researcher -n "$NAMESPACE" --type=merge \
+  -p "{\"spec\":{\"podSpec\":{\"containers\":[{\"name\":\"agent\"}],\"hostAliases\":[{\"ip\":\"$GATEWAY_IP\",\"hostnames\":[\"$MOCK_HOST\"]}]}}}"
+
+# Use this value in the AIB service and in the Agent tool.
+PROTECTED_RESOURCE=http://$MOCK_HOST/api/data
+```
+
+With that KIND-only split, the proved path was `researcher -> gateway -> PDP -> ext_proc -> generated Backend -> mock-api:80`, with `ResolvedRefs=True`, no loop, and no administrator-authored egress Kubernetes object.

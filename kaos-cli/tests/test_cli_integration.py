@@ -955,6 +955,25 @@ class TestPgvectorMemoryInstall:
         assert "image: pgvector/pgvector" in applied["input"]
 
 
+def test_token_exchange_gateway_install_enables_backend_api():
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from kaos_cli.install import _install_gateway_api
+
+    calls = []
+
+    def fake_helm(args, check=False):
+        calls.append(args)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    with patch("kaos_cli.install.run_helm_command", side_effect=fake_helm):
+        assert _install_gateway_api(enable_backend=True)
+
+    install_args = calls[-1]
+    assert "config.envoyGateway.extensionApis.enableBackend=true" in install_args
+
+
 class TestAuthWiring:
     @pytest.fixture(autouse=True)
     def _stub_gateway_install(self):
@@ -1369,7 +1388,22 @@ class TestAuthWiring:
         mappers = {
             mapper["name"]: mapper for mapper in clients["kaos"]["protocolMappers"]
         }
-        assert set(mappers) == {"kaos-audience", "kaos-groups", "kaos-subject"}
+        assert set(mappers) == {
+            "kaos-audience",
+            "kaos-groups",
+            "kaos-subject",
+            "token-exchange-audience",
+        }
+        assert mappers["token-exchange-audience"] == {
+            "name": "token-exchange-audience",
+            "protocol": "openid-connect",
+            "protocolMapper": "oidc-audience-mapper",
+            "config": {
+                "included.custom.audience": "token-exchange-broker",
+                "id.token.claim": "false",
+                "access.token.claim": "true",
+            },
+        }
         assert mappers["kaos-groups"] == {
             "name": "kaos-groups",
             "protocol": "openid-connect",
@@ -1423,6 +1457,17 @@ class TestAuthWiring:
 
         issuer = _default_user_auth_issuer("kc-ns", "keycloak")
         assert issuer == "http://keycloak.kc-ns.svc.cluster.local:8080/realms/kaos"
+
+    def test_keycloak_dev_enables_token_exchange_features_when_requested(self):
+        from kaos_cli.install import _keycloak_dev_manifests
+
+        deployment = _keycloak_dev_manifests("keycloak", "keycloak", True)[0]
+        args = deployment["spec"]["template"]["spec"]["containers"][0]["args"]
+        assert args == [
+            "start-dev",
+            "--import-realm",
+            "--features=token-exchange,admin-fine-grained-authz",
+        ]
 
     def test_auth_enabled_wires_user_auth_values(self):
         """aib-keycloak (user-auth on) adds security.userAuth.* args."""
@@ -1837,7 +1882,10 @@ class TestAuthWiring:
     @pytest.mark.parametrize(
         "flag,expected",
         [
-            ("--agent-auth-enabled", "security.agentAuth.identity.provider=serviceaccount"),
+            (
+                "--agent-auth-enabled",
+                "security.agentAuth.identity.provider=serviceaccount",
+            ),
             ("--user-auth-enabled", "security.userAuth.audience=kaos"),
         ],
     )
@@ -1911,6 +1959,85 @@ class TestAuthWiring:
         )
         assert result.exit_code != 0
         assert "No such option: --auth-enabled" in strip_ansi(result.output)
+
+    def test_token_exchange_expands_keycloak_aib_and_operator_wiring(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        captured = {}
+
+        def fake_helm(args, check=True, **kwargs):
+            captured["operator"] = args
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with patch("kaos_cli.install.check_helm_installed", return_value=True), patch(
+            "kaos_cli.install.run_helm_command", side_effect=fake_helm
+        ), patch("kaos_cli.install._install_aib", return_value=True) as mock_aib, patch(
+            "kaos_cli.install._install_keycloak", return_value=True
+        ) as mock_keycloak:
+            result = runner.invoke(
+                app,
+                [
+                    "system",
+                    "install",
+                    "--token-exchange-enabled",
+                    "--aib-chart-path",
+                    "aib/chart",
+                    "--chart-path",
+                    "operator/chart",
+                ],
+            )
+
+        assert result.exit_code == 0, result.output
+        mock_keycloak.assert_called_once()
+        mock_aib.assert_called_once()
+        aib_args = mock_aib.call_args.kwargs["extra_set"]
+        joined_aib = " ".join(aib_args)
+        assert "extProc.enabled=true" in joined_aib
+        assert "EXTPROC_OAUTH2_ISSUER" in joined_aib
+        assert "EXTPROC_OAUTH2_CLIENT_ID" in joined_aib
+        assert "EXTPROC_OAUTH2_CLIENT_SECRET" in joined_aib
+        assert "EXTPROC_OAUTH2_CLIENT_ASSERTION_TYPE" in joined_aib
+        assert "EXTPROC_OAUTH2_TOKEN_ENDPOINT" not in joined_aib
+        assert "EXTPROC_OAUTH2_TLS_ALLOW_HTTP" not in joined_aib
+        assert "EXTPROC_OAUTH2_CLIENT_CREDENTIALS_ENDPOINT" not in joined_aib
+        assert "extProc.oauth2.clientCredentialsEndpoint=" in joined_aib
+        assert 'client_assertion.azp == "kaos"' in joined_aib
+
+        assert mock_keycloak.call_args.args[-1] is True
+
+        joined = " ".join(captured["operator"])
+        assert "security.agentAuth.identity.provider=oidc" in joined
+        assert "security.userAuth.audience=kaos" in joined
+        assert "security.tokenExchange.enabled=true" in joined
+        assert "security.tokenExchange.aib.adminUrl=" in joined
+        assert "security.tokenExchange.extProc.port=50051" in joined
+
+    @pytest.mark.parametrize(
+        "args,message",
+        [
+            (
+                [
+                    "--agent-auth-enabled",
+                    "service-account",
+                    "--aib-chart-path",
+                    "aib/chart",
+                ],
+                "requires --agent-auth-enabled keycloak",
+            ),
+            (
+                ["--user-auth-enabled", "none", "--aib-chart-path", "aib/chart"],
+                "requires --user-auth-enabled keycloak",
+            ),
+            ([], "requires --aib-chart-path"),
+        ],
+    )
+    def test_token_exchange_rejects_incompatible_postures(self, args, message):
+        result = runner.invoke(
+            app, ["system", "install", "--token-exchange-enabled", *args]
+        )
+        assert result.exit_code != 0
+        assert message in strip_ansi(result.output)
 
     def test_install_without_auth_flags_emits_no_security_values(self):
         from types import SimpleNamespace

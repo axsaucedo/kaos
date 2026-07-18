@@ -109,6 +109,28 @@ class TestAgentCreationAndCard:
         server = create_agent_server(settings)
         assert server._agent._system_prompts == ()
 
+    def test_custom_agent_accepts_kaos_toolsets(self, monkeypatch):
+        """KAOS toolsets are added through Pydantic AI's current storage field."""
+        from pais.server import create_agent_server
+        from pais.serverutils import AgentServerSettings
+        from pais.tools import DelegationToolset
+
+        monkeypatch.setenv("DEBUG_MOCK_RESPONSES", '["done"]')
+        custom_agent = PydanticAgent(model="test", defer_model_check=True)
+        settings = AgentServerSettings(
+            agent_name="custom-agent",
+            model_name="mock-model",
+            model_api_url="http://mock",
+        )
+
+        server = create_agent_server(
+            settings,
+            sub_agents=[RemoteAgent("worker", "http://worker")],
+            custom_agent=custom_agent,
+        )
+
+        assert any(isinstance(toolset, DelegationToolset) for toolset in server._agent.toolsets)
+
 
 class TestAgentMessageProcessing:
     """Tests for Agent message processing with Pydantic AI."""

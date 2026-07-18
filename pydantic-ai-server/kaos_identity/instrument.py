@@ -324,6 +324,31 @@ def instrument_fastapi(
 
 _httpx_patched = False
 
+# Marks the current context as a kaos_identity-internal httpx call so the patched sends skip
+# it. The managed actor-token ``client_credentials`` mint issues its own httpx request while
+# holding the identity manager's non-reentrant refresh lock; header injection would otherwise
+# re-enter the manager (``token_async`` -> lock) and deadlock with no I/O and no timeout — a
+# permanent hang. Infra callers set this via :func:`suppress_instrumentation`; ordinary
+# (including legitimately nested agent-to-agent) requests never set it and stay instrumented.
+_in_send: "contextvars.ContextVar[bool]" = contextvars.ContextVar(
+    "_kaos_instrument_in_send", default=False
+)
+
+
+@contextmanager
+def suppress_instrumentation() -> Iterator[None]:
+    """Bypass the outbound httpx patch for kaos_identity-internal requests.
+
+    Requests issued within this context skip header injection, re-mint, and gateway-outcome
+    handling, deferring straight to the original transport. Wrap the managed-identity token
+    mint with it so the mint never re-enters instrumentation (see :data:`_in_send`).
+    """
+    reset = _in_send.set(True)
+    try:
+        yield
+    finally:
+        _in_send.reset(reset)
+
 
 def _inject_request_headers(request: Any) -> None:
     """Merge the current context's propagation headers into an outbound request.
@@ -406,13 +431,14 @@ async def _refresh_actor_header_async(request: Any) -> bool:
 def _raise_for_gateway_outcome(request: Any, response: Any) -> None:
     """Raise a typed access outcome when a response carries a KAOS-gateway denial.
 
-    Header-gated (``x-kaos-access-reason``) so it imports the outcome machinery only
-    for genuine gateway enforcement responses; ordinary traffic and non-KAOS 4xx/5xx
-    responses are untouched. Reads only headers — never the body — so streaming
-    responses are unaffected.
+    Header-gated for ordinary routes. Declared token-exchange targets also inspect an
+    already-buffered AIB JSON-RPC URL elicitation body. Streaming bodies are untouched.
     """
     if HEADER_ACCESS_REASON not in response.headers:
-        return
+        from .exchange import is_declared_target
+
+        if not is_declared_target(request.url):
+            return
     from .client import raise_for_gateway_outcome
 
     raise_for_gateway_outcome(
@@ -457,7 +483,12 @@ def instrument_httpx() -> None:
     async_send = httpx.AsyncClient.send
 
     def _patched_sync_send(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
+        if _in_send.get():
+            return sync_send(self, request, *args, **kwargs)
         _inject_request_headers(request)
+        from .exchange import remint_request_sync
+
+        remint_request_sync(request, sync_send)
         had_actor = HEADER_ACTOR_TOKEN in request.headers
         response = sync_send(self, request, *args, **kwargs)
         if response.status_code == 401 and had_actor and _refresh_actor_header_sync(request):
@@ -466,7 +497,12 @@ def instrument_httpx() -> None:
         return response
 
     async def _patched_async_send(self: Any, request: Any, *args: Any, **kwargs: Any) -> Any:
+        if _in_send.get():
+            return await async_send(self, request, *args, **kwargs)
         await _inject_request_headers_async(request)
+        from .exchange import remint_request_async
+
+        await remint_request_async(request, async_send)
         had_actor = HEADER_ACTOR_TOKEN in request.headers
         response = await async_send(self, request, *args, **kwargs)
         if response.status_code == 401 and had_actor and await _refresh_actor_header_async(request):
@@ -474,6 +510,6 @@ def instrument_httpx() -> None:
         _raise_for_gateway_outcome(request, response)
         return response
 
-    httpx.Client.send = _patched_sync_send  # ty: ignore[invalid-assignment]
-    httpx.AsyncClient.send = _patched_async_send  # ty: ignore[invalid-assignment]
+    httpx.Client.send = _patched_sync_send
+    httpx.AsyncClient.send = _patched_async_send
     _httpx_patched = True

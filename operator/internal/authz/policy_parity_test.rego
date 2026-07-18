@@ -65,6 +65,8 @@ non_autonomous_subject_jwt := signed_token(verified_issuer, ["kaos-gateway"], no
 user_subject_jwt := signed_token(user_issuer, ["kaos-users"], "user-123", {"email": "alice@example.com", "groups": ["writers", "readers"]})
 user_subject_without_email_jwt := signed_token(user_issuer, ["kaos-users"], "user-123", {})
 wrong_audience_subject_jwt := signed_token(user_issuer, ["another-service"], "user-123", {"email": "alice@example.com"})
+delegated_subject_jwt := signed_token(user_issuer, ["token-exchange-broker"], "user-123", {"azp": "oidc-client-1"})
+mismatched_delegated_subject_jwt := signed_token(user_issuer, ["token-exchange-broker"], "user-123", {"azp": "another-client"})
 wrong_issuer_subject_jwt := signed_token(wrong_issuer, ["kaos-users"], "user-123", {"email": "alice@example.com"})
 forged_subject_jwt := io.jwt.encode_sign(
 	{"alg": "HS256"},
@@ -95,6 +97,8 @@ entry_path_input(subject, path) := {
 }
 
 entry_input(subject) := entry_path_input(subject, ["demo", "agent", "writer"])
+
+egress_input(actor, subject) := internal_input(actor, subject, ["api", "data"])
 
 empty_input := {
 	"attributes": {"request": {"http": {"headers": {}}}},
@@ -189,6 +193,46 @@ test_internal_actor_granted_with_user_subject_allows if {
 		with data.kaos.agents as agents
 		with data.kaos.user as user_config
 	out.allowed == true
+}
+
+test_delegated_egress_with_verified_actor_and_subject_allows if {
+	out := result with input as egress_input(oidc_actor_jwt, delegated_subject_jwt)
+		with data.kaos.grants as grants
+		with data.kaos.jwks as configured_jwks
+		with data.kaos.agents as agents
+		with data.kaos.user as user_config
+	out.allowed == true
+	"actor kaos://agent/demo/oidc may perform delegated third-party egress" in out.reasons
+}
+
+test_delegated_egress_actor_client_mismatch_denies if {
+	out := result with input as egress_input(oidc_actor_jwt, mismatched_delegated_subject_jwt)
+		with data.kaos.grants as grants
+		with data.kaos.jwks as configured_jwks
+		with data.kaos.agents as agents
+		with data.kaos.user as user_config
+	out.allowed == false
+	"request declares no target resource" in out.reasons
+}
+
+test_delegated_egress_wrong_subject_audience_denies if {
+	out := result with input as egress_input(actor_jwt, user_subject_jwt)
+		with data.kaos.grants as grants
+		with data.kaos.jwks as configured_jwks
+		with data.kaos.agents as agents
+		with data.kaos.user as user_config
+	out.allowed == false
+	"request declares no target resource" in out.reasons
+}
+
+test_delegated_subject_is_not_accepted_on_internal_route if {
+	out := result with input as internal_input(actor_jwt, delegated_subject_jwt, ["demo", "mcp", "github"])
+		with data.kaos.grants as grants
+		with data.kaos.jwks as configured_jwks
+		with data.kaos.agents as agents
+		with data.kaos.user as user_config
+	out.allowed == false
+	"subject missing or invalid" in out.reasons
 }
 
 test_internal_actor_alone_without_subject_denies if {

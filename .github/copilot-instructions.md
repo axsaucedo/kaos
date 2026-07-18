@@ -107,6 +107,7 @@ Envoy Gateway verifies agent JWTs and calls the fail-closed `kaos-pdp` OPA Servi
 - `operator/api/v1alpha1/*_types.go`: CRD schemas
 - `operator/controllers/*_controller.go`: Reconciliation logic
 - `operator/controllers/authz_projection_controller.go`: Authorization policy ConfigMap + identity projection
+- `operator/internal/authz/adapters/projector_aib_exchange.go`: Poll-based reflection of AIB-administered exchange bindings into generated egress plumbing
 - `operator/internal/authz/`: Static policy rego, data document builder, JWKS fetch, published `data-schema.md`
 - `operator/chart/`: Helm chart (generated from kustomize)
 - `pydantic-ai-server/pais/server.py`: AgentServer, create_agent_server, routes, _run_autonomous
