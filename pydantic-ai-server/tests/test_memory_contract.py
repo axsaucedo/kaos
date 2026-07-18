@@ -34,7 +34,11 @@ class TestMemoryScope:
             "principal": "alice",
             "agent_client_id": "agent-1",
             "session_id": "sess-1",
+            "user_scoping_required": False,
         }
+
+        required = MemoryScope.model_validate({**payload, "user_scoping_required": True})
+        assert required.user_scoping_required is True
 
     def test_scope_level_values(self):
         assert ScopeLevel.AGENT.value == "agent"
