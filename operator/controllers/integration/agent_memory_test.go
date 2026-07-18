@@ -209,6 +209,26 @@ var _ = Describe("Agent memory binding", func() {
 		Expect(env["MEMORY_SCOPE"]).To(Equal("group"))
 		Expect(env["MEMORY_DEFAULT_READ_SCOPE"]).To(Equal("group"))
 		Expect(env["MEMORY_READ_SCOPES"]).To(Equal("group"))
+
+		overrideName := uniqueAgentName("agent")
+		override := &kaosv1alpha1.Agent{
+			ObjectMeta: metav1.ObjectMeta{Name: overrideName, Namespace: namespace},
+			Spec: kaosv1alpha1.AgentSpec{
+				ModelAPI:            modelAPIName,
+				Model:               "mock-model",
+				WaitForDependencies: boolPtr(false),
+				Config: &kaosv1alpha1.AgentConfig{Memory: &kaosv1alpha1.MemoryConfig{
+					Type: "remote", MemoryStore: storeName, Scope: "user",
+				}},
+			},
+		}
+		Expect(k8sClient.Create(ctx, override)).To(Succeed())
+		defer func() { k8sClient.Delete(ctx, override) }()
+
+		overrideEnv := agentMemoryEnv(ctx, namespace, overrideName)
+		Expect(overrideEnv["MEMORY_SCOPE"]).To(Equal("user"))
+		Expect(overrideEnv["MEMORY_DEFAULT_READ_SCOPE"]).To(Equal("user"))
+		Expect(overrideEnv["MEMORY_READ_SCOPES"]).To(Equal("user"))
 	})
 
 	It("stays Ready with a MemoryDegraded condition when the bound store is missing", func() {

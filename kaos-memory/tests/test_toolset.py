@@ -69,6 +69,8 @@ async def test_schema_rejects_out_of_enum_and_owner_arguments_before_handler():
     with pytest.raises(ValidationError):
         tool.args_validator.validate_python({"query": "tea", "level": "group"})
     with pytest.raises(ValidationError):
+        tool.args_validator.validate_python({"query": "tea"})
+    with pytest.raises(ValidationError):
         tool.args_validator.validate_python(
             {"query": "tea", "level": "user", "principal": "mallory"}
         )
@@ -83,6 +85,13 @@ async def test_handler_revalidates_entitlement():
         await toolset.call_tool(
             SEARCH_MEMORY_TOOL,
             {"query": "tea", "level": "group"},
+            _ctx(deps),
+            cast(Any, None),
+        )
+    with pytest.raises(ValueError, match="not entitled"):
+        await toolset.call_tool(
+            SEARCH_MEMORY_TOOL,
+            {"query": "tea"},
             _ctx(deps),
             cast(Any, None),
         )
