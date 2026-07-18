@@ -815,6 +815,18 @@ func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *
 				Value: memoryScope,
 			})
 		}
+		defaultReadScope := mem.DefaultReadScope
+		if defaultReadScope == "" {
+			defaultReadScope = memoryScope
+		}
+		readScopes := mem.ReadScopes
+		if len(readScopes) == 0 {
+			readScopes = []string{defaultReadScope}
+		}
+		env = append(env,
+			corev1.EnvVar{Name: "MEMORY_DEFAULT_READ_SCOPE", Value: defaultReadScope},
+			corev1.EnvVar{Name: "MEMORY_READ_SCOPES", Value: strings.Join(readScopes, ",")},
+		)
 		if mem.Tools != "" {
 			env = append(env, corev1.EnvVar{
 				Name:  "MEMORY_TOOLS",
