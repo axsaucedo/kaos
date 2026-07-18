@@ -78,6 +78,15 @@ func HTTPRoutePath(namespace string, resourceType ResourceType, resourceName str
 	return fmt.Sprintf("/%s/%s/%s", namespace, resourceType, resourceName)
 }
 
+// ResourceIdentity returns the logical resource id used by authorization data.
+func ResourceIdentity(namespace string, resourceType ResourceType, resourceName string) string {
+	slug := string(resourceType)
+	if resourceType == ResourceTypeMCP {
+		slug = "mcpserver"
+	}
+	return fmt.Sprintf("kaos://%s/%s/%s", slug, namespace, resourceName)
+}
+
 // GatewayEndpoint returns the external endpoint URL for a resource via Gateway
 func GatewayEndpoint(gatewayHost string, namespace string, resourceType ResourceType, resourceName string) string {
 	return fmt.Sprintf("http://%s/%s/%s/%s", gatewayHost, namespace, resourceType, resourceName)
@@ -165,6 +174,17 @@ func constructHTTPRoute(params HTTPRouteParams, config Config) *gatewayv1.HTTPRo
 			},
 		},
 		Filters: []gatewayv1.HTTPRouteFilter{
+			{
+				Type: gatewayv1.HTTPRouteFilterRequestHeaderModifier,
+				RequestHeaderModifier: &gatewayv1.HTTPHeaderFilter{
+					Set: []gatewayv1.HTTPHeader{
+						{
+							Name:  gatewayv1.HTTPHeaderName("x-kaos-target-resource"),
+							Value: ResourceIdentity(params.Namespace, params.ResourceType, params.ResourceName),
+						},
+					},
+				},
+			},
 			{
 				Type: gatewayv1.HTTPRouteFilterURLRewrite,
 				URLRewrite: &gatewayv1.HTTPURLRewriteFilter{

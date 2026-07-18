@@ -18,7 +18,7 @@ import (
 	"github.com/axsaucedo/kaos/operator/internal/projection"
 )
 
-func TestConfigMapProjectorWritesPolicyConfigMap(t *testing.T) {
+func TestAuthzPolicyProjectorWritesPolicyConfigMap(t *testing.T) {
 	scheme := newTestScheme(t)
 	mcp := &kaosv1alpha1.MCPServer{ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "github"}}
 	agent := &kaosv1alpha1.Agent{
@@ -26,7 +26,7 @@ func TestConfigMapProjectorWritesPolicyConfigMap(t *testing.T) {
 		Spec:       kaosv1alpha1.AgentSpec{MCPServers: []string{"github"}},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(mcp, agent).Build()
-	p := &ConfigMapProjector{Client: c, Name: "kaos-authz-policy", Namespace: "aib-system", WriteGrantData: true}
+	p := &AuthzPolicyProjector{Client: c, Name: "kaos-authz-policy", Namespace: "aib-system", WriteGrantData: true}
 	desired := projection.Project([]projection.Resource{resourceFromAgent(agent), {
 		Kind: projection.MCPServer.ResourceKind, Namespace: "demo", Name: "github",
 	}})
@@ -51,14 +51,14 @@ func TestConfigMapProjectorWritesPolicyConfigMap(t *testing.T) {
 	}
 }
 
-func TestConfigMapProjectorSkipsPolicyConfigMapWhenUnset(t *testing.T) {
+func TestAuthzPolicyProjectorSkipsPolicyConfigMapWhenUnset(t *testing.T) {
 	scheme := newTestScheme(t)
 	agent := &kaosv1alpha1.Agent{
 		ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "researcher"},
 		Spec:       kaosv1alpha1.AgentSpec{MCPServers: []string{"github"}},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(agent).Build()
-	p := &ConfigMapProjector{Client: c}
+	p := &AuthzPolicyProjector{Client: c, Name: "kaos-authz-policy", Namespace: "aib-system", Disabled: true}
 
 	if err := p.Apply(context.Background(), projection.Project([]projection.Resource{resourceFromAgent(agent)})); err != nil {
 		t.Fatalf("apply: %v", err)
@@ -72,7 +72,7 @@ func TestConfigMapProjectorSkipsPolicyConfigMapWhenUnset(t *testing.T) {
 	}
 }
 
-func TestConfigMapProjectorInjectsJWKSInVerifiedMode(t *testing.T) {
+func TestAuthzPolicyProjectorInjectsJWKS(t *testing.T) {
 	jwksBody := `{"keys":[{"kty":"RSA","kid":"k1","n":"abc","e":"AQAB"}]}`
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -87,7 +87,7 @@ func TestConfigMapProjectorInjectsJWKSInVerifiedMode(t *testing.T) {
 	}
 	mcp := &kaosv1alpha1.MCPServer{ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "github"}}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(agent, mcp).Build()
-	p := &ConfigMapProjector{Client: c, Name: "kaos-authz-policy", Namespace: "aib-system", JWKSURI: srv.URL, WriteGrantData: true}
+	p := &AuthzPolicyProjector{Client: c, Name: "kaos-authz-policy", Namespace: "aib-system", Issuer: "https://issuer.example", JWKSURI: srv.URL, WriteGrantData: true}
 	desired := projection.Project([]projection.Resource{resourceFromAgent(agent), {
 		Kind: projection.MCPServer.ResourceKind, Namespace: "demo", Name: "github",
 	}})
@@ -104,11 +104,43 @@ func TestConfigMapProjectorInjectsJWKSInVerifiedMode(t *testing.T) {
 	}
 }
 
+func TestAuthzPolicyProjectorInjectsServiceAccountIdentityData(t *testing.T) {
+	scheme := newTestScheme(t)
+	agent := &kaosv1alpha1.Agent{ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "researcher"}, Spec: kaosv1alpha1.AgentSpec{MCPServers: []string{"github"}}}
+	mcp := &kaosv1alpha1.MCPServer{ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "github"}}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(agent, mcp).Build()
+	p := &AuthzPolicyProjector{
+		Client: c, Name: "kaos-authz-policy", Namespace: "kaos-system", WriteGrantData: true,
+		Issuer:             "https://kubernetes.default.svc",
+		StaticJWKS:         map[string]any{"keys": []any{map[string]any{"kid": "sa-key", "kty": "RSA"}}},
+		MapServiceAccounts: true,
+	}
+	desired := projection.Project([]projection.Resource{resourceFromAgent(agent), {Kind: projection.MCPServer.ResourceKind, Namespace: "demo", Name: "github"}})
+	if err := p.Apply(context.Background(), desired); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	cm := &corev1.ConfigMap{}
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "kaos-system", Name: "kaos-authz-policy"}, cm); err != nil {
+		t.Fatalf("get ConfigMap: %v", err)
+	}
+	data := cm.Data["data.json"]
+	for _, expected := range []string{
+		`"https://kubernetes.default.svc"`,
+		`"kaos://agent/demo/researcher"`,
+		`"issuer_sub": "system:serviceaccount:demo:kaos-agent-researcher"`,
+		`"kid": "sa-key"`,
+	} {
+		if !contains(data, expected) {
+			t.Fatalf("data.json missing %s: %s", expected, data)
+		}
+	}
+}
+
 func contains(s, sub string) bool {
 	return strings.Contains(s, sub)
 }
 
-func TestConfigMapProjectorLeavesBYOConfigMapUntouched(t *testing.T) {
+func TestAuthzPolicyProjectorLeavesBYOConfigMapUntouched(t *testing.T) {
 	scheme := newTestScheme(t)
 	agent := &kaosv1alpha1.Agent{
 		ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "researcher"},
@@ -122,7 +154,7 @@ func TestConfigMapProjectorLeavesBYOConfigMapUntouched(t *testing.T) {
 		},
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(agent, byo).Build()
-	p := &ConfigMapProjector{Client: c}
+	p := &AuthzPolicyProjector{Client: c}
 
 	if err := p.Apply(context.Background(), projection.Project([]projection.Resource{resourceFromAgent(agent)})); err != nil {
 		t.Fatalf("apply: %v", err)
@@ -136,7 +168,7 @@ func TestConfigMapProjectorLeavesBYOConfigMapUntouched(t *testing.T) {
 	}
 }
 
-func TestConfigMapProjectorRegoOverrideLeavesAdminDataUntouched(t *testing.T) {
+func TestAuthzPolicyProjectorRegoOverrideLeavesAdminDataUntouched(t *testing.T) {
 	scheme := newTestScheme(t)
 	agent := &kaosv1alpha1.Agent{
 		ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "researcher"},
@@ -152,7 +184,7 @@ func TestConfigMapProjectorRegoOverrideLeavesAdminDataUntouched(t *testing.T) {
 	if err := c.Patch(context.Background(), adminCM, client.Apply, client.FieldOwner("admin")); err != nil {
 		t.Fatalf("admin apply: %v", err)
 	}
-	p := &ConfigMapProjector{Client: c, Name: "kaos-authz-policy", Namespace: "aib-system", WriteGrantData: false}
+	p := &AuthzPolicyProjector{Client: c, Name: "kaos-authz-policy", Namespace: "aib-system", WriteGrantData: false}
 	desired := projection.Project([]projection.Resource{resourceFromAgent(agent)})
 
 	for i := 0; i < 2; i++ {

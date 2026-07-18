@@ -28,16 +28,16 @@ func newFakeAIB() *fakeAIB {
 	return &fakeAIB{created: map[string][]string{}, listed: map[string][]map[string]any{}}
 }
 
-func (f *fakeAIB) List(_ context.Context, collection string) ([]map[string]any, error) {
-	return f.listed[collection], nil
+func (f *fakeAIB) ListAgents(context.Context) ([]map[string]any, error) {
+	return f.listed["agents"], nil
 }
 
-func (f *fakeAIB) CreateOrGet(_ context.Context, collection, _, matchValue string, _ map[string]any) (string, error) {
-	f.created[collection] = append(f.created[collection], matchValue)
-	return collection + ":" + matchValue, nil
+func (f *fakeAIB) CreateOrGetAgent(_ context.Context, externalID string, _ map[string]any) (string, error) {
+	f.created["agents"] = append(f.created["agents"], externalID)
+	return "agents:" + externalID, nil
 }
 
-func (f *fakeAIB) Delete(context.Context, string, string) (bool, error) {
+func (f *fakeAIB) DeleteAgent(context.Context, string) (bool, error) {
 	f.deleted++
 	return true, nil
 }
@@ -55,7 +55,7 @@ func TestBrokerProjectorMintsCredentialSecret(t *testing.T) {
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(agent).Build()
 	admin := newFakeAIB()
-	p := &BrokerProjector{Client: c, Scheme: scheme, AIB: admin, SecretPrefix: "kaos-aib", Prune: false, BindPermissionSets: true}
+	p := &BrokerProjector{Client: c, Scheme: scheme, AIB: admin, SecretPrefix: "kaos-aib"}
 	desired := projection.Project([]projection.Resource{resourceFromAgent(agent)})
 
 	if err := p.Apply(context.Background(), desired); err != nil {
@@ -115,48 +115,23 @@ func resourceFromAgent(a *kaosv1alpha1.Agent) projection.Resource {
 	if a.Spec.AgentNetwork != nil {
 		res.Access = a.Spec.AgentNetwork.Access
 	}
+	if a.Spec.Config != nil && a.Spec.Config.Memory != nil {
+		res.MemoryStore = a.Spec.Config.Memory.MemoryStore
+	}
 	return res
 }
 
-func TestServiceBodyShape(t *testing.T) {
-	svc := projection.DesiredService{Namespace: "demo", Name: "github", Kind: projection.MCPServer}
-	body := ServiceBody(svc)
-	if body["client_id"] != "kaos-mcpserver-demo-github" {
-		t.Fatalf("svc client_id = %v", body["client_id"])
-	}
-	if body["issuer_uri"] != "https://kaos.local/mcpserver/demo/github" {
-		t.Fatalf("issuer_uri = %v", body["issuer_uri"])
-	}
-	scopes := body["scopes"].([]any)[0].(map[string]any)
-	if scopes["scope_value"] != projection.CallScope {
-		t.Fatalf("scope_value = %v", scopes["scope_value"])
-	}
-}
-
-func TestPermissionSetBodyReferencesService(t *testing.T) {
-	ps := projection.DesiredPermissionSet{Namespace: "demo", Target: "github", Kind: projection.MCPServer}
-	body := PermissionSetBody(ps, "svc-123")
-	scopes := body["service_scopes"].([]any)[0].(map[string]any)
-	if scopes["service_id"] != "svc-123" {
-		t.Fatalf("service_id = %v", scopes["service_id"])
-	}
-	if scopes["requirement_type"] != "mandatory" {
-		t.Fatalf("requirement_type = %v", scopes["requirement_type"])
-	}
-}
-
-func TestAgentBodyBindsPermissionSetsWithoutLeakingClientID(t *testing.T) {
+func TestAgentBodyContainsIdentityOnly(t *testing.T) {
 	agent := projection.DesiredAgent{Namespace: "demo", Name: "researcher"}
-	body := AgentBody(agent, []string{"ps-1"})
+	body := AgentBody(agent)
 	if _, leaks := body["client_id"]; leaks {
 		t.Fatalf("agent body leaks client_id: %v", body)
 	}
 	if body["display_name"] != agent.ExternalID() {
 		t.Fatalf("display_name = %v", body["display_name"])
 	}
-	entry := body["permission_sets"].([]any)[0].(map[string]any)
-	if entry["permission_set_id"] != "ps-1" || entry["requirement_type"] != "mandatory" {
-		t.Fatalf("binding = %v", entry)
+	if _, projects := body["permission_sets"]; projects {
+		t.Fatalf("agent body projects permission sets: %v", body)
 	}
 }
 
@@ -170,23 +145,13 @@ func TestAdminBodiesCarryNoApprovalStatus(t *testing.T) {
 		}
 	}
 
-	svc := projection.DesiredService{Namespace: "demo", Name: "github", Kind: projection.MCPServer}
-	ps := projection.DesiredPermissionSet{Namespace: "demo", Target: "github", Kind: projection.MCPServer}
 	agent := projection.DesiredAgent{Namespace: "demo", Name: "researcher"}
 
-	check(ServiceBody(svc), "service body")
-	check(PermissionSetBody(ps, "svc-id"), "permission-set body")
-	body := AgentBody(agent, []string{"ps-id"})
+	body := AgentBody(agent)
 	check(body, "agent body")
-	for _, e := range body["permission_sets"].([]any) {
-		entry := e.(map[string]any)
-		if len(entry) != 2 || entry["requirement_type"] != "mandatory" {
-			t.Fatalf("binding entry = %v", entry)
-		}
-	}
 }
 
-func TestBrokerProjectorExternalOffSwitchProjectsIdentityOnly(t *testing.T) {
+func TestBrokerProjectorProjectsIdentityOnly(t *testing.T) {
 	scheme := newTestScheme(t)
 	agent := &kaosv1alpha1.Agent{
 		ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "researcher"},
@@ -194,7 +159,7 @@ func TestBrokerProjectorExternalOffSwitchProjectsIdentityOnly(t *testing.T) {
 	}
 	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(agent).Build()
 	admin := newFakeAIB()
-	p := &BrokerProjector{Client: c, Scheme: scheme, AIB: admin, SecretPrefix: "kaos-aib", Prune: true, BindPermissionSets: false}
+	p := &BrokerProjector{Client: c, Scheme: scheme, AIB: admin, SecretPrefix: "kaos-aib", Prune: true}
 	desired := projection.Project([]projection.Resource{resourceFromAgent(agent), {
 		Kind: projection.MCPServer.ResourceKind, Namespace: "demo", Name: "github",
 	}})
@@ -214,48 +179,23 @@ func TestBrokerProjectorExternalOffSwitchProjectsIdentityOnly(t *testing.T) {
 		t.Fatalf("expected credential secret: %v", err)
 	}
 	if len(admin.created["services"]) != 0 || len(admin.created["permission-sets"]) != 0 {
-		t.Fatalf("authorization projected in off-switch: services=%v permission-sets=%v",
+		t.Fatalf("authorization projected to broker: services=%v permission-sets=%v",
 			admin.created["services"], admin.created["permission-sets"])
-	}
-	if admin.deleted != 0 {
-		t.Fatalf("prune deleted %d records in off-switch mode", admin.deleted)
 	}
 }
 
-func TestBrokerProjectorPruneIsGatedByAuthorizationProjection(t *testing.T) {
-	staleService := map[string]any{"id": "svc-stale", "client_id": "kaos-mcpserver-demo-stale"}
-
-	t.Run("automated broker mode prunes stale records", func(t *testing.T) {
-		scheme := newTestScheme(t)
-		admin := newFakeAIB()
-		admin.listed["services"] = []map[string]any{staleService}
-		p := &BrokerProjector{
-			Client: fake.NewClientBuilder().WithScheme(scheme).Build(), Scheme: scheme, AIB: admin,
-			SecretPrefix: "kaos-aib", Prune: true, BindPermissionSets: true,
-		}
-
-		if err := p.Apply(context.Background(), projection.DesiredState{}); err != nil {
-			t.Fatalf("apply: %v", err)
-		}
-		if admin.deleted == 0 {
-			t.Fatal("expected prune to delete the stale record in automated mode")
-		}
-	})
-
-	t.Run("external off-switch never prunes even with prune enabled", func(t *testing.T) {
-		scheme := newTestScheme(t)
-		admin := newFakeAIB()
-		admin.listed["services"] = []map[string]any{staleService}
-		p := &BrokerProjector{
-			Client: fake.NewClientBuilder().WithScheme(scheme).Build(), Scheme: scheme, AIB: admin,
-			SecretPrefix: "kaos-aib", Prune: true, BindPermissionSets: false,
-		}
-
-		if err := p.Apply(context.Background(), projection.DesiredState{}); err != nil {
-			t.Fatalf("apply: %v", err)
-		}
-		if admin.deleted != 0 {
-			t.Fatalf("prune deleted %d records despite the off-switch", admin.deleted)
-		}
-	})
+func TestBrokerProjectorPrunesStaleAgentsOnly(t *testing.T) {
+	scheme := newTestScheme(t)
+	admin := newFakeAIB()
+	admin.listed["agents"] = []map[string]any{{"id": "agent-stale", "display_name": "kaos://agent/demo/stale"}}
+	p := &BrokerProjector{
+		Client: fake.NewClientBuilder().WithScheme(scheme).Build(), Scheme: scheme, AIB: admin,
+		SecretPrefix: "kaos-aib", Prune: true,
+	}
+	if err := p.Apply(context.Background(), projection.DesiredState{}); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if admin.deleted != 1 {
+		t.Fatalf("deleted = %d, want one stale agent", admin.deleted)
+	}
 }

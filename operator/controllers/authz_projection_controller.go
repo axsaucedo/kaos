@@ -26,19 +26,18 @@ const authzProjectionControllerName = "kaos-authz-projection"
 // controller funnels every event to one reconcile that recomputes the full state.
 var authzSentinel = reconcile.Request{NamespacedName: types.NamespacedName{Namespace: "_kaos", Name: "_authz"}}
 
-// PolicyProjector applies the projected desired state into a provider's sink.
+// PolicyProjector applies the projected desired state into a configured sink.
 type PolicyProjector interface {
 	Apply(ctx context.Context, desired projection.DesiredState) error
 }
 
-// AuthzProjectionReconciler projects KAOS resources into the configured
-// authorization provider. It recomputes the whole world on every change and
-// dispatches the projected desired state to the configured provider projector.
+// AuthzProjectionReconciler projects KAOS resources into the configured identity
+// and policy sinks. It recomputes the whole world on every change.
 type AuthzProjectionReconciler struct {
 	Client     client.Client
 	Scheme     *runtime.Scheme
 	Namespaces []string
-	Projector  PolicyProjector
+	Projectors []PolicyProjector
 }
 
 //+kubebuilder:rbac:groups="",resources=secrets,verbs=get;list;watch;create;update;patch;delete
@@ -61,13 +60,19 @@ func (r *AuthzProjectionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 // Reconcile runs a full projection pass: list every KAOS resource, project the
-// desired state, and apply it through the configured provider projector.
+// desired state, and apply it through every configured projector.
 func (r *AuthzProjectionReconciler) Reconcile(ctx context.Context, _ reconcile.Request) (reconcile.Result, error) {
 	resources, err := r.listResources(ctx)
 	if err != nil {
 		return reconcile.Result{}, fmt.Errorf("listing KAOS resources: %w", err)
 	}
-	return reconcile.Result{}, r.Projector.Apply(ctx, projection.Project(resources))
+	desired := projection.Project(resources)
+	for _, projector := range r.Projectors {
+		if err := projector.Apply(ctx, desired); err != nil {
+			return reconcile.Result{}, err
+		}
+	}
+	return reconcile.Result{}, nil
 }
 
 // listResources reads every watched KAOS kind via the typed client and maps each
@@ -130,6 +135,9 @@ func resourceFromAgent(a *kaosv1alpha1.Agent) projection.Resource {
 	}
 	if a.Spec.AgentNetwork != nil {
 		res.Access = a.Spec.AgentNetwork.Access
+	}
+	if a.Spec.Config != nil && a.Spec.Config.Memory != nil {
+		res.MemoryStore = a.Spec.Config.Memory.MemoryStore
 	}
 	return res
 }

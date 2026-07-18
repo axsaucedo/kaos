@@ -104,12 +104,12 @@ func constructEgressRules(params NetworkPolicyParams, cfg Config) []networkingv1
 		cfg.GatewayNamespaceOrDefault(),
 		cfg.OperatorNamespaceOrDefault(),
 	}
-	for _, endpoint := range []string{cfg.Issuer, cfg.ExtAuthzURL, cfg.ExtProcURL} {
+	for _, endpoint := range []string{cfg.Issuer, cfg.ExtAuthzURL} {
 		if ns := serviceNamespaceFromEndpoint(endpoint); ns != "" {
 			allowedNamespaces = append(allowedNamespaces, ns)
 		}
 	}
-	// AIB broker/ext_authz/ext_proc namespaces are derived from configured Service
+	// AIB broker/ext_authz namespaces are derived from configured Service
 	// DNS endpoints so token minting and gateway policy backends remain reachable.
 	for _, ns := range deduplicateStrings(allowedNamespaces) {
 		rules = append(rules, networkingv1.NetworkPolicyEgressRule{

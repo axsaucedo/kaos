@@ -1,0 +1,19 @@
+{{- if .Values.security.pdp.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: kaos-pdp
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+    app.kubernetes.io/component: pdp
+spec:
+  selector:
+    app.kubernetes.io/name: kaos-pdp
+    app.kubernetes.io/instance: {{ .Release.Name }}
+  ports:
+  - name: grpc
+    port: 9191
+    targetPort: grpc
+    protocol: TCP
+{{- end }}

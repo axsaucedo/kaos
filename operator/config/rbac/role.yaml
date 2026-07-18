@@ -10,6 +10,7 @@ rules:
   - configmaps
   - persistentvolumeclaims
   - secrets
+  - serviceaccounts
   - services
   verbs:
   - create
@@ -53,7 +54,6 @@ rules:
 - apiGroups:
   - gateway.envoyproxy.io
   resources:
-  - envoyextensionpolicies
   - securitypolicies
   verbs:
   - create
@@ -75,6 +75,7 @@ rules:
   - gateway.networking.k8s.io
   resources:
   - httproutes
+  - referencegrants
   verbs:
   - create
   - delete

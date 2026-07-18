@@ -105,15 +105,11 @@ def install(
     auth_enabled: str | None = typer.Option(
         None,
         "--auth-enabled",
-        help="Enable an end-to-end security posture by preset. Options: "
-        f"'{AUTH_PRESET_AIB_KEYCLOAK}' (default; Keycloak user identity + identity "
-        "broker agent identity with RFC 8693 token exchange + verified OPA "
-        f"authorization), '{AUTH_PRESET_KAOS_INTERNAL}' (self-contained demo; "
-        "KAOS-projected policy ConfigMap, header-trusted agent JWT, no external "
-        f"IdP/broker), or '{AUTH_PRESET_AIB_ONLY}' (broker agent identity, no "
-        "user layer, no token exchange). May be passed without a value to select "
-        "the default. Implies --gateway-enabled. Advanced overrides go through "
-        "--set security.agentAuth.*",
+        help="Enable gateway policy enforcement by preset. Options: "
+        f"'{AUTH_PRESET_AIB_KEYCLOAK}' (default; AIB + Keycloak identity), "
+        f"'{AUTH_PRESET_KAOS_INTERNAL}' (cluster-issued agent identity), or "
+        f"'{AUTH_PRESET_AIB_ONLY}' (AIB agent identity). May "
+        "be passed without a value to select the default.",
     ),
     gateway_api_strict: bool = typer.Option(
         False,
@@ -179,9 +175,6 @@ def install(
                 err=True,
             )
             raise typer.Exit(1)
-        # The gateway is the enforcement point for every auth posture, so ensure
-        # it is installed even if --gateway-enabled was not passed explicitly.
-        gateway_enabled = True
         auth_kwargs = _expand_auth_preset(auth_enabled, namespace)
 
     call_kwargs = dict(

@@ -6,22 +6,42 @@
 package security
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"strconv"
 	"strings"
 )
 
 // Config holds operator-wide security configuration read from the environment.
-// Security is enabled when any gateway enforcement hook is configured — either
-// the ext_authz access-check backend or the ext_proc token-exchange/OPA backend
-// (see SecurityEnabled). Credential mounting and NetworkPolicy generation are
-// gated on that broader predicate so they stay active for ext_proc-only installs
-// rather than being tied to ext_authz alone.
+// Security is enabled when the ext_authz access-check backend is configured.
 type Config struct {
+	// PDPEnabled enables the chart-managed OPA policy decision point. When true
+	// and ExtAuthzURL is empty, ext_authz uses the kaos-pdp Service in the
+	// operator namespace.
+	PDPEnabled bool
+
+	// IdentityProvider selects the single active agent identity issuer.
+	IdentityProvider IdentityProvider
+
+	// ServiceAccountAudience is the audience of projected agent tokens.
+	ServiceAccountAudience string
+
+	// ServiceAccountTokenExpirationSeconds controls projected token lifetime.
+	ServiceAccountTokenExpirationSeconds int64
+
+	// ServiceAccountTokenPath is the file exposed to the agent runtime.
+	ServiceAccountTokenPath string
+
+	// ServiceAccountIssuer and ServiceAccountJWKS are discovered from the
+	// Kubernetes API server at operator startup.
+	ServiceAccountIssuer string
+	ServiceAccountJWKS   map[string]any
+
 	// ExtAuthzURL is the host:port of the external authorization (ext_authz)
-	// access-check gRPC backend (agentAuth.extAuthzUrl). An empty value means
-	// gateway authorization enforcement is disabled.
+	// access-check gRPC backend override (agentAuth.extAuthzUrl). An empty value
+	// uses the chart-managed PDP backend when PDPEnabled is true.
 	ExtAuthzURL string
 
 	// Issuer is the agent-auth OIDC issuer URL (agentAuth.issuer): the broker
@@ -49,14 +69,6 @@ type Config struct {
 	// standard OIDC realm path.
 	UserJWKSURIOverride string
 
-	// ExtProcURL is the host:port of the AIB external-processing (ext_proc)
-	// token-exchange gRPC backend (agentAuth.extProcUrl). When set, the operator
-	// emits an EnvoyExtensionPolicy on protected routes so the gateway can perform
-	// an RFC 8693 token exchange and replace the upstream Authorization header.
-	// An empty value means token-exchange is disabled and existing routing is
-	// unchanged. It is independent of ExtAuthzURL.
-	ExtProcURL string
-
 	// GatewayNamespace is the namespace of the Envoy Gateway data plane
 	// (security.gatewayNamespace). It is the ingress source allowed by the
 	// generated NetworkPolicy so the Gateway can reach protected workloads. An
@@ -83,7 +95,7 @@ type Config struct {
 	// the cluster (security.gatewayHost). When gateway routing is enabled and this
 	// is set, the operator injects gateway-routed URLs into agents so internal
 	// agent->MCP/ModelAPI/peer traffic flows through the gateway (where jwt_authn,
-	// ext_authz and ext_proc apply) instead of directly to the workload Service. An
+	// ext_authz applies) instead of directly to the workload Service. An
 	// empty value lets the controller resolve the host from the Gateway resource's
 	// status address.
 	GatewayHost string
@@ -103,23 +115,6 @@ type Config struct {
 	// NetworkPolicy still requires a CNI that enforces it (e.g. Calico).
 	StrictGatewayAPI bool
 
-	// AuthzProvider selects which authorization provider the operator projects
-	// and enforces at the ext_proc OPA decision point
-	// (security.authorization.provider). "none" (default) means authorization
-	// projection is off.
-	AuthzProvider AuthzProvider
-
-	// AuthzGatewayEnforcementExtension selects which Envoy gateway extension
-	// enforces authorization (security.authorization.gatewayExtension). Defaults
-	// to OPA embedded in ext_proc; the ext_authz extension is opt-in.
-	AuthzGatewayEnforcementExtension AuthzGatewayEnforcementExtension
-
-	// AgentJWTVerificationMode selects how the agent (actor) JWT is trusted
-	// (security.authorization.agentJwtVerification). Empty derives the mode from
-	// the agent issuer: verified when an issuer is configured, skip (header-trust)
-	// otherwise.
-	AgentJWTVerificationMode AgentJWTVerificationMode
-
 	// PolicyDataSource selects who authors the authorization policy data
 	// (security.authorization.policyDataSource). Defaults to operator projection.
 	PolicyDataSource PolicyDataSource
@@ -130,44 +125,13 @@ type Config struct {
 	PolicyRegoOverride bool
 }
 
-// AuthzProvider selects which authorization provider the operator projects and
-// enforces. All providers share one OPA decision point in ext_proc; they differ
-// only in where the grant facts live.
-type AuthzProvider string
+// IdentityProvider selects the active agent identity issuer.
+type IdentityProvider string
 
 const (
-	// AuthzProviderNone disables authorization projection (default).
-	AuthzProviderNone AuthzProvider = "none"
-	// AuthzProviderKAOS enforces from KAOS-owned OPA data (data.kaos.grants)
-	// derived from CRDs — the actor-keyed provider.
-	AuthzProviderKAOS AuthzProvider = "kaos"
-	// AuthzProviderAIB enforces from broker permission sets returned by token
-	// exchange (granted_permission_sets) — the broker provider.
-	AuthzProviderAIB AuthzProvider = "aib"
-)
-
-// AuthzGatewayEnforcementExtension selects which Envoy gateway extension enforces
-// authorization.
-type AuthzGatewayEnforcementExtension string
-
-const (
-	// EnforcementExtProc enforces via OPA embedded in the ext_proc filter (default).
-	EnforcementExtProc AuthzGatewayEnforcementExtension = "ext_proc"
-	// EnforcementExtAuthz enforces via the optional, default-off ext_authz extension.
-	EnforcementExtAuthz AuthzGatewayEnforcementExtension = "ext_authz"
-)
-
-// AgentJWTVerificationMode selects how the agent (actor) JWT is trusted by the
-// policy.
-type AgentJWTVerificationMode string
-
-const (
-	// VerificationSkip trusts the actor header without signature verification;
-	// used when no issuer is configured. Not for production.
-	VerificationSkip AgentJWTVerificationMode = "skip"
-	// VerificationVerified requires the actor JWT signature to be verified
-	// against the injected JWKS.
-	VerificationVerified AgentJWTVerificationMode = "verified"
+	IdentityProviderServiceAccount IdentityProvider = "serviceaccount"
+	IdentityProviderOIDC           IdentityProvider = "oidc"
+	IdentityProviderAIB            IdentityProvider = "aib"
 )
 
 // PolicyDataSource selects who authors the authorization policy data the operator
@@ -180,32 +144,38 @@ const (
 	// PolicyDataManual points enforcement at an admin-authored data key the
 	// operator does not project.
 	PolicyDataManual PolicyDataSource = "manual"
-	// PolicyDataExternal turns projection off and leaves the broker authoritative,
-	// forcing prune off while KAOS keeps identity.
-	PolicyDataExternal PolicyDataSource = "external"
 )
 
 const (
-	envExtAuthzURL            = "SECURITY_AGENT_AUTH_EXT_AUTHZ_URL"
-	envExtProcURL             = "SECURITY_AGENT_AUTH_EXT_PROC_URL"
-	envIssuer                 = "SECURITY_AGENT_AUTH_ISSUER"
-	envCredentialSecretPrefix = "SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX"
-	envUserIssuer             = "SECURITY_USER_AUTH_ISSUER"
-	envUserAudience           = "SECURITY_USER_AUTH_AUDIENCE"
-	envUserJWKSURI            = "SECURITY_USER_AUTH_JWKS_URI"
-	envGatewayNamespace       = "SECURITY_GATEWAY_NAMESPACE"
-	envOperatorNamespace      = "SECURITY_OPERATOR_NAMESPACE"
-	envPodNamespace           = "POD_NAMESPACE"
-	envNetworkPolicyDisabled  = "SECURITY_NETWORK_POLICY_DISABLED"
-	envNetworkPolicyEgress    = "SECURITY_NETWORK_POLICY_EGRESS_ENABLED"
-	envGatewayHost            = "SECURITY_GATEWAY_HOST"
-	envGatewayRouting         = "SECURITY_GATEWAY_ROUTING_ENABLED"
-	envStrictGatewayAPI       = "SECURITY_STRICT_GATEWAY_API_ENABLED"
-	envAuthzProvider          = "SECURITY_AUTHORIZATION_PROVIDER"
-	envGatewayEnforcementExt  = "SECURITY_AUTHORIZATION_GATEWAY_EXTENSION"
-	envAgentJWTVerification   = "SECURITY_AUTHORIZATION_AGENT_JWT_VERIFICATION"
-	envPolicyDataSource       = "SECURITY_AUTHORIZATION_POLICY_DATA_SOURCE"
-	envPolicyRegoOverride     = "SECURITY_AUTHORIZATION_POLICY_REGO_OVERRIDE"
+	defaultPDPServiceName                    = "kaos-pdp"
+	defaultPDPPort                           = 9191
+	defaultAgentTokenAudience                = "kaos-gateway"
+	defaultAgentTokenExpirationSeconds int64 = 3600
+	defaultAgentTokenPath                    = "/var/run/secrets/kaos-agent/token"
+
+	envExtAuthzURL              = "SECURITY_AGENT_AUTH_EXT_AUTHZ_URL"
+	envPDPEnabled               = "SECURITY_PDP_ENABLED"
+	envIdentityProvider         = "SECURITY_AGENT_AUTH_IDENTITY_PROVIDER"
+	envServiceAccountAudience   = "SECURITY_AGENT_AUTH_SERVICE_ACCOUNT_AUDIENCE"
+	envServiceAccountExpiration = "SECURITY_AGENT_AUTH_SERVICE_ACCOUNT_EXPIRATION_SECONDS"
+	envServiceAccountTokenPath  = "SECURITY_AGENT_AUTH_SERVICE_ACCOUNT_TOKEN_PATH"
+	envServiceAccountIssuer     = "SECURITY_AGENT_AUTH_SERVICE_ACCOUNT_ISSUER"
+	envServiceAccountJWKS       = "SECURITY_AGENT_AUTH_SERVICE_ACCOUNT_JWKS"
+	envIssuer                   = "SECURITY_AGENT_AUTH_ISSUER"
+	envCredentialSecretPrefix   = "SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX"
+	envUserIssuer               = "SECURITY_USER_AUTH_ISSUER"
+	envUserAudience             = "SECURITY_USER_AUTH_AUDIENCE"
+	envUserJWKSURI              = "SECURITY_USER_AUTH_JWKS_URI"
+	envGatewayNamespace         = "SECURITY_GATEWAY_NAMESPACE"
+	envOperatorNamespace        = "SECURITY_OPERATOR_NAMESPACE"
+	envPodNamespace             = "POD_NAMESPACE"
+	envNetworkPolicyDisabled    = "SECURITY_NETWORK_POLICY_DISABLED"
+	envNetworkPolicyEgress      = "SECURITY_NETWORK_POLICY_EGRESS_ENABLED"
+	envGatewayHost              = "SECURITY_GATEWAY_HOST"
+	envGatewayRouting           = "SECURITY_GATEWAY_ROUTING_ENABLED"
+	envStrictGatewayAPI         = "SECURITY_STRICT_GATEWAY_API_ENABLED"
+	envPolicyDataSource         = "SECURITY_AUTHORIZATION_POLICY_DATA_SOURCE"
+	envPolicyRegoOverride       = "SECURITY_AUTHORIZATION_POLICY_REGO_OVERRIDE"
 )
 
 // Default namespaces used by NetworkPolicy ingress rules when not configured.
@@ -220,26 +190,43 @@ func GetConfig() Config {
 	if strings.TrimSpace(operatorNamespace) == "" {
 		operatorNamespace = os.Getenv(envPodNamespace)
 	}
+	serviceAccountExpiration := defaultAgentTokenExpirationSeconds
+	if parsed, err := strconv.ParseInt(strings.TrimSpace(os.Getenv(envServiceAccountExpiration)), 10, 64); err == nil && parsed > 0 {
+		serviceAccountExpiration = parsed
+	}
+	serviceAccountAudience := strings.TrimSpace(os.Getenv(envServiceAccountAudience))
+	if serviceAccountAudience == "" {
+		serviceAccountAudience = defaultAgentTokenAudience
+	}
+	serviceAccountTokenPath := strings.TrimSpace(os.Getenv(envServiceAccountTokenPath))
+	if serviceAccountTokenPath == "" {
+		serviceAccountTokenPath = defaultAgentTokenPath
+	}
+	var serviceAccountJWKS map[string]any
+	_ = json.Unmarshal([]byte(os.Getenv(envServiceAccountJWKS)), &serviceAccountJWKS)
 	return Config{
-		ExtAuthzURL:                      os.Getenv(envExtAuthzURL),
-		Issuer:                           os.Getenv(envIssuer),
-		CredentialSecretPrefix:           os.Getenv(envCredentialSecretPrefix),
-		UserIssuer:                       os.Getenv(envUserIssuer),
-		UserAudience:                     os.Getenv(envUserAudience),
-		UserJWKSURIOverride:              os.Getenv(envUserJWKSURI),
-		ExtProcURL:                       os.Getenv(envExtProcURL),
-		GatewayNamespace:                 os.Getenv(envGatewayNamespace),
-		OperatorNamespace:                operatorNamespace,
-		NetworkPolicyDisabled:            parseBoolEnv(envNetworkPolicyDisabled),
-		NetworkPolicyEgress:              parseBoolEnv(envNetworkPolicyEgress),
-		GatewayHost:                      os.Getenv(envGatewayHost),
-		GatewayRouting:                   parseBoolEnv(envGatewayRouting),
-		StrictGatewayAPI:                 parseBoolEnv(envStrictGatewayAPI),
-		AuthzProvider:                    AuthzProvider(readEnumEnv(envAuthzProvider)),
-		AuthzGatewayEnforcementExtension: AuthzGatewayEnforcementExtension(readEnumEnv(envGatewayEnforcementExt)),
-		AgentJWTVerificationMode:         AgentJWTVerificationMode(readEnumEnv(envAgentJWTVerification)),
-		PolicyDataSource:                 PolicyDataSource(readEnumEnv(envPolicyDataSource)),
-		PolicyRegoOverride:               parseBoolEnv(envPolicyRegoOverride),
+		PDPEnabled:                           parseBoolEnv(envPDPEnabled),
+		IdentityProvider:                     IdentityProvider(readEnumEnv(envIdentityProvider)),
+		ServiceAccountAudience:               serviceAccountAudience,
+		ServiceAccountTokenExpirationSeconds: serviceAccountExpiration,
+		ServiceAccountTokenPath:              serviceAccountTokenPath,
+		ServiceAccountIssuer:                 strings.TrimSpace(os.Getenv(envServiceAccountIssuer)),
+		ServiceAccountJWKS:                   serviceAccountJWKS,
+		ExtAuthzURL:                          os.Getenv(envExtAuthzURL),
+		Issuer:                               os.Getenv(envIssuer),
+		CredentialSecretPrefix:               os.Getenv(envCredentialSecretPrefix),
+		UserIssuer:                           os.Getenv(envUserIssuer),
+		UserAudience:                         os.Getenv(envUserAudience),
+		UserJWKSURIOverride:                  os.Getenv(envUserJWKSURI),
+		GatewayNamespace:                     os.Getenv(envGatewayNamespace),
+		OperatorNamespace:                    operatorNamespace,
+		NetworkPolicyDisabled:                parseBoolEnv(envNetworkPolicyDisabled),
+		NetworkPolicyEgress:                  parseBoolEnv(envNetworkPolicyEgress),
+		GatewayHost:                          os.Getenv(envGatewayHost),
+		GatewayRouting:                       parseBoolEnv(envGatewayRouting),
+		StrictGatewayAPI:                     parseBoolEnv(envStrictGatewayAPI),
+		PolicyDataSource:                     PolicyDataSource(readEnumEnv(envPolicyDataSource)),
+		PolicyRegoOverride:                   parseBoolEnv(envPolicyRegoOverride),
 	}
 }
 
@@ -271,28 +258,50 @@ func normalizeEnum[T ~string](v T, allowed []T, def T) T {
 	return def
 }
 
-// IsOperational reports whether the legacy ext_authz access-check backend is
-// configured. It gates ext_authz SecurityPolicy generation specifically; broader
-// security behavior (credentials, NetworkPolicy) is gated on SecurityEnabled.
+// IsOperational reports whether ext_authz enforcement is enabled through the
+// chart-managed PDP or an explicit backend override.
 func (c Config) IsOperational() bool {
-	return strings.TrimSpace(c.ExtAuthzURL) != ""
+	return c.PDPEnabled || strings.TrimSpace(c.ExtAuthzURL) != ""
 }
 
-// SecurityEnabled reports whether any gateway enforcement hook is configured —
-// either the ext_authz access-check backend or the ext_proc token-exchange/OPA
-// backend. It is the predicate that keeps credential mounting and NetworkPolicy
-// generation active independently of ext_authz, so an ext_proc-only install
-// (OPA-in-ext_proc authorization) still provisions credentials and isolation.
+// SecurityEnabled reports whether gateway authorization enforcement is configured.
 func (c Config) SecurityEnabled() bool {
-	return c.IsOperational() || c.ExtProcEnabled()
+	return c.IsOperational()
 }
 
 // CredentialMountingEnabled reports whether the operator should mount per-agent
-// AIB credentials into agent pods. This requires security to be enabled (any
-// enforcement hook, not ext_authz specifically) and a credential Secret prefix to
-// be configured.
+// AIB credentials into agent pods. This requires security to be enabled and a
+// credential Secret prefix to be configured.
 func (c Config) CredentialMountingEnabled() bool {
-	return c.SecurityEnabled() && strings.TrimSpace(c.CredentialSecretPrefix) != ""
+	return c.IdentityProviderOrDefault() == IdentityProviderAIB && c.SecurityEnabled() && strings.TrimSpace(c.CredentialSecretPrefix) != ""
+}
+
+// IdentityProviderOrDefault returns the single configured issuer, preserving
+// the existing AIB behavior when the setting is omitted or invalid.
+func (c Config) IdentityProviderOrDefault() IdentityProvider {
+	return normalizeEnum(c.IdentityProvider,
+		[]IdentityProvider{IdentityProviderServiceAccount, IdentityProviderOIDC, IdentityProviderAIB},
+		IdentityProviderAIB)
+}
+
+func (c Config) ServiceAccountIdentityEnabled() bool {
+	return c.IdentityProviderOrDefault() == IdentityProviderServiceAccount
+}
+
+// AgentIssuer returns the issuer used by the gateway agent JWT provider.
+func (c Config) AgentIssuer() string {
+	if c.ServiceAccountIdentityEnabled() {
+		return strings.TrimSpace(c.ServiceAccountIssuer)
+	}
+	return strings.TrimSpace(c.Issuer)
+}
+
+// AgentLocalJWKS returns the discovered cluster JWKS for ServiceAccount identity.
+func (c Config) AgentLocalJWKS() map[string]any {
+	if !c.ServiceAccountIdentityEnabled() {
+		return nil
+	}
+	return c.ServiceAccountJWKS
 }
 
 // CredentialSecretName returns the per-agent credential Secret name for the given
@@ -300,6 +309,19 @@ func (c Config) CredentialMountingEnabled() bool {
 // controller that writes the Secret and the mounting path that consumes it.
 func CredentialSecretName(prefix, agentName string) string {
 	return fmt.Sprintf("%s-%s", strings.TrimSpace(prefix), agentName)
+}
+
+// AgentServiceAccountName returns the per-agent Kubernetes identity name.
+func AgentServiceAccountName(agentName string) string {
+	return "kaos-agent-" + agentName
+}
+
+func (c Config) ServiceAccountTokenMountDir() string {
+	return path.Dir(c.ServiceAccountTokenPath)
+}
+
+func (c Config) ServiceAccountTokenFilename() string {
+	return path.Base(c.ServiceAccountTokenPath)
 }
 
 // CredentialSecretName returns the name of the per-agent credential Secret for the
@@ -348,13 +370,16 @@ func (c Config) CredentialSecretFilePath() string {
 // is configured. This is independent of IsOperational (which gates ext_authz):
 // the jwt block is only rendered when at least one issuer is known.
 func (c Config) JWTEnabled() bool {
-	return strings.TrimSpace(c.Issuer) != "" || strings.TrimSpace(c.UserIssuer) != ""
+	return c.AgentIssuer() != "" || strings.TrimSpace(c.UserIssuer) != ""
 }
 
 // AgentJWKSURI returns the JWKS endpoint for the agent (actor) provider, derived
 // from the agent-auth issuer. The broker publishes its signing keys at
 // "<issuer>/oauth2/jwks.json". It returns an empty string when no issuer is set.
 func (c Config) AgentJWKSURI() string {
+	if c.ServiceAccountIdentityEnabled() {
+		return ""
+	}
 	issuer := strings.TrimRight(strings.TrimSpace(c.Issuer), "/")
 	if issuer == "" {
 		return ""
@@ -376,14 +401,6 @@ func (c Config) UserJWKSURI() string {
 		return ""
 	}
 	return issuer + "/protocol/openid-connect/certs"
-}
-
-// ExtProcEnabled reports whether the operator should emit an EnvoyExtensionPolicy
-// (ext_proc token exchange) on protected routes. It is true when ExtProcURL is
-// configured. This is independent of IsOperational (which gates ext_authz): a
-// deployment may enable token exchange without changing the ext_authz wiring.
-func (c Config) ExtProcEnabled() bool {
-	return strings.TrimSpace(c.ExtProcURL) != ""
 }
 
 // NetworkPolicyEnabled reports whether the operator should generate a
@@ -441,16 +458,19 @@ func (c Config) GatewayRoutingEnabled() bool {
 // gRPC backendRef. The host is expected as a Service DNS name in the form
 // "name[.namespace[.svc.cluster.local]]"; the namespace is empty when not present.
 func (c Config) ExtAuthzBackendRef() (name, namespace string, port int, err error) {
-	return parseServiceHostPort(c.ExtAuthzURL, "ext_authz")
+	return parseServiceHostPort(c.ExtAuthzURLOrDefault(), "ext_authz")
 }
 
-// ExtProcBackendRef parses the configured ext_proc host:port URL into the
-// Kubernetes Service name, namespace, and port used to build the
-// EnvoyExtensionPolicy gRPC backendRef. The host is expected as a Service DNS
-// name in the form "name[.namespace[.svc.cluster.local]]"; the namespace is empty
-// when not present.
-func (c Config) ExtProcBackendRef() (name, namespace string, port int, err error) {
-	return parseServiceHostPort(c.ExtProcURL, "ext_proc")
+// ExtAuthzURLOrDefault returns the explicit backend override when configured,
+// otherwise the chart-managed PDP Service when PDP enforcement is enabled.
+func (c Config) ExtAuthzURLOrDefault() string {
+	if override := strings.TrimSpace(c.ExtAuthzURL); override != "" {
+		return override
+	}
+	if !c.PDPEnabled {
+		return ""
+	}
+	return fmt.Sprintf("%s.%s.svc:%d", defaultPDPServiceName, c.OperatorNamespaceOrDefault(), defaultPDPPort)
 }
 
 // parseServiceHostPort parses a "host:port" Service DNS URL into name, namespace,
@@ -483,65 +503,23 @@ func parseServiceHostPort(rawURL, label string) (name, namespace string, port in
 	return name, namespace, port, nil
 }
 
-// AuthzProviderOrDefault returns the configured authorization provider,
-// defaulting to none (no projection) for unset or unrecognized values.
-func (c Config) AuthzProviderOrDefault() AuthzProvider {
-	return normalizeEnum(c.AuthzProvider,
-		[]AuthzProvider{AuthzProviderNone, AuthzProviderKAOS, AuthzProviderAIB},
-		AuthzProviderNone)
-}
-
-// AuthorizationEnabled reports whether any authorization provider is selected.
-func (c Config) AuthorizationEnabled() bool {
-	return c.AuthzProviderOrDefault() != AuthzProviderNone
-}
-
 // ExtAuthzEnabled reports whether the operator should attach the ext_authz
-// external-authorization check to protected routes. It is the optional,
-// default-off enforcement extension: it requires the gateway enforcement
-// extension to be set to ext_authz explicitly and a backend to be configured.
-// The default enforcement path is OPA embedded in ext_proc, so this returns
-// false unless ext_authz is deliberately selected.
+// external-authorization check to protected routes. It remains default-off and
+// requires a backend to be configured.
 func (c Config) ExtAuthzEnabled() bool {
-	return c.GatewayEnforcementExtensionOrDefault() == EnforcementExtAuthz && c.IsOperational()
-}
-
-// GatewayEnforcementExtensionOrDefault returns the configured gateway
-// enforcement extension, defaulting to OPA embedded in ext_proc.
-func (c Config) GatewayEnforcementExtensionOrDefault() AuthzGatewayEnforcementExtension {
-	return normalizeEnum(c.AuthzGatewayEnforcementExtension,
-		[]AuthzGatewayEnforcementExtension{EnforcementExtProc, EnforcementExtAuthz},
-		EnforcementExtProc)
+	return c.IsOperational()
 }
 
 // AuthzJWKSURI returns the agent (actor) JWKS endpoint the operator injects into
-// the authorization policy data, but only in verified mode. In skip mode it
-// returns an empty string so no JWKS is injected and the policy decodes the
-// actor token without verifying it.
+// the authorization policy data for signature verification.
 func (c Config) AuthzJWKSURI() string {
-	if c.AgentJWTVerificationModeOrDefault() != VerificationVerified {
-		return ""
-	}
 	return c.AgentJWKSURI()
-}
-
-// AgentJWTVerificationModeOrDefault returns the configured agent JWT
-// verification mode, deriving the default from the issuer: verified when an
-// issuer is configured, skip otherwise.
-func (c Config) AgentJWTVerificationModeOrDefault() AgentJWTVerificationMode {
-	def := VerificationSkip
-	if strings.TrimSpace(c.Issuer) != "" {
-		def = VerificationVerified
-	}
-	return normalizeEnum(c.AgentJWTVerificationMode,
-		[]AgentJWTVerificationMode{VerificationSkip, VerificationVerified},
-		def)
 }
 
 // PolicyDataSourceOrDefault returns the configured policy-data source, defaulting
 // to operator projection.
 func (c Config) PolicyDataSourceOrDefault() PolicyDataSource {
 	return normalizeEnum(c.PolicyDataSource,
-		[]PolicyDataSource{PolicyDataAutomated, PolicyDataManual, PolicyDataExternal},
+		[]PolicyDataSource{PolicyDataAutomated, PolicyDataManual},
 		PolicyDataAutomated)
 }

@@ -1,19 +1,19 @@
-"""Unit tests for aib.instrument_fastapi inbound boundary instrumentation."""
+"""Unit tests for kaos_identity.instrument_fastapi inbound boundary instrumentation."""
 
-import aib
+import kaos_identity
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 
 def _make_app(**kwargs):
     app = FastAPI()
-    aib.instrument_fastapi(app, **kwargs)
+    kaos_identity.instrument_fastapi(app, **kwargs)
 
     @app.get("/seen")
     async def seen():
         # The context set by the middleware must be visible inside the endpoint
         # (same task — pure ASGI middleware, not BaseHTTPMiddleware).
-        return aib.current()
+        return kaos_identity.current()
 
     return TestClient(app)
 

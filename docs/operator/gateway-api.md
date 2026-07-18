@@ -275,7 +275,7 @@ When Gateway API is enabled, agents can optionally use Gateway URLs for inter-ag
 
 By default agents reach other KAOS resources (MCP servers, model APIs, peer agents) directly over their in-cluster Service DNS. Strict gateway-only traffic makes the Envoy Gateway the single application path between workloads: it generates a `NetworkPolicy` for each protected workload that denies direct workload-to-workload traffic, and injects gateway-routed URLs into agents so their internal calls flow through the gateway (where JWT authentication, authorization, and TLS apply).
 
-This is a defence-in-depth posture that is useful on its own — it does **not** require any authorization backend (ext_authz or ext_proc). Enable it with a single switch:
+This is a defence-in-depth posture that is useful on its own and does **not** require the PDP. Enable it with a single switch:
 
 ```bash
 kaos system install --gateway-enabled --gateway-api-strict

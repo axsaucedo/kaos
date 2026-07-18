@@ -39,24 +39,26 @@ type EdgeKind struct {
 
 // The edge kinds an agent can request. Agent->Agent edges (spec.agentNetwork.access)
 // authorize peer A2A delegation on the calling agent's actor identity, the same
-// way MCPServer/ModelAPI edges authorize tool and model calls.
+// way MCPServer/ModelAPI/MemoryStore edges authorize dependency calls.
 var (
-	MCPServer = EdgeKind{Slug: "mcpserver", ResourceKind: "MCPServer", DisplayLabel: "MCPServer", ScopeDescription: "Invoke the MCP server"}
-	ModelAPI  = EdgeKind{Slug: "modelapi", ResourceKind: "ModelAPI", DisplayLabel: "ModelAPI", ScopeDescription: "Invoke the model API"}
-	Agent     = EdgeKind{Slug: AgentSlug, ResourceKind: AgentKind, DisplayLabel: "Agent", ScopeDescription: "Invoke the agent (A2A)"}
+	MCPServer   = EdgeKind{Slug: "mcpserver", ResourceKind: "MCPServer", DisplayLabel: "MCPServer", ScopeDescription: "Invoke the MCP server"}
+	ModelAPI    = EdgeKind{Slug: "modelapi", ResourceKind: "ModelAPI", DisplayLabel: "ModelAPI", ScopeDescription: "Invoke the model API"}
+	MemoryStore = EdgeKind{Slug: "memorystore", ResourceKind: "MemoryStore", DisplayLabel: "MemoryStore", ScopeDescription: "Invoke the memory store"}
+	Agent       = EdgeKind{Slug: AgentSlug, ResourceKind: AgentKind, DisplayLabel: "Agent", ScopeDescription: "Invoke the agent (A2A)"}
 )
 
-var serviceClientIDPrefixes = []string{"kaos-" + MCPServer.Slug + "-", "kaos-" + ModelAPI.Slug + "-", "kaos-" + Agent.Slug + "-"}
+var serviceClientIDPrefixes = []string{"kaos-" + MCPServer.Slug + "-", "kaos-" + ModelAPI.Slug + "-", "kaos-" + MemoryStore.Slug + "-", "kaos-" + Agent.Slug + "-"}
 
 // Resource is the minimal KAOS resource shape the projection needs. The runtime
 // converts unstructured CRDs into this; tests construct it directly.
 type Resource struct {
-	Kind       string
-	Namespace  string
-	Name       string
-	MCPServers []string // spec.mcpServers (Agent only)
-	ModelAPI   string   // spec.modelAPI (Agent only)
-	Access     []string // spec.agentNetwork.access -- peer agents this agent may call (Agent only)
+	Kind        string
+	Namespace   string
+	Name        string
+	MCPServers  []string // spec.mcpServers (Agent only)
+	ModelAPI    string   // spec.modelAPI (Agent only)
+	MemoryStore string   // spec.config.memory.memoryStore (Agent only)
+	Access      []string // spec.agentNetwork.access -- peer agents this agent may call (Agent only)
 }
 
 func logicalPath(namespace, name string) string {
@@ -178,7 +180,7 @@ type DesiredState struct {
 }
 
 // Project turns a list of KAOS resources into the desired authorization graph.
-// MCP server edges, the model API edge and agent->agent access edges are all
+// MCP server, model API, memory store, and agent->agent access edges are all
 // projected so an agent is authorized against every external dependency and peer
 // it declares. Agents with no edges are skipped. Logical identity is always
 // kaos://<slug>/<ns>/<name>, so identities are unique by construction and need
@@ -232,6 +234,9 @@ func Project(resources []Resource) DesiredState {
 		}
 		if r.ModelAPI != "" {
 			addEdge(ModelAPI, r.ModelAPI)
+		}
+		if r.MemoryStore != "" {
+			addEdge(MemoryStore, r.MemoryStore)
 		}
 		for _, peer := range r.Access {
 			if peer == "" || peer == r.Name {

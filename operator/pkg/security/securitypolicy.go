@@ -2,6 +2,8 @@ package security
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -23,6 +25,9 @@ const (
 	securityPolicyKind    = "SecurityPolicy"
 	httpRouteGroup        = "gateway.networking.k8s.io"
 	httpRouteKind         = "HTTPRoute"
+	referenceGrantGroup   = "gateway.networking.k8s.io"
+	referenceGrantVersion = "v1beta1"
+	referenceGrantKind    = "ReferenceGrant"
 )
 
 // SecurityPolicyGVK is the GroupVersionKind of the generated SecurityPolicy.
@@ -30,6 +35,12 @@ var SecurityPolicyGVK = schema.GroupVersionKind{
 	Group:   securityPolicyGroup,
 	Version: securityPolicyVersion,
 	Kind:    securityPolicyKind,
+}
+
+var referenceGrantGVK = schema.GroupVersionKind{
+	Group:   referenceGrantGroup,
+	Version: referenceGrantVersion,
+	Kind:    referenceGrantKind,
 }
 
 // PolicyParams describes the protected route a SecurityPolicy should guard.
@@ -48,8 +59,8 @@ type PolicyParams struct {
 // unstructured object) attaching JWT authentication and, when the optional
 // ext_authz enforcement seam is enabled, a fail-closed gRPC external
 // authorization check to the target HTTPRoute. The ext_authz block is emitted
-// only in ext_authz enforcement mode (the default is OPA-in-ext_proc); JWT
-// providers are emitted whenever an issuer is configured. It returns a nil policy
+// whenever an ext_authz backend is configured; JWT providers are emitted whenever
+// an issuer is configured. It returns a nil policy
 // when neither block applies, so no SecurityPolicy is created. It returns an
 // error only when the ext_authz backend is enabled but cannot be resolved.
 func constructSecurityPolicy(params PolicyParams, cfg Config) (*unstructured.Unstructured, error) {
@@ -113,6 +124,55 @@ func constructSecurityPolicy(params PolicyParams, cfg Config) (*unstructured.Uns
 	return policy, nil
 }
 
+func constructExtAuthReferenceGrant(sourceNamespace, backendNamespace, serviceName string) *unstructured.Unstructured {
+	nameHash := sha256.Sum256([]byte(sourceNamespace + "\x00" + serviceName))
+	grant := &unstructured.Unstructured{}
+	grant.SetGroupVersionKind(referenceGrantGVK)
+	grant.SetName(fmt.Sprintf("kaos-ext-auth-%x", nameHash[:6]))
+	grant.SetNamespace(backendNamespace)
+	grant.Object["spec"] = map[string]interface{}{
+		"from": []interface{}{
+			map[string]interface{}{
+				"group":     securityPolicyGroup,
+				"kind":      securityPolicyKind,
+				"namespace": sourceNamespace,
+			},
+		},
+		"to": []interface{}{
+			map[string]interface{}{
+				"group": "",
+				"kind":  "Service",
+				"name":  serviceName,
+			},
+		},
+	}
+	return grant
+}
+
+func reconcileExtAuthReferenceGrant(
+	ctx context.Context,
+	c client.Client,
+	sourceNamespace, backendNamespace, serviceName string,
+	log logr.Logger,
+) error {
+	desired := constructExtAuthReferenceGrant(sourceNamespace, backendNamespace, serviceName)
+	existing := &unstructured.Unstructured{}
+	existing.SetGroupVersionKind(referenceGrantGVK)
+	key := types.NamespacedName{Name: desired.GetName(), Namespace: backendNamespace}
+	if err := c.Get(ctx, key, existing); apierrors.IsNotFound(err) {
+		log.Info("Creating ext_authz ReferenceGrant", "name", desired.GetName(), "namespace", backendNamespace, "sourceNamespace", sourceNamespace)
+		return c.Create(ctx, desired)
+	} else if err != nil {
+		return err
+	}
+
+	spec, _, _ := unstructured.NestedMap(desired.Object, "spec")
+	if err := unstructured.SetNestedMap(existing.Object, spec, "spec"); err != nil {
+		return fmt.Errorf("update ReferenceGrant spec: %w", err)
+	}
+	return c.Update(ctx, existing)
+}
+
 // constructJWTProviders builds the Envoy Gateway SecurityPolicy spec.jwt.providers
 // list. The agent (actor) provider verifies the broker-issued token carried on the
 // x-agent-authorization header and is emitted whenever an agent issuer is set. The
@@ -123,13 +183,10 @@ func constructSecurityPolicy(params PolicyParams, cfg Config) (*unstructured.Uns
 func constructJWTProviders(cfg Config) []interface{} {
 	providers := make([]interface{}, 0, 2)
 
-	if agentJWKS := cfg.AgentJWKSURI(); agentJWKS != "" {
-		providers = append(providers, map[string]interface{}{
+	if issuer := cfg.AgentIssuer(); issuer != "" {
+		agentProvider := map[string]interface{}{
 			"name":   "agent",
-			"issuer": strings.TrimSpace(cfg.Issuer),
-			"remoteJWKS": map[string]interface{}{
-				"uri": agentJWKS,
-			},
+			"issuer": issuer,
 			"extractFrom": map[string]interface{}{
 				"headers": []interface{}{
 					map[string]interface{}{
@@ -141,7 +198,22 @@ func constructJWTProviders(cfg Config) []interface{} {
 			"claimToHeaders": []interface{}{
 				map[string]interface{}{"claim": "sub", "header": "x-agent-claim-sub"},
 			},
-		})
+		}
+		if localJWKS := cfg.AgentLocalJWKS(); localJWKS != nil {
+			if raw, err := json.Marshal(localJWKS); err == nil {
+				agentProvider["localJWKS"] = map[string]interface{}{"type": "Inline", "inline": string(raw)}
+			}
+		} else if agentJWKS := cfg.AgentJWKSURI(); agentJWKS != "" {
+			agentProvider["remoteJWKS"] = map[string]interface{}{"uri": agentJWKS}
+		}
+		if _, local := agentProvider["localJWKS"]; local || agentProvider["remoteJWKS"] != nil {
+			audience := strings.TrimSpace(cfg.ServiceAccountAudience)
+			if audience == "" {
+				audience = defaultAgentTokenAudience
+			}
+			agentProvider["audiences"] = []interface{}{audience}
+			providers = append(providers, agentProvider)
+		}
 	}
 
 	if userJWKS := cfg.UserJWKSURI(); userJWKS != "" {
@@ -168,9 +240,7 @@ func constructJWTProviders(cfg Config) []interface{} {
 // ReconcileSecurityPolicy creates or updates the SecurityPolicy that guards a
 // protected route with JWT authentication and, when the ext_authz enforcement
 // seam is enabled, an external authorization check. It is a no-op when security
-// is disabled or when neither JWT authn nor ext_authz applies (for example an
-// ext_proc-only install with no issuer), leaving enforcement entirely to the
-// ext_proc OPA path.
+// is disabled or when neither JWT authn nor ext_authz applies.
 func ReconcileSecurityPolicy(
 	ctx context.Context,
 	c client.Client,
@@ -190,6 +260,17 @@ func ReconcileSecurityPolicy(
 	}
 	if desired == nil {
 		return nil
+	}
+	if cfg.ExtAuthzEnabled() {
+		serviceName, backendNamespace, _, err := cfg.ExtAuthzBackendRef()
+		if err != nil {
+			return fmt.Errorf("resolve ext_authz backend: %w", err)
+		}
+		if backendNamespace != "" && backendNamespace != params.Namespace {
+			if err := reconcileExtAuthReferenceGrant(ctx, c, params.Namespace, backendNamespace, serviceName, log); err != nil {
+				return fmt.Errorf("reconcile ext_authz ReferenceGrant: %w", err)
+			}
+		}
 	}
 
 	existing := &unstructured.Unstructured{}

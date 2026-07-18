@@ -44,3 +44,27 @@ func TestGrantDataOmitsAgentsWithoutEdges(t *testing.T) {
 		t.Fatalf("expected no grants, got %v", GrantData(state))
 	}
 }
+
+func TestGrantDataIncludesBoundMemoryStore(t *testing.T) {
+	state := Project([]Resource{{
+		Kind: "Agent", Namespace: "demo", Name: "researcher", MemoryStore: "brain",
+	}})
+
+	got := GrantData(state)["kaos://agent/demo/researcher"]
+	want := []string{"kaos://memorystore/demo/brain"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("grants = %v, want %v", got, want)
+	}
+}
+
+func TestGrantDataOmitsMemoryStoreForUnboundAgent(t *testing.T) {
+	state := Project([]Resource{{
+		Kind: "Agent", Namespace: "demo", Name: "researcher", ModelAPI: "gpt",
+	}})
+
+	got := GrantData(state)["kaos://agent/demo/researcher"]
+	want := []string{"kaos://modelapi/demo/gpt"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("grants = %v, want %v", got, want)
+	}
+}

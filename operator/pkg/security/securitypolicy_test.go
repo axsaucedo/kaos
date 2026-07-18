@@ -1,6 +1,7 @@
 package security
 
 import (
+	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -8,8 +9,7 @@ import (
 
 func operationalConfig() Config {
 	return Config{
-		ExtAuthzURL:                      "aib-access-check.kaos-system.svc.cluster.local:9191",
-		AuthzGatewayEnforcementExtension: EnforcementExtAuthz,
+		ExtAuthzURL: "aib-access-check.kaos-system.svc.cluster.local:9191",
 	}
 }
 
@@ -71,6 +71,31 @@ func TestConstructSecurityPolicyShape(t *testing.T) {
 	}
 }
 
+func TestConstructExtAuthReferenceGrant(t *testing.T) {
+	grant := constructExtAuthReferenceGrant("agents", "kaos-system", "kaos-pdp")
+	if grant.GetNamespace() != "kaos-system" || !strings.HasPrefix(grant.GetName(), "kaos-ext-auth-") {
+		t.Fatalf("unexpected ReferenceGrant identity %s/%s", grant.GetNamespace(), grant.GetName())
+	}
+	from, found, err := unstructured.NestedSlice(grant.Object, "spec", "from")
+	if err != nil || !found || len(from) != 1 {
+		t.Fatalf("from = %#v found=%v err=%v", from, found, err)
+	}
+	wantFrom := map[string]interface{}{
+		"group": securityPolicyGroup, "kind": securityPolicyKind, "namespace": "agents",
+	}
+	if got := from[0].(map[string]interface{}); got["group"] != wantFrom["group"] || got["kind"] != wantFrom["kind"] || got["namespace"] != wantFrom["namespace"] {
+		t.Fatalf("from = %#v", got)
+	}
+	to, found, err := unstructured.NestedSlice(grant.Object, "spec", "to")
+	if err != nil || !found || len(to) != 1 {
+		t.Fatalf("to = %#v found=%v err=%v", to, found, err)
+	}
+	gotTo := to[0].(map[string]interface{})
+	if gotTo["group"] != "" || gotTo["kind"] != "Service" || gotTo["name"] != "kaos-pdp" {
+		t.Fatalf("to = %#v", gotTo)
+	}
+}
+
 func TestConstructSecurityPolicyNoLabels(t *testing.T) {
 	policy, err := constructSecurityPolicy(PolicyParams{Name: "a", Namespace: "ns", RouteName: "a"}, operationalConfig())
 	if err != nil {
@@ -82,32 +107,46 @@ func TestConstructSecurityPolicyNoLabels(t *testing.T) {
 }
 
 func TestConstructSecurityPolicyInvalidConfig(t *testing.T) {
-	cfg := Config{ExtAuthzURL: "no-port", AuthzGatewayEnforcementExtension: EnforcementExtAuthz}
+	cfg := Config{ExtAuthzURL: "no-port"}
 	if _, err := constructSecurityPolicy(PolicyParams{Name: "a", Namespace: "ns", RouteName: "a"}, cfg); err == nil {
 		t.Errorf("expected error for malformed ext_authz URL")
 	}
 }
 
-func TestConstructSecurityPolicyExtAuthzDefaultOff(t *testing.T) {
-	// ext_authz URL set but enforcement mode defaults to ext_proc: no extAuth
-	// block is emitted, and with no issuer there is nothing to attach.
-	policy, err := constructSecurityPolicy(
-		PolicyParams{Name: "a", Namespace: "ns", RouteName: "a"},
-		Config{ExtAuthzURL: "aib-access-check.kaos-system.svc.cluster.local:9191"},
-	)
+func TestConstructSecurityPolicyUsesPDPDefaultWhenEnabled(t *testing.T) {
+	cfg := Config{PDPEnabled: true, OperatorNamespace: "kaos-system"}
+	policy, err := constructSecurityPolicy(PolicyParams{Name: "a", Namespace: "ns", RouteName: "a"}, cfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if policy == nil {
+		t.Fatal("expected SecurityPolicy when PDP is enabled")
+	}
+	backendRef, found, err := unstructured.NestedMap(policy.Object, "spec", "extAuth", "grpc", "backendRef")
+	if err != nil || !found {
+		t.Fatalf("expected PDP backendRef, found=%v err=%v", found, err)
+	}
+	if backendRef["name"] != "kaos-pdp" || backendRef["namespace"] != "kaos-system" || backendRef["port"] != int64(9191) {
+		t.Fatalf("unexpected PDP backendRef: %#v", backendRef)
+	}
+	failOpen, found, err := unstructured.NestedBool(policy.Object, "spec", "extAuth", "failOpen")
+	if err != nil || !found || failOpen {
+		t.Fatalf("expected explicit failOpen=false, got %v (found=%v err=%v)", failOpen, found, err)
+	}
+}
+
+func TestConstructSecurityPolicyAbsentWhenPDPDisabled(t *testing.T) {
+	policy, err := constructSecurityPolicy(PolicyParams{Name: "a", Namespace: "ns", RouteName: "a"}, Config{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if policy != nil {
-		t.Fatalf("expected nil policy when ext_authz off and no issuers, got %+v", policy.Object)
+		t.Fatalf("expected no SecurityPolicy when PDP and JWT are disabled: %#v", policy.Object)
 	}
 }
 
-func TestConstructSecurityPolicyJWTOnlyWhenExtAuthzOff(t *testing.T) {
-	// ext_proc-only install with a user issuer: JWT authn is attached, but no
-	// extAuth block, so gateway authentication stays intact without ext_authz.
+func TestConstructSecurityPolicyJWTOnlyWithoutExtAuthz(t *testing.T) {
 	cfg := Config{
-		ExtProcURL: "aib-extproc.kaos-system.svc.cluster.local:9002",
 		UserIssuer: "http://keycloak.kaos-system.svc.cluster.local:8080/realms/kaos",
 	}
 	policy, err := constructSecurityPolicy(PolicyParams{Name: "a", Namespace: "ns", RouteName: "a"}, cfg)
@@ -118,7 +157,7 @@ func TestConstructSecurityPolicyJWTOnlyWhenExtAuthzOff(t *testing.T) {
 		t.Fatal("expected a policy with jwt providers")
 	}
 	if _, found, _ := unstructured.NestedMap(policy.Object, "spec", "extAuth"); found {
-		t.Errorf("expected no extAuth block in ext_proc-only mode")
+		t.Errorf("expected no extAuth block without an ext_authz backend")
 	}
 	if _, found, _ := unstructured.NestedSlice(policy.Object, "spec", "jwt", "providers"); !found {
 		t.Errorf("expected jwt providers to be attached")
@@ -191,8 +230,9 @@ func TestConstructSecurityPolicyEmitsBothJWTProviders(t *testing.T) {
 	if h["name"] != "x-agent-authorization" || h["valuePrefix"] != "Bearer " {
 		t.Errorf("unexpected agent extractFrom header %#v", h)
 	}
-	if _, hasAud := agent["audiences"]; hasAud {
-		t.Errorf("agent provider should not set audiences")
+	agentAud, _, _ := unstructured.NestedStringSlice(agent, "audiences")
+	if len(agentAud) != 1 || agentAud[0] != "kaos-gateway" {
+		t.Errorf("unexpected agent audiences %#v", agentAud)
 	}
 
 	user := providerByName(providers, "user")
@@ -237,6 +277,41 @@ func TestConstructSecurityPolicyAgentOnlyWhenNoUserIssuer(t *testing.T) {
 	}
 	if providerByName(providers, "user") != nil {
 		t.Errorf("did not expect a user provider without a user issuer")
+	}
+}
+
+func TestConstructSecurityPolicyServiceAccountUsesLocalJWKS(t *testing.T) {
+	cfg := Config{
+		PDPEnabled:             true,
+		IdentityProvider:       IdentityProviderServiceAccount,
+		ServiceAccountAudience: "kaos-gateway",
+		ServiceAccountIssuer:   "https://kubernetes.default.svc",
+		ServiceAccountJWKS: map[string]any{
+			"keys": []any{map[string]any{"kty": "RSA", "kid": "sa-key"}},
+		},
+	}
+	policy, err := constructSecurityPolicy(PolicyParams{Name: "a", Namespace: "ns", RouteName: "a"}, cfg)
+	if err != nil {
+		t.Fatalf("constructSecurityPolicy: %v", err)
+	}
+	agent := providerByName(jwtProviders(t, policy), "agent")
+	if agent == nil || agent["issuer"] != "https://kubernetes.default.svc" {
+		t.Fatalf("agent provider = %#v", agent)
+	}
+	local, found, err := unstructured.NestedMap(agent, "localJWKS")
+	if err != nil || !found || local["type"] != "Inline" {
+		t.Fatalf("localJWKS = %#v found=%v err=%v", local, found, err)
+	}
+	inline, _ := local["inline"].(string)
+	if !strings.Contains(inline, `"kid":"sa-key"`) {
+		t.Fatalf("inline JWKS = %q", inline)
+	}
+	if _, remote := agent["remoteJWKS"]; remote {
+		t.Fatal("ServiceAccount provider must not use remoteJWKS")
+	}
+	audiences, found, err := unstructured.NestedSlice(agent, "audiences")
+	if err != nil || !found || len(audiences) != 1 || audiences[0] != "kaos-gateway" {
+		t.Fatalf("audiences = %#v found=%v err=%v", audiences, found, err)
 	}
 }
 
@@ -287,7 +362,7 @@ func TestConstructSecurityPolicyBackendRefIsConfigDriven(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			policy, err := constructSecurityPolicy(params, Config{ExtAuthzURL: tc.url, AuthzGatewayEnforcementExtension: EnforcementExtAuthz})
+			policy, err := constructSecurityPolicy(params, Config{ExtAuthzURL: tc.url})
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}

@@ -74,47 +74,47 @@ gateway:
 # protected routes so requests are allowed or denied based on the calling
 # agent's granted permissions. Disabled by default — routing is unchanged.
 security:
+  # pdp runs stock OPA with the Envoy ext_authz gRPC plugin. It is disabled
+  # until gateway enforcement is enabled separately.
+  pdp:
+    enabled: false
+    image: openpolicyagent/opa:1.18.1-envoy-static
+    replicas: 2
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi
   # Operator-wide security configuration. Security is enabled by the presence of
   # an agent-auth ext_authz URL; when unset, the operator generates no
   # authorization policies and routing behavior is unchanged.
   agentAuth:
-    # authorization groups the coarse authorization knobs. All are optional with
-    # safe defaults: provider "none" leaves authorization projection off.
+    # identity selects exactly one agent token issuer.
+    identity:
+      # provider is serviceaccount, oidc, or aib.
+      provider: serviceaccount
+      serviceAccount:
+        audience: kaos-gateway
+        expirationSeconds: 3600
+        tokenPath: /var/run/secrets/kaos-agent/token
+    # authorization groups the coarse authorization knobs.
     authorization:
-      # provider selects the authorization provider: "none" (default), "kaos"
-      # (OPA data from CRDs), or "aib" (broker permission sets).
-      provider: ""
-      # gatewayExtension selects which Envoy gateway extension enforces authz.
-      # "ext_proc" (default) enforces via OPA embedded in the ext_proc filter;
-      # "ext_authz" enables the optional, default-off external-authorization
-      # extension and requires extAuthzUrl to point at a gRPC ext_authz backend.
-      gatewayExtension: ""
-      # agentJwtVerification selects how the agent (actor) JWT is trusted:
-      # "skip" (header-trust, non-production) or "verified" (signature-checked).
-      # Empty derives it from the issuer.
-      agentJwtVerification: ""
       # policyDataSource selects who authors the authorization policy data:
-      # "automated" (operator projects data, default), "manual" (admin authors
-      # data), or "external" (broker authoritative, projection+prune off).
+      # "automated" (operator projects data, default) or "manual" (admin authors
+      # data).
       policyDataSource: ""
       # policyRegoOverride, when true, has the operator own only the policy.rego
       # key and leaves the data key to the admin. Orthogonal to policyDataSource.
       policyRegoOverride: false
-    # extAuthzUrl is the host:port of the Envoy ext_authz access-check gRPC
-    # backend used only when gatewayExtension is "ext_authz" (any standards-
-    # compliant gRPC ext_authz backend, e.g. opa-envoy, is a drop-in).
+    # extAuthzUrl overrides the PDP's ext_authz gRPC backend. When empty and the
+    # PDP is enabled, the chart uses kaos-pdp.<release-namespace>.svc:9191.
     # Example: opa-envoy.opa-system.svc.cluster.local:9191
     extAuthzUrl: ""
-    # extProcUrl is the host:port of the Envoy ext_proc token-exchange gRPC
-    # backend (AIB ExtProc by default). When set, the operator generates an
-    # EnvoyExtensionPolicy on protected routes so the backend can exchange the
-    # inbound user subject token for a delegated upstream token. Leaving it empty
-    # disables token exchange and leaves routing behavior unchanged.
-    # Example: aib-ext-proc.aib-system.svc.cluster.local:50051
-    extProcUrl: ""
-    # issuer is the agent-auth OIDC issuer (the broker that mints agent actor
-    # tokens). It is propagated to agent pods, which derive the token endpoint
-    # from it. Example: http://aib-enduser.aib-system.svc.cluster.local:8000
+    # issuer is the selected OIDC or AIB issuer URL. For AIB this exact value
+    # must also configure broker.server.enduser.publicUrl; the KAOS CLI derives
+    # both installs from this single value.
     issuer: ""
     # credentialSecretPrefix is the name prefix of the per-agent credential
     # Secret provisioned by the operator's identity projection. When set (and
@@ -123,9 +123,9 @@ security:
     # variables. Empty disables credential mounting. Example: kaos-aib
     credentialSecretPrefix: ""
     # adminUrl is the base URL of the identity broker admin API. When set, the
-    # operator's identity projection controller registers agents, mints their
-    # per-agent credential Secrets, and projects services and permission sets
-    # into the broker. Leaving it empty disables projection entirely. Example:
+    # operator's identity projection controller registers agents and manages
+    # their per-agent credential Secrets. Leaving it empty disables AIB identity
+    # projection. Example:
     # http://aib-agentic-identity-broker.aib-system.svc.cluster.local:8000/api
     adminUrl: ""
     # adminPrincipal is the principal the projection controller presents to the
@@ -138,13 +138,13 @@ security:
       # namespaces optionally restricts projection to a comma-separated list of
       # namespaces. Empty projects across all namespaces.
       namespaces: ""
-      # prune removes broker records (services, permission sets, agents) that no
-      # longer correspond to any KAOS resource. On by default.
+      # prune removes broker agent records that no longer correspond to a KAOS
+      # Agent. On by default.
       prune: true
-      # policyConfigMap names the ConfigMap the operator writes with the Model-1
-      # authorization policy and projected grant data for the enforcement engine
+      # policyConfigMap names the ConfigMap the operator writes with the
+      # authorization policy and projected grant data for the PDP
       # to mount. When name and namespace are both set, the operator maintains
-      # it; leaving either empty disables the Model-1 data path.
+      # it; leaving either empty disables policy projection.
       policyConfigMap:
         name: ""
         namespace: ""
@@ -182,14 +182,14 @@ security:
       enabled: false
   # gatewayRouting injects gateway-routed endpoint URLs into agents so internal
   # agent->ModelAPI/MCP/peer traffic flows through the gateway (where jwt_authn,
-  # ext_authz and ext_proc apply) rather than directly to the workload Service.
+  # ext_authz applies) rather than directly to the workload Service.
   # Off by default; enable together with networkPolicy to make the gateway the
   # only application path between workloads.
   gatewayRouting:
     enabled: false
   # strictGatewayApi turns on gateway-only strict traffic: it enables
   # NetworkPolicy isolation and gateway-routed URLs together, independently of
-  # whether any authorization enforcement hook (extAuthzUrl/extProcUrl) is set.
+  # whether the authorization enforcement hook (extAuthzUrl) is set.
   # Use it to make the Envoy Gateway the only application path between workloads
   # as a standalone posture. It overrides the networkPolicy.enabled escape hatch.
   # Enforcement of the generated NetworkPolicy still requires a CNI that enforces
@@ -238,4 +238,3 @@ telemetry:
 # - ModelAPI (LiteLLM): Maps to LITELLM_LOG
 # - ModelAPI (Ollama): Maps to OLLAMA_DEBUG
 logLevel: INFO
-

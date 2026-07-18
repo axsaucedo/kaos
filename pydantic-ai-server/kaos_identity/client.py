@@ -7,7 +7,7 @@ wants to ask the broker directly whether the calling agent may act on a resource
 obtain a delegated third-party token, without sitting behind the gateway. It is not the
 enforcement boundary — it is a convenience over the broker's HTTP API.
 
-Principal / actor / request-id default from the request-local :data:`aib.ctx` so an
+Principal / actor / request-id default from the request-local :data:`kaos_identity.ctx` so an
 in-request caller does not have to thread them manually.
 """
 
@@ -19,7 +19,7 @@ from typing import Any, Dict, Optional
 
 import httpx
 
-from .identity import AIBUnavailable, actor_token, actor_token_async
+from .identity import IdentityUnavailable, actor_token, actor_token_async
 from .instrument import HEADER_ACCESS_REASON, HEADER_REAUTH_URL, ctx
 
 _TOKEN_EXCHANGE_GRANT = "urn:ietf:params:oauth:grant-type:token-exchange"
@@ -133,7 +133,7 @@ def _parse_decision(data: Dict[str, Any]) -> AccessDecision:
 def _parse_token(data: Dict[str, Any]) -> TokenResult:
     token = data.get("access_token")
     if not token:
-        raise AIBUnavailable("broker token response missing access_token")
+        raise IdentityUnavailable("broker token response missing access_token")
     return TokenResult(
         access_token=token,
         token_type=str(data.get("token_type", "Bearer") or "Bearer"),
@@ -249,7 +249,7 @@ class Client:
             )
             resp.raise_for_status()
         except httpx.HTTPError as exc:
-            raise AIBUnavailable(f"access-check request failed: {exc}") from exc
+            raise IdentityUnavailable(f"access-check request failed: {exc}") from exc
         return _parse_decision(resp.json())
 
     def require_access(
@@ -272,14 +272,14 @@ class Client:
             )
             resp.raise_for_status()
         except httpx.HTTPError as exc:
-            raise AIBUnavailable(f"token exchange failed: {exc}") from exc
+            raise IdentityUnavailable(f"token exchange failed: {exc}") from exc
         return _parse_token(resp.json())
 
     def get_token(self, resource: str, scopes: str = "") -> TokenResult:
         """Obtain a delegated token for ``resource`` using the request's subject token."""
         subject_token = ctx.get("subject_token")
         if not subject_token:
-            raise AIBUnavailable("no subject token in context for get_token")
+            raise IdentityUnavailable("no subject token in context for get_token")
         return self.exchange_token(subject_token, audience=resource, scopes=scopes)
 
 
@@ -327,7 +327,7 @@ class AsyncClient:
                 )
             resp.raise_for_status()
         except httpx.HTTPError as exc:
-            raise AIBUnavailable(f"access-check request failed: {exc}") from exc
+            raise IdentityUnavailable(f"access-check request failed: {exc}") from exc
         return _parse_decision(resp.json())
 
     async def require_access(
@@ -349,14 +349,14 @@ class AsyncClient:
                 )
             resp.raise_for_status()
         except httpx.HTTPError as exc:
-            raise AIBUnavailable(f"token exchange failed: {exc}") from exc
+            raise IdentityUnavailable(f"token exchange failed: {exc}") from exc
         return _parse_token(resp.json())
 
     async def get_token(self, resource: str, scopes: str = "") -> TokenResult:
         """Async variant of :meth:`Client.get_token`."""
         subject_token = ctx.get("subject_token")
         if not subject_token:
-            raise AIBUnavailable("no subject token in context for get_token")
+            raise IdentityUnavailable("no subject token in context for get_token")
         return await self.exchange_token(subject_token, audience=resource, scopes=scopes)
 
 

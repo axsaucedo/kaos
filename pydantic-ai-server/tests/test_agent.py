@@ -316,7 +316,7 @@ class TestAccessOutcomeSurfacing:
 
     @pytest.mark.asyncio
     async def test_ext_authz_denial_surfaces_reason(self):
-        from aib import AccessDecision, AccessDenied
+        from kaos_identity import AccessDecision, AccessDenied
 
         decision = AccessDecision(
             allowed=False, reason="platform_grant_missing", resource="mcp.payments"
@@ -336,7 +336,7 @@ class TestAccessOutcomeSurfacing:
 
     @pytest.mark.asyncio
     async def test_reauth_required_surfaces_url(self):
-        from aib import AccessDecision, ReauthenticationRequired
+        from kaos_identity import AccessDecision, ReauthenticationRequired
 
         decision = AccessDecision(
             allowed=False,
@@ -358,7 +358,7 @@ class TestAccessOutcomeSurfacing:
 
     @pytest.mark.asyncio
     async def test_wrapped_outcome_is_unwrapped(self):
-        from aib import AccessDecision, AccessDenied
+        from kaos_identity import AccessDecision, AccessDenied
 
         decision = AccessDecision(allowed=False, reason="user_grant_required", resource="db")
         inner = AccessDenied(decision)

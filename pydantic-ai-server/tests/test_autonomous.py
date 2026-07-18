@@ -271,7 +271,7 @@ class TestAutonomousAccessOutcome:
 
     @pytest.mark.asyncio
     async def test_reauth_outcome_records_event_and_completes(self):
-        from aib import AccessDecision, ReauthenticationRequired
+        from kaos_identity import AccessDecision, ReauthenticationRequired
         from pais.a2a import LocalTaskManager, EVENT_USER_ACTION_REQUIRED
 
         calls = {"n": 0}
@@ -304,7 +304,7 @@ class TestAutonomousAccessOutcome:
 
     @pytest.mark.asyncio
     async def test_platform_denial_records_event_without_url(self):
-        from aib import AccessDecision, AccessDenied
+        from kaos_identity import AccessDecision, AccessDenied
         from pais.a2a import LocalTaskManager, EVENT_USER_ACTION_REQUIRED
 
         async def process_fn(message, session_id):

@@ -8,7 +8,7 @@ The SDK turns these into typed outcomes so the runtime can surface them; every o
 response (including ordinary non-KAOS 4xx/5xx) is returned untouched.
 """
 
-import aib
+import kaos_identity
 import httpx
 import pytest
 import respx
@@ -16,10 +16,10 @@ import respx
 
 @pytest.fixture(autouse=True)
 def _patch_and_clear():
-    aib.instrument_httpx()  # idempotent — safe to call per test
-    aib.ctx.replace({})
+    kaos_identity.instrument_httpx()  # idempotent — safe to call per test
+    kaos_identity.ctx.replace({})
     yield
-    aib.ctx.replace({})
+    kaos_identity.ctx.replace({})
 
 
 # --- outcome_from_response (pure header mapping) ------------------------------
@@ -30,13 +30,13 @@ def _response(status: int, headers: dict) -> httpx.Response:
 
 
 def test_outcome_none_for_plain_response():
-    assert aib.outcome_from_response(_response(200, {})) is None
-    assert aib.outcome_from_response(_response(403, {})) is None
-    assert aib.outcome_from_response(_response(500, {"x-other": "y"})) is None
+    assert kaos_identity.outcome_from_response(_response(200, {})) is None
+    assert kaos_identity.outcome_from_response(_response(403, {})) is None
+    assert kaos_identity.outcome_from_response(_response(500, {"x-other": "y"})) is None
 
 
 def test_outcome_platform_grant_missing_has_no_url():
-    decision = aib.outcome_from_response(
+    decision = kaos_identity.outcome_from_response(
         _response(403, {"x-kaos-access-reason": "platform_grant_missing"}),
         resource="mcp.example",
     )
@@ -49,7 +49,7 @@ def test_outcome_platform_grant_missing_has_no_url():
 
 
 def test_outcome_reauth_carries_url():
-    decision = aib.outcome_from_response(
+    decision = kaos_identity.outcome_from_response(
         _response(
             200,
             {
@@ -68,17 +68,17 @@ def test_outcome_reauth_carries_url():
 
 
 def test_raise_access_denied_for_ext_authz():
-    with pytest.raises(aib.AccessDenied) as exc:
-        aib.raise_for_gateway_outcome(
+    with pytest.raises(kaos_identity.AccessDenied) as exc:
+        kaos_identity.raise_for_gateway_outcome(
             _response(403, {"x-kaos-access-reason": "user_grant_required"})
         )
-    assert not isinstance(exc.value, aib.ReauthenticationRequired)
+    assert not isinstance(exc.value, kaos_identity.ReauthenticationRequired)
     assert exc.value.decision.reason == "user_grant_required"
 
 
 def test_raise_reauth_for_ext_proc():
-    with pytest.raises(aib.ReauthenticationRequired) as exc:
-        aib.raise_for_gateway_outcome(
+    with pytest.raises(kaos_identity.ReauthenticationRequired) as exc:
+        kaos_identity.raise_for_gateway_outcome(
             _response(
                 200,
                 {
@@ -91,8 +91,10 @@ def test_raise_reauth_for_ext_proc():
 
 
 def test_raise_noop_for_plain_response():
-    aib.raise_for_gateway_outcome(_response(200, {}))  # no raise
-    aib.raise_for_gateway_outcome(_response(403, {"x-app": "z"}))  # non-KAOS 403, no raise
+    kaos_identity.raise_for_gateway_outcome(_response(200, {}))  # no raise
+    kaos_identity.raise_for_gateway_outcome(
+        _response(403, {"x-app": "z"})
+    )  # non-KAOS 403, no raise
 
 
 # --- end-to-end through the instrumented httpx send --------------------------
@@ -103,7 +105,7 @@ def test_sync_send_raises_on_ext_authz_denial():
     respx.get("http://downstream/data").respond(
         403, headers={"x-kaos-access-reason": "platform_grant_missing"}
     )
-    with httpx.Client() as client, pytest.raises(aib.AccessDenied) as exc:
+    with httpx.Client() as client, pytest.raises(kaos_identity.AccessDenied) as exc:
         client.get("http://downstream/data")
     assert exc.value.decision.reason == "platform_grant_missing"
     assert exc.value.decision.resource == "downstream"
@@ -120,7 +122,7 @@ async def test_async_send_raises_reauth_on_ext_proc():
         },
     )
     async with httpx.AsyncClient() as client:
-        with pytest.raises(aib.ReauthenticationRequired) as exc:
+        with pytest.raises(kaos_identity.ReauthenticationRequired) as exc:
             await client.post("http://downstream/tool")
     assert exc.value.reauth_url == "https://idp.example/reauth"
 

@@ -26,23 +26,23 @@ data:
   GATEWAY_DEFAULT_AGENT_TIMEOUT: {{ .Values.gateway.defaultTimeouts.agent | quote }}
   GATEWAY_DEFAULT_MODELAPI_TIMEOUT: {{ .Values.gateway.defaultTimeouts.modelAPI | quote }}
   GATEWAY_DEFAULT_MCP_TIMEOUT: {{ .Values.gateway.defaultTimeouts.mcp | quote }}
-  # Operator-wide security configuration. Authorization is enforced by OPA
-  # embedded in the ext_proc filter by default; the ext_authz extension is
-  # optional and default-off, enabled only when gatewayExtension is "ext_authz"
-  # with an ext_authz backend URL. Leaving all hooks unset disables enforcement
-  # and leaves existing routing behavior unchanged.
+  # Operator-wide security configuration.
+  {{- if .Values.security.pdp.enabled }}
+  SECURITY_PDP_ENABLED: "true"
+  {{- end }}
   {{- with .Values.security }}
   {{- with .agentAuth }}
+  {{- $identityProvider := .identity.provider | default "serviceaccount" }}
+  {{- if not (has $identityProvider (list "serviceaccount" "oidc" "aib")) }}
+  {{- fail "security.agentAuth.identity.provider must be one of: serviceaccount, oidc, aib" }}
+  {{- end }}
+  SECURITY_AGENT_AUTH_IDENTITY_PROVIDER: {{ $identityProvider | quote }}
+  {{- if eq $identityProvider "serviceaccount" }}
+  SECURITY_AGENT_AUTH_SERVICE_ACCOUNT_AUDIENCE: {{ .identity.serviceAccount.audience | default "kaos-gateway" | quote }}
+  SECURITY_AGENT_AUTH_SERVICE_ACCOUNT_EXPIRATION_SECONDS: {{ .identity.serviceAccount.expirationSeconds | default 3600 | quote }}
+  SECURITY_AGENT_AUTH_SERVICE_ACCOUNT_TOKEN_PATH: {{ .identity.serviceAccount.tokenPath | default "/var/run/secrets/kaos-agent/token" | quote }}
+  {{- end }}
   {{- with .authorization }}
-  {{- if .provider }}
-  SECURITY_AUTHORIZATION_PROVIDER: {{ .provider | quote }}
-  {{- end }}
-  {{- if .gatewayExtension }}
-  SECURITY_AUTHORIZATION_GATEWAY_EXTENSION: {{ .gatewayExtension | quote }}
-  {{- end }}
-  {{- if .agentJwtVerification }}
-  SECURITY_AUTHORIZATION_AGENT_JWT_VERIFICATION: {{ .agentJwtVerification | quote }}
-  {{- end }}
   {{- if .policyDataSource }}
   SECURITY_AUTHORIZATION_POLICY_DATA_SOURCE: {{ .policyDataSource | quote }}
   {{- end }}
@@ -52,21 +52,18 @@ data:
   {{- end }}
   {{- if .extAuthzUrl }}
   SECURITY_AGENT_AUTH_EXT_AUTHZ_URL: {{ .extAuthzUrl | quote }}
+  {{- else if $.Values.security.pdp.enabled }}
+  SECURITY_AGENT_AUTH_EXT_AUTHZ_URL: {{ printf "kaos-pdp.%s.svc:9191" $.Release.Namespace | quote }}
   {{- end }}
-  {{- if .extProcUrl }}
-  SECURITY_AGENT_AUTH_EXT_PROC_URL: {{ .extProcUrl | quote }}
-  {{- end }}
-  {{- if .issuer }}
+  {{- if and (ne $identityProvider "serviceaccount") .issuer }}
   SECURITY_AGENT_AUTH_ISSUER: {{ .issuer | quote }}
   {{- end }}
-  {{- if .credentialSecretPrefix }}
+  {{- if and (eq $identityProvider "aib") .credentialSecretPrefix }}
   SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX: {{ .credentialSecretPrefix | quote }}
   {{- end }}
-  {{- if .adminUrl }}
+  {{- if and (eq $identityProvider "aib") .adminUrl }}
   # Broker identity projection: when an admin URL is set the operator registers
-  # agents, mints per-agent credential Secrets, and (unless the external
-  # off-switch is selected) projects services/permission sets into the broker
-  # admin API.
+  # agents and mints per-agent credential Secrets through the broker admin API.
   AIB_ADMIN_URL: {{ .adminUrl | quote }}
   AIB_PRINCIPAL: {{ .adminPrincipal | default "kaos-operator" | quote }}
   AIB_PRINCIPAL_HEADER: {{ .adminPrincipalHeader | default "X-Remote-User" | quote }}

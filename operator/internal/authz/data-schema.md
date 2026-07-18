@@ -1,9 +1,8 @@
 # KAOS authorization data schema (`data.json`)
 
-The enforcement policy (`policy.rego`) reads a single OPA data document from the
-policy ConfigMap key `data.json`. This document is a published contract: an admin
-authors it directly in the operator-rego mode, and the operator projects it in the
-automated mode. Both produce the same shape.
+The gateway-external OPA policy reads one data document from the policy ConfigMap key `data.json`. Automated projection and administrator-authored manual data use the same published shape.
+
+The shipped policy package is `kaos.authz`, and the Envoy plugin queries its `result` rule at `kaos/authz/result`.
 
 ```json
 {
@@ -12,30 +11,30 @@ automated mode. Both produce the same shape.
       "<actor-id>": ["<resource-id>", "..."]
     },
     "jwks": {
-      "keys": [ { "kty": "RSA", "kid": "...", "n": "...", "e": "AQAB" } ]
+      "<issuer>": {
+        "keys": [ { "kty": "RSA", "kid": "...", "alg": "RS256", "n": "...", "e": "AQAB" } ]
+      }
+    },
+    "agents": {
+      "<actor-id>": { "issuer_sub": "<token-subject>" }
     }
   }
 }
 ```
 
-## `kaos.grants` (required)
+## `kaos.grants`
 
-Maps an actor identity to the sorted, de-duplicated set of resource identities it
-may reach.
+Maps an agent's logical actor id to the sorted, deduplicated resources it may reach.
 
-- **Actor id** — the agent logical identity `kaos://agent/<namespace>/<name>`. It
-  is the `sub` claim of the agent (actor) token carried in the
-  `x-agent-authorization` header.
-- **Resource id** — the target logical identity `kaos://<slug>/<namespace>/<name>`
-  (`slug` is `mcpserver`, `modelapi`, or `agent`). It is matched against the
-  `x-kaos-target-resource` header the gateway stamps onto the request.
+- Actor ids use `kaos://agent/<namespace>/<name>`.
+- Automated resource ids use `kaos://<slug>/<namespace>/<name>`, where `slug` is `agent`, `mcpserver`, `modelapi`, or `memorystore`.
 
-A request is allowed only when the request's resource id is present in the
-granting array for the request's actor id.
+The policy derives the target only from the operator-owned gateway path because external authorization runs before route header modification. Inbound `x-kaos-target-resource` headers are not forwarded to or trusted by the PDP.
 
-## `kaos.jwks` (optional)
+## `kaos.jwks`
 
-The IdP JSON Web Key Set used to verify the actor token signature. Its presence
-switches the policy from demo mode (decode without verifying, spoofable,
-non-production) to verified mode (`io.jwt.decode_verify` against these keys before
-trusting the `sub`). Omit it only in demo/non-production installs.
+Maps the exact actor-token issuer to its JSON Web Key Set. The policy selects the issuer entry from the token `iss`, verifies the token with the server-side `RS256` allowlist, and requires the exact issuer plus the `kaos-gateway` audience before trusting its subject.
+
+## `kaos.agents`
+
+Maps logical agent ids to issuer-specific token subjects. ServiceAccount mode uses `system:serviceaccount:<namespace>:<serviceaccount-name>` subjects, so this mapping resolves the verified token subject back to its KAOS actor id.

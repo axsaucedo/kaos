@@ -6,11 +6,50 @@ import (
 
 func TestGetConfigDisabledByDefault(t *testing.T) {
 	t.Setenv(envExtAuthzURL, "")
+	t.Setenv(envPDPEnabled, "")
 
 	cfg := GetConfig()
 
 	if cfg.IsOperational() {
 		t.Errorf("expected not operational when ext_authz URL is unset")
+	}
+}
+
+func TestGetConfigOperationalWhenPDPEnabled(t *testing.T) {
+	t.Setenv(envPDPEnabled, "true")
+	t.Setenv(envOperatorNamespace, "kaos-system")
+
+	cfg := GetConfig()
+	if !cfg.IsOperational() {
+		t.Fatal("expected PDP to enable ext_authz enforcement")
+	}
+	if got := cfg.ExtAuthzURLOrDefault(); got != "kaos-pdp.kaos-system.svc:9191" {
+		t.Fatalf("ExtAuthzURLOrDefault() = %q", got)
+	}
+	name, namespace, port, err := cfg.ExtAuthzBackendRef()
+	if err != nil {
+		t.Fatalf("ExtAuthzBackendRef(): %v", err)
+	}
+	if name != "kaos-pdp" || namespace != "kaos-system" || port != 9191 {
+		t.Fatalf("backend = %s/%s:%d", namespace, name, port)
+	}
+}
+
+func TestExtAuthzURLOverrideTakesPrecedenceOverPDPDefault(t *testing.T) {
+	cfg := Config{
+		PDPEnabled:        true,
+		OperatorNamespace: "kaos-system",
+		ExtAuthzURL:       "custom-authz.custom-system.svc:9002",
+	}
+	if got := cfg.ExtAuthzURLOrDefault(); got != cfg.ExtAuthzURL {
+		t.Fatalf("ExtAuthzURLOrDefault() = %q, want override %q", got, cfg.ExtAuthzURL)
+	}
+	name, namespace, port, err := cfg.ExtAuthzBackendRef()
+	if err != nil {
+		t.Fatalf("ExtAuthzBackendRef(): %v", err)
+	}
+	if name != "custom-authz" || namespace != "custom-system" || port != 9002 {
+		t.Fatalf("backend = %s/%s:%d", namespace, name, port)
 	}
 }
 
@@ -100,7 +139,6 @@ func TestGetConfigReadsAllFields(t *testing.T) {
 	t.Setenv(envUserIssuer, "http://keycloak.kaos-system.svc.cluster.local:8080/realms/kaos")
 	t.Setenv(envUserAudience, "kaos")
 	t.Setenv(envUserJWKSURI, "")
-	t.Setenv(envExtProcURL, "aib-extproc.aib-system.svc.cluster.local:50051")
 
 	cfg := GetConfig()
 
@@ -116,30 +154,54 @@ func TestGetConfigReadsAllFields(t *testing.T) {
 	if cfg.UserAudience != "kaos" {
 		t.Errorf("unexpected user audience %q", cfg.UserAudience)
 	}
-	if !cfg.ExtProcEnabled() {
-		t.Errorf("expected ext_proc enabled")
+}
+
+func TestIdentityProviderSelection(t *testing.T) {
+	cases := []struct {
+		configured string
+		want       IdentityProvider
+	}{
+		{"", IdentityProviderAIB},
+		{"aib", IdentityProviderAIB},
+		{"oidc", IdentityProviderOIDC},
+		{"serviceaccount", IdentityProviderServiceAccount},
+		{"invalid", IdentityProviderAIB},
 	}
-	if cfg.ExtProcURL != "aib-extproc.aib-system.svc.cluster.local:50051" {
-		t.Errorf("unexpected ext_proc URL %q", cfg.ExtProcURL)
+	for _, tc := range cases {
+		t.Run(tc.configured, func(t *testing.T) {
+			cfg := Config{IdentityProvider: IdentityProvider(tc.configured)}
+			if got := cfg.IdentityProviderOrDefault(); got != tc.want {
+				t.Fatalf("IdentityProviderOrDefault() = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
-func TestExtProcEnabled(t *testing.T) {
-	cases := []struct {
-		name string
-		url  string
-		want bool
-	}{
-		{"empty", "", false},
-		{"whitespace only", "   ", false},
-		{"set", "aib-extproc.aib-system:50051", true},
+func TestServiceAccountIdentityDefaults(t *testing.T) {
+	t.Setenv(envIdentityProvider, "serviceaccount")
+	t.Setenv(envServiceAccountAudience, "")
+	t.Setenv(envServiceAccountExpiration, "")
+	t.Setenv(envServiceAccountTokenPath, "")
+	cfg := GetConfig()
+	if !cfg.ServiceAccountIdentityEnabled() {
+		t.Fatal("expected ServiceAccount identity")
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := (Config{ExtProcURL: tc.url}).ExtProcEnabled(); got != tc.want {
-				t.Errorf("ExtProcEnabled() = %v, want %v", got, tc.want)
-			}
-		})
+	if cfg.ServiceAccountAudience != "kaos-gateway" || cfg.ServiceAccountTokenExpirationSeconds != 3600 {
+		t.Fatalf("unexpected token projection defaults: %+v", cfg)
+	}
+	if cfg.ServiceAccountTokenPath != "/var/run/secrets/kaos-agent/token" {
+		t.Fatalf("token path = %q", cfg.ServiceAccountTokenPath)
+	}
+}
+
+func TestServiceAccountModeDisablesAIBCredentialMounting(t *testing.T) {
+	cfg := Config{
+		IdentityProvider:       IdentityProviderServiceAccount,
+		PDPEnabled:             true,
+		CredentialSecretPrefix: "kaos-aib",
+	}
+	if cfg.CredentialMountingEnabled() {
+		t.Fatal("ServiceAccount identity must not mount AIB credentials")
 	}
 }
 
@@ -187,19 +249,16 @@ func TestAgentJWKSURI(t *testing.T) {
 
 func TestAuthzJWKSURI(t *testing.T) {
 	cases := []struct {
-		name             string
-		issuer           string
-		verificationMode AgentJWTVerificationMode
-		want             string
+		name   string
+		issuer string
+		want   string
 	}{
-		{"skip default without issuer", "", "", ""},
-		{"verified default with issuer", "http://aib:8000", "", "http://aib:8000/oauth2/jwks.json"},
-		{"forced skip suppresses jwks", "http://aib:8000", VerificationSkip, ""},
-		{"forced verified without issuer", "", VerificationVerified, ""},
+		{"without issuer", "", ""},
+		{"with issuer", "http://aib:8000", "http://aib:8000/oauth2/jwks.json"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			c := Config{Issuer: tc.issuer, AgentJWTVerificationMode: tc.verificationMode}
+			c := Config{Issuer: tc.issuer}
 			if got := c.AuthzJWKSURI(); got != tc.want {
 				t.Errorf("AuthzJWKSURI() = %q, want %q", got, tc.want)
 			}
@@ -250,42 +309,6 @@ func TestExtAuthzBackendRef(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			name, ns, port, err := (Config{ExtAuthzURL: tc.url}).ExtAuthzBackendRef()
-			if tc.wantError {
-				if err == nil {
-					t.Fatalf("expected error for %q", tc.url)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if name != tc.wantName || ns != tc.wantNS || port != tc.wantPort {
-				t.Errorf("got (%q,%q,%d), want (%q,%q,%d)", name, ns, port, tc.wantName, tc.wantNS, tc.wantPort)
-			}
-		})
-	}
-}
-
-func TestExtProcBackendRef(t *testing.T) {
-	cases := []struct {
-		name      string
-		url       string
-		wantName  string
-		wantNS    string
-		wantPort  int
-		wantError bool
-	}{
-		{"fqdn", "aib-extproc.aib-system.svc.cluster.local:50051", "aib-extproc", "aib-system", 50051, false},
-		{"name and namespace", "aib-extproc.aib-system:50051", "aib-extproc", "aib-system", 50051, false},
-		{"name only", "aib-extproc:50051", "aib-extproc", "", 50051, false},
-		{"missing port", "aib-extproc.aib-system", "", "", 0, true},
-		{"empty", "", "", "", 0, true},
-		{"invalid port", "aib-extproc.aib-system:nope", "", "", 0, true},
-		{"zero port", "aib-extproc.aib-system:0", "", "", 0, true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			name, ns, port, err := (Config{ExtProcURL: tc.url}).ExtProcBackendRef()
 			if tc.wantError {
 				if err == nil {
 					t.Fatalf("expected error for %q", tc.url)
@@ -461,80 +484,20 @@ func TestSecurityEnabled(t *testing.T) {
 	cases := []struct {
 		name     string
 		extAuthz string
-		extProc  string
+		pdp      bool
 		want     bool
 	}{
-		{"nothing set", "", "", false},
-		{"ext_authz only", "svc:9002", "", true},
-		{"ext_proc only", "", "svc:50051", true},
-		{"both set", "svc:9002", "svc:50051", true},
+		{"nothing set", "", false, false},
+		{"ext_authz set", "svc:9002", false, true},
+		{"PDP enabled", "", true, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg := Config{ExtAuthzURL: tc.extAuthz, ExtProcURL: tc.extProc}
+			cfg := Config{ExtAuthzURL: tc.extAuthz, PDPEnabled: tc.pdp}
 			if got := cfg.SecurityEnabled(); got != tc.want {
 				t.Errorf("SecurityEnabled() = %v, want %v", got, tc.want)
 			}
 		})
-	}
-}
-
-func TestCredentialMountingEnabledWithExtProcOnly(t *testing.T) {
-	cfg := Config{ExtProcURL: "svc:50051", CredentialSecretPrefix: "kaos-aib"}
-	if !cfg.CredentialMountingEnabled() {
-		t.Errorf("expected credential mounting enabled with ext_proc-only and prefix set")
-	}
-	if (Config{ExtProcURL: "svc:50051"}).CredentialMountingEnabled() {
-		t.Errorf("expected credential mounting disabled without prefix")
-	}
-}
-
-func TestNetworkPolicyEnabledWithExtProcOnly(t *testing.T) {
-	if !(Config{ExtProcURL: "svc:50051"}).NetworkPolicyEnabled() {
-		t.Errorf("expected NetworkPolicy enabled with ext_proc-only")
-	}
-	if (Config{ExtProcURL: "svc:50051", NetworkPolicyDisabled: true}).NetworkPolicyEnabled() {
-		t.Errorf("expected NetworkPolicy disabled by escape hatch")
-	}
-}
-
-func TestAuthzProviderOrDefault(t *testing.T) {
-	cases := []struct {
-		in   AuthzProvider
-		want AuthzProvider
-	}{
-		{"", AuthzProviderNone},
-		{"none", AuthzProviderNone},
-		{"kaos", AuthzProviderKAOS},
-		{"aib", AuthzProviderAIB},
-		{"bogus", AuthzProviderNone},
-	}
-	for _, tc := range cases {
-		cfg := Config{AuthzProvider: tc.in}
-		if got := cfg.AuthzProviderOrDefault(); got != tc.want {
-			t.Errorf("AuthzProviderOrDefault(%q) = %q, want %q", tc.in, got, tc.want)
-		}
-		wantEnabled := tc.want != AuthzProviderNone
-		if got := cfg.AuthorizationEnabled(); got != wantEnabled {
-			t.Errorf("AuthorizationEnabled(%q) = %v, want %v", tc.in, got, wantEnabled)
-		}
-	}
-}
-
-func TestGatewayEnforcementExtensionOrDefault(t *testing.T) {
-	cases := []struct {
-		in   AuthzGatewayEnforcementExtension
-		want AuthzGatewayEnforcementExtension
-	}{
-		{"", EnforcementExtProc},
-		{"ext_proc", EnforcementExtProc},
-		{"ext_authz", EnforcementExtAuthz},
-		{"bogus", EnforcementExtProc},
-	}
-	for _, tc := range cases {
-		if got := (Config{AuthzGatewayEnforcementExtension: tc.in}).GatewayEnforcementExtensionOrDefault(); got != tc.want {
-			t.Errorf("GatewayEnforcementExtensionOrDefault(%q) = %q, want %q", tc.in, got, tc.want)
-		}
 	}
 }
 
@@ -545,38 +508,14 @@ func TestExtAuthzEnabled(t *testing.T) {
 		cfg  Config
 		want bool
 	}{
-		{"default ext_proc mode with url off", Config{ExtAuthzURL: url}, false},
-		{"ext_authz mode with url on", Config{ExtAuthzURL: url, AuthzGatewayEnforcementExtension: EnforcementExtAuthz}, true},
-		{"ext_authz mode without url off", Config{AuthzGatewayEnforcementExtension: EnforcementExtAuthz}, false},
-		{"explicit ext_proc mode off", Config{ExtAuthzURL: url, AuthzGatewayEnforcementExtension: EnforcementExtProc}, false},
+		{"url on", Config{ExtAuthzURL: url}, true},
+		{"PDP on", Config{PDPEnabled: true}, true},
+		{"without url off", Config{}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := tc.cfg.ExtAuthzEnabled(); got != tc.want {
 				t.Errorf("ExtAuthzEnabled() = %v, want %v", got, tc.want)
-			}
-		})
-	}
-}
-
-func TestAgentJWTVerificationModeOrDefault(t *testing.T) {
-	cases := []struct {
-		name   string
-		mode   AgentJWTVerificationMode
-		issuer string
-		want   AgentJWTVerificationMode
-	}{
-		{"derive skip without issuer", "", "", VerificationSkip},
-		{"derive verified with issuer", "", "http://aib:8000", VerificationVerified},
-		{"explicit skip overrides issuer", "skip", "http://aib:8000", VerificationSkip},
-		{"explicit verified without issuer", "verified", "", VerificationVerified},
-		{"bogus falls back to derived", "bogus", "http://aib:8000", VerificationVerified},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			cfg := Config{AgentJWTVerificationMode: tc.mode, Issuer: tc.issuer}
-			if got := cfg.AgentJWTVerificationModeOrDefault(); got != tc.want {
-				t.Errorf("AgentJWTVerificationModeOrDefault() = %q, want %q", got, tc.want)
 			}
 		})
 	}
@@ -590,7 +529,7 @@ func TestPolicyDataSourceOrDefault(t *testing.T) {
 		{"", PolicyDataAutomated},
 		{"automated", PolicyDataAutomated},
 		{"manual", PolicyDataManual},
-		{"external", PolicyDataExternal},
+		{"external", PolicyDataAutomated},
 		{"bogus", PolicyDataAutomated},
 	}
 	for _, tc := range cases {
@@ -601,25 +540,13 @@ func TestPolicyDataSourceOrDefault(t *testing.T) {
 }
 
 func TestGetConfigReadsAuthorizationModes(t *testing.T) {
-	t.Setenv(envAuthzProvider, "AIB")
-	t.Setenv(envGatewayEnforcementExt, "Ext_Authz")
-	t.Setenv(envAgentJWTVerification, "Verified")
 	t.Setenv(envPolicyDataSource, "External")
 	t.Setenv(envPolicyRegoOverride, "true")
 
 	cfg := GetConfig()
 
-	if got := cfg.AuthzProviderOrDefault(); got != AuthzProviderAIB {
-		t.Errorf("AuthzProvider = %q, want aib", got)
-	}
-	if got := cfg.GatewayEnforcementExtensionOrDefault(); got != EnforcementExtAuthz {
-		t.Errorf("AuthzGatewayEnforcementExtension = %q, want ext_authz", got)
-	}
-	if got := cfg.AgentJWTVerificationModeOrDefault(); got != VerificationVerified {
-		t.Errorf("AgentJWTVerificationMode = %q, want verified", got)
-	}
-	if got := cfg.PolicyDataSourceOrDefault(); got != PolicyDataExternal {
-		t.Errorf("PolicyDataSource = %q, want external", got)
+	if got := cfg.PolicyDataSourceOrDefault(); got != PolicyDataAutomated {
+		t.Errorf("PolicyDataSource = %q, want automated", got)
 	}
 	if !cfg.PolicyRegoOverride {
 		t.Errorf("PolicyRegoOverride = false, want true")

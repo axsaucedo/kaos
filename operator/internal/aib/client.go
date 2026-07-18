@@ -90,8 +90,8 @@ func (c *Client) do(ctx context.Context, method, path string, body any) (*http.R
 	return resp, data, nil
 }
 
-// List returns all items in a collection (items envelope or bare list).
-func (c *Client) List(ctx context.Context, collection string) ([]map[string]any, error) {
+// list returns all items in a collection (items envelope or bare list).
+func (c *Client) list(ctx context.Context, collection string) ([]map[string]any, error) {
 	resp, data, err := c.do(ctx, http.MethodGet, "/"+collection, nil)
 	if err != nil {
 		return nil, err
@@ -112,10 +112,10 @@ func (c *Client) List(ctx context.Context, collection string) ([]map[string]any,
 	return bare, nil
 }
 
-// CreateOrGet creates a resource and returns its id; if it already exists, the
+// createOrGet creates a resource and returns its id; if it already exists, the
 // collection is scanned for an item whose matchField equals matchValue, making
 // the call idempotent across reconcile passes.
-func (c *Client) CreateOrGet(ctx context.Context, collection, matchField, matchValue string, body map[string]any) (string, error) {
+func (c *Client) createOrGet(ctx context.Context, collection, matchField, matchValue string, body map[string]any) (string, error) {
 	resp, data, err := c.do(ctx, http.MethodPost, "/"+collection, body)
 	if err != nil {
 		return "", err
@@ -129,7 +129,7 @@ func (c *Client) CreateOrGet(ctx context.Context, collection, matchField, matchV
 		}
 		return created.ID, nil
 	}
-	items, err := c.List(ctx, collection)
+	items, err := c.list(ctx, collection)
 	if err != nil {
 		return "", err
 	}
@@ -143,10 +143,19 @@ func (c *Client) CreateOrGet(ctx context.Context, collection, matchField, matchV
 	return "", fmt.Errorf("failed to create or find %s %s: %d %s", collection, matchValue, resp.StatusCode, string(data))
 }
 
-// Delete removes a resource by id. A 404 is treated as success (absence already
-// holds), so pruning is idempotent.
-func (c *Client) Delete(ctx context.Context, collection, id string) (bool, error) {
-	resp, data, err := c.do(ctx, http.MethodDelete, "/"+collection+"/"+id, nil)
+// CreateOrGetAgent registers an agent or returns its existing id.
+func (c *Client) CreateOrGetAgent(ctx context.Context, externalID string, body map[string]any) (string, error) {
+	return c.createOrGet(ctx, "agents", "display_name", externalID, body)
+}
+
+// ListAgents returns all registered agents.
+func (c *Client) ListAgents(ctx context.Context) ([]map[string]any, error) {
+	return c.list(ctx, "agents")
+}
+
+// DeleteAgent removes an agent by id. A 404 is treated as success.
+func (c *Client) DeleteAgent(ctx context.Context, id string) (bool, error) {
+	resp, data, err := c.do(ctx, http.MethodDelete, "/agents/"+id, nil)
 	if err != nil {
 		return false, err
 	}
@@ -154,7 +163,7 @@ func (c *Client) Delete(ctx context.Context, collection, id string) (bool, error
 		return false, nil
 	}
 	if resp.StatusCode/100 != 2 {
-		return false, fmt.Errorf("delete %s/%s: %d %s", collection, id, resp.StatusCode, string(data))
+		return false, fmt.Errorf("delete agent %s: %d %s", id, resp.StatusCode, string(data))
 	}
 	return true, nil
 }

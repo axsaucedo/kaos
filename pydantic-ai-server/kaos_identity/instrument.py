@@ -1,4 +1,4 @@
-"""AIB propagation SDK — request-local security context and header propagation.
+"""Request-local agent security context and identity propagation.
 
 This module carries two identities across agent hops:
 
@@ -313,7 +313,7 @@ def _inject_request_headers(request: Any) -> None:
     Strictly **additive**: a header already present on the request (for example the
     ModelAPI/LLM provider's own ``Authorization`` API key) is never overwritten. When the
     request-local context carries no actor token but a managed actor-token lifecycle is
-    active (see :func:`aib.instrument_agent_identity`), this agent's minted actor token is
+    active (see :func:`kaos_identity.instrument_agent_identity`), this agent's minted actor token is
     injected so each hop authenticates as itself even without a static token.
     """
     for header, value in ctx.to_headers().items():
@@ -386,7 +386,7 @@ async def _refresh_actor_header_async(request: Any) -> bool:
 
 
 def _raise_for_gateway_outcome(request: Any, response: Any) -> None:
-    """Raise a typed AIB outcome when a response carries a KAOS-gateway denial.
+    """Raise a typed access outcome when a response carries a KAOS-gateway denial.
 
     Header-gated (``x-kaos-access-reason``) so it imports the outcome machinery only
     for genuine gateway enforcement responses; ordinary traffic and non-KAOS 4xx/5xx
@@ -412,7 +412,7 @@ def instrument_httpx() -> None:
     ModelAPI clients alike — and injection happens at request time, so clients built once
     at startup still propagate per-request context. Idempotent.
 
-    When a managed actor-token identity is active (see :func:`aib.instrument_agent_identity`)
+    When a managed actor-token identity is active (see :func:`kaos_identity.instrument_agent_identity`)
     and an instrumented request that carried ``x-agent-authorization`` receives a ``401``,
     the actor token is refreshed once and the request replayed a single time — covering the
     case where the cached token expired or the credential rotated mid-flight. Requests with
@@ -420,8 +420,8 @@ def instrument_httpx() -> None:
     before (no retry).
 
     When a response carries the KAOS-gateway enforcement header (``x-kaos-access-reason``),
-    the outcome is raised as a typed :class:`aib.AccessDenied` /
-    :class:`aib.ReauthenticationRequired` so the runtime can surface the reason (and any
+    the outcome is raised as a typed :class:`kaos_identity.AccessDenied` /
+    :class:`kaos_identity.ReauthenticationRequired` so the runtime can surface the reason (and any
     re-auth URL) instead of an opaque transport error. Responses without that header are
     returned unchanged.
 

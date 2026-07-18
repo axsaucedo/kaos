@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -47,6 +48,7 @@ type AgentReconciler struct {
 //+kubebuilder:rbac:groups=kaos.tools,resources=memorystores,verbs=get;list;watch
 //+kubebuilder:rbac:groups=apps,resources=deployments,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups="",resources=serviceaccounts,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -297,9 +299,12 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 
 	// When gateway routing is enabled, repoint internal endpoints at the gateway so
-	// agent->ModelAPI/MCP/peer traffic traverses jwt_authn/ext_authz/ext_proc rather
+	// agent->ModelAPI/MCP/peer traffic traverses jwt_authn/ext_authz rather
 	// than reaching the workload Service directly (which NetworkPolicy denies).
 	r.applyGatewayRouting(ctx, agent, modelapi, mcpServers, peerAgents, memoryStoreName, &memoryEndpoint, log)
+	if err := r.reconcileAgentServiceAccount(ctx, agent); err != nil {
+		return ctrl.Result{}, err
+	}
 
 	// Create or update Deployment
 	deployment := &appsv1.Deployment{}
@@ -423,9 +428,6 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 			}
 			if err := security.ReconcileSecurityPolicy(ctx, r.Client, r.Scheme, agent, policyParams, secCfg, log); err != nil {
 				log.Error(err, "failed to reconcile SecurityPolicy")
-			}
-			if err := security.ReconcileEnvoyExtensionPolicy(ctx, r.Client, r.Scheme, agent, policyParams, secCfg, log); err != nil {
-				log.Error(err, "failed to reconcile EnvoyExtensionPolicy")
 			}
 			if err := security.ReconcileNetworkPolicy(ctx, r.Client, r.Scheme, agent, security.NetworkPolicyParams{
 				Name:        routeName,
@@ -626,6 +628,10 @@ func (r *AgentReconciler) constructDeployment(agent *kaosv1alpha1.Agent, modelap
 
 	basePodSpec := corev1.PodSpec{
 		Containers: []corev1.Container{container},
+	}
+	if cfg := security.GetConfig(); cfg.ServiceAccountIdentityEnabled() {
+		basePodSpec.ServiceAccountName = security.AgentServiceAccountName(agent.Name)
+		basePodSpec.AutomountServiceAccountToken = ptr.To(false)
 	}
 
 	// Mount the per-agent credential Secret as a file so the runtime can re-read the
@@ -950,6 +956,12 @@ func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *
 // Returns nil when credential mounting is not enabled, leaving existing pods unchanged.
 func buildAgentAuthEnvVars(agent *kaosv1alpha1.Agent) []corev1.EnvVar {
 	cfg := security.GetConfig()
+	if cfg.ServiceAccountIdentityEnabled() {
+		return []corev1.EnvVar{
+			{Name: "AGENT_AUTH_IDENTITY", Value: fmt.Sprintf("kaos://agent/%s/%s", agent.Namespace, agent.Name)},
+			{Name: "AGENT_AUTH_TOKEN_FILE", Value: cfg.ServiceAccountTokenPath},
+		}
+	}
 	if !cfg.CredentialMountingEnabled() {
 		return nil
 	}
@@ -994,13 +1006,24 @@ func buildAgentAuthEnvVars(agent *kaosv1alpha1.Agent) []corev1.EnvVar {
 	return env
 }
 
-// buildAgentAuthVolume returns the projected credential volume and its read-only mount
-// for the agent container when credential mounting is enabled, or nil otherwise. The
-// per-agent credential Secret is mounted at the configured directory so the runtime can
-// re-read the client_secret on rotation. The Secret reference is optional so the pod can
-// start before the identity projection controller has written it.
+// buildAgentAuthVolume returns the active issuer's credential or projected-token
+// volume and read-only mount.
 func buildAgentAuthVolume(agent *kaosv1alpha1.Agent) (*corev1.Volume, *corev1.VolumeMount) {
 	cfg := security.GetConfig()
+	if cfg.ServiceAccountIdentityEnabled() {
+		expiration := cfg.ServiceAccountTokenExpirationSeconds
+		volume := &corev1.Volume{
+			Name: "agent-auth-token",
+			VolumeSource: corev1.VolumeSource{Projected: &corev1.ProjectedVolumeSource{
+				Sources: []corev1.VolumeProjection{{ServiceAccountToken: &corev1.ServiceAccountTokenProjection{
+					Audience:          cfg.ServiceAccountAudience,
+					ExpirationSeconds: &expiration,
+					Path:              cfg.ServiceAccountTokenFilename(),
+				}}},
+			}},
+		}
+		return volume, &corev1.VolumeMount{Name: volume.Name, MountPath: cfg.ServiceAccountTokenMountDir(), ReadOnly: true}
+	}
 	if !cfg.CredentialMountingEnabled() {
 		return nil, nil
 	}
@@ -1020,6 +1043,34 @@ func buildAgentAuthVolume(agent *kaosv1alpha1.Agent) (*corev1.Volume, *corev1.Vo
 		ReadOnly:  true,
 	}
 	return volume, mount
+}
+
+func (r *AgentReconciler) reconcileAgentServiceAccount(ctx context.Context, agent *kaosv1alpha1.Agent) error {
+	name := security.AgentServiceAccountName(agent.Name)
+	cfg := security.GetConfig()
+	if !cfg.ServiceAccountIdentityEnabled() {
+		existing := &corev1.ServiceAccount{}
+		if err := r.Get(ctx, types.NamespacedName{Namespace: agent.Namespace, Name: name}, existing); err == nil {
+			if existing.Labels["app.kubernetes.io/managed-by"] == "kaos-operator" {
+				return r.Delete(ctx, existing)
+			}
+			return nil
+		} else if !apierrors.IsNotFound(err) {
+			return err
+		}
+		return nil
+	}
+
+	serviceAccount := &corev1.ServiceAccount{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: agent.Namespace}}
+	_, err := controllerutil.CreateOrUpdate(ctx, r.Client, serviceAccount, func() error {
+		serviceAccount.Labels = map[string]string{
+			"app.kubernetes.io/managed-by": "kaos-operator",
+			"kaos.tools/agent":             agent.Name,
+		}
+		serviceAccount.AutomountServiceAccountToken = ptr.To(false)
+		return controllerutil.SetControllerReference(agent, serviceAccount, r.Scheme)
+	})
+	return err
 }
 
 // constructService creates a Service for A2A communication
@@ -1145,6 +1196,7 @@ func (r *AgentReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		For(&kaosv1alpha1.Agent{}).
 		Owns(&appsv1.Deployment{}).
 		Owns(&corev1.Service{}).
+		Owns(&corev1.ServiceAccount{}).
 		Watches(&kaosv1alpha1.ModelAPI{}, mapModelAPIToAgents).
 		Watches(&kaosv1alpha1.MCPServer{}, mapMCPServerToAgents).
 		Watches(&kaosv1alpha1.MemoryStore{}, mapMemoryStoreToAgents)

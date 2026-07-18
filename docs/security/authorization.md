@@ -1,119 +1,118 @@
 # Authorization
 
-KAOS enforces agent authorization at the gateway: every request an agent makes to another KAOS resource (an MCP server, a model API, or another agent) can be checked before it is forwarded. Enforcement runs as an Open Policy Agent (OPA) policy inside the Envoy `ext_proc` filter, so a denied request never reaches the target workload.
+KAOS enforces coarse agent actor → resource authorization at Envoy Gateway. The operator projects the desired grant graph from KAOS resources, and a gateway-external OPA deployment evaluates every protected request through Envoy's gRPC external-authorization filter.
 
-Authorization is optional and off by default. You turn it on at install time and pick who authors the policy data.
+## Enforcement components
 
-## Concepts
+When `security.pdp.enabled=true`:
 
-- **Actor identity** — the agent making the call. It is the `sub` claim of the agent (actor) token carried in the `x-agent-authorization` header, and equals the agent logical identity `kaos://agent/<namespace>/<name>`.
-- **Resource identity** — the target being called. It is the logical identity `kaos://<slug>/<namespace>/<name>` (`slug` is `mcpserver`, `modelapi`, or `agent`), matched against the `x-kaos-target-resource` header the gateway stamps onto the request.
-- **Grant** — a decision fact stating that an actor may reach a resource. Grants live in `data.kaos.grants`, a published contract (see [Policy data schema](#policy-data-schema)).
-- **Provider** — who owns the authorization decision data: `kaos` (KAOS projects grants from your CRDs) or `aib` (an external identity broker owns permission sets).
+1. The chart deploys `kaos-pdp` with two replicas, a gRPC Service on port 9191, and a PodDisruptionBudget with `minAvailable: 1`.
+2. The operator attaches a `SecurityPolicy` to every internal Agent, MCPServer, ModelAPI, and MemoryStore route.
+3. The gateway verifies the actor JWT and sends the selected request headers to OPA.
+4. OPA evaluates `data.kaos.authz.result` using the mounted `policy.rego` and `data.json` files.
+5. Envoy forwards allowed requests and returns 403 for policy denials. `failOpen: false` also denies requests when the PDP cannot answer.
 
-## Providers
+The policy ConfigMap must be in the PDP's namespace because Kubernetes cannot mount a ConfigMap across namespaces. Helm rejects an incompatible configuration during rendering.
 
-### `kaos` — KAOS-owned policy data
+## Identity and request conventions
 
-The operator derives the grant graph from your `Agent`, `MCPServer`, and `ModelAPI` resources (their `mcpServers`, `agentNetwork.access`, and model references) and writes it, together with a static policy, into a single policy ConfigMap that the enforcement engine mounts. No external broker is required. This is the recommended starting point and works in autonomous mode because the actor token is always present.
+### Actor token
 
-### `aib` — broker permission sets
+The calling agent sends its JWT in:
 
-The operator registers agents with an external identity broker and enforcement reads the broker's `granted_permission_sets` returned from token exchange. Use this when the broker is your source of truth for authorization.
-
-## Modes
-
-Select a mode with `kaos system install` flags. All modes are safe by construction: KAOS never overwrites or prunes policy data that it does not own.
-
-## Installing
-
-The `kaos system install` command exposes three curated end-to-end postures through the single `--auth-enabled` flag. All enable OPA-in-`ext_proc` authorization, route internal traffic through the gateway, and generate bypass-prevention NetworkPolicies.
-
-### Demo posture (no identity provider)
-
-`kaos-internal` uses the `kaos` provider with grants projected from your CRDs and the agent token header-trusted, so you can explore route- and agent-level authorization without Keycloak or a broker. It bakes in the `kaos-authz-policy` ConfigMap projection target, so no additional flags are required.
-
-```bash
-kaos system install --gateway-enabled --auth-enabled kaos-internal
+```http
+x-agent-authorization: Bearer <actor-jwt>
 ```
 
-### Broker identity posture (no user login)
+The gateway's agent JWT provider validates the token against the selected issuer and requires audience `kaos-gateway`. ServiceAccount mode uses the discovered Kubernetes issuer and an inline JWKS. AIB mode uses the single configured AIB issuer URL and its JWKS; the broker must mint agent tokens with `kaos-gateway` in their audience claim.
 
-`aib-only` wires the identity broker so agents receive broker-issued, signature-verified actor tokens, but installs neither Keycloak user identity nor RFC 8693 token exchange. Use it when you want verified agent identity without a user-auth layer.
+ServiceAccount token subjects have the form `system:serviceaccount:<namespace>:<serviceaccount-name>`. The policy resolves that issuer subject to the logical actor id through `data.kaos.agents`.
 
-```bash
-kaos system install --gateway-enabled --auth-enabled aib-only
-```
+### Resource identity
 
-### Full verified posture
+Resource ids use these forms:
 
-`aib-keycloak` (the default when `--auth-enabled` is passed without a value) installs Keycloak for user identity and wires the identity broker with RFC 8693 token exchange. Authorization reads the broker's permission sets and the agent token signature is verified against the IdP JWKS.
+- `kaos://agent/<namespace>/<name>`
+- `kaos://mcpserver/<namespace>/<name>`
+- `kaos://modelapi/<namespace>/<name>`
+- `kaos://memorystore/<namespace>/<name>`
 
-```bash
-kaos system install --gateway-enabled --auth-enabled aib-keycloak
-```
+Automated projection emits grants for Agent, MCPServer, and ModelAPI relationships. A manual data document can grant a protected MemoryStore route by using its `kaos://memorystore/...` id.
 
-### Advanced configuration
+Operator-owned routes stamp the logical id in `x-kaos-target-resource`. Envoy performs external authorization before applying the HTTPRoute request-header modifier, so the policy also derives the same identity from the route path `/<namespace>/<route-kind>/<name>/...`. The route kind `mcp` maps to the resource slug `mcpserver`.
 
-The presets cover the common cases. Every underlying knob remains available as a Helm chart value via `--set`, so you can compose any of the modes below. All modes are safe by construction: KAOS never overwrites or prunes policy data that it does not own.
+Clients must not use `x-kaos-target-resource` to select an arbitrary resource. The gateway route and its path are authoritative.
 
-| Mode | Provider | `policyDataSource` | KAOS writes | Use when |
-|------|----------|--------------------|-------------|----------|
-| Automated (default) | `kaos` | `automated` | `policy.rego` + `data.json` grants | KAOS should project grants from CRDs |
-| Bring-your-own ConfigMap | `kaos` | `manual` | nothing | You author both the rego and the data in your own ConfigMap |
-| Operator-rego + admin data | `kaos` | `manual` (+ `policyRegoOverride`) | `policy.rego` only | KAOS owns the policy, you author `data.kaos.grants` |
-| Broker external off-switch | `aib` | `external` | identity only (no grants, no prune) | The broker owns authorization; KAOS only registers identity |
+### User token
 
-The relevant chart values are:
+The standard `Authorization: Bearer <user-jwt>` header is verified by the user JWT provider when user authentication is configured. The current authorization decision does not add a user → resource dimension; it remains an agent actor → resource check.
 
-```bash
-kaos system install --gateway-enabled --auth-enabled kaos-internal \
-  --set security.agentAuth.authorization.provider=kaos \
-  --set security.agentAuth.authorization.policyDataSource=manual \
-  --set security.agentAuth.authorization.policyRegoOverride=true \
-  --set security.agentAuth.authorization.agentJwtVerification=verified \
-  --set security.agentAuth.projection.policyConfigMap.name=kaos-authz-policy \
-  --set security.agentAuth.projection.policyConfigMap.namespace=kaos-system
-```
+## Automated and manual policy data
 
-## Verification modes
+`security.agentAuth.authorization.policyDataSource` accepts:
 
-The subject (user) token is always verified by the gateway's JWT authentication. The actor token needs the same treatment for a production posture, controlled by `security.agentAuth.authorization.agentJwtVerification` (the `aib-keycloak` and `aib-only` presets set `verified`; `kaos-internal` sets `skip`):
+- `automated`: the operator writes the shipped policy and derives `data.json` from Agent relationships and referenced resources.
+- `manual`: an administrator owns the ConfigMap data. With `policyRegoOverride=true`, the operator owns only `policy.rego` while the administrator owns `data.json`.
 
-- `verified` — the operator injects the IdP JWKS at `data.kaos.jwks` and the policy verifies the actor token signature, issuer, and expiry before trusting its `sub`. This is the real posture.
-- `skip` — **demo mode, non-production.** The policy decodes the actor token without verifying its signature, so the `x-agent-authorization` header is spoofable. Use it only to try route- and agent-level authorization without an identity provider. Move to `verified` before any real deployment.
+The PDP runs whenever its policy ConfigMap is configured; there is no authorization-provider selector.
 
-::: warning
-Demo mode (`agentJwtVerification=skip`, the `kaos-internal` preset) trusts an unverified header and is spoofable. It exists to explore authorization without an IdP and must never be used in production.
-:::
+## Published `data.kaos` schema
 
-## Policy data schema
-
-The enforcement policy reads one OPA data document from the policy ConfigMap key `data.json`. This shape is a published contract: the operator projects it in automated mode, and you author it directly in operator-rego and bring-your-own modes.
+OPA reads this document from the ConfigMap key `data.json`:
 
 ```json
 {
   "kaos": {
     "grants": {
-      "kaos://agent/<namespace>/<name>": [
-        "kaos://mcpserver/<namespace>/<name>",
-        "kaos://agent/<namespace>/<name>"
+      "kaos://agent/demo/researcher": [
+        "kaos://mcpserver/demo/github",
+        "kaos://modelapi/demo/llama"
       ]
     },
     "jwks": {
-      "keys": [ { "kty": "RSA", "kid": "...", "n": "...", "e": "AQAB" } ]
+      "https://kubernetes.default.svc.cluster.local": {
+        "keys": [
+          { "kty": "RSA", "kid": "key-id", "alg": "RS256", "n": "...", "e": "AQAB" }
+        ]
+      }
+    },
+    "agents": {
+      "kaos://agent/demo/researcher": {
+        "issuer_sub": "system:serviceaccount:demo:kaos-agent-researcher"
+      }
     }
   }
 }
 ```
 
-### `kaos.grants` (required)
+### `data.kaos.grants`
 
-Maps an actor identity to the sorted, de-duplicated set of resource identities it may reach. A request is allowed only when its resource id is present in the granting array for its actor id.
+Maps each logical agent id to a sorted, deduplicated list of resources it may reach. A request is allowed only when the resolved actor id has the target resource in this list.
 
-- **Actor id** — `kaos://agent/<namespace>/<name>`, the `sub` of the agent token in `x-agent-authorization`.
-- **Resource id** — `kaos://<slug>/<namespace>/<name>` (`slug` is `mcpserver`, `modelapi`, or `agent`), matched against the `x-kaos-target-resource` header.
+### `data.kaos.jwks`
 
-### `kaos.jwks` (optional)
+Maps the exact token issuer string to its JSON Web Key Set. The policy selects keys by the unverified token's `iss`, then verifies the signature with the server-side `RS256` allowlist and requires the exact issuer plus the `kaos-gateway` audience for every configured issuer.
 
-The IdP JSON Web Key Set used to verify the actor token signature. Its presence switches the policy from demo mode (decode only) to verified mode (`io.jwt.decode_verify` against these keys). Omit it only in demo installs.
+### `data.kaos.agents`
+
+Maps a logical agent id to its issuer-specific token subject. ServiceAccount mode uses this reverse lookup because Kubernetes subjects are not KAOS resource ids. For issuers whose token `sub` already equals the logical agent id, the mapping can be omitted.
+
+## Configuration example
+
+```bash
+kaos system install --auth-enabled kaos-internal \
+  --set security.agentAuth.authorization.policyDataSource=automated \
+  --set security.agentAuth.projection.policyConfigMap.name=kaos-authz-policy \
+  --set security.agentAuth.projection.policyConfigMap.namespace=kaos-system \
+  --wait
+```
+
+Set `security.agentAuth.extAuthzUrl` only to replace the in-chart PDP Service with another Envoy-compatible gRPC authorizer. The explicit URL takes precedence over `kaos-pdp.<release-namespace>.svc:9191`.
+
+## Propagation and key rotation
+
+Authorization data is eventually consistent. Budget about 90 seconds for resource reconciliation, ConfigMap projection, kubelet volume refresh, OPA file watching, and gateway configuration; this bound also applies to revocations.
+
+ServiceAccount issuer discovery and JWKS loading happen during operator startup. Restart the operator after Kubernetes ServiceAccount signing-key rotation.
+
+See [Authentication and authorization](/security/walkthrough-auth) for the end-to-end gateway and PDP request path.
