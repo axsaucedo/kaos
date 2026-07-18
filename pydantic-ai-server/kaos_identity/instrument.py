@@ -235,9 +235,9 @@ def _extract_inbound(
     request_id = headers.get(HEADER_REQUEST_ID) or f"req-{uuid.uuid4().hex[:16]}"
     session_id = headers.get(HEADER_SESSION_ID) or headers.get(_LEGACY_SESSION_HEADER)
 
-    principal = headers.get(HEADER_PRINCIPAL)
-    if not principal and principal_resolver is not None:
-        principal = principal_resolver(headers)
+    principal = principal_resolver(headers) if principal_resolver is not None else None
+    if not principal:
+        principal = headers.get(HEADER_PRINCIPAL)
     if not principal:
         principal = default_principal
 
@@ -306,9 +306,9 @@ def instrument_fastapi(
     Local runtime identity (``actor``/``actor_token``/``principal``) falls back to the
     ``AGENT_AUTH_IDENTITY`` / ``AGENT_AUTH_TOKEN`` / ``AGENT_AUTH_PRINCIPAL`` environment
     variables (provider-agnostic; populated by the operator from the configured broker). The
-    user principal is normally taken from the inbound ``x-principal`` header or the
-    ``principal_resolver``; the fixed ``principal`` is only a fallback for processes with
-    a constant trusted principal.
+    user principal is taken from the ``principal_resolver`` when it returns a verified
+    value, then from inbound ``x-principal``; the fixed ``principal`` is only a fallback
+    for processes with a constant trusted principal.
     """
     app.add_middleware(
         _PropagationMiddleware,

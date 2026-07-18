@@ -63,7 +63,10 @@ def test_required_user_scoping_resolves_and_propagates_gateway_subject(monkeypat
             "outbound": kaos_identity.to_headers().get("x-principal"),
         }
 
-    seen = TestClient(server.app).get("/identity-test", headers={"x-user-claim-sub": "oidc-alice"})
+    seen = TestClient(server.app).get(
+        "/identity-test",
+        headers={"x-user-claim-sub": "oidc-alice", "x-principal": "spoofed-bob"},
+    )
     assert seen.json() == {"principal": "oidc-alice", "outbound": "oidc-alice"}
 
 
