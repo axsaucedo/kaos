@@ -210,7 +210,7 @@ class MemoryService:
                 degraded = True
 
             summary, recent = "", []
-            if req.include_short_term:
+            if req.include_short_term and req.scope.session_id is not None:
                 summary = self.short_term.summary(req.scope)
                 recent = self.short_term.active_window(
                     req.scope, token_budget=req.short_term_token_budget

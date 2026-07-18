@@ -121,6 +121,22 @@ def test_recall_can_exclude_short_term(tmp_path):
     assert "## Recent turns" not in body["block"]
 
 
+def test_user_recall_without_session_returns_long_term_and_empty_conversation(tmp_path):
+    longterm = _FakeLongTerm(facts=[{"memory": "alice prefers dark mode"}])
+
+    response = _client(longterm, _short_term(tmp_path)).post(
+        "/v1/recall",
+        json={"scope": {"level": "user", "principal": "alice"}, "query": "preferences"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["facts"] == [{"memory": "alice prefers dark mode"}]
+    assert body["short_term"]["recent"] == []
+    assert body["medium_term"]["summary"] == ""
+    assert body["degraded"] is False
+
+
 def test_session_recall_round_trips_agent_writes_without_cross_session_leakage(tmp_path):
     short_term = ShortTermStore(
         "local",
