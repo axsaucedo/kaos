@@ -5,6 +5,8 @@ from typing import Any, cast
 import pytest
 from pydantic_core import ValidationError
 
+pytest.importorskip("pydantic_ai")
+
 from kaos_memory.client import RecalledMemory
 from kaos_memory.contract import ScopeLevel
 from kaos_memory.pydantic_ai.toolset import MemoryToolset, SEARCH_MEMORY_TOOL
