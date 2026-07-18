@@ -300,6 +300,16 @@ spec:
                 - soft
                 - strict
                 type: string
+              defaultScope:
+                description: |-
+                  DefaultScope is the store-wide home scope for bound agents that do not set
+                  config.memory.scope. When unset the agent scope is used.
+                enum:
+                - agent
+                - user
+                - group
+                - session
+                type: string
               engine:
                 default: mem0
                 description: Engine is the long-term memory engine. Mem0 is the only

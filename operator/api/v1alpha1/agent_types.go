@@ -101,7 +101,6 @@ type MemoryConfig struct {
 	// Scope selects whose memory this agent reads and writes. "user" and "group"
 	// require a bound memoryStore.
 	// +kubebuilder:validation:Enum=agent;user;group;session
-	// +kubebuilder:default=agent
 	// +kubebuilder:validation:Optional
 	Scope string `json:"scope,omitempty"`
 

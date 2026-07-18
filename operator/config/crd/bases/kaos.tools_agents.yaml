@@ -169,7 +169,6 @@ spec:
                           type: string
                         type: array
                       scope:
-                        default: agent
                         description: |-
                           Scope selects whose memory this agent reads and writes. "user" and "group"
                           require a bound memoryStore.
