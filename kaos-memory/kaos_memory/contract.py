@@ -57,6 +57,7 @@ class Scope(BaseModel):
     principal: Optional[str] = None
     agent_client_id: Optional[str] = None
     session_id: Optional[str] = None
+    user_scoping_required: bool = False
 
     @model_validator(mode="after")
     def _normalise(self) -> "Scope":
@@ -70,7 +71,9 @@ class Scope(BaseModel):
     def is_complete(self) -> bool:
         """Whether the field required by ``level`` is present (a usable owner key exists)."""
         if self.level is ScopeLevel.AGENT:
-            return self.agent_client_id is not None
+            return self.agent_client_id is not None and (
+                not self.user_scoping_required or self.principal is not None
+            )
         if self.level is ScopeLevel.USER:
             return self.principal is not None
         if self.level is ScopeLevel.SESSION:

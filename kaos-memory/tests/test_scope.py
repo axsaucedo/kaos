@@ -11,6 +11,15 @@ def test_agent_maps_to_agent_id():
     assert scope.search_filters() == {"agent_id": "agent-a"}
 
 
+def test_required_agent_scope_is_incomplete_without_user():
+    scope = Scope(
+        level=ScopeLevel.AGENT,
+        agent_client_id="agent-a",
+        user_scoping_required=True,
+    )
+    assert scope.is_complete() is False
+
+
 def test_user_maps_to_user_id():
     scope = Scope(level=ScopeLevel.USER, principal="alice")
     assert scope.owner_kwargs() == {"user_id": "alice"}
