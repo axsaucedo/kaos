@@ -137,7 +137,7 @@ def test_user_recall_without_session_returns_long_term_and_empty_conversation(tm
     assert body["degraded"] is False
 
 
-def test_session_recall_round_trips_agent_writes_without_cross_session_leakage(tmp_path):
+def test_conversation_round_trips_across_recall_scopes_without_session_leakage(tmp_path):
     short_term = ShortTermStore(
         "local",
         str(tmp_path / "w.db"),
@@ -175,6 +175,20 @@ def test_session_recall_round_trips_agent_writes_without_cross_session_leakage(t
         )
         assert response.status_code == 200
         recalled.append(response.json())
+
+    for level_scope in (
+        {**base_scope, "session_id": "session-1"},
+        {"level": "group", "session_id": "session-1"},
+    ):
+        response = client.post(
+            "/v1/recall",
+            json={"scope": level_scope, "query": "notebook compass"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert "amber notebook" in body["medium_term"]["summary"]
+        assert body["short_term"]["recent"] == [["assistant", "noted amber notebook"]]
+        assert "silver compass" not in str(body)
 
     assert "amber notebook" in recalled[0]["medium_term"]["summary"]
     assert recalled[0]["short_term"]["recent"] == [["assistant", "noted amber notebook"]]

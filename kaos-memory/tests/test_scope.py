@@ -77,17 +77,17 @@ def test_write_requires_an_entity_contributor():
         (
             Scope(level=ScopeLevel.USER, principal="alice", session_id="run-1"),
             None,
-            "user_id:alice|run:run-1",
+            "run:run-1",
         ),
         (
             Scope(level=ScopeLevel.AGENT, agent_client_id="agent-a", session_id="run-1"),
             None,
-            "agent_id:agent-a|run:run-1",
+            "run:run-1",
         ),
         (
             Scope(level=ScopeLevel.SESSION, session_id="run-1"),
             None,
-            "kaos_run:run-1|run:run-1",
+            "run:run-1",
         ),
         (
             Scope(level=ScopeLevel.GROUP, session_id="run-1"),
@@ -96,22 +96,22 @@ def test_write_requires_an_entity_contributor():
         ),
     ],
 )
-def test_scope_key_combines_owner_and_session(scope, group, expected):
+def test_scope_key_uses_session_with_optional_store_boundary(scope, group, expected):
     assert scope_key(scope, group) == expected
 
 
-def test_scope_key_uses_known_attribution_independently_of_level():
+def test_scope_key_ignores_write_attribution_and_recall_level():
     agent = Scope(
         level=ScopeLevel.AGENT,
         principal="alice",
         agent_client_id="agent-a",
         session_id="run-1",
     )
-    session = agent.model_copy(update={"level": ScopeLevel.SESSION})
+    group = Scope(level=ScopeLevel.GROUP, session_id="run-1")
 
-    expected = "user_id:alice|agent_id:agent-a|kaos_group:team-a|run:run-1"
+    expected = "kaos_group:team-a|run:run-1"
     assert scope_key(agent, "team-a") == expected
-    assert scope_key(session, "team-a") == expected
+    assert scope_key(group, "team-a") == expected
 
 
 def test_scope_key_requires_session_for_every_level():

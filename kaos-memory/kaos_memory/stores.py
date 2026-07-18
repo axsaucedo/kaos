@@ -152,6 +152,14 @@ def _summary_table_ddl(kind: str) -> str:
     )
 
 
+def _attribution_table_ddl() -> str:
+    """DDL for owners used by scoped conversational-memory erasure."""
+    return (
+        "CREATE TABLE IF NOT EXISTS conversational_memory_attribution ("
+        "scope_key TEXT, owner_key TEXT, PRIMARY KEY (scope_key, owner_key))"
+    )
+
+
 class _Backend:
     """Thin DB abstraction over SQLite and Postgres with a single schema.
 
@@ -179,6 +187,7 @@ class _Backend:
     def _ensure_schema(self, serial: str) -> None:
         self.execute(_window_table_ddl(self.kind, serial))
         self.execute(_summary_table_ddl(self.kind))
+        self.execute(_attribution_table_ddl())
         self.commit()
 
     @contextmanager
@@ -250,7 +259,7 @@ class ShortTermStore:
         summarizer: folds overflow into a rolling summary; required when
             ``config.rolling_summary`` is True.
         scheduler: runs the fold off the response path; if absent, folds inline.
-        group: configured store group used to key group-scoped conversations.
+        group: configured store group used as the conversational tenant boundary.
         """
         self.cfg = config or ShortTermTierConfig()
         self.summarizer = summarizer
@@ -275,6 +284,18 @@ class ShortTermStore:
         key = scope_key(scope, self.group)
         now = time.time()
         with self._lock:
+            owner_keys = []
+            if scope.principal is not None:
+                owner_keys.append(f"user_id:{scope.principal}")
+            if scope.agent_client_id is not None:
+                owner_keys.append(f"agent_id:{scope.agent_client_id}")
+            if self.group:
+                owner_keys.append(f"kaos_group:{self.group}")
+            self.db.executemany(
+                "INSERT INTO conversational_memory_attribution (scope_key, owner_key) "
+                "VALUES (?, ?) ON CONFLICT (scope_key, owner_key) DO NOTHING",
+                [(key, owner_key) for owner_key in owner_keys],
+            )
             self.db.executemany(
                 "INSERT INTO short_term_memory_window "
                 "(scope_key, role, content, created_at, pending_summary) "
@@ -313,13 +334,19 @@ class ShortTermStore:
     def delete(self, scope: Scope) -> None:
         """Delete conversational memory carrying the requested owner key."""
         if scope.level is ScopeLevel.SESSION:
-            if scope.session_id is None:
-                raise ValueError("session scope requires session_id")
             owner_key = f"run:{scope.session_id}"
+            keys = {scope_key(scope, self.group)}
         else:
             owner_key = scope_owner_key(scope, self.group)
-        with self._lock:
             keys = set()
+        with self._lock:
+            rows = self.db.execute(
+                "SELECT scope_key FROM conversational_memory_attribution WHERE owner_key = ?",
+                (owner_key,),
+            ).fetchall()
+            keys.update(key for (key,) in rows)
+            # Also find composite keys written by earlier versions so scoped erasure
+            # continues to clean up pre-change conversational rows.
             for table in ("short_term_memory_window", "medium_term_memory_summaries"):
                 rows = self.db.execute(f"SELECT DISTINCT scope_key FROM {table}").fetchall()
                 keys.update(key for (key,) in rows if owner_key in key.split("|"))
@@ -327,6 +354,9 @@ class ShortTermStore:
                 self.db.execute("DELETE FROM short_term_memory_window WHERE scope_key = ?", (key,))
                 self.db.execute(
                     "DELETE FROM medium_term_memory_summaries WHERE scope_key = ?", (key,)
+                )
+                self.db.execute(
+                    "DELETE FROM conversational_memory_attribution WHERE scope_key = ?", (key,)
                 )
             self.db.commit()
 

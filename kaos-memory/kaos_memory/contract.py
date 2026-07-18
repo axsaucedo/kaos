@@ -166,23 +166,17 @@ def scope_owner_key(scope: Scope, group: Optional[str] = None) -> str:
 
 
 def scope_key(scope: Scope, group: Optional[str] = None) -> str:
-    """Return a stable attributed key for a conversational session.
+    """Return the stable store-local key for a conversational session.
 
-    The selected read/write level does not change the physical partition: all
-    known owners are included in a fixed order, followed by the session id.
+    Conversational tiers belong to the run, not to the agent or principal that
+    wrote a turn. The configured store group is the tenant boundary when one is
+    available; the unguessable session id is the capability within that boundary.
     """
     if scope.session_id is None:
         raise ValueError("conversational memory requires session_id")
-    owners = []
-    if scope.principal is not None:
-        owners.append(f"user_id:{scope.principal}")
-    if scope.agent_client_id is not None:
-        owners.append(f"agent_id:{scope.agent_client_id}")
     if group:
-        owners.append(f"kaos_group:{group}")
-    if not owners:
-        owners.append(scope_owner_key(scope, group))
-    return "|".join([*owners, f"run:{scope.session_id}"])
+        return f"kaos_group:{group}|run:{scope.session_id}"
+    return f"run:{scope.session_id}"
 
 
 # --------------------------------------------------------------------------- #
