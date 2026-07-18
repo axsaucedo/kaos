@@ -25,7 +25,12 @@ def _fake_summarizer(prior, folded):
 
 
 def test_short_term_and_longterm_compose(tmp_path):
-    scope = Scope(level=ScopeLevel.USER, principal="alice")
+    scope = Scope(
+        level=ScopeLevel.USER,
+        principal="alice",
+        agent_client_id="agent-a",
+        session_id="session-1",
+    )
 
     short_term = ShortTermStore(
         "local",

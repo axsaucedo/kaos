@@ -7,7 +7,7 @@ from kaos_memory.stores import Scope, ScopeLevel
 from kaos_memory.app import MemoryService, create_app
 from kaos_memory.stores import ShortTermStore
 
-USER_SCOPE = {"level": "user", "principal": "carol"}
+USER_SCOPE = {"level": "user", "principal": "carol", "session_id": "session-1"}
 
 
 class _RecordingLongTerm:
@@ -51,7 +51,7 @@ def test_overflow_summarizes_server_side(tmp_path):
         ShortTermTierConfig(token_budget=4, rolling_summary=True),
         summarizer,
     )
-    scope = Scope(level=ScopeLevel.USER, principal="carol")
+    scope = Scope(level=ScopeLevel.USER, principal="carol", session_id="session-1")
     for i in range(5):
         short_term.add(scope, [("user", f"message number {i} with several tokens here")])
 
@@ -64,7 +64,7 @@ def test_forget_clears_both_tiers(tmp_path):
         "local", str(tmp_path / "w.db"), ShortTermTierConfig(), lambda p, f: p
     )
     longterm = _RecordingLongTerm()
-    scope = Scope(level=ScopeLevel.USER, principal="carol")
+    scope = Scope(level=ScopeLevel.USER, principal="carol", session_id="session-1")
     short_term.add(scope, [("user", "something to remember")])
     assert short_term.active_window(scope)
 
@@ -84,7 +84,7 @@ def test_forget_soft_degrades_on_longterm_failure(tmp_path):
     short_term = ShortTermStore(
         "local", str(tmp_path / "w.db"), ShortTermTierConfig(), lambda p, f: p
     )
-    scope = Scope(level=ScopeLevel.USER, principal="carol")
+    scope = Scope(level=ScopeLevel.USER, principal="carol", session_id="session-1")
     short_term.add(scope, [("user", "x")])
 
     resp = _client(_BrokenDelete(), short_term).post(

@@ -21,7 +21,7 @@ from kaos_memory.config import ShortTermTierConfig
 from kaos_memory.contract import Scope, ScopeLevel
 from kaos_memory.stores import ShortTermStore
 
-USER_SCOPE = Scope(level=ScopeLevel.USER, principal="alice")
+USER_SCOPE = Scope(level=ScopeLevel.USER, principal="alice", session_id="session-1")
 
 
 class _FakeLongTerm:

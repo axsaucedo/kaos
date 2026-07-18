@@ -29,7 +29,7 @@ def _client(longterm, short_term):
     return TestClient(create_app(MemoryService(longterm=longterm, short_term=short_term)))
 
 
-USER_SCOPE = {"level": "user", "principal": "alice"}
+USER_SCOPE = {"level": "user", "principal": "alice", "session_id": "s1"}
 
 
 def test_recall_surfaces_medium_term_digest(tmp_path):
@@ -43,7 +43,7 @@ def test_recall_surfaces_medium_term_digest(tmp_path):
         ShortTermTierConfig(token_budget=4, rolling_summary=True),
         lambda prior, turns: (prior + " " + " ".join(c for _, c in turns)).strip(),
     )
-    s = Scope(level=ScopeLevel.USER, principal="alice")
+    s = Scope(level=ScopeLevel.USER, principal="alice", session_id="s1")
     for i in range(6):
         short_term.add(s, [("user", f"message number {i}")])
 
@@ -61,11 +61,10 @@ def test_recall_surfaces_medium_term_digest(tmp_path):
 def test_recall_returns_facts_and_short_term_context(tmp_path):
     short_term = _short_term(tmp_path)
     longterm = _FakeLongTerm(facts=[{"memory": "alice prefers dark mode", "score": 0.9}])
-    scope = {"level": "user", "principal": "alice", "session_id": "s1"}
     # Seed short-term turns under the same owner key.
     from kaos_memory.stores import Scope, ScopeLevel
 
-    s = Scope(level=ScopeLevel.USER, principal="alice")
+    s = Scope(level=ScopeLevel.USER, principal="alice", session_id="s1")
     short_term.add(s, [("user", "hello there")])
     short_term.add(s, [("assistant", "hi alice")])
 
@@ -88,7 +87,8 @@ def test_recall_degrades_to_short_term_only_on_longterm_failure(tmp_path):
     from kaos_memory.stores import Scope, ScopeLevel
 
     short_term.add(
-        Scope(level=ScopeLevel.USER, principal="alice"), [("user", "remember the budget is 5000")]
+        Scope(level=ScopeLevel.USER, principal="alice", session_id="s1"),
+        [("user", "remember the budget is 5000")],
     )
     longterm = _FakeLongTerm(fail=True)
 
