@@ -216,6 +216,7 @@ class TestAutonomousIdentity:
             agent_identity=identity,
         )
 
+        assert isinstance(server.task_manager, LocalTaskManager)
         assert server.task_manager._autonomous_principal == identity
 
     @pytest.mark.asyncio

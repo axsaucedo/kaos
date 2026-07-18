@@ -345,7 +345,7 @@ def create_app(service: MemoryService, request_concurrency: int = 8) -> FastAPI:
         return JSONResponse(result, status_code=code)
 
     @app.post("/v1/recall", response_model=RecallResponse)
-    async def recall(req: RecallRequest) -> RecallResponse:
+    async def recall(req: RecallRequest) -> RecallResponse | JSONResponse:
         """Synchronous recall: assemble long-term facts and short-term context for a scope."""
         if not req.scope.is_complete():
             return JSONResponse(
