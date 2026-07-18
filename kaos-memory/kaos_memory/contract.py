@@ -146,10 +146,30 @@ class Scope(BaseModel):
         return {"user_id": "*", "kaos_group": group}
 
 
-def scope_key(scope: Scope) -> str:
-    """Stable string key for a scope's short-term window (one owner key -> 'key:value')."""
-    ((key, value),) = scope.owner_kwargs().items()
-    return f"{key}:{value}"
+def scope_owner_key(scope: Scope, group: Optional[str] = None) -> str:
+    """Return the selected owner portion of a conversational-tier key."""
+    if scope.level is ScopeLevel.AGENT:
+        if scope.agent_client_id is None:
+            raise ValueError("agent scope requires agent_client_id")
+        return f"agent_id:{scope.agent_client_id}"
+    if scope.level is ScopeLevel.USER:
+        if scope.principal is None:
+            raise ValueError("user scope requires principal")
+        return f"user_id:{scope.principal}"
+    if scope.level is ScopeLevel.SESSION:
+        if scope.session_id is None:
+            raise ValueError("session scope requires session_id")
+        return f"kaos_run:{scope.session_id}"
+    if not group:
+        raise ValueError("group scope requires the store group")
+    return f"kaos_group:{group}"
+
+
+def scope_key(scope: Scope, group: Optional[str] = None) -> str:
+    """Return the per-session key for the short- and medium-term tiers."""
+    if scope.session_id is None:
+        raise ValueError("conversational memory requires session_id")
+    return f"{scope_owner_key(scope, group)}|run:{scope.session_id}"
 
 
 # --------------------------------------------------------------------------- #

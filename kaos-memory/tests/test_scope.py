@@ -2,7 +2,7 @@
 
 import pytest
 
-from kaos_memory.stores import Scope, ScopeLevel
+from kaos_memory.stores import Scope, ScopeLevel, scope_key
 
 
 def test_agent_maps_to_agent_id():
@@ -69,6 +69,40 @@ def test_write_kwargs_omit_unknown_attribution():
 def test_write_requires_an_entity_contributor():
     with pytest.raises(ValueError, match="principal or agent_client_id"):
         Scope(level=ScopeLevel.GROUP, session_id="run-1").write_kwargs("team-a")
+
+
+@pytest.mark.parametrize(
+    ("scope", "group", "expected"),
+    [
+        (
+            Scope(level=ScopeLevel.USER, principal="alice", session_id="run-1"),
+            None,
+            "user_id:alice|run:run-1",
+        ),
+        (
+            Scope(level=ScopeLevel.AGENT, agent_client_id="agent-a", session_id="run-1"),
+            None,
+            "agent_id:agent-a|run:run-1",
+        ),
+        (
+            Scope(level=ScopeLevel.SESSION, session_id="run-1"),
+            None,
+            "kaos_run:run-1|run:run-1",
+        ),
+        (
+            Scope(level=ScopeLevel.GROUP, session_id="run-1"),
+            "team-a",
+            "kaos_group:team-a|run:run-1",
+        ),
+    ],
+)
+def test_scope_key_combines_owner_and_session(scope, group, expected):
+    assert scope_key(scope, group) == expected
+
+
+def test_scope_key_requires_session_for_every_level():
+    with pytest.raises(ValueError, match="requires session_id"):
+        scope_key(Scope(level=ScopeLevel.USER, principal="alice"))
 
 
 def test_incomplete_scope_is_representable_but_raises_on_mapping():

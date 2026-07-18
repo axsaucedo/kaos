@@ -37,7 +37,7 @@ from kaos_memory.config import (
     ShortTermTierConfig,
     StorageConfig,
 )
-from kaos_memory.contract import Scope, ScopeLevel, scope_key
+from kaos_memory.contract import Scope, ScopeLevel, scope_key, scope_owner_key
 
 # --------------------------------------------------------------------------- #
 # Token counting and short-term helpers                                        #
@@ -241,6 +241,7 @@ class ShortTermStore:
         config: Optional[ShortTermTierConfig] = None,
         summarizer: Optional[Summarizer] = None,
         scheduler: Optional[Scheduler] = None,
+        group: Optional[str] = None,
     ) -> None:
         """Args:
         storage_type: ``local`` (SQLite) or ``external`` (Postgres).
@@ -249,10 +250,12 @@ class ShortTermStore:
         summarizer: folds overflow into a rolling summary; required when
             ``config.rolling_summary`` is True.
         scheduler: runs the fold off the response path; if absent, folds inline.
+        group: configured store group used to key group-scoped conversations.
         """
         self.cfg = config or ShortTermTierConfig()
         self.summarizer = summarizer
         self._scheduler = scheduler
+        self.group = group
         self._lock = threading.Lock()
         self.db = _Backend(storage_type, target)
 
@@ -269,7 +272,7 @@ class ShortTermStore:
         """
         if not turns:
             return []
-        key = scope_key(scope)
+        key = scope_key(scope, self.group)
         now = time.time()
         with self._lock:
             self.db.executemany(
@@ -287,7 +290,7 @@ class ShortTermStore:
         self, scope: Scope, token_budget: Optional[int] = None
     ) -> List[Tuple[str, str]]:
         """Return the active verbatim window as ordered (role, content), within the budget."""
-        key = scope_key(scope)
+        key = scope_key(scope, self.group)
         budget = token_budget if token_budget is not None else self.cfg.token_budget
         with self._lock:
             active = self._load_active_window_rows(key)
@@ -301,19 +304,29 @@ class ShortTermStore:
     def summary(self, scope: Scope) -> str:
         """Return the current medium-term summary text for the scope (empty if none)."""
         with self._lock:
-            return self._load_summary(scope_key(scope))
+            return self._load_summary(scope_key(scope, self.group))
 
     def short_term_context(self, scope: Scope) -> Tuple[str, List[Tuple[str, str]]]:
         """Return (medium_term_summary, active_window) — the full short-term context for a run."""
         return self.summary(scope), self.active_window(scope)
 
-    def clear(self, scope: Scope) -> None:
-        """Delete all turns and the summary for the scope."""
-        key = scope_key(scope)
+    def delete(self, scope: Scope) -> None:
+        """Delete conversational memory for a session or every session under an owner."""
+        if scope.level is ScopeLevel.SESSION:
+            where = "scope_key = ?"
+            params: Tuple[Any, ...] = (scope_key(scope, self.group),)
+        else:
+            prefix = f"{scope_owner_key(scope, self.group)}|run:"
+            where = "substr(scope_key, 1, ?) = ?"
+            params = (len(prefix), prefix)
         with self._lock:
-            self.db.execute("DELETE FROM short_term_memory_window WHERE scope_key = ?", (key,))
-            self.db.execute("DELETE FROM medium_term_memory_summaries WHERE scope_key = ?", (key,))
+            self.db.execute(f"DELETE FROM short_term_memory_window WHERE {where}", params)
+            self.db.execute(f"DELETE FROM medium_term_memory_summaries WHERE {where}", params)
             self.db.commit()
+
+    def clear(self, scope: Scope) -> None:
+        """Backward-compatible alias for :meth:`delete`."""
+        self.delete(scope)
 
     def fold_pending_into_summary(self, scope: Scope) -> None:
         """Fold all pending (marked) turns for the scope into a new digest version.
@@ -327,7 +340,7 @@ class ShortTermStore:
         """
         if self.summarizer is None:
             raise ValueError("rolling_summary is enabled but no summarizer was provided")
-        key = scope_key(scope)
+        key = scope_key(scope, self.group)
         with self._lock, self.db.scope_lock(key):
             pending = self._load_pending_summary_rows(key)
             if not pending:

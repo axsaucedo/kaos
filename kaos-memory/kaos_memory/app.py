@@ -286,7 +286,7 @@ class MemoryService:
         the response but the short-term tier is still cleared."""
         with tracer.start_as_current_span("kaos.memory.forget") as span:
             span.set_attribute("kaos.memory.scope_level", req.scope.level.value)
-            self.short_term.clear(req.scope)
+            self.short_term.delete(req.scope)
             try:
                 self.longterm.delete_scope(req.scope)
             except Exception:
@@ -408,6 +408,7 @@ def build_service(settings: MemorySettings) -> MemoryService:
         settings.short_term_tier(),
         summarizer,
         scheduler=runner,
+        group=storage.resolved().collection_name,
     )
     return MemoryService(
         longterm=longterm,
