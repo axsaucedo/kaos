@@ -110,7 +110,6 @@ def init(
     try:
         init_module = importlib.import_module("kaos_cli.agent.init")
         init_command = init_module.init_command  # type: ignore[import-untyped]
-
         init_command(directory=directory, force=force)
     except ImportError:
         typer.echo(

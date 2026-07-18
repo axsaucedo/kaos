@@ -1,6 +1,9 @@
 """Unit tests for the long-term Mem0 adapter (scope isolation + erasure)."""
 
+import threading
+import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -68,17 +71,82 @@ def test_local_delete_scope_removes_only_that_owner(tmp_path, offline_models):
     )
 
 
-def test_agent_and_session_scopes_isolated(tmp_path, offline_models):
+def test_local_delete_session_uses_custom_attribution(tmp_path, offline_models):
+    store = _local_store(tmp_path, offline_models)
+    first = Scope(
+        level=ScopeLevel.SESSION,
+        principal="alice",
+        agent_client_id="agent-a",
+        session_id="run-1",
+    )
+    second = first.model_copy(update={"session_id": "run-2"})
+    store.add(first, "first session fact", infer=False)
+    store.add(second, "second session fact", infer=False)
+
+    store.delete_scope(first)
+
+    assert store.recall(first, "session fact", top_k=10) == []
+    assert [hit["memory"] for hit in store.recall(second, "session fact", top_k=10)] == [
+        "second session fact"
+    ]
+
+
+def test_local_delete_group_removes_store_group(tmp_path, offline_models):
+    store = _local_store(tmp_path, offline_models)
+    alice = Scope(
+        level=ScopeLevel.GROUP,
+        principal="alice",
+        agent_client_id="agent-a",
+        session_id="run-1",
+    )
+    bob = Scope(
+        level=ScopeLevel.GROUP,
+        principal="bob",
+        agent_client_id="agent-b",
+        session_id="run-2",
+    )
+    store.add(alice, "alice group fact", infer=False)
+    store.add(bob, "bob group fact", infer=False)
+
+    store.delete_scope(Scope(level=ScopeLevel.GROUP))
+
+    assert store.recall(Scope(level=ScopeLevel.GROUP), "group fact", top_k=10) == []
+
+
+def test_agent_read_includes_same_agent_session_contribution(tmp_path, offline_models):
     store = _local_store(tmp_path, offline_models)
     agent = Scope(level=ScopeLevel.AGENT, agent_client_id="agent-a")
-    session = Scope(level=ScopeLevel.SESSION, session_id="run-1")
+    session = Scope(
+        level=ScopeLevel.SESSION,
+        principal="alice",
+        agent_client_id="agent-a",
+        session_id="run-1",
+    )
     store.add(agent, "agent private fact about ports", infer=False)
     store.add(session, "session ephemeral fact about ports", infer=False)
 
     agent_hits = store.recall(agent, "ports", top_k=10)
     assert any("agent private" in h["memory"] for h in agent_hits)
-    # The session fact must not surface under the agent scope.
-    assert all("ephemeral" not in h["memory"] for h in agent_hits)
+    assert any("session ephemeral" in h["memory"] for h in agent_hits)
+
+    session_hits = store.recall(session, "ports", top_k=10)
+    assert any("session ephemeral" in h["memory"] for h in session_hits)
+    assert all("agent private" not in h["memory"] for h in session_hits)
+
+
+def test_group_read_uses_collection_attribution(tmp_path, offline_models):
+    store = _local_store(tmp_path, offline_models)
+    scope = Scope(
+        level=ScopeLevel.GROUP,
+        principal="alice",
+        agent_client_id="agent-a",
+        session_id="run-1",
+    )
+    store.add(scope, "group deployment fact", infer=False)
+
+    hits = store.recall(Scope(level=ScopeLevel.GROUP), "deployment", top_k=10)
+
+    assert [hit["memory"] for hit in hits] == ["group deployment fact"]
 
 
 @pytest.mark.pgvector
@@ -124,3 +192,152 @@ def test_extraction_system_prompt_threads_into_mem0_config(tmp_path, offline_mod
     captured.clear()
     LongTermStore(storage, offline_models["summarization"], offline_models["embedding"])
     assert "custom_fact_extraction_prompt" not in captured["config"]
+
+
+def test_add_uses_compound_attribution_and_collection_group(tmp_path, offline_models, monkeypatch):
+    captured = {}
+
+    class _StubMemory:
+        @classmethod
+        def from_config(cls, config):
+            return cls()
+
+        def add(self, messages, **kwargs):
+            captured.update(kwargs)
+            return {"results": []}
+
+    monkeypatch.setattr("kaos_memory.stores.Memory", _StubMemory)
+    storage = StorageConfig(
+        type="local",
+        local=LocalStorage(path=str(tmp_path), collection_name="store-team"),
+    )
+    store = LongTermStore(storage, offline_models["summarization"], offline_models["embedding"])
+    scope = Scope(
+        level=ScopeLevel.USER,
+        principal="alice",
+        agent_client_id="agent-a",
+        session_id="run-1",
+    )
+
+    store.add(scope, "remember this", infer=False)
+
+    assert captured == {
+        "infer": False,
+        "user_id": "alice",
+        "agent_id": "agent-a",
+        "metadata": {"kaos_run": "run-1", "kaos_group": "store-team"},
+    }
+
+
+def test_concurrent_cross_session_adds_share_dedup_candidates(
+    tmp_path, offline_models, monkeypatch
+):
+    class _RacingMemory:
+        def __init__(self):
+            self.calls = []
+            self.records = []
+            self.first_entered = threading.Event()
+            self.second_entered = threading.Event()
+
+        @classmethod
+        def from_config(cls, config):
+            return cls()
+
+        def add(self, messages, **kwargs):
+            existing = bool(self.records)
+            self.calls.append(kwargs)
+            if len(self.calls) == 1:
+                self.first_entered.set()
+                self.second_entered.wait(timeout=0.1)
+            else:
+                self.second_entered.set()
+            time.sleep(0.01)
+            if not existing:
+                self.records.append("same durable preference")
+            return {"results": list(self.records)}
+
+    monkeypatch.setattr("kaos_memory.stores.Memory", _RacingMemory)
+    storage = StorageConfig(
+        type="local",
+        local=LocalStorage(path=str(tmp_path), collection_name="store-team"),
+    )
+    store = LongTermStore(storage, offline_models["summarization"], offline_models["embedding"])
+    first = Scope(
+        level=ScopeLevel.AGENT,
+        principal="alice",
+        agent_client_id="agent-a",
+        session_id="run-1",
+    )
+    second = first.model_copy(update={"session_id": "run-2"})
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        list(executor.map(lambda scope: store.add(scope, "same fact"), (first, second)))
+
+    assert store._memory.records == ["same durable preference"]
+    assert [call["metadata"]["kaos_run"] for call in store._memory.calls] == ["run-1", "run-2"]
+    assert all(call["user_id"] == "alice" for call in store._memory.calls)
+    assert all(call["agent_id"] == "agent-a" for call in store._memory.calls)
+    assert all("run_id" not in call for call in store._memory.calls)
+
+
+def test_filtered_delete_prefers_native_mem0_support(tmp_path, offline_models, monkeypatch):
+    captured = {}
+
+    class _StubMemory:
+        @classmethod
+        def from_config(cls, config):
+            return cls()
+
+        def delete_all(self, **kwargs):
+            captured.update(kwargs)
+
+    monkeypatch.setattr("kaos_memory.stores.Memory", _StubMemory)
+    storage = StorageConfig(
+        type="local",
+        local=LocalStorage(path=str(tmp_path), collection_name="store-team"),
+    )
+    store = LongTermStore(storage, offline_models["summarization"], offline_models["embedding"])
+
+    store.delete_scope(Scope(level=ScopeLevel.SESSION, session_id="run-1"))
+
+    assert captured == {"filters": {"user_id": "*", "kaos_run": "run-1"}}
+
+
+def test_filtered_delete_falls_back_to_get_all_and_ids(tmp_path, offline_models, monkeypatch):
+    calls = []
+
+    class _StubMemory:
+        def __init__(self):
+            self.ids = ["m1", "m2"]
+
+        @classmethod
+        def from_config(cls, config):
+            return cls()
+
+        def delete_all(self, **kwargs):
+            raise TypeError("filters are unsupported")
+
+        def get_all(self, **kwargs):
+            calls.append(("get_all", kwargs))
+            return {"results": [{"id": memory_id} for memory_id in self.ids]}
+
+        def delete(self, memory_id):
+            calls.append(("delete", memory_id))
+            self.ids.remove(memory_id)
+
+    monkeypatch.setattr("kaos_memory.stores.Memory", _StubMemory)
+    storage = StorageConfig(
+        type="local",
+        local=LocalStorage(path=str(tmp_path), collection_name="store-team"),
+    )
+    store = LongTermStore(storage, offline_models["summarization"], offline_models["embedding"])
+
+    store.delete_scope(Scope(level=ScopeLevel.GROUP))
+
+    filters = {"user_id": "*", "kaos_group": "store-team"}
+    assert calls == [
+        ("get_all", {"filters": filters, "top_k": 1000}),
+        ("delete", "m1"),
+        ("delete", "m2"),
+        ("get_all", {"filters": filters, "top_k": 1000}),
+    ]

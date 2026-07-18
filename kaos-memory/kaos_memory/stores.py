@@ -3,8 +3,8 @@
 This module is the whole storage layer, grouped by layer rather than split into
 many single-responsibility files (KEEP IT SIMPLE):
 
-- ``Scope`` / ``ScopeLevel`` / ``GROUP_OWNER`` — the identity every operation is
-  keyed on, plus its translation to Mem0 owner identifiers.
+- ``Scope`` / ``ScopeLevel`` — the identity every operation is keyed on, plus its
+  translation to Mem0 owner identifiers.
 - ``count_tokens`` / ``scope_key`` / ``Summarizer`` — small helpers the short-term
   store needs.
 - ``ModelClient`` — an outbound OpenAI-compatible client the short-term store calls
@@ -37,12 +37,7 @@ from kaos_memory.config import (
     ShortTermTierConfig,
     StorageConfig,
 )
-from kaos_memory.contract import (
-    GROUP_OWNER,
-    Scope,
-    ScopeLevel,
-    scope_key,
-)
+from kaos_memory.contract import Scope, ScopeLevel, scope_key, scope_owner_key
 
 # --------------------------------------------------------------------------- #
 # Token counting and short-term helpers                                        #
@@ -157,6 +152,14 @@ def _summary_table_ddl(kind: str) -> str:
     )
 
 
+def _attribution_table_ddl() -> str:
+    """DDL for owners used by scoped conversational-memory erasure."""
+    return (
+        "CREATE TABLE IF NOT EXISTS conversational_memory_attribution ("
+        "scope_key TEXT, owner_key TEXT, PRIMARY KEY (scope_key, owner_key))"
+    )
+
+
 class _Backend:
     """Thin DB abstraction over SQLite and Postgres with a single schema.
 
@@ -184,6 +187,7 @@ class _Backend:
     def _ensure_schema(self, serial: str) -> None:
         self.execute(_window_table_ddl(self.kind, serial))
         self.execute(_summary_table_ddl(self.kind))
+        self.execute(_attribution_table_ddl())
         self.commit()
 
     @contextmanager
@@ -246,6 +250,7 @@ class ShortTermStore:
         config: Optional[ShortTermTierConfig] = None,
         summarizer: Optional[Summarizer] = None,
         scheduler: Optional[Scheduler] = None,
+        group: Optional[str] = None,
     ) -> None:
         """Args:
         storage_type: ``local`` (SQLite) or ``external`` (Postgres).
@@ -254,10 +259,12 @@ class ShortTermStore:
         summarizer: folds overflow into a rolling summary; required when
             ``config.rolling_summary`` is True.
         scheduler: runs the fold off the response path; if absent, folds inline.
+        group: configured store group used as the conversational tenant boundary.
         """
         self.cfg = config or ShortTermTierConfig()
         self.summarizer = summarizer
         self._scheduler = scheduler
+        self.group = group
         self._lock = threading.Lock()
         self.db = _Backend(storage_type, target)
 
@@ -274,9 +281,21 @@ class ShortTermStore:
         """
         if not turns:
             return []
-        key = scope_key(scope)
+        key = scope_key(scope, self.group)
         now = time.time()
         with self._lock:
+            owner_keys = []
+            if scope.principal is not None:
+                owner_keys.append(f"user_id:{scope.principal}")
+            if scope.agent_client_id is not None:
+                owner_keys.append(f"agent_id:{scope.agent_client_id}")
+            if self.group:
+                owner_keys.append(f"kaos_group:{self.group}")
+            self.db.executemany(
+                "INSERT INTO conversational_memory_attribution (scope_key, owner_key) "
+                "VALUES (?, ?) ON CONFLICT (scope_key, owner_key) DO NOTHING",
+                [(key, owner_key) for owner_key in owner_keys],
+            )
             self.db.executemany(
                 "INSERT INTO short_term_memory_window "
                 "(scope_key, role, content, created_at, pending_summary) "
@@ -292,7 +311,7 @@ class ShortTermStore:
         self, scope: Scope, token_budget: Optional[int] = None
     ) -> List[Tuple[str, str]]:
         """Return the active verbatim window as ordered (role, content), within the budget."""
-        key = scope_key(scope)
+        key = scope_key(scope, self.group)
         budget = token_budget if token_budget is not None else self.cfg.token_budget
         with self._lock:
             active = self._load_active_window_rows(key)
@@ -306,19 +325,44 @@ class ShortTermStore:
     def summary(self, scope: Scope) -> str:
         """Return the current medium-term summary text for the scope (empty if none)."""
         with self._lock:
-            return self._load_summary(scope_key(scope))
+            return self._load_summary(scope_key(scope, self.group))
 
     def short_term_context(self, scope: Scope) -> Tuple[str, List[Tuple[str, str]]]:
         """Return (medium_term_summary, active_window) — the full short-term context for a run."""
         return self.summary(scope), self.active_window(scope)
 
-    def clear(self, scope: Scope) -> None:
-        """Delete all turns and the summary for the scope."""
-        key = scope_key(scope)
+    def delete(self, scope: Scope) -> None:
+        """Delete conversational memory carrying the requested owner key."""
+        if scope.level is ScopeLevel.SESSION:
+            owner_key = f"run:{scope.session_id}"
+            keys = {scope_key(scope, self.group)}
+        else:
+            owner_key = scope_owner_key(scope, self.group)
+            keys = set()
         with self._lock:
-            self.db.execute("DELETE FROM short_term_memory_window WHERE scope_key = ?", (key,))
-            self.db.execute("DELETE FROM medium_term_memory_summaries WHERE scope_key = ?", (key,))
+            rows = self.db.execute(
+                "SELECT scope_key FROM conversational_memory_attribution WHERE owner_key = ?",
+                (owner_key,),
+            ).fetchall()
+            keys.update(key for (key,) in rows)
+            # Also find composite keys written by earlier versions so scoped erasure
+            # continues to clean up pre-change conversational rows.
+            for table in ("short_term_memory_window", "medium_term_memory_summaries"):
+                rows = self.db.execute(f"SELECT DISTINCT scope_key FROM {table}").fetchall()
+                keys.update(key for (key,) in rows if owner_key in key.split("|"))
+            for key in keys:
+                self.db.execute("DELETE FROM short_term_memory_window WHERE scope_key = ?", (key,))
+                self.db.execute(
+                    "DELETE FROM medium_term_memory_summaries WHERE scope_key = ?", (key,)
+                )
+                self.db.execute(
+                    "DELETE FROM conversational_memory_attribution WHERE scope_key = ?", (key,)
+                )
             self.db.commit()
+
+    def clear(self, scope: Scope) -> None:
+        """Backward-compatible alias for :meth:`delete`."""
+        self.delete(scope)
 
     def fold_pending_into_summary(self, scope: Scope) -> None:
         """Fold all pending (marked) turns for the scope into a new digest version.
@@ -332,7 +376,7 @@ class ShortTermStore:
         """
         if self.summarizer is None:
             raise ValueError("rolling_summary is enabled but no summarizer was provided")
-        key = scope_key(scope)
+        key = scope_key(scope, self.group)
         with self._lock, self.db.scope_lock(key):
             pending = self._load_pending_summary_rows(key)
             if not pending:
@@ -549,6 +593,13 @@ class LongTermStore:
         if system_prompt:
             config["custom_fact_extraction_prompt"] = system_prompt
         self._memory = Memory.from_config(config)
+        # Mem0's dedup candidate search and insert are separate operations. Keep
+        # them atomic within a service replica so overlapping session folds see
+        # records that just finished consolidating.
+        self._consolidation_lock = threading.Lock()
+        # A MemoryStore is the group boundary. Its configured vector collection
+        # is the service's existing, always-present binding identity.
+        self.group = block.collection_name
 
     @staticmethod
     def _results(raw: Any) -> List[Dict[str, Any]]:
@@ -557,12 +608,13 @@ class LongTermStore:
 
     def add(self, scope: Scope, messages: Any, infer: bool = True) -> List[Dict[str, Any]]:
         """Store ``messages`` under ``scope``. With ``infer`` the engine extracts facts."""
-        raw = self._memory.add(messages, infer=infer, **scope.owner_kwargs())
+        with self._consolidation_lock:
+            raw = self._memory.add(messages, infer=infer, **scope.write_kwargs(self.group))
         return self._results(raw)
 
     def recall(self, scope: Scope, query: str, top_k: int = 10) -> List[Dict[str, Any]]:
         """Return memories relevant to ``query`` visible at ``scope`` (pre-filtered by owner)."""
-        raw = self._memory.search(query, filters=scope.search_filters(), top_k=top_k)
+        raw = self._memory.search(query, filters=scope.search_filters(self.group), top_k=top_k)
         return self._results(raw)
 
     def delete(self, memory_id: str) -> None:
@@ -571,7 +623,25 @@ class LongTermStore:
 
     def delete_scope(self, scope: Scope) -> None:
         """Erase every memory owned by ``scope`` (the scope-targeted erasure primitive)."""
-        self._memory.delete_all(**scope.owner_kwargs())
+        if scope.level in (ScopeLevel.USER, ScopeLevel.AGENT):
+            self._memory.delete_all(**scope.owner_kwargs())
+            return
+
+        filters = scope.search_filters(self.group)
+        try:
+            self._memory.delete_all(filters=filters)
+            return
+        except (TypeError, NotImplementedError):
+            # Mem0 2.0.10 has no filtered delete_all surface. Keep the fallback
+            # on its public APIs so a future engine upgrade remains testable.
+            pass
+
+        while True:
+            memories = self._results(self._memory.get_all(filters=filters, top_k=1000))
+            if not memories:
+                return
+            for memory in memories:
+                self._memory.delete(memory["id"])
 
     def ping(self) -> None:
         """Probe vector-store reachability without embedding (no model call).

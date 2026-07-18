@@ -19,7 +19,7 @@ jupyter:
 
 This example shows how a KAOS **agent** uses a `MemoryStore`. When an agent is bound to a store, the runtime does two things automatically around every request: it **recalls** relevant memory and injects it into the model context *before* the run, and it **persists** the conversation *after* the run. On top of that automatic baseline, `memory.tools` optionally gives the model explicit `save_memory` / `search_memory` tools.
 
-The agent here uses **mock model responses**, so the demonstration is deterministic and needs no live LLM. What we actually verify is the integration: after the agent handles a message, we query the **memory service API** directly and confirm the conversation was written into the central store, then show a second, separate session reading the same memory back.
+The agent here uses **mock model responses**, so the demonstration is deterministic and needs no live LLM. What we actually verify is the integration: after the agent handles a message, we query the **memory service API** directly and confirm the conversation was written into that session's window, then show that a second session has its own window.
 
 ## Understanding the Flow
 
@@ -28,11 +28,11 @@ graph LR
     U1[Session 1: user message] --> A[Agent]
     A -->|automatic flush| M[(MemoryStore)]
     U2[Session 2: new session] --> A
-    M -->|automatic recall| A
-    A --> R[Earlier facts recalled ✓]
+    A -->|separate window| M
+    M --> R[Raw turns stay isolated ✓]
 ```
 
-Every request an agent handles flows through the same memory baseline — recall before, persist after — so memory written in one session is available to the next.
+Every request an agent handles flows through the same memory baseline — recall before, persist after. Verbatim conversational windows are session-local; extracted long-term facts can be recalled across sessions according to the configured scope.
 
 ## Prerequisites
 
@@ -59,7 +59,7 @@ We deploy three resources: a `ModelAPI` (never actually called — the agent use
 The important part is the agent's `config.memory` block:
 
 - `memoryStore` binds the agent to the store.
-- `scope: group` keeps a single memory shared across every agent and session bound to this store (see [scopes](#scopes) below).
+- `scope: group` shares extracted long-term facts across agents and sessions bound to this store while keeping each session's verbatim turns separate (see [scopes](#scopes) below).
 - `tools: all` **enables the explicit memory tools** (`save_memory` and `search_memory`) on top of the automatic recall/persist baseline.
 
 `DEBUG_MOCK_RESPONSES` makes the agent return a canned reply instead of calling the model, so the run is deterministic.
@@ -152,8 +152,17 @@ kubectl wait --for=condition=available deployment/agent-memory-agent -n "$NAMESP
 Send the agent a fact to remember. This is an ordinary chat request; the agent handles it and, because it is bound to the store, **automatically persists the conversation** afterwards:
 
 ```bash
-kaos agent invoke memory-agent -n "$NAMESPACE" \
-  -m "My favourite deployment port is 8080"
+mkdir -p ./tmp
+AGENT_PORT=$(kubectl get svc/agent-memory-agent -n "$NAMESPACE" -o jsonpath='{.spec.ports[0].port}')
+kubectl port-forward -n "$NAMESPACE" svc/agent-memory-agent "19001:$AGENT_PORT" \
+  > ./tmp/memory-agent-port-forward.log 2>&1 &
+AGENT_PF=$!
+sleep 4
+curl --fail --retry 5 --retry-connrefused -s http://localhost:19001/v1/chat/completions \
+  -H 'content-type: application/json' \
+  -H 'x-session-id: memory-session-1' \
+  -d '{"messages": [{"role": "user", "content": "My favourite deployment port is 8080"}]}'
+kill "$AGENT_PF" 2>/dev/null || true
 ```
 
 ## Step 4: Verify the Agent Wrote to the Store
@@ -162,12 +171,12 @@ Now we confirm the integration by asking the **memory service** directly. The ag
 
 ```bash
 kubectl port-forward -n "$NAMESPACE" svc/memorystore-shared-memory 18080:8080 \
-  >/dev/null 2>&1 &
+  > ./tmp/memory-store-port-forward.log 2>&1 &
 PF=$!
 sleep 4
-curl -s http://localhost:18080/v1/recall \
+curl --fail --retry 5 --retry-connrefused -s http://localhost:18080/v1/recall \
   -H 'content-type: application/json' \
-  -d '{"scope": {"level": "group"}, "query": "deployment port", "include_short_term": true}' \
+  -d '{"scope": {"level": "group", "session_id": "memory-session-1"}, "query": "deployment port", "include_short_term": true}' \
   > recall-session1.json
 kill "$PF" 2>/dev/null || true
 cat recall-session1.json
@@ -184,25 +193,18 @@ assert ("user", "My favourite deployment port is 8080") in recent
 print("SUCCESS: the agent persisted the conversation to the MemoryStore")
 ```
 
-## Step 5: Session 2 — A New Session Recalls Earlier Memory
+## Step 5: Session 2 — A Separate Conversational Window
 
-`kaos agent invoke` opens a fresh session each time. On this second, separate request the agent's automatic recall pulls the earlier turns from the shared store and injects them into the model context before it answers:
-
-```bash
-kaos agent invoke memory-agent -n "$NAMESPACE" \
-  -m "What deployment port did I choose earlier?"
-```
-
-The store now holds turns from **both** sessions — the agent read the shared memory on this run and wrote to it again. Recall once more to see the cross-session accumulation:
+Recall a different session directly. Its verbatim conversational window starts empty, even though both sessions use the same group scope:
 
 ```bash
 kubectl port-forward -n "$NAMESPACE" svc/memorystore-shared-memory 18080:8080 \
-  >/dev/null 2>&1 &
+  > ./tmp/memory-store-port-forward.log 2>&1 &
 PF=$!
 sleep 4
-curl -s http://localhost:18080/v1/recall \
+curl --fail --retry 5 --retry-connrefused -s http://localhost:18080/v1/recall \
   -H 'content-type: application/json' \
-  -d '{"scope": {"level": "group"}, "query": "deployment port", "include_short_term": true}' \
+  -d '{"scope": {"level": "group", "session_id": "memory-session-2"}, "query": "deployment port", "include_short_term": true}' \
   > recall-session2.json
 kill "$PF" 2>/dev/null || true
 ```
@@ -210,11 +212,10 @@ kill "$PF" 2>/dev/null || true
 ```python
 recall = json.load(open("recall-session2.json"))
 recent = [tuple(pair) for pair in recall["short_term"]["recent"]]
-print("Cross-session memory:", recent)
+print("Session 2 window:", recent)
 
-assert ("user", "My favourite deployment port is 8080") in recent
-assert ("user", "What deployment port did I choose earlier?") in recent
-print("SUCCESS: both sessions share one cross-session memory the agent reads and writes")
+assert recent == []
+print("SUCCESS: each session keeps an independent verbatim window")
 ```
 
 ## Enabling the Tools
@@ -235,7 +236,7 @@ The tools never take a scope from the model — the scope is derived server-side
 Memory is partitioned by `scope`, set on the agent's `config.memory` block:
 
 - `session` — one conversation only.
-- `group` — shared by every agent and session on the store (used here).
+- `group` — extracted facts are shared by every agent and session on the store (used here); raw turns remain session-local.
 - `user` — all sessions for an authenticated principal.
 - `agent` — only this specific agent.
 
@@ -268,7 +269,7 @@ With a real embedder, a `save_memory` tool call (or automatic extraction) distil
 ## How It Works
 
 - **Automatic recall + persist** — bound agents recall relevant memory before every run and persist the conversation after, with no code changes.
-- **Short-term window** — recent turns are stored verbatim per scope for conversational continuity; no model is needed.
+- **Short-term window** — recent turns are stored verbatim per session for conversational continuity; no model is needed.
 - **Long-term memory** — the embedding model makes distilled facts semantically searchable; `tools: all` lets the model save and search them explicitly.
 - **Scope** — memory is isolated by scope, so sessions, users, and agents only see what they are entitled to.
 - **Storage** — `local` mode keeps everything in one pod (Chroma + SQLite on a PVC); `external` mode uses pgvector for production and horizontal scaling.

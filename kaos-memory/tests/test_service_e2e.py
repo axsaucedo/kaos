@@ -27,7 +27,12 @@ from tests._fakes import DeterministicEmbedder
 
 OFFLINE = ModelConfig(base_url="http://127.0.0.1:0/v1", model="offline", api_key="t")
 
-USER_SCOPE = {"level": "user", "principal": "dave"}
+USER_SCOPE = {
+    "level": "user",
+    "principal": "dave",
+    "agent_client_id": "agent-a",
+    "session_id": "session-1",
+}
 
 
 @pytest.fixture(scope="module")
@@ -56,6 +61,7 @@ def _service(storage: StorageConfig, short_term_target: str) -> MemoryService:
         short_term_target,
         ShortTermTierConfig(hard_event_cap=1),
         lambda p, f: p,
+        group=storage.resolved().collection_name,
     )
     return MemoryService(longterm=longterm, short_term=short_term, scheduler=lambda thunk: thunk())
 

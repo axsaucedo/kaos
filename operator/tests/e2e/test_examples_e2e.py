@@ -127,7 +127,7 @@ class TestExamplesViaJupytext:
         """Execute the agent memory example.
 
         Tests: a memory-enabled Agent bound to a local MemoryStore, automatic
-        persist-after-run and recall-before-run, and cross-session accumulation
+        persist-after-run and recall-before-run, and per-session window isolation
         verified by querying the memory service API directly.
         """
         example_file = DOCS_EXAMPLES_PATH / "memory.md"

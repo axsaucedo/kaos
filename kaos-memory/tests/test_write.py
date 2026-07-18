@@ -9,7 +9,7 @@ from kaos_memory.stores import Scope, ScopeLevel
 from kaos_memory.app import MemoryService, create_app
 from kaos_memory.stores import ShortTermStore
 
-USER_SCOPE = {"level": "user", "principal": "bob"}
+USER_SCOPE = {"level": "user", "principal": "bob", "session_id": "session-1"}
 
 
 class _RecordingLongTerm:
@@ -66,7 +66,9 @@ def test_write_buffers_without_eviction_then_extracts_the_evicted_batch(tmp_path
     assert body["accepted"] is True and body["scheduled"] is True
 
     # The newest turn is present synchronously; extraction was scheduled but not executed.
-    recent = short_term.active_window(Scope(level=ScopeLevel.USER, principal="bob"))
+    recent = short_term.active_window(
+        Scope(level=ScopeLevel.USER, principal="bob", session_id="session-1")
+    )
     assert recent == [("user", "scale to three")]
     assert len(captured) == 1
     assert longterm.writes == []
@@ -103,7 +105,9 @@ def test_batch_write_appends_all_turns_and_extracts_combined_eviction(tmp_path):
     assert resp.json()["scheduled"] is True
 
     # The newest turn remains in the window; the older turns were evicted.
-    recent = short_term.active_window(Scope(level=ScopeLevel.USER, principal="bob"))
+    recent = short_term.active_window(
+        Scope(level=ScopeLevel.USER, principal="bob", session_id="session-1")
+    )
     assert recent == [("user", "three")]
 
     # A single extraction was scheduled over the combined evicted batch, in order.
@@ -147,6 +151,6 @@ def test_soft_swallows_schedule_failure(tmp_path):
     assert body["scheduled"] is False
     assert body["degraded"] is True
     # The durable short-term append still happened (newest turn retained after eviction).
-    assert short_term.active_window(Scope(level=ScopeLevel.USER, principal="bob")) == [
-        ("user", "y")
-    ]
+    assert short_term.active_window(
+        Scope(level=ScopeLevel.USER, principal="bob", session_id="session-1")
+    ) == [("user", "y")]
