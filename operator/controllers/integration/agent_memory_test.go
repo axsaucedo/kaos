@@ -401,5 +401,33 @@ var _ = Describe("Agent memory binding", func() {
 
 		By("rejecting tools without a memoryStore")
 		Expect(k8sClient.Create(ctx, makeAgent(&kaosv1alpha1.MemoryConfig{Tools: "all"}))).NotTo(Succeed())
+
+		By("rejecting a defaultReadScope outside readScopes")
+		Expect(k8sClient.Create(ctx, makeAgent(&kaosv1alpha1.MemoryConfig{
+			MemoryStore:      "store",
+			DefaultReadScope: "user",
+			ReadScopes:       []string{"agent"},
+		}))).NotTo(Succeed())
+
+		By("rejecting non-session read policy without a memoryStore")
+		Expect(k8sClient.Create(ctx, makeAgent(&kaosv1alpha1.MemoryConfig{DefaultReadScope: "agent"}))).NotTo(Succeed())
+		Expect(k8sClient.Create(ctx, makeAgent(&kaosv1alpha1.MemoryConfig{ReadScopes: []string{"session", "user"}, Tools: "read"}))).NotTo(Succeed())
+
+		By("rejecting multiple readScopes without a read tool")
+		Expect(k8sClient.Create(ctx, makeAgent(&kaosv1alpha1.MemoryConfig{
+			MemoryStore: "store",
+			ReadScopes:  []string{"session", "agent"},
+			Tools:       "write",
+		}))).NotTo(Succeed())
+
+		By("accepting an entitled multi-scope read policy")
+		validReadPolicy := makeAgent(&kaosv1alpha1.MemoryConfig{
+			MemoryStore:      "store",
+			DefaultReadScope: "session",
+			ReadScopes:       []string{"session", "agent"},
+			Tools:            "read",
+		})
+		Expect(k8sClient.Create(ctx, validReadPolicy)).To(Succeed())
+		defer func() { k8sClient.Delete(ctx, validReadPolicy) }()
 	})
 })
