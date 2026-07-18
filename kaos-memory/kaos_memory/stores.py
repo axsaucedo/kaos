@@ -311,17 +311,23 @@ class ShortTermStore:
         return self.summary(scope), self.active_window(scope)
 
     def delete(self, scope: Scope) -> None:
-        """Delete conversational memory for a session or every session under an owner."""
+        """Delete conversational memory carrying the requested owner key."""
         if scope.level is ScopeLevel.SESSION:
-            where = "scope_key = ?"
-            params: Tuple[Any, ...] = (scope_key(scope, self.group),)
+            if scope.session_id is None:
+                raise ValueError("session scope requires session_id")
+            owner_key = f"run:{scope.session_id}"
         else:
-            prefix = f"{scope_owner_key(scope, self.group)}|"
-            where = "substr(scope_key, 1, ?) = ?"
-            params = (len(prefix), prefix)
+            owner_key = scope_owner_key(scope, self.group)
         with self._lock:
-            self.db.execute(f"DELETE FROM short_term_memory_window WHERE {where}", params)
-            self.db.execute(f"DELETE FROM medium_term_memory_summaries WHERE {where}", params)
+            keys = set()
+            for table in ("short_term_memory_window", "medium_term_memory_summaries"):
+                rows = self.db.execute(f"SELECT DISTINCT scope_key FROM {table}").fetchall()
+                keys.update(key for (key,) in rows if owner_key in key.split("|"))
+            for key in keys:
+                self.db.execute("DELETE FROM short_term_memory_window WHERE scope_key = ?", (key,))
+                self.db.execute(
+                    "DELETE FROM medium_term_memory_summaries WHERE scope_key = ?", (key,)
+                )
             self.db.commit()
 
     def clear(self, scope: Scope) -> None:

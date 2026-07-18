@@ -94,3 +94,60 @@ def test_forget_soft_degrades_on_longterm_failure(tmp_path):
     assert resp.json()["degraded"] is True
     # Short-term tier was still cleared despite the long-term failure.
     assert short_term.active_window(scope) == []
+
+
+def test_user_forget_clears_all_attributed_tiers_and_preserves_other_users(tmp_path):
+    class _AttributedLongTerm(_RecordingLongTerm):
+        def __init__(self):
+            super().__init__()
+            self.facts = [
+                {"principal": "alice", "agent": "agent-a", "memory": "alice one"},
+                {"principal": "alice", "agent": "agent-b", "memory": "alice two"},
+                {"principal": "bob", "agent": "agent-a", "memory": "bob control"},
+            ]
+
+        def delete_scope(self, scope):
+            super().delete_scope(scope)
+            self.facts = [fact for fact in self.facts if fact["principal"] != scope.principal]
+
+    short_term = ShortTermStore(
+        "local",
+        str(tmp_path / "w.db"),
+        ShortTermTierConfig(token_budget=4, rolling_summary=True),
+        lambda prior, turns: (prior + " " + " ".join(c for _, c in turns)).strip(),
+        group="team-a",
+    )
+    alice_first = Scope(
+        level=ScopeLevel.AGENT,
+        principal="alice",
+        agent_client_id="agent-a",
+        session_id="alice-1",
+    )
+    alice_second = alice_first.model_copy(
+        update={"agent_client_id": "agent-b", "session_id": "alice-2"}
+    )
+    bob = alice_first.model_copy(update={"principal": "bob", "session_id": "bob-1"})
+    for scope, marker in (
+        (alice_first, "alice first"),
+        (alice_second, "alice second"),
+        (bob, "bob control"),
+    ):
+        short_term.add(
+            scope,
+            [("user", f"remember {marker} across the rolling summary"), ("assistant", marker)],
+        )
+        assert short_term.summary(scope)
+        assert short_term.active_window(scope)
+
+    longterm = _AttributedLongTerm()
+    response = _client(longterm, short_term).post(
+        "/v1/forget", json={"scope": {"level": "user", "principal": "alice"}}
+    )
+
+    assert response.status_code == 200
+    for scope in (alice_first, alice_second):
+        assert short_term.summary(scope) == ""
+        assert short_term.active_window(scope) == []
+    assert short_term.summary(bob)
+    assert short_term.active_window(bob) == [("assistant", "bob control")]
+    assert longterm.facts == [{"principal": "bob", "agent": "agent-a", "memory": "bob control"}]
