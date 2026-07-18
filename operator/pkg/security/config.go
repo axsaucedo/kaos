@@ -294,6 +294,14 @@ func (c Config) UserPlaneEnabled() bool {
 	return Configured(c.UserIssuer)
 }
 
+// Validate rejects security configurations that could bypass user authentication.
+func (c Config) Validate() error {
+	if c.UserPlaneEnabled() && !c.StrictGatewayAPI {
+		return fmt.Errorf("%s requires %s=true; strict mode provides %s and overrides %s", envUserIssuer, envStrictGatewayAPI, envGatewayRouting, envNetworkPolicyDisabled)
+	}
+	return nil
+}
+
 // SecurityEnabled reports whether gateway authorization enforcement is configured.
 func (c Config) SecurityEnabled() bool {
 	return c.IsOperational()

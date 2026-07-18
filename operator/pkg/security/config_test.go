@@ -1,6 +1,7 @@
 package security
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -89,6 +90,34 @@ func TestUserPlaneEnabled(t *testing.T) {
 	}
 	if (Config{UserIssuer: "  "}).UserPlaneEnabled() {
 		t.Fatal("expected whitespace-only user issuer to leave the user plane disabled")
+	}
+}
+
+func TestValidateUserAuthRequiresStrictGatewayAPI(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  Config
+		wantErr bool
+	}{
+		{name: "user auth disabled", config: Config{}},
+		{name: "strict gateway enabled", config: Config{UserIssuer: "https://users.example", StrictGatewayAPI: true}},
+		{name: "strict overrides network policy disable", config: Config{UserIssuer: "https://users.example", StrictGatewayAPI: true, NetworkPolicyDisabled: true}},
+		{name: "user auth without enforcement", config: Config{UserIssuer: "https://users.example"}, wantErr: true},
+		{name: "routing alone is insufficient", config: Config{UserIssuer: "https://users.example", GatewayRouting: true}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.config.Validate()
+			if tt.wantErr && err == nil {
+				t.Fatal("expected validation error")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("unexpected validation error: %v", err)
+			}
+			if tt.wantErr && !strings.Contains(err.Error(), "SECURITY_USER_AUTH_ISSUER requires SECURITY_STRICT_GATEWAY_API_ENABLED=true") {
+				t.Fatalf("unexpected validation error: %v", err)
+			}
+		})
 	}
 }
 
