@@ -7,6 +7,7 @@ and operate over the memory backend without taking scope from the model.
 
 import pytest
 from typing import Any, cast
+from pydantic_ai.messages import ModelRequest, UserPromptPart
 
 from pais.memory import MemoryScope, NullMemory, RecalledMemory, ScopeLevel
 from pais.memory_tools import (
@@ -20,6 +21,7 @@ from pais.memory_tools import (
     tools_expose_search,
 )
 from pais.serverutils import AgentDeps
+from tests.helpers import make_test_server
 
 
 class _RecordingMemory(NullMemory):
@@ -68,18 +70,18 @@ class TestMemoryToolsSelection:
         assert not tools_expose_search(None)
 
     def test_build_toolset_returns_none_when_no_tools(self):
-        assert build_memory_toolset(None, ScopeLevel.USER) is None
+        assert build_memory_toolset(None, ScopeLevel.USER, [ScopeLevel.USER]) is None
 
     def test_build_toolset_returns_toolset_when_tools_enabled(self):
-        ts = build_memory_toolset(MemoryTools.ALL, ScopeLevel.USER, "agent-1")
+        ts = build_memory_toolset(MemoryTools.ALL, ScopeLevel.USER, [ScopeLevel.USER], "agent-1")
         assert isinstance(ts, MemoryToolset)
 
     def test_build_toolset_read_registers_search_only(self):
-        ts = build_memory_toolset(MemoryTools.READ, ScopeLevel.USER, "agent-1")
+        ts = build_memory_toolset(MemoryTools.READ, ScopeLevel.USER, [ScopeLevel.USER], "agent-1")
         assert ts is not None and ts._expose_search and not ts._expose_save
 
     def test_build_toolset_write_registers_save_only(self):
-        ts = build_memory_toolset(MemoryTools.WRITE, ScopeLevel.USER, "agent-1")
+        ts = build_memory_toolset(MemoryTools.WRITE, ScopeLevel.USER, [ScopeLevel.USER], "agent-1")
         assert ts is not None and ts._expose_save and not ts._expose_search
 
 
@@ -122,7 +124,10 @@ class TestMemoryToolset:
         deps = AgentDeps(session_id="s1", memory=mem, security_context={"principal": "alice"})
         ts = MemoryToolset(ScopeLevel.USER)
         result = await ts.call_tool(
-            SEARCH_MEMORY_TOOL, {"query": "tea"}, _ctx(deps), cast(Any, None)
+            SEARCH_MEMORY_TOOL,
+            {"query": "tea", "level": "user"},
+            _ctx(deps),
+            cast(Any, None),
         )
         assert "alice likes tea" in result
         assert mem.recalls[0][1] == "tea"
@@ -136,7 +141,12 @@ class TestMemoryToolset:
             security_context={"principal": "a", "actor": "agent-a"},
         )
         ts = MemoryToolset(ScopeLevel.AGENT)
-        result = await ts.call_tool(SEARCH_MEMORY_TOOL, {"query": "x"}, _ctx(deps), cast(Any, None))
+        result = await ts.call_tool(
+            SEARCH_MEMORY_TOOL,
+            {"query": "x", "level": "agent"},
+            _ctx(deps),
+            cast(Any, None),
+        )
         assert "fact one" in result
 
     @pytest.mark.asyncio
@@ -148,7 +158,12 @@ class TestMemoryToolset:
             security_context={"principal": "a", "actor": "agent-a"},
         )
         ts = MemoryToolset(ScopeLevel.AGENT)
-        result = await ts.call_tool(SEARCH_MEMORY_TOOL, {"query": "x"}, _ctx(deps), cast(Any, None))
+        result = await ts.call_tool(
+            SEARCH_MEMORY_TOOL,
+            {"query": "x", "level": "agent"},
+            _ctx(deps),
+            cast(Any, None),
+        )
         assert "No relevant memories" in result
 
     @pytest.mark.asyncio
@@ -171,3 +186,29 @@ class TestMemoryToolset:
         scope = mem.writes[0][0]
         assert scope.level is ScopeLevel.AGENT
         assert scope.principal == "alice"
+
+
+@pytest.mark.asyncio
+async def test_baseline_recall_uses_read_scope_and_flush_uses_home_scope():
+    mem = _RecordingMemory()
+    server = make_test_server(memory=mem)
+    server.settings.memory_scope = "session"
+    server.settings.memory_default_read_scope = "group"
+
+    _prompt, _history, deps, _limits = await server._prepare_run("hello", "current-session")
+
+    recalled_scope, query = mem.recalls[0]
+    assert query == "hello"
+    assert recalled_scope.level is ScopeLevel.GROUP
+    assert recalled_scope.session_id == "current-session"
+    assert deps.memory_scope is not None
+    assert deps.memory_scope.level is ScopeLevel.SESSION
+    assert deps.memory_scope.session_id == "current-session"
+
+    await server._write_turns(
+        deps,
+        [ModelRequest(parts=[UserPromptPart(content="hello")])],
+    )
+    written_scope = mem.writes[0][0]
+    assert written_scope.level is ScopeLevel.SESSION
+    assert written_scope.session_id == "current-session"

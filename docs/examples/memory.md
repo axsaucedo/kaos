@@ -60,6 +60,7 @@ The important part is the agent's `config.memory` block:
 
 - `memoryStore` binds the agent to the store.
 - `scope: group` shares extracted long-term facts across agents and sessions bound to this store while keeping each session's verbatim turns separate (see [scopes](#scopes) below).
+- `defaultReadScope: group` keeps automatic recall at the shared level, while `readScopes` entitles explicit searches at either the shared group or this agent's durable level.
 - `tools: all` **enables the explicit memory tools** (`save_memory` and `search_memory`) on top of the automatic recall/persist baseline.
 
 `DEBUG_MOCK_RESPONSES` makes the agent return a canned reply instead of calling the model, so the run is deterministic.
@@ -121,6 +122,8 @@ spec:
       type: remote
       memoryStore: shared-memory
       scope: group
+      defaultReadScope: group
+      readScopes: [group, agent]
       tools: all
       failureMode: soft
   agentNetwork:
@@ -222,14 +225,14 @@ print("SUCCESS: each session keeps an independent verbatim window")
 
 The agent above sets `tools: all`. Memory always applies the **automatic baseline** (recall before a run, persist after) — that is what Steps 3–5 exercised. `tools` layers explicit, model-driven tools on top:
 
-| Setting | Tools exposed | The model can… |
-|---------|---------------|----------------|
-| _(unset)_ | none | rely purely on automatic recall/persist |
-| `read` | `search_memory` | look facts up on demand |
-| `write` | `save_memory` | save a durable fact on demand |
-| `all` | both | save and search on demand |
+| Setting | Tools exposed | Arguments | The model can… |
+|---------|---------------|-----------|----------------|
+| _(unset)_ | none | — | rely purely on automatic recall/persist |
+| `read` | `search_memory` | `query`, required entitled `level` | look facts up at `session`, `agent`, `user`, or `group` when configured |
+| `write` | `save_memory` | `content` | save a durable fact at the home scope |
+| `all` | both | as above | save and search on demand |
 
-The tools never take a scope from the model — the scope is derived server-side from the agent's configured level and identity, so a tool call can only ever touch memory the agent is entitled to. Genuine semantic use of `save_memory` (distilling and recalling facts in natural language) needs a real embedding model, shown next.
+`search_memory` accepts a level but never accepts owner values: the enum is generated from `readScopes`, revalidated by the handler, and combined with the server-derived principal, agent identity, and current session. `save_memory` remains fixed to the home `scope`. Genuine semantic use of `save_memory` (distilling and recalling facts in natural language) needs a real embedding model, shown next.
 
 ## Scopes
 

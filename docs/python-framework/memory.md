@@ -21,6 +21,10 @@ The memory system provides session management and event storage for agents. It t
 | `MEMORY_MAX_SESSIONS` | `1000` | Max sessions (LocalMemory) |
 | `MEMORY_MAX_SESSION_EVENTS` | `500` | Max events per session (LocalMemory) |
 | `MEMORY_STORE_ENDPOINT` | - | Central memory-service URL (set by the operator when a MemoryStore is bound; selects `RemoteMemory`) |
+| `MEMORY_SCOPE` | `session` | Home scope used for writes: `session`, `agent`, `user`, or `group` |
+| `MEMORY_DEFAULT_READ_SCOPE` | `MEMORY_SCOPE` | Single scope used by automatic recall |
+| `MEMORY_READ_SCOPES` | `MEMORY_DEFAULT_READ_SCOPE` | Comma-separated entitlement list offered by `search_memory` |
+| `MEMORY_TOOLS` | - | Additive explicit tools: `all`, `read`, or `write` |
 
 ### Via Agent CRD
 
@@ -31,7 +35,9 @@ spec:
       enabled: true
       type: remote            # "remote" (bound MemoryStore) or "local" (pod-local)
       memoryStore: shared-memory
-      scope: user             # agent | user | group | session
+      scope: user             # Home/write scope
+      defaultReadScope: user  # Automatic recall scope
+      readScopes: [user, agent] # search_memory entitlements
       tools: all              # all | read | write
       failureMode: soft       # soft | strict
 ```
@@ -47,6 +53,12 @@ A `RemoteMemory` agent layers three tiers behind one client:
 - **Long-term** — semantic, cross-session facts extracted into the bound [MemoryStore](../operator/memorystore-crd.md) and recalled by relevance.
 
 `LocalMemory` keeps only the pod-local short-term window.
+
+## Read-Scope Policy
+
+Automatic recall derives one server-owned scope at `memory_default_read_scope`; the post-run flush always writes at the home `memory_scope`. A broader read scope changes only the long-term filter: the short- and medium-term tiers still use the current `session_id`, so an agent never assembles a multi-session conversational window.
+
+When `memory_tools` enables reads, the runtime exposes one `search_memory(query, level)` tool. Its `level` JSON-schema enum contains only `memory_read_scopes`: `session` means this conversation, `agent` means this agent's durable experience, `user` means what is known about this user across agents, and `group` means shared group knowledge. The schema rejects other values before dispatch and the handler checks the entitlement again. Principal, agent owner, group owner, session ID, and serialized scopes are never model arguments; they are derived from run dependencies and operator-injected identity. `save_memory(content)` is unchanged and always uses the home scope.
 
 ## Memory-Enabled Gating
 

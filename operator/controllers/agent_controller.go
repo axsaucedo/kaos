@@ -243,6 +243,7 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	memoryDegraded := false
 	memoryDegradedMsg := ""
 	memoryStoreName := ""
+	var resolvedMemoryStore *kaosv1alpha1.MemoryStore
 	if agent.Spec.Config != nil && agent.Spec.Config.Memory != nil {
 		mem := agent.Spec.Config.Memory
 		effectiveType := mem.Type
@@ -266,12 +267,14 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 					return ctrl.Result{}, err
 				}
 			} else if !store.Status.Ready {
+				resolvedMemoryStore = store
 				// Store exists but is warming up. Withhold the endpoint so the
 				// runtime falls back to short-term rather than dialling a service
 				// that is not yet serving.
 				memoryDegraded = true
 				memoryDegradedMsg = fmt.Sprintf("MemoryStore %s is not ready", mem.MemoryStore)
 			} else {
+				resolvedMemoryStore = store
 				memoryEndpoint = store.Status.Endpoint
 			}
 		}
@@ -312,6 +315,11 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	if err := r.reconcileAgentServiceAccount(ctx, agent); err != nil {
 		return ctrl.Result{}, err
 	}
+	var memoryConfig *kaosv1alpha1.MemoryConfig
+	if agent.Spec.Config != nil {
+		memoryConfig = agent.Spec.Config.Memory
+	}
+	memoryScope := resolveMemoryScope(memoryConfig, resolvedMemoryStore)
 
 	// Create or update Deployment
 	deployment := &appsv1.Deployment{}
@@ -320,7 +328,7 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	if err != nil && apierrors.IsNotFound(err) {
 		// Create new Deployment
-		deployment, err = r.constructDeployment(agent, modelapi, mcpServers, peerAgents, memoryEndpoint, tokenExchangeConfig)
+		deployment, err = r.constructDeployment(agent, modelapi, mcpServers, peerAgents, memoryEndpoint, memoryScope, tokenExchangeConfig)
 		if err != nil {
 			log.Error(err, "failed to construct Deployment")
 			agent.Status.Phase = "Failed"
@@ -350,7 +358,7 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, err
 	} else {
 		// Deployment exists - check if spec has changed using hash annotation
-		desiredDeployment, err := r.constructDeployment(agent, modelapi, mcpServers, peerAgents, memoryEndpoint, tokenExchangeConfig)
+		desiredDeployment, err := r.constructDeployment(agent, modelapi, mcpServers, peerAgents, memoryEndpoint, memoryScope, tokenExchangeConfig)
 		if err != nil {
 			log.Error(err, "failed to construct Deployment for comparison")
 			return ctrl.Result{}, err
@@ -557,6 +565,16 @@ func (r *AgentReconciler) applyGatewayRouting(
 	}
 }
 
+func resolveMemoryScope(mem *kaosv1alpha1.MemoryConfig, store *kaosv1alpha1.MemoryStore) string {
+	if mem != nil && mem.Scope != "" {
+		return mem.Scope
+	}
+	if store != nil && store.Spec.DefaultScope != "" {
+		return store.Spec.DefaultScope
+	}
+	return "agent"
+}
+
 // agentDeploymentExists reports whether the agent's Deployment already exists.
 // It is used to gate only the agent's initial creation on memory availability:
 // a missing Deployment means "first creation" (gate when memory is unavailable),
@@ -576,7 +594,7 @@ func (r *AgentReconciler) agentDeploymentExists(ctx context.Context, agent *kaos
 }
 
 // constructDeployment creates a Deployment for the Agent
-func (r *AgentReconciler) constructDeployment(agent *kaosv1alpha1.Agent, modelapi *kaosv1alpha1.ModelAPI, mcpServers map[string]string, peerAgents map[string]string, memoryEndpoint, tokenExchangeConfig string) (*appsv1.Deployment, error) {
+func (r *AgentReconciler) constructDeployment(agent *kaosv1alpha1.Agent, modelapi *kaosv1alpha1.ModelAPI, mcpServers map[string]string, peerAgents map[string]string, memoryEndpoint, memoryScope, tokenExchangeConfig string) (*appsv1.Deployment, error) {
 	labels := map[string]string{
 		"app":   "agent",
 		"agent": agent.Name,
@@ -585,7 +603,7 @@ func (r *AgentReconciler) constructDeployment(agent *kaosv1alpha1.Agent, modelap
 	replicas := int32(1)
 
 	// Build environment variables
-	env := r.constructEnvVars(agent, modelapi, mcpServers, peerAgents, memoryEndpoint, tokenExchangeConfig)
+	env := r.constructEnvVars(agent, modelapi, mcpServers, peerAgents, memoryEndpoint, memoryScope, tokenExchangeConfig)
 
 	// Get agent image from environment (required - set via ConfigMap)
 	agentImage := os.Getenv("DEFAULT_AGENT_IMAGE")
@@ -694,7 +712,7 @@ func (r *AgentReconciler) constructDeployment(agent *kaosv1alpha1.Agent, modelap
 }
 
 // constructEnvVars builds environment variables for the agent
-func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *kaosv1alpha1.ModelAPI, mcpServers map[string]string, peerAgents map[string]string, memoryEndpoint, tokenExchangeConfig string) []corev1.EnvVar {
+func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *kaosv1alpha1.ModelAPI, mcpServers map[string]string, peerAgents map[string]string, memoryEndpoint, memoryScope, tokenExchangeConfig string) []corev1.EnvVar {
 	var env []corev1.EnvVar
 
 	// Agent identity and configuration
@@ -791,12 +809,24 @@ func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *
 			})
 		}
 
-		if mem.Scope != "" {
+		if memoryScope != "" {
 			env = append(env, corev1.EnvVar{
 				Name:  "MEMORY_SCOPE",
-				Value: mem.Scope,
+				Value: memoryScope,
 			})
 		}
+		defaultReadScope := mem.DefaultReadScope
+		if defaultReadScope == "" {
+			defaultReadScope = memoryScope
+		}
+		readScopes := mem.ReadScopes
+		if len(readScopes) == 0 {
+			readScopes = []string{defaultReadScope}
+		}
+		env = append(env,
+			corev1.EnvVar{Name: "MEMORY_DEFAULT_READ_SCOPE", Value: defaultReadScope},
+			corev1.EnvVar{Name: "MEMORY_READ_SCOPES", Value: strings.Join(readScopes, ",")},
+		)
 		if mem.Tools != "" {
 			env = append(env, corev1.EnvVar{
 				Name:  "MEMORY_TOOLS",
