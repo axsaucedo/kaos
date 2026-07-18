@@ -137,6 +137,23 @@ def test_user_recall_without_session_returns_long_term_and_empty_conversation(tm
     assert body["degraded"] is False
 
 
+def test_recall_rejects_incomplete_scope_before_fail_soft_recall(tmp_path):
+    response = _client(_FakeLongTerm(), _short_term(tmp_path)).post(
+        "/v1/recall",
+        json={
+            "scope": {
+                "level": "agent",
+                "principal": "alice",
+                "user_scoping_required": True,
+            },
+            "query": "anything",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"error": "incomplete agent scope"}
+
+
 def test_conversation_round_trips_across_recall_scopes_without_session_leakage(tmp_path):
     short_term = ShortTermStore(
         "local",

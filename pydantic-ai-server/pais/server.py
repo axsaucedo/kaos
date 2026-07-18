@@ -99,6 +99,11 @@ def configure_logging(level: str = "INFO", otel_correlation: bool = False) -> No
 logger = logging.getLogger(__name__)
 
 
+def _gateway_user_principal(headers: Dict[str, str]) -> Optional[str]:
+    """Resolve the subject projected by the gateway's verified user JWT provider."""
+    return headers.get("x-user-claim-sub")
+
+
 class AgentServer:
     """AgentServer exposing OpenAI-compatible chat completions API."""
 
@@ -128,7 +133,7 @@ class AgentServer:
         self._agent_identity = settings.agent_identity or settings.security_actor or ""
         if task_manager_type == "local":
             setup_fn = self._mock_state.reset if self._mock_state else None
-            local_actor = self.settings.security_actor or f"kaos://agent/{self.settings.agent_name}"
+            local_actor = self._agent_identity or f"kaos://agent/{self.settings.agent_name}"
             self.task_manager: TaskManager = LocalTaskManager(
                 self._run_agent,
                 setup_fn=setup_fn,
@@ -146,12 +151,17 @@ class AgentServer:
         # Two-identity propagation: extract inbound user context at the
         # server boundary and inject the user subject + this agent's actor on outbound
         # A2A/MCP/ModelAPI calls. The SDK is not the enforcement boundary; it propagates.
-        local_actor = self.settings.security_actor or f"kaos://agent/{self.settings.agent_name}"
+        local_actor = self._agent_identity or f"kaos://agent/{self.settings.agent_name}"
         kaos_identity.instrument_fastapi(
             self.app,
             actor=local_actor,
             actor_token=self.settings.security_actor_token or None,
             principal=self.settings.security_principal or None,
+            principal_resolver=(
+                _gateway_user_principal
+                if os.environ.get("MEMORY_USER_SCOPING", "").strip().lower() == "required"
+                else None
+            ),
         )
         # When no static actor token is configured, set up the managed actor-token
         # lifecycle: if broker credentials are mounted (AGENT_AUTH_CLIENT_ID/SECRET/

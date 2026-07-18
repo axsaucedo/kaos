@@ -48,12 +48,25 @@ Every operation carries a **scope** that selects long-term read visibility and e
 
 | `scope` | Long-term read filter | Isolation boundary |
 |---------|-----------------------|--------------------|
-| `agent` (default) | `agent_id = <agent identity>` | every fact contributed by this agent |
+| `agent` (default) | OIDC off: `agent_id = <agent identity>`; OIDC on: `agent_id = <agent identity>` AND `user_id = <principal>` | this agent's pool, partitioned per user when OIDC is enabled |
 | `user` | `user_id = <principal>` | every fact this user contributed through any agent or session |
 | `group` | `user_id = "*"` plus `kaos_group = <store group>` | every attributed fact on the same `MemoryStore` |
 | `session` | `user_id = "*"` plus `kaos_run = <session id>` | facts attributed to one conversation/run |
 
 The `user_id = "*"` entry is Mem0 2.0.10's required wildcard convention for filtering by custom metadata; KAOS pins and regression-tests that behavior. Group membership is metadata, never a synthetic agent identity: `agent_id` always contains the real contributing agent. The group value comes from the active vector collection binding (`KAOS_MEMORY_LOCAL_COLLECTION` or `KAOS_MEMORY_EXTERNAL_COLLECTION`, default `kaos_memory`). That signal is always present even when telemetry is disabled, and the `MemoryStore` itself is the physical group boundary, so the collection name only needs to be stable within that store.
+
+### OIDC-conditional agent scope
+
+Agent scope follows one static cluster mode; it does not change based on whether an individual request happens to carry a principal.
+
+| Cluster mode | `agent` owner | Missing principal |
+|--------------|---------------|-------------------|
+| OIDC user identity enabled (`SecurityEnabled()` plus a configured user issuer) | `{agent_id, user_id}` | fail closed before recall or write |
+| OIDC user identity disabled | `{agent_id}` | allowed; no user key participates in the agent read partition |
+
+The operator injects `MEMORY_USER_SCOPING=required` into memory-configured agent pods only in the first mode. The gateway verifies the user JWT and projects its `sub` claim into a reserved header; the runtime resolves that subject as the principal and propagates it over subsequent agent hops. `user` scope continues to require a principal, while `group` remains the deliberate cross-user publication surface.
+
+Autonomous execution uses the same rule without an exception. The loop's agent bearer self-subjects the run, so its owner is `{agent_id, agent-as-user}`. For a hybrid agent, this means autonomous findings are private to the loop and are not recalled into a human user's agent partition; making those findings human-visible is an explicit publication at `group` level.
 
 Design choices:
 
@@ -65,7 +78,7 @@ Design choices:
 - **Enforcement is fail-closed at the service.** Scope is derived **server-side** from the authenticated agent identity and request context — never trusted from model- or tool-supplied arguments. An operation that cannot resolve a usable owner key fails rather than querying an unscoped store. Because the vector providers pre-filter during the query, a tenant's relevant memories are never dropped by an unfiltered nearest-neighbour window.
 - **Erasure fans out synchronously across tiers.** User and agent long-term erasure use Mem0's native entity deletion. Session and group erasure use wildcard-qualified custom filters, falling back to filtered id listing plus per-id deletion where the pinned Mem0 version lacks filtered deletion. Pre-existing alpha records without compound attribution cannot be reached by a newly available user-level erasure; there is no data migration.
 
-Cross-agent (A2A) delegation scope propagation and admin cross-user erasure depend on per-request principal propagation from the identity track and are deferred.
+Gateway-derived principals propagate automatically over cross-agent (A2A) delegation. Administrative cross-user erasure remains deferred.
 
 ## Deployment topology
 

@@ -57,6 +57,7 @@ class Scope(BaseModel):
     principal: Optional[str] = None
     agent_client_id: Optional[str] = None
     session_id: Optional[str] = None
+    user_scoping_required: bool = False
 
     @model_validator(mode="after")
     def _normalise(self) -> "Scope":
@@ -70,7 +71,9 @@ class Scope(BaseModel):
     def is_complete(self) -> bool:
         """Whether the field required by ``level`` is present (a usable owner key exists)."""
         if self.level is ScopeLevel.AGENT:
-            return self.agent_client_id is not None
+            return self.agent_client_id is not None and (
+                not self.user_scoping_required or self.principal is not None
+            )
         if self.level is ScopeLevel.USER:
             return self.principal is not None
         if self.level is ScopeLevel.SESSION:
@@ -78,15 +81,19 @@ class Scope(BaseModel):
         return True  # GROUP always resolves to the reserved owner.
 
     def owner_kwargs(self) -> Dict[str, Any]:
-        """Return the single Mem0 entity owner selected by this scope.
+        """Return the Mem0 entity owner keys selected by this scope.
 
-        Entity-scoped operations use one of ``user_id`` / ``agent_id`` / ``run_id``.
-        Group scope has no synthetic entity owner and raises instead of mapping to
-        a sentinel.
+        Entity-scoped operations normally use one of ``user_id`` / ``agent_id`` /
+        ``run_id``. Required user-scoped agent operations use both user and agent.
+        Group scope has no synthetic entity owner and raises instead of mapping to a sentinel.
         """
         if self.level is ScopeLevel.AGENT:
             if self.agent_client_id is None:
                 raise ValueError("agent scope requires agent_client_id")
+            if self.user_scoping_required:
+                if self.principal is None:
+                    raise ValueError("user-scoped agent scope requires principal")
+                return {"user_id": self.principal, "agent_id": self.agent_client_id}
             return {"agent_id": self.agent_client_id}
         if self.level is ScopeLevel.USER:
             if self.principal is None:
@@ -136,6 +143,10 @@ class Scope(BaseModel):
         if self.level is ScopeLevel.AGENT:
             if self.agent_client_id is None:
                 raise ValueError("agent scope requires agent_client_id")
+            if self.user_scoping_required:
+                if self.principal is None:
+                    raise ValueError("user-scoped agent scope requires principal")
+                return {"user_id": self.principal, "agent_id": self.agent_client_id}
             return {"agent_id": self.agent_client_id}
         if self.level is ScopeLevel.SESSION:
             if self.session_id is None:

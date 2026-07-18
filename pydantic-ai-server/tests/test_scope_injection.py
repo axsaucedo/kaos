@@ -8,6 +8,7 @@ exposes no way for request content to influence the scope.
 
 import inspect
 
+import kaos_identity
 import pytest
 
 from pais.memory import MemoryScope, ScopeLevel, scope_from_deps
@@ -59,6 +60,53 @@ class TestScopeFromDeps:
         deps = _deps(actor="agent-actor")
         scope = scope_from_deps(deps, level=ScopeLevel.AGENT)
         assert scope.agent_client_id == "agent-actor"
+
+    def test_required_agent_scope_fails_closed_without_principal(self, monkeypatch):
+        monkeypatch.setenv("MEMORY_USER_SCOPING", "required")
+        deps = _deps(actor="agent-actor")
+        with pytest.raises(ValueError, match="authenticated principal"):
+            scope_from_deps(deps, level=ScopeLevel.AGENT)
+
+    def test_required_agent_scope_marks_agent_and_user_partition(self, monkeypatch):
+        monkeypatch.setenv("MEMORY_USER_SCOPING", "required")
+        scope = scope_from_deps(
+            _deps(principal="alice", actor="agent-actor"),
+            level=ScopeLevel.AGENT,
+        )
+        assert scope.agent_client_id == "agent-actor"
+        assert scope.principal == "alice"
+        assert scope.user_scoping_required is True
+
+    def test_autonomous_principal_uses_uniform_required_partition(self, monkeypatch):
+        monkeypatch.setenv("MEMORY_USER_SCOPING", "required")
+        identity = "kaos://agent/default/researcher"
+        with kaos_identity.autonomous_identity_context("agent-token", identity):
+            deps = AgentDeps(
+                session_id="loop-1",
+                security_context=kaos_identity.security_context(),
+            )
+            scope = scope_from_deps(
+                deps,
+                level=ScopeLevel.AGENT,
+                agent_identity=identity,
+            )
+
+        assert scope.agent_client_id == identity
+        assert scope.principal == identity
+        assert scope.user_scoping_required is True
+
+    def test_agent_scope_keeps_compound_attribution_when_mode_is_off(self):
+        scope = scope_from_deps(
+            _deps(principal="alice", actor="agent-actor"),
+            level=ScopeLevel.AGENT,
+        )
+        assert scope.user_scoping_required is False
+        assert scope.write_kwargs() == {
+            "user_id": "alice",
+            "agent_id": "agent-actor",
+            "metadata": {"kaos_run": "sess-1"},
+        }
+        assert scope.owner_kwargs() == {"agent_id": "agent-actor"}
 
     def test_helper_takes_no_scope_argument(self):
         # The derivation must not accept caller/model-supplied scope: there is no

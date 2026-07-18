@@ -28,6 +28,7 @@ def make_test_server(
     max_steps: int = 5,
     memory_context_limit: int = 6,
     task_manager_type: str = "none",
+    agent_identity: str = "",
 ) -> AgentServer:
     """Create an AgentServer for testing."""
     if memory is None:
@@ -60,6 +61,7 @@ def make_test_server(
         agent_description=description,
         agentic_loop_max_steps=max_steps,
         memory_context_limit=memory_context_limit,
+        agent_identity=agent_identity,
     )
 
     return AgentServer(

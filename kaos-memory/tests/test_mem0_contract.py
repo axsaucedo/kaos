@@ -155,6 +155,25 @@ def test_single_entity_filters_retrieve_compound_records_without_leakage(mem0):
     assert "u1 a2" not in _texts(agent_hits)
 
 
+def test_two_entity_filter_requires_matching_user_and_agent(mem0):
+    memory, _ = mem0
+    _add_raw(memory, "u1 a1", user_id="u1", agent_id="a1")
+    _add_raw(memory, "u2 a1", user_id="u2", agent_id="a1")
+    _add_raw(memory, "u1 a2", user_id="u1", agent_id="a2")
+
+    filters = Scope(
+        level=ScopeLevel.AGENT,
+        principal="u1",
+        agent_client_id="a1",
+        user_scoping_required=True,
+    ).search_filters()
+    searched = memory.search("equal query", filters=filters, top_k=10, threshold=0.0)
+    listed = memory.get_all(filters=filters, top_k=100)
+
+    assert _texts(searched) == {"u1 a1"}
+    assert _texts(listed) == {"u1 a1"}
+
+
 def test_cross_session_dedup_consolidates_compound_record(mem0):
     memory, llm = mem0
     llm.fact = "same durable preference"

@@ -1,6 +1,7 @@
 package security
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -281,8 +282,12 @@ func TestConstructSecurityPolicyEmitsBothJWTProviders(t *testing.T) {
 		t.Errorf("user provider should use default Authorization extraction, got explicit extractFrom")
 	}
 	userClaims, _, _ := unstructured.NestedSlice(user, "claimToHeaders")
-	if len(userClaims) != 2 {
-		t.Errorf("expected two user claimToHeaders, got %d", len(userClaims))
+	wantUserClaims := []interface{}{
+		map[string]interface{}{"claim": "sub", "header": "x-user-claim-sub"},
+		map[string]interface{}{"claim": "preferred_username", "header": "x-user-claim-username"},
+	}
+	if !reflect.DeepEqual(userClaims, wantUserClaims) {
+		t.Errorf("user claimToHeaders = %#v, want %#v", userClaims, wantUserClaims)
 	}
 }
 
