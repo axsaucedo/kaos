@@ -804,6 +804,7 @@ def create_agent_server(
     memory_toolset = build_memory_toolset(
         parse_memory_tools(settings.memory_tools),
         ScopeLevel(settings.memory_scope),
+        [ScopeLevel(scope) for scope in settings.memory_read_scopes.split(",")],
         agent_identity=settings.agent_identity or settings.security_actor or None,
     )
     if memory_toolset is not None:
