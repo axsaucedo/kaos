@@ -32,6 +32,7 @@ def test_server_wires_fastapi_and_httpx_instrumentation():
     assert mw is not None
     # Default local actor derives from the agent name.
     assert mw.kwargs["actor"] == "kaos://agent/researcher"
+    assert mw.kwargs["principal_resolver"] is None
     assert kaos_identity.instrument._httpx_patched is True
 
 
@@ -49,6 +50,34 @@ def test_request_through_server_runs_middleware_and_resets():
     assert resp.status_code == 200
     # Context is request-scoped and reset afterwards — no leak into the process.
     assert kaos_identity.current() == {}
+
+
+def test_required_user_scoping_resolves_and_propagates_gateway_subject(monkeypatch):
+    monkeypatch.setenv("MEMORY_USER_SCOPING", "required")
+    server = create_agent_server(_settings())
+
+    @server.app.get("/identity-test")
+    async def identity_test():
+        return {
+            "principal": kaos_identity.current().get("principal"),
+            "outbound": kaos_identity.to_headers().get("x-principal"),
+        }
+
+    seen = TestClient(server.app).get("/identity-test", headers={"x-user-claim-sub": "oidc-alice"})
+    assert seen.json() == {"principal": "oidc-alice", "outbound": "oidc-alice"}
+
+
+def test_gateway_subject_is_not_trusted_when_user_scoping_is_off():
+    server = create_agent_server(_settings())
+
+    @server.app.get("/identity-test-off")
+    async def identity_test_off():
+        return kaos_identity.current()
+
+    seen = TestClient(server.app).get(
+        "/identity-test-off", headers={"x-user-claim-sub": "untrusted-alice"}
+    )
+    assert "principal" not in seen.json()
 
 
 def test_security_context_excludes_raw_tokens():

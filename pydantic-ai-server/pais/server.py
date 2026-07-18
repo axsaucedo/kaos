@@ -99,6 +99,11 @@ def configure_logging(level: str = "INFO", otel_correlation: bool = False) -> No
 logger = logging.getLogger(__name__)
 
 
+def _gateway_user_principal(headers: Dict[str, str]) -> Optional[str]:
+    """Resolve the subject projected by the gateway's verified user JWT provider."""
+    return headers.get("x-user-claim-sub")
+
+
 class AgentServer:
     """AgentServer exposing OpenAI-compatible chat completions API."""
 
@@ -152,6 +157,11 @@ class AgentServer:
             actor=local_actor,
             actor_token=self.settings.security_actor_token or None,
             principal=self.settings.security_principal or None,
+            principal_resolver=(
+                _gateway_user_principal
+                if os.environ.get("MEMORY_USER_SCOPING", "").strip().lower() == "required"
+                else None
+            ),
         )
         # When no static actor token is configured, set up the managed actor-token
         # lifecycle: if broker credentials are mounted (AGENT_AUTH_CLIENT_ID/SECRET/
