@@ -560,7 +560,7 @@ class LongTermStore:
 
     def recall(self, scope: Scope, query: str, top_k: int = 10) -> List[Dict[str, Any]]:
         """Return memories relevant to ``query`` visible at ``scope`` (pre-filtered by owner)."""
-        raw = self._memory.search(query, filters=scope.search_filters(), top_k=top_k)
+        raw = self._memory.search(query, filters=scope.search_filters(self.group), top_k=top_k)
         return self._results(raw)
 
     def delete(self, memory_id: str) -> None:

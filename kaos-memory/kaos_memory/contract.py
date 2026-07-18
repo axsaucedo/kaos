@@ -122,14 +122,28 @@ class Scope(BaseModel):
             kwargs["metadata"] = metadata
         return kwargs
 
-    def search_filters(self) -> Dict[str, Any]:
+    def search_filters(self, group: Optional[str] = None) -> Dict[str, Any]:
         """Return the Mem0 ``filters`` dict for a search at this scope.
 
-        Identical to the owner kwargs: Mem0 2.x uses the same owner keys inside the
-        ``filters`` argument and requires at least one of them, which this always
-        provides.
+        User and agent visibility use their native entity ids. Session and group
+        visibility use custom attribution metadata plus Mem0's required entity
+        wildcard compatibility convention.
         """
-        return self.owner_kwargs()
+        if self.level is ScopeLevel.USER:
+            if self.principal is None:
+                raise ValueError("user scope requires principal")
+            return {"user_id": self.principal}
+        if self.level is ScopeLevel.AGENT:
+            if self.agent_client_id is None:
+                raise ValueError("agent scope requires agent_client_id")
+            return {"agent_id": self.agent_client_id}
+        if self.level is ScopeLevel.SESSION:
+            if self.session_id is None:
+                raise ValueError("session scope requires session_id")
+            return {"user_id": "*", "kaos_run": self.session_id}
+        if not group:
+            raise ValueError("group scope requires the store group")
+        return {"user_id": "*", "kaos_group": group}
 
 
 def scope_key(scope: Scope) -> str:

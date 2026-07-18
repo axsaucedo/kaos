@@ -14,11 +14,23 @@ def test_agent_maps_to_agent_id():
 def test_user_maps_to_user_id():
     scope = Scope(level=ScopeLevel.USER, principal="alice")
     assert scope.owner_kwargs() == {"user_id": "alice"}
+    assert scope.search_filters() == {"user_id": "alice"}
 
 
 def test_session_maps_to_run_id():
     scope = Scope(level=ScopeLevel.SESSION, session_id="run-1")
     assert scope.owner_kwargs() == {"run_id": "run-1"}
+    assert scope.search_filters() == {"user_id": "*", "kaos_run": "run-1"}
+
+
+def test_group_search_uses_wildcard_and_store_group():
+    scope = Scope(level=ScopeLevel.GROUP)
+    assert scope.search_filters("team-a") == {"user_id": "*", "kaos_group": "team-a"}
+
+
+def test_group_search_requires_store_group():
+    with pytest.raises(ValueError, match="store group"):
+        Scope(level=ScopeLevel.GROUP).search_filters()
 
 
 def test_entity_scopes_yield_exactly_one_owner_key():

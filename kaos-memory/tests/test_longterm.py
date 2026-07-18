@@ -84,6 +84,25 @@ def test_agent_read_includes_same_agent_session_contribution(tmp_path, offline_m
     assert any("agent private" in h["memory"] for h in agent_hits)
     assert any("session ephemeral" in h["memory"] for h in agent_hits)
 
+    session_hits = store.recall(session, "ports", top_k=10)
+    assert any("session ephemeral" in h["memory"] for h in session_hits)
+    assert all("agent private" not in h["memory"] for h in session_hits)
+
+
+def test_group_read_uses_collection_attribution(tmp_path, offline_models):
+    store = _local_store(tmp_path, offline_models)
+    scope = Scope(
+        level=ScopeLevel.GROUP,
+        principal="alice",
+        agent_client_id="agent-a",
+        session_id="run-1",
+    )
+    store.add(scope, "group deployment fact", infer=False)
+
+    hits = store.recall(Scope(level=ScopeLevel.GROUP), "deployment", top_k=10)
+
+    assert [hit["memory"] for hit in hits] == ["group deployment fact"]
+
 
 @pytest.mark.pgvector
 def test_external_scope_isolation(pgvector_dsn, offline_models):
