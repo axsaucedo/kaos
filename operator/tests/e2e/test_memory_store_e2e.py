@@ -172,8 +172,16 @@ async def test_short_term_is_isolated_between_scopes(test_namespace: str):
 
     process, base_url = _forward_memory_service(test_namespace, "iso-store")
     try:
-        alice = {"level": "user", "principal": "alice"}
-        bob = {"level": "user", "principal": "bob"}
+        alice = {
+            "level": "user",
+            "principal": "alice",
+            "session_id": "alice-session",
+        }
+        bob = {
+            "level": "user",
+            "principal": "bob",
+            "session_id": "bob-session",
+        }
         httpx.post(
             f"{base_url}/v1/write",
             json={
