@@ -133,7 +133,7 @@ class AgentServer:
         self._agent_identity = settings.agent_identity or settings.security_actor or ""
         if task_manager_type == "local":
             setup_fn = self._mock_state.reset if self._mock_state else None
-            local_actor = self.settings.security_actor or f"kaos://agent/{self.settings.agent_name}"
+            local_actor = self._agent_identity or f"kaos://agent/{self.settings.agent_name}"
             self.task_manager: TaskManager = LocalTaskManager(
                 self._run_agent,
                 setup_fn=setup_fn,
@@ -151,7 +151,7 @@ class AgentServer:
         # Two-identity propagation: extract inbound user context at the
         # server boundary and inject the user subject + this agent's actor on outbound
         # A2A/MCP/ModelAPI calls. The SDK is not the enforcement boundary; it propagates.
-        local_actor = self.settings.security_actor or f"kaos://agent/{self.settings.agent_name}"
+        local_actor = self._agent_identity or f"kaos://agent/{self.settings.agent_name}"
         kaos_identity.instrument_fastapi(
             self.app,
             actor=local_actor,

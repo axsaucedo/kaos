@@ -208,6 +208,16 @@ class TestAutonomousLoop:
 
 
 class TestAutonomousIdentity:
+    def test_server_uses_canonical_agent_identity_for_autonomous_principal(self):
+        identity = "kaos://agent/memv2-final/autonomous-agent"
+        server = make_test_server(
+            name="autonomous-agent",
+            task_manager_type="local",
+            agent_identity=identity,
+        )
+
+        assert server.task_manager._autonomous_principal == identity
+
     @pytest.mark.asyncio
     async def test_self_subjects_with_current_actor_token_each_iteration(self, monkeypatch):
         snapshots = []
