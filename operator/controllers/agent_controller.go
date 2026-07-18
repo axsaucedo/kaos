@@ -775,6 +775,10 @@ func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *
 	// Memory configuration
 	if agent.Spec.Config != nil && agent.Spec.Config.Memory != nil {
 		mem := agent.Spec.Config.Memory
+		secCfg := security.GetConfig()
+		if secCfg.SecurityEnabled() && strings.TrimSpace(secCfg.UserIssuer) != "" {
+			env = append(env, corev1.EnvVar{Name: "MEMORY_USER_SCOPING", Value: "required"})
+		}
 
 		enabled := true
 		if mem.Enabled != nil {
