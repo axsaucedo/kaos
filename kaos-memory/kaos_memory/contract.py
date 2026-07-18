@@ -166,10 +166,23 @@ def scope_owner_key(scope: Scope, group: Optional[str] = None) -> str:
 
 
 def scope_key(scope: Scope, group: Optional[str] = None) -> str:
-    """Return the per-session key for the short- and medium-term tiers."""
+    """Return a stable attributed key for a conversational session.
+
+    The selected read/write level does not change the physical partition: all
+    known owners are included in a fixed order, followed by the session id.
+    """
     if scope.session_id is None:
         raise ValueError("conversational memory requires session_id")
-    return f"{scope_owner_key(scope, group)}|run:{scope.session_id}"
+    owners = []
+    if scope.principal is not None:
+        owners.append(f"user_id:{scope.principal}")
+    if scope.agent_client_id is not None:
+        owners.append(f"agent_id:{scope.agent_client_id}")
+    if group:
+        owners.append(f"kaos_group:{group}")
+    if not owners:
+        owners.append(scope_owner_key(scope, group))
+    return "|".join([*owners, f"run:{scope.session_id}"])
 
 
 # --------------------------------------------------------------------------- #

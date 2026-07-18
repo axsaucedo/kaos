@@ -17,6 +17,9 @@ class _FakeLongTerm:
             raise RuntimeError("vector store unreachable")
         return self._facts
 
+    def add(self, scope, messages, infer=True):
+        return []
+
     def ping(self):
         return None
 
@@ -116,3 +119,50 @@ def test_recall_can_exclude_short_term(tmp_path):
     assert body["short_term"]["recent"] == []
     assert "fact one" in body["block"]
     assert "## Recent turns" not in body["block"]
+
+
+def test_session_recall_round_trips_agent_writes_without_cross_session_leakage(tmp_path):
+    short_term = ShortTermStore(
+        "local",
+        str(tmp_path / "w.db"),
+        ShortTermTierConfig(token_budget=4, rolling_summary=True),
+        lambda prior, turns: (prior + " " + " ".join(c for _, c in turns)).strip(),
+        group="team-a",
+    )
+    client = _client(_FakeLongTerm(), short_term)
+    base_scope = {
+        "level": "agent",
+        "principal": "alice",
+        "agent_client_id": "agent-a",
+    }
+    for session_id, marker in (("session-1", "amber notebook"), ("session-2", "silver compass")):
+        response = client.post(
+            "/v1/write",
+            json={
+                "scope": {**base_scope, "session_id": session_id},
+                "turns": [
+                    {"role": "user", "content": f"remember the {marker} in this session"},
+                    {"role": "assistant", "content": f"noted {marker}"},
+                ],
+            },
+        )
+        assert response.status_code == 202
+
+    recalled = []
+    for session_id in ("session-1", "session-2"):
+        response = client.post(
+            "/v1/recall",
+            json={
+                "scope": {**base_scope, "level": "session", "session_id": session_id},
+                "query": "notebook compass",
+            },
+        )
+        assert response.status_code == 200
+        recalled.append(response.json())
+
+    assert "amber notebook" in recalled[0]["medium_term"]["summary"]
+    assert recalled[0]["short_term"]["recent"] == [["assistant", "noted amber notebook"]]
+    assert "silver compass" not in str(recalled[0])
+    assert "silver compass" in recalled[1]["medium_term"]["summary"]
+    assert recalled[1]["short_term"]["recent"] == [["assistant", "noted silver compass"]]
+    assert "amber notebook" not in str(recalled[1])

@@ -100,6 +100,20 @@ def test_scope_key_combines_owner_and_session(scope, group, expected):
     assert scope_key(scope, group) == expected
 
 
+def test_scope_key_uses_known_attribution_independently_of_level():
+    agent = Scope(
+        level=ScopeLevel.AGENT,
+        principal="alice",
+        agent_client_id="agent-a",
+        session_id="run-1",
+    )
+    session = agent.model_copy(update={"level": ScopeLevel.SESSION})
+
+    expected = "user_id:alice|agent_id:agent-a|kaos_group:team-a|run:run-1"
+    assert scope_key(agent, "team-a") == expected
+    assert scope_key(session, "team-a") == expected
+
+
 def test_scope_key_requires_session_for_every_level():
     with pytest.raises(ValueError, match="requires session_id"):
         scope_key(Scope(level=ScopeLevel.USER, principal="alice"))

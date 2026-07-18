@@ -316,7 +316,7 @@ class ShortTermStore:
             where = "scope_key = ?"
             params: Tuple[Any, ...] = (scope_key(scope, self.group),)
         else:
-            prefix = f"{scope_owner_key(scope, self.group)}|run:"
+            prefix = f"{scope_owner_key(scope, self.group)}|"
             where = "substr(scope_key, 1, ?) = ?"
             params = (len(prefix), prefix)
         with self._lock:
