@@ -410,20 +410,26 @@ class AgentServer:
             security_context=kaos_identity.security_context(),
         )
 
-        # Derive the server-side memory scope (owner) for the long-term tier.
+        # Keep the home scope on deps for post-run writes, and derive the
+        # independently configured read scope for this run's recall.
         from pais.memory import scope_from_deps, reconstruct_message_history
 
-        scope = scope_from_deps(
+        home_scope = scope_from_deps(
             deps,
             level=self.settings.memory_scope,
             agent_identity=self._agent_identity or None,
         )
-        deps.memory_scope = scope
+        deps.memory_scope = home_scope
+        read_scope = scope_from_deps(
+            deps,
+            level=self.settings.memory_default_read_scope,
+            agent_identity=self._agent_identity or None,
+        )
 
         # Recall long-term facts and the service-hosted short-term tier (best-effort;
         # short-term-only backends return an empty result and we fall back below).
         token_budget = self.settings.memory_short_term_token_budget or None
-        recalled = await self.memory.recall(scope, user_prompt, token_budget=token_budget)
+        recalled = await self.memory.recall(read_scope, user_prompt, token_budget=token_budget)
 
         # Local short-term tier log: keep recording the incoming turn for back-compat
         # (no-op for the service backend, whose short-term tier is written post-run).

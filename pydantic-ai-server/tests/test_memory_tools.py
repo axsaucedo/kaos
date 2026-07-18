@@ -7,6 +7,7 @@ and operate over the memory backend without taking scope from the model.
 
 import pytest
 from typing import Any, cast
+from pydantic_ai.messages import ModelRequest, UserPromptPart
 
 from pais.memory import MemoryScope, NullMemory, RecalledMemory, ScopeLevel
 from pais.memory_tools import (
@@ -20,6 +21,7 @@ from pais.memory_tools import (
     tools_expose_search,
 )
 from pais.serverutils import AgentDeps
+from tests.helpers import make_test_server
 
 
 class _RecordingMemory(NullMemory):
@@ -171,3 +173,29 @@ class TestMemoryToolset:
         scope = mem.writes[0][0]
         assert scope.level is ScopeLevel.AGENT
         assert scope.principal == "alice"
+
+
+@pytest.mark.asyncio
+async def test_baseline_recall_uses_read_scope_and_flush_uses_home_scope():
+    mem = _RecordingMemory()
+    server = make_test_server(memory=mem)
+    server.settings.memory_scope = "session"
+    server.settings.memory_default_read_scope = "group"
+
+    _prompt, _history, deps, _limits = await server._prepare_run("hello", "current-session")
+
+    recalled_scope, query = mem.recalls[0]
+    assert query == "hello"
+    assert recalled_scope.level is ScopeLevel.GROUP
+    assert recalled_scope.session_id == "current-session"
+    assert deps.memory_scope is not None
+    assert deps.memory_scope.level is ScopeLevel.SESSION
+    assert deps.memory_scope.session_id == "current-session"
+
+    await server._write_turns(
+        deps,
+        [ModelRequest(parts=[UserPromptPart(content="hello")])],
+    )
+    written_scope = mem.writes[0][0]
+    assert written_scope.level is ScopeLevel.SESSION
+    assert written_scope.session_id == "current-session"
