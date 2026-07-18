@@ -3,8 +3,8 @@
 This module is the whole storage layer, grouped by layer rather than split into
 many single-responsibility files (KEEP IT SIMPLE):
 
-- ``Scope`` / ``ScopeLevel`` / ``GROUP_OWNER`` — the identity every operation is
-  keyed on, plus its translation to Mem0 owner identifiers.
+- ``Scope`` / ``ScopeLevel`` — the identity every operation is keyed on, plus its
+  translation to Mem0 owner identifiers.
 - ``count_tokens`` / ``scope_key`` / ``Summarizer`` — small helpers the short-term
   store needs.
 - ``ModelClient`` — an outbound OpenAI-compatible client the short-term store calls
@@ -37,12 +37,7 @@ from kaos_memory.config import (
     ShortTermTierConfig,
     StorageConfig,
 )
-from kaos_memory.contract import (
-    GROUP_OWNER,
-    Scope,
-    ScopeLevel,
-    scope_key,
-)
+from kaos_memory.contract import Scope, ScopeLevel, scope_key
 
 # --------------------------------------------------------------------------- #
 # Token counting and short-term helpers                                        #
@@ -549,6 +544,9 @@ class LongTermStore:
         if system_prompt:
             config["custom_fact_extraction_prompt"] = system_prompt
         self._memory = Memory.from_config(config)
+        # A MemoryStore is the group boundary. Its configured vector collection
+        # is the service's existing, always-present binding identity.
+        self.group = block.collection_name
 
     @staticmethod
     def _results(raw: Any) -> List[Dict[str, Any]]:
@@ -557,7 +555,7 @@ class LongTermStore:
 
     def add(self, scope: Scope, messages: Any, infer: bool = True) -> List[Dict[str, Any]]:
         """Store ``messages`` under ``scope``. With ``infer`` the engine extracts facts."""
-        raw = self._memory.add(messages, infer=infer, **scope.owner_kwargs())
+        raw = self._memory.add(messages, infer=infer, **scope.write_kwargs(self.group))
         return self._results(raw)
 
     def recall(self, scope: Scope, query: str, top_k: int = 10) -> List[Dict[str, Any]]:

@@ -68,17 +68,21 @@ def test_local_delete_scope_removes_only_that_owner(tmp_path, offline_models):
     )
 
 
-def test_agent_and_session_scopes_isolated(tmp_path, offline_models):
+def test_agent_read_includes_same_agent_session_contribution(tmp_path, offline_models):
     store = _local_store(tmp_path, offline_models)
     agent = Scope(level=ScopeLevel.AGENT, agent_client_id="agent-a")
-    session = Scope(level=ScopeLevel.SESSION, session_id="run-1")
+    session = Scope(
+        level=ScopeLevel.SESSION,
+        principal="alice",
+        agent_client_id="agent-a",
+        session_id="run-1",
+    )
     store.add(agent, "agent private fact about ports", infer=False)
     store.add(session, "session ephemeral fact about ports", infer=False)
 
     agent_hits = store.recall(agent, "ports", top_k=10)
     assert any("agent private" in h["memory"] for h in agent_hits)
-    # The session fact must not surface under the agent scope.
-    assert all("ephemeral" not in h["memory"] for h in agent_hits)
+    assert any("session ephemeral" in h["memory"] for h in agent_hits)
 
 
 @pytest.mark.pgvector
@@ -124,3 +128,38 @@ def test_extraction_system_prompt_threads_into_mem0_config(tmp_path, offline_mod
     captured.clear()
     LongTermStore(storage, offline_models["summarization"], offline_models["embedding"])
     assert "custom_fact_extraction_prompt" not in captured["config"]
+
+
+def test_add_uses_compound_attribution_and_collection_group(tmp_path, offline_models, monkeypatch):
+    captured = {}
+
+    class _StubMemory:
+        @classmethod
+        def from_config(cls, config):
+            return cls()
+
+        def add(self, messages, **kwargs):
+            captured.update(kwargs)
+            return {"results": []}
+
+    monkeypatch.setattr("kaos_memory.stores.Memory", _StubMemory)
+    storage = StorageConfig(
+        type="local",
+        local=LocalStorage(path=str(tmp_path), collection_name="store-team"),
+    )
+    store = LongTermStore(storage, offline_models["summarization"], offline_models["embedding"])
+    scope = Scope(
+        level=ScopeLevel.USER,
+        principal="alice",
+        agent_client_id="agent-a",
+        session_id="run-1",
+    )
+
+    store.add(scope, "remember this", infer=False)
+
+    assert captured == {
+        "infer": False,
+        "user_id": "alice",
+        "agent_id": "agent-a",
+        "metadata": {"kaos_run": "run-1", "kaos_group": "store-team"},
+    }

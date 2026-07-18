@@ -1,8 +1,8 @@
-"""Unit tests for the Scope value object and its Mem0 owner mapping."""
+"""Unit tests for the Scope value object and its Mem0 attribution mapping."""
 
 import pytest
 
-from kaos_memory.stores import GROUP_OWNER, Scope, ScopeLevel
+from kaos_memory.stores import Scope, ScopeLevel
 
 
 def test_agent_maps_to_agent_id():
@@ -21,29 +21,42 @@ def test_session_maps_to_run_id():
     assert scope.owner_kwargs() == {"run_id": "run-1"}
 
 
-def test_group_maps_to_reserved_owner_not_empty():
-    scope = Scope(level=ScopeLevel.GROUP)
-    kwargs = scope.owner_kwargs()
-    # Never an empty filter: Mem0 2.x rejects owner-less searches.
-    assert kwargs == {"agent_id": GROUP_OWNER}
-    assert kwargs
-
-
-def test_group_owner_distinct_from_any_agent():
-    agent = Scope(level=ScopeLevel.AGENT, agent_client_id="agent-a").owner_kwargs()
-    group = Scope(level=ScopeLevel.GROUP).owner_kwargs()
-    # Both use agent_id but the group sentinel cannot collide with a real agent id.
-    assert agent["agent_id"] != group["agent_id"]
-
-
-def test_each_scope_yields_exactly_one_owner_key():
+def test_entity_scopes_yield_exactly_one_owner_key():
     for scope in (
         Scope(level=ScopeLevel.AGENT, agent_client_id="a"),
         Scope(level=ScopeLevel.USER, principal="p"),
         Scope(level=ScopeLevel.SESSION, session_id="s"),
-        Scope(level=ScopeLevel.GROUP),
     ):
         assert len(scope.owner_kwargs()) == 1
+
+
+def test_group_has_no_synthetic_entity_owner():
+    with pytest.raises(ValueError, match="no Mem0 entity owner"):
+        Scope(level=ScopeLevel.GROUP).owner_kwargs()
+
+
+def test_write_kwargs_carry_all_known_attribution():
+    scope = Scope(
+        level=ScopeLevel.GROUP,
+        principal="alice",
+        agent_client_id="agent-a",
+        session_id="run-1",
+    )
+    assert scope.write_kwargs("team-a") == {
+        "user_id": "alice",
+        "agent_id": "agent-a",
+        "metadata": {"kaos_run": "run-1", "kaos_group": "team-a"},
+    }
+
+
+def test_write_kwargs_omit_unknown_attribution():
+    scope = Scope(level=ScopeLevel.AGENT, agent_client_id="agent-a")
+    assert scope.write_kwargs() == {"agent_id": "agent-a"}
+
+
+def test_write_requires_an_entity_contributor():
+    with pytest.raises(ValueError, match="principal or agent_client_id"):
+        Scope(level=ScopeLevel.GROUP, session_id="run-1").write_kwargs("team-a")
 
 
 def test_incomplete_scope_is_representable_but_raises_on_mapping():

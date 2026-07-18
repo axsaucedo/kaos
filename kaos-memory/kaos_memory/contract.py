@@ -20,11 +20,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field, model_validator
 
-#: Reserved owner id naming the store-wide group namespace. It is mapped onto
-#: ``agent_id`` and is deliberately distinct from any real agent client id, so a
-#: ``group`` operation never collides with an ``agent``-scoped one.
-GROUP_OWNER = "kaos:group"
-
 #: A write/forget failure mode: ``"soft"`` swallows long-term errors and returns
 #: degraded; ``"strict"`` surfaces them. When omitted the service default applies.
 FailureMode = str
@@ -83,11 +78,11 @@ class Scope(BaseModel):
         return True  # GROUP always resolves to the reserved owner.
 
     def owner_kwargs(self) -> Dict[str, Any]:
-        """Return the Mem0 owner keyword arguments for a write/search at this scope.
+        """Return the single Mem0 entity owner selected by this scope.
 
-        Exactly one of ``user_id`` / ``agent_id`` / ``run_id`` is set. Raises if the
-        field required by ``level`` is missing, so an unusable scope never silently
-        widens to another owner.
+        Entity-scoped operations use one of ``user_id`` / ``agent_id`` / ``run_id``.
+        Group scope has no synthetic entity owner and raises instead of mapping to
+        a sentinel.
         """
         if self.level is ScopeLevel.AGENT:
             if self.agent_client_id is None:
@@ -101,7 +96,31 @@ class Scope(BaseModel):
             if self.session_id is None:
                 raise ValueError("session scope requires session_id")
             return {"run_id": self.session_id}
-        return {"agent_id": GROUP_OWNER}
+        raise ValueError("group scope has no Mem0 entity owner")
+
+    def write_kwargs(self, group: Optional[str] = None) -> Dict[str, Any]:
+        """Return compound Mem0 attribution for a long-term write.
+
+        Entity ids identify every known contributor. The conversation and store
+        group are custom metadata so they remain filterable without narrowing
+        Mem0's deduplication candidates across sessions.
+        """
+        kwargs: Dict[str, Any] = {}
+        if self.principal is not None:
+            kwargs["user_id"] = self.principal
+        if self.agent_client_id is not None:
+            kwargs["agent_id"] = self.agent_client_id
+        if not kwargs:
+            raise ValueError("memory write requires principal or agent_client_id")
+
+        metadata = {}
+        if self.session_id is not None:
+            metadata["kaos_run"] = self.session_id
+        if group:
+            metadata["kaos_group"] = group
+        if metadata:
+            kwargs["metadata"] = metadata
+        return kwargs
 
     def search_filters(self) -> Dict[str, Any]:
         """Return the Mem0 ``filters`` dict for a search at this scope.
