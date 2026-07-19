@@ -549,10 +549,9 @@ class TestMemoryStoreCreateDryRun:
         spec = yaml.safe_load(result.output)["spec"]
         assert spec["defaultReadScope"] == "user"
         assert spec["defaultFailureMode"] == "strict"
-        assert spec["container"]["env"] == [
-            {"name": "KAOS_MEMORY_TOKEN_BUDGET", "value": "64"},
-            {"name": "KAOS_MEMORY_ROLLING_SUMMARY", "value": "true"},
-        ]
+        assert spec["shortTerm"] == {"tokenBudget": 64}
+        assert spec["mediumTerm"] == {"enabled": True}
+        assert "container" not in spec
 
 
 class TestModelAPIDeployDryRun:
