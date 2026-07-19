@@ -415,9 +415,13 @@ def create_app(
         """Record turns: durable short-term append now, long-term extraction scheduled on fold."""
         settings = app.state.settings
         if settings.require_principal and not req.attribution.principal:
-            return JSONResponse({"accepted": False, "error": "missing required principal"}, status_code=403)
+            return JSONResponse(
+                {"accepted": False, "error": "missing required principal"}, status_code=403
+            )
         if settings.require_agent_identity and not req.attribution.agent_client_id:
-            return JSONResponse({"accepted": False, "error": "missing required agent identity"}, status_code=403)
+            return JSONResponse(
+                {"accepted": False, "error": "missing required agent identity"}, status_code=403
+            )
         try:
             result = await _offload(lambda: app.state.memory.write(req))
         except Exception as exc:

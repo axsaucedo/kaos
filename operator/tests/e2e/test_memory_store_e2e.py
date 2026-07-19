@@ -185,7 +185,7 @@ async def test_short_term_is_isolated_between_scopes(test_namespace: str):
         httpx.post(
             f"{base_url}/v1/write",
             json={
-                "scope": alice,
+                "attribution": alice,
                 "turns": [{"role": "user", "content": "alice secret token"}],
                 "infer": False,
             },
@@ -194,7 +194,7 @@ async def test_short_term_is_isolated_between_scopes(test_namespace: str):
         httpx.post(
             f"{base_url}/v1/write",
             json={
-                "scope": bob,
+                "attribution": bob,
                 "turns": [{"role": "user", "content": "bob private note"}],
                 "infer": False,
             },

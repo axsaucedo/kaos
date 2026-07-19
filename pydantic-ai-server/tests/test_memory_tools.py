@@ -31,8 +31,8 @@ class _RecordingMemory(NullMemory):
         self.recalls = []
         self._recalled = recalled or RecalledMemory()
 
-    async def write(self, scope, turns, *, infer=True, failure_mode=None):
-        self.writes.append((scope, turns, infer))
+    async def write(self, attribution, turns, *, infer=True, failure_mode=None):
+        self.writes.append((attribution, turns, infer))
         return True
 
     async def recall(self, scope, query, **kwargs):

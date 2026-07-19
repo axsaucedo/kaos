@@ -11,7 +11,13 @@ import inspect
 import kaos_identity
 import pytest
 
-from pais.memory import MemoryAttribution, MemoryScope, ScopeLevel, attribution_from_deps, scope_from_deps
+from pais.memory import (
+    MemoryAttribution,
+    MemoryScope,
+    ScopeLevel,
+    attribution_from_deps,
+    scope_from_deps,
+)
 from pais.serverutils import AgentDeps
 
 
