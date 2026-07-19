@@ -96,7 +96,7 @@ The DSN is injected into the service as `KAOS_MEMORY_EXTERNAL_DSN` via a `secret
 
 ## Models
 
-Both `summarization` and `embedding` model references are required. Each points at a `ModelAPI` in the same namespace plus a concrete model name. The controller resolves the referenced ModelAPIs and holds the MemoryStore in `Pending` until they are `Ready`; the summarization endpoint (suffixed with `/v1`) becomes the service's model base URL. Models bind lazily at first use, so the store can reach `Ready` from storage reachability before any embedding or summarization call is made.
+Both `summarization` and `embedding` model references are required. Each points at a `ModelAPI` in the same namespace plus a concrete model name. The controller resolves the referenced ModelAPIs and holds the MemoryStore in `Pending` until they are `Ready`; the summarization ModelAPI's cluster-local Service endpoint (suffixed with `/v1`) becomes the service's model base URL. Generated ModelAPI NetworkPolicies admit same-namespace MemoryStore pods for this direct model traffic while other workload pods remain gateway-only. Models bind lazily at first use, so the store can reach `Ready` from storage reachability before any embedding or summarization call is made.
 
 | Field | Type | Description |
 |-------|------|-------------|
