@@ -242,3 +242,49 @@ def test_forget_yes_returns_successful_service_result(monkeypatch):
 
     assert result.exit_code == 0
     assert '{"forgotten": true, "degraded": false}' in result.output
+
+
+def _fake_jwt(sub: str) -> str:
+    import base64
+
+    payload = base64.urlsafe_b64encode(json.dumps({"sub": sub}).encode()).decode().rstrip("=")
+    return f"header.{payload}.signature"
+
+
+def test_resolve_user_substitutes_cached_login_sub(tmp_path, monkeypatch):
+    from kaos_cli.memory import _resolve_user
+
+    config = tmp_path / ".kaos-config.yaml"
+    config.write_text(
+        json.dumps({"sessions": {"alice": {"token": _fake_jwt("sub-123"), "active": True}}})
+    )
+    monkeypatch.chdir(tmp_path)
+    assert _resolve_user("alice") == "sub-123"
+
+
+def test_resolve_user_passes_through_unknown_and_raw_subs(tmp_path, monkeypatch):
+    from kaos_cli.memory import _resolve_user
+
+    config = tmp_path / ".kaos-config.yaml"
+    config.write_text(json.dumps({"sessions": {"alice": {"token": _fake_jwt("sub-123")}}}))
+    monkeypatch.chdir(tmp_path)
+    assert _resolve_user("bob") == "bob"
+    assert _resolve_user("9dfcf3f2-7ec0-485d") == "9dfcf3f2-7ec0-485d"
+    assert _resolve_user(None) is None
+
+
+def test_resolve_user_without_config_is_identity(tmp_path, monkeypatch):
+    from kaos_cli.memory import _resolve_user
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert _resolve_user("alice") == "alice"
+
+
+def test_resolve_user_survives_malformed_token(tmp_path, monkeypatch):
+    from kaos_cli.memory import _resolve_user
+
+    config = tmp_path / ".kaos-config.yaml"
+    config.write_text(json.dumps({"sessions": {"alice": {"token": "not-a-jwt"}}}))
+    monkeypatch.chdir(tmp_path)
+    assert _resolve_user("alice") == "alice"

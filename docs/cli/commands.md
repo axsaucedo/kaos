@@ -411,7 +411,7 @@ kaos memory recall --store support-memory --scope agent --agent AGENT --all [OPT
 | `--scope` | | `session`, `agent`, `user`, or `group` (required) |
 | `--session` | | Session ID; required only for session scope |
 | `--agent` | | Agent name; required only for agent scope |
-| `--user` | | User principal; required only for user scope |
+| `--user` | | User principal; required only for user scope. A username with a cached `kaos auth login` session resolves to its verified subject; anything else passes through verbatim |
 | `--query` | | Semantic query; mutually exclusive with `--all` |
 | `--all` | | List every long-term record visible at the scope |
 | `--short-term` | | Include conversational tiers when the scope carries a session |

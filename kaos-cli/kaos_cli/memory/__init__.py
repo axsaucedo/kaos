@@ -1,13 +1,16 @@
 """Central MemoryStore administration commands."""
 
+import base64
 import json
 import subprocess
 from enum import Enum
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
 import typer
+import yaml
 
 from kaos_cli.utils.port_forward import PortForwardError, port_forward
 
@@ -206,6 +209,36 @@ def _scope_from_options(
         raise MemoryCLIError(str(exc)) from exc
 
 
+
+def _resolve_user(user: str | None) -> str | None:
+    """Resolve a login username to its verified subject via the cached session.
+
+    ``kaos auth login`` caches each user's token in ``.kaos-config.yaml``; when
+    ``--user`` names a cached session, the token's ``sub`` claim is the owner
+    key the store partitions by. Anything unrecognised passes through verbatim
+    so raw subjects and users without a local login keep working.
+    """
+    if not user:
+        return user
+    for base in (Path.cwd(), Path.home()):
+        path = base / ".kaos-config.yaml"
+        if not path.exists():
+            continue
+        try:
+            sessions = (yaml.safe_load(path.read_text()) or {}).get("sessions", {})
+            token = sessions.get(user, {}).get("token", "")
+            payload = token.split(".")[1]
+            payload += "=" * (-len(payload) % 4)
+            sub = json.loads(base64.urlsafe_b64decode(payload)).get("sub")
+        except (KeyError, IndexError, ValueError, AttributeError, OSError):
+            return user
+        if sub:
+            typer.echo(f"Resolved user '{user}' to principal '{sub}' from the cached login.", err=True)
+            return sub
+        return user
+    return user
+
+
 app = typer.Typer(help="Inspect and erase central memory stores.", no_args_is_help=True)
 
 
@@ -234,6 +267,7 @@ def recall_memory(
         if query is not None and not query.strip():
             raise MemoryCLIError("--query requires non-empty text")
 
+        user = _resolve_user(user)
         # Validate owner flags before consulting Kubernetes for the default namespace.
         _scope_from_options(scope, namespace or "default", session, agent, user)
         resolved_namespace = _effective_namespace(namespace)
@@ -279,6 +313,7 @@ def forget_memory(
 ) -> None:
     """Erase all long- and conversational memory at one scope."""
     try:
+        user = _resolve_user(user)
         _scope_from_options(scope, namespace or "default", session, agent, user)
         resolved_namespace = _effective_namespace(namespace)
         resolved_scope = _scope_from_options(
