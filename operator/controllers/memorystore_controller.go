@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -423,6 +424,13 @@ func (r *MemoryStoreReconciler) buildStorageEnv(store *kaosv1alpha1.MemoryStore)
 // place, and explicit container.env entries (appended later) still win.
 func (r *MemoryStoreReconciler) buildOperationalEnv(store *kaosv1alpha1.MemoryStore) []corev1.EnvVar {
 	var env []corev1.EnvVar
+	secCfg := security.GetConfig()
+	if secCfg.SecurityEnabled() && strings.TrimSpace(secCfg.UserIssuer) != "" {
+		env = append(env, corev1.EnvVar{Name: "KAOS_MEMORY_REQUIRE_PRINCIPAL", Value: "true"})
+	}
+	if secCfg.SecurityEnabled() {
+		env = append(env, corev1.EnvVar{Name: "KAOS_MEMORY_REQUIRE_AGENT_IDENTITY", Value: "true"})
+	}
 	addInt := func(name string, value *int32) {
 		if value != nil {
 			env = append(env, corev1.EnvVar{Name: name, Value: fmt.Sprintf("%d", *value)})

@@ -13,16 +13,16 @@ func TestResolveMemoryScope(t *testing.T) {
 		store *kaosv1alpha1.MemoryStore
 		want  string
 	}{
-		{name: "agent override", mem: &kaosv1alpha1.MemoryConfig{Scope: "user"}, store: &kaosv1alpha1.MemoryStore{Spec: kaosv1alpha1.MemoryStoreSpec{DefaultScope: "group"}}, want: "user"},
-		{name: "store default", mem: &kaosv1alpha1.MemoryConfig{}, store: &kaosv1alpha1.MemoryStore{Spec: kaosv1alpha1.MemoryStoreSpec{DefaultScope: "group"}}, want: "group"},
-		{name: "agent fallback", mem: &kaosv1alpha1.MemoryConfig{}, store: &kaosv1alpha1.MemoryStore{}, want: "agent"},
-		{name: "missing store", mem: &kaosv1alpha1.MemoryConfig{}, want: "agent"},
+		{name: "agent override", mem: &kaosv1alpha1.MemoryConfig{DefaultReadScope: "user"}, store: &kaosv1alpha1.MemoryStore{Spec: kaosv1alpha1.MemoryStoreSpec{DefaultReadScope: "group"}}, want: "user"},
+		{name: "store default", mem: &kaosv1alpha1.MemoryConfig{}, store: &kaosv1alpha1.MemoryStore{Spec: kaosv1alpha1.MemoryStoreSpec{DefaultReadScope: "group"}}, want: "group"},
+		{name: "agent fallback", mem: &kaosv1alpha1.MemoryConfig{}, store: &kaosv1alpha1.MemoryStore{}, want: "session"},
+		{name: "missing store", mem: &kaosv1alpha1.MemoryConfig{}, want: "session"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := resolveMemoryScope(tt.mem, tt.store); got != tt.want {
-				t.Fatalf("resolveMemoryScope() = %q, want %q", got, tt.want)
+			if got := resolveDefaultReadScope(tt.mem, tt.store); got != tt.want {
+				t.Fatalf("resolveDefaultReadScope() = %q, want %q", got, tt.want)
 			}
 		})
 	}

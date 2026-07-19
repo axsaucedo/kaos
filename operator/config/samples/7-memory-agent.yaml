@@ -1,7 +1,7 @@
 ---
-# Sample 7: shared support memory with agents named by scope posture:
-# user-assistant (personalised, user-scoped recall), session-assistant
-# (conversation-only), and agent-bot (agent-isolated, no memory tools).
+# Sample 7: shared support memory with three read policies:
+# user-assistant (personalised recall), session-assistant (conversation-only),
+# and agent-bot (agent-level recall without explicit memory tools).
 # Deploy: kaos samples deploy 7-memory-agent -n <namespace>
 # Override the agent model with: kaos samples deploy 7-memory-agent --model <model>
 
@@ -63,7 +63,6 @@ spec:
     memory:
       type: remote
       memoryStore: support-memory
-      scope: user
       defaultReadScope: user
       readScopes:
       - session
@@ -89,7 +88,6 @@ spec:
     memory:
       type: remote
       memoryStore: support-memory
-      scope: session
       tools: read
       clientParams:
         tokenBudget: 64
@@ -109,7 +107,7 @@ spec:
     memory:
       type: remote
       memoryStore: support-memory
-      scope: agent
+      defaultReadScope: agent
       clientParams:
         tokenBudget: 64
         rollingSummary: true

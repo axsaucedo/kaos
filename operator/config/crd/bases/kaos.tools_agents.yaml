@@ -130,7 +130,7 @@ spec:
                       defaultReadScope:
                         description: |-
                           DefaultReadScope selects the single scope used by automatic recall. When
-                          omitted it resolves to the effective home Scope.
+                          omitted it resolves to the MemoryStore defaultReadScope, then session.
                         enum:
                         - agent
                         - user
@@ -168,16 +168,6 @@ spec:
                           - session
                           type: string
                         type: array
-                      scope:
-                        description: |-
-                          Scope selects whose memory this agent reads and writes. "user" and "group"
-                          require a bound memoryStore.
-                        enum:
-                        - agent
-                        - user
-                        - group
-                        - session
-                        type: string
                       tools:
                         description: |-
                           Tools exposes explicit memory tools to the agent on top of the automatic
@@ -204,10 +194,6 @@ spec:
                       rule: '!has(self.type) || self.type != ''remote'' || has(self.memoryStore)'
                     - message: type 'local' must not set memoryStore
                       rule: '!has(self.type) || self.type != ''local'' || !has(self.memoryStore)'
-                    - message: scope 'user' or 'group' requires memoryStore to be
-                        set
-                      rule: '!has(self.scope) || (self.scope != ''user'' && self.scope
-                        != ''group'') || has(self.memoryStore)'
                     - message: tools requires memoryStore to be set
                       rule: '!has(self.tools) || has(self.memoryStore)'
                     - message: defaultReadScope must be included in readScopes
