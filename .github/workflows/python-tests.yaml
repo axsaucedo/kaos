@@ -2,7 +2,6 @@ name: Python Tests
 
 on:
   pull_request:
-    branches: [main]
     paths:
       - 'pydantic-ai-server/**'
       - 'kaos-cli/**'

@@ -2,7 +2,6 @@ name: Go Tests
 
 on:
   pull_request:
-    branches: [main]
     paths:
       - 'operator/**'
       - '.github/workflows/go-tests.yaml'
