@@ -46,7 +46,7 @@ Temporal (bi-temporal validity) and procedural (skill) memory are **deferred** a
 
 ## Multi-tenancy: the scope model
 
-Every operation carries a **scope** that selects long-term read visibility and erasure. Writes preserve compound attribution independently of that selection: each record carries `user_id = <principal>` and `agent_id = <real agent identity>` whenever those identities are known, plus custom `kaos_run = <session id>` and `kaos_group = <store group>` metadata. The session is deliberately metadata rather than Mem0's `run_id` entity because Mem0 intersects every entity id during deduplication; leaving the session out of the entity set lets the same user-and-agent fact consolidate across runs.
+Reads and erasure carry a **scope** selecting long-term visibility. Writes instead carry level-less compound attribution: every verified principal and agent identity is attached, plus session and store-group metadata. Scope and attribution are derived server-side, never accepted from model arguments.
 
 | `scope` | Long-term read filter | Isolation boundary |
 |---------|-----------------------|--------------------|
@@ -57,16 +57,16 @@ Every operation carries a **scope** that selects long-term read visibility and e
 
 The `user_id = "*"` entry is Mem0 2.0.10's required wildcard convention for filtering by custom metadata; KAOS pins and regression-tests that behavior. Group membership is metadata, never a synthetic agent identity: `agent_id` always contains the real contributing agent. The group value comes from the active vector collection binding (`KAOS_MEMORY_LOCAL_COLLECTION` or `KAOS_MEMORY_EXTERNAL_COLLECTION`, default `kaos_memory`). That signal is always present even when telemetry is disabled, and the `MemoryStore` itself is the physical group boundary, so the collection name only needs to be stable within that store.
 
-### OIDC-conditional agent scope
+### Posture-derived enforcement
 
-Agent scope follows one static cluster mode; it does not change based on whether an individual request happens to carry a principal.
+Identity requirements follow one static cluster posture; agents cannot weaken or strengthen them.
 
 | Cluster mode | `agent` owner | Missing principal |
 |--------------|---------------|-------------------|
-| OIDC user identity enabled (`SecurityEnabled()` plus a configured user issuer) | `{agent_id, user_id}` | fail closed before recall or write |
+| OIDC user identity enabled (`SecurityEnabled()` plus a configured user issuer) | `{agent_id, user_id}` | writes fail closed; agent reads retain the two-key partition |
 | OIDC user identity disabled | `{agent_id}` | allowed; no user key participates in the agent read partition |
 
-The operator injects `MEMORY_USER_SCOPING=required` into memory-configured agent pods only in the first mode. The gateway verifies the user JWT and projects its `sub` claim into a reserved header; the runtime resolves that subject as the principal and propagates it over subsequent agent hops. `user` scope continues to require a principal, while `group` remains the deliberate cross-user publication surface.
+The operator injects `MEMORY_REQUIRE_PRINCIPAL=true` when secured user identity is enabled and `MEMORY_REQUIRE_AGENT_IDENTITY=true` whenever security is enabled. It projects equivalent `KAOS_MEMORY_*` settings into the MemoryStore pod, whose write check is authoritative. The runtime repeats the checks as defence in depth. Admin CLI recall and forget remain trusted in-cluster read/erasure paths and do not require agent identity.
 
 Autonomous execution uses the same rule without an exception. The loop's agent bearer self-subjects the run, so its owner is `{agent_id, agent-as-user}`. For a hybrid agent, this means autonomous findings are private to the loop and are not recalled into a human user's agent partition; making those findings human-visible is an explicit publication at `group` level.
 
@@ -76,7 +76,7 @@ Design choices:
 - **Isolation strength is chosen by how many stores you deploy.** The default is a shared store with scope filtering; deploying one `MemoryStore` per tenant gives **physical** isolation (data is not co-located), so a filtering defect cannot leak across tenants. No isolation-mode field exists.
 - **Scope selects long-term visibility, not write ownership.** A user-level read is deliberately broad: it returns everything that principal contributed through any agent and session. Compound attribution lets narrower agent/session reads and user/agent erasure reach the same physical fact without duplicating it.
 - **Conversational tiers are always per-session.** The verbatim window and medium-term digest use `kaos_group:<store group>|run:<session id>`; without a configured group an embedded store uses `run:<session id>`. The group is the consistent tenant component supplied by the service on both write and recall, while the unguessable run id is the capability that addresses one window through the scoped service and its network/RBAC boundary. Agent and principal identities live in a separate erasure index rather than the conversational key, so changing the recall scope cannot change the physical session partition. `scope: user` does not create a user-wide conversational window. Session forget deletes one key; user, agent, and group forget use the erasure index to delete every attributed session.
-- **Read policy is separate from the home scope.** `defaultReadScope` selects the one level used by baseline recall, while `readScopes` limits the required `level` enum on a single `search_memory` tool. The handler revalidates the entitlement and derives every owner server-side. Writes, including `save_memory`, remain on the resolved home scope. A broader read level still recalls the current session's conversational window; only its long-term filter broadens.
+- **Agent configuration is read-only.** `defaultReadScope` selects baseline recall and resolves Agent → MemoryStore → `session`; `readScopes` limits `search_memory`. Writes, including `save_memory`, carry attribution without a level.
 - **Enforcement is fail-closed at the service.** Scope is derived **server-side** from the authenticated agent identity and request context — never trusted from model- or tool-supplied arguments. An operation that cannot resolve a usable owner key fails rather than querying an unscoped store. Because the vector providers pre-filter during the query, a tenant's relevant memories are never dropped by an unfiltered nearest-neighbour window.
 - **Erasure fans out synchronously across tiers.** User and agent long-term erasure use Mem0's native entity deletion. Session and group erasure use wildcard-qualified custom filters, falling back to filtered id listing plus per-id deletion where the pinned Mem0 version lacks filtered deletion. Pre-existing alpha records without compound attribution cannot be reached by a newly available user-level erasure; there is no data migration.
 
@@ -95,13 +95,13 @@ Gateway-derived principals propagate automatically over cross-agent (A2A) delega
 
 ## Control plane
 
-The `MemoryStore` CRD describes **infrastructure, model bindings, and store-level defaults** (extraction concurrency, failure mode, and agent home scope). It deliberately does not carry the shared-window, digest, or sweeper marks — those are service-side configuration with env defaults, because they govern a window the service owns and are not per-agent policy. The two model roles reference an existing `ModelAPI`: `summarization` drives both Mem0's extraction prompt and the medium-term digest; `embedding` drives the vector index.
+The `MemoryStore` CRD describes infrastructure, model bindings, extraction/failure defaults, and the store-wide default read scope. The two model roles reference an existing `ModelAPI`: `summarization` drives extraction and digest generation; `embedding` drives the vector index.
 
-The Agent memory block selects a store by name and carries the agent-specific policy — home `scope`, `defaultReadScope`, entitled `readScopes`, `tools`, `failureMode`, and the two forwarded `clientParams` (`tokenBudget`, `rollingSummary`). Enabling memory applies an **automatic baseline** unconditionally (recall-and-inject before each run at the default read scope, flush-for-extraction after at the home scope); the `tools` knob layers **additive** explicit tools on top (`read` → level-aware `search_memory`, `write` → home-scoped `save_memory`, `all` → both).
+The Agent memory block selects a store and configures reads with `defaultReadScope`, `readScopes`, and tools. Enabling memory recalls before each run and flushes level-less attributed turns afterward.
 
 Binding is fail-closed and degradation-aware:
 
-- `type: remote` requires a `memoryStore`; `type: local` forbids one. `user`/`group` scope and any `tools` require a `memoryStore` (a pod-local store cannot serve cross-agent scopes or long-term tools), and are rejected rather than silently degraded.
+- `type: remote` requires a `memoryStore`; `type: local` forbids one. Non-session read scopes and any tools require a `memoryStore`. User read scopes additionally require a secured user-identity posture.
 - An `agent` owner is resolved from the injected `AGENT_IDENTITY` (`kaos://agent/<ns>/<name>`), never a name-only or empty owner, so identity-less agents cannot collapse onto one agent partition.
 - **Already-running** agents treat a missing/not-ready store as degraded: the operator surfaces a `MemoryDegraded` condition and keeps the pod Ready serving short-term-only — a store outage never removes a serving agent. Only **initial creation** is gated: with `waitForDependencies` (default) the agent stays `Waiting` until the bound store is Ready, so it never starts up degraded.
 

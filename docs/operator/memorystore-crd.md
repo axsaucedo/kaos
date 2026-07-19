@@ -79,9 +79,9 @@ spec:
   # "soft" tolerates memory-write failures; "strict" surfaces them as errors.
   defaultFailureMode: soft
 
-  # Default home/write scope for agents that omit config.memory.scope.
+  # Default read scope for agents that omit config.memory.defaultReadScope.
   # When omitted, agents fall back to "agent".
-  defaultScope: agent
+  defaultReadScope: agent
 ```
 
 ## Storage Modes
@@ -169,7 +169,7 @@ The `shortTerm`, `mediumTerm`, and `longTerm` blocks tune the three memory tiers
 | `longTerm.extraction.systemPrompt` | string | built-in | Fact-extraction prompt override |
 | `requestConcurrency` | int | `8` | Bounded request executor size |
 | `defaultFailureMode` | string | `soft` | Default write/forget failure mode for bound agents (`soft` or `strict`) |
-| `defaultScope` | string | `agent` | Default home/write scope for bound agents: `agent`, `user`, `group`, or `session`; an Agent `config.memory.scope` overrides it |
+| `defaultReadScope` | string | `session` | Default automatic read scope for bound agents: `agent`, `user`, `group`, or `session`; an Agent `config.memory.defaultReadScope` overrides it |
 
 ## Status
 
@@ -191,13 +191,13 @@ When ready, the store exposes an endpoint of the form `http://memorystore-<name>
 
 **Failure mode and degradation.** The store's `defaultFailureMode` (`soft` by default) governs how write and forget failures surface to bound agents. Under `soft`, a memory-write failure is tolerated: the agent's turn proceeds and the write is retried in the background. Under `strict`, the failure is surfaced as an error. Recall is always best-effort regardless of mode — if the long-term tier is unavailable, recall degrades to the short-term window rather than failing the turn. An individual Agent can override the store default in its `config.memory.failureMode`.
 
-**Default agent scope.** `defaultScope` supplies the home/write scope for bound agents that omit `config.memory.scope`. Resolution is Agent scope override, then store `defaultScope`, then `agent`. Read policy is configured on each Agent with `defaultReadScope` and `readScopes`.
+**Default read scope.** `defaultReadScope` supplies the automatic recall level for bound agents that omit their own value. Resolution is Agent `defaultReadScope`, then store `defaultReadScope`, then `session`.
 
 **Provisioning a development database.** For local development, `kaos system install --pgvector-memory-enabled` provisions a pgvector Postgres in the install namespace and writes a `kaos-memory-pgvector` connection Secret, ready to reference from an `external`-mode store's `connectionSecretRef`. This is a development convenience — production deployments point `connectionSecretRef` at a managed pgvector database.
 
 ## Binding an Agent
 
-Agents attach to a MemoryStore through their `config.memory` block. See the [Agent CRD](./agent-crd.md) memory section for the full binding surface (type, scope, tools, and failure mode).
+Agents attach to a MemoryStore through their `config.memory` block. See the [Agent CRD](./agent-crd.md) memory section for the full binding surface (type, read scopes, tools, and failure mode).
 
 ```yaml
 apiVersion: kaos.tools/v1alpha1
@@ -212,7 +212,7 @@ spec:
     memory:
       type: remote
       memoryStore: shared-memory
-      scope: user
+      defaultReadScope: user
       tools: all
 ```
 

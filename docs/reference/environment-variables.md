@@ -36,7 +36,10 @@ Injected by the operator on memory-enabled agents. For the full model see [Memor
 | `MEMORY_ENABLED` | Enable/disable memory (uses NullMemory when disabled) | `true` |
 | `MEMORY_TYPE` | Backend: `local` (pod-local short-term) or `remote` (bound MemoryStore) | derived |
 | `MEMORY_STORE_ENDPOINT` | Memory service URL; injected only for `remote` (selects `RemoteMemory`) | — |
-| `MEMORY_SCOPE` | Long-term scope: `agent`, `user`, `group`, `session` | `session` |
+| `MEMORY_DEFAULT_READ_SCOPE` | Automatic recall scope: `agent`, `user`, `group`, `session` | `session` |
+| `MEMORY_READ_SCOPES` | Comma-separated `search_memory` read entitlements | default read scope |
+| `MEMORY_REQUIRE_PRINCIPAL` | Require verified principal attribution on writes and narrow agent reads | posture-derived |
+| `MEMORY_REQUIRE_AGENT_IDENTITY` | Require stable agent attribution on writes | posture-derived |
 | `MEMORY_TOOLS` | Explicit memory tools: `all`, `read`, `write` (unset = none) | — |
 | `MEMORY_FAILURE_MODE` | Write/forget failure mode: `soft` or `strict` | store default |
 | `MEMORY_SHORT_TERM_TOKEN_BUDGET` | Verbatim short-term window cap, in tokens | runtime default |
@@ -138,7 +141,8 @@ The operator automatically sets these variables on agent pods:
 | `config.reasoningLoopMaxSteps` | `AGENTIC_LOOP_MAX_STEPS` |
 | `config.memory.enabled` | `MEMORY_ENABLED` |
 | `config.memory.type` | `MEMORY_TYPE` |
-| `config.memory.scope` | `MEMORY_SCOPE` |
+| `config.memory.defaultReadScope` | `MEMORY_DEFAULT_READ_SCOPE` |
+| `config.memory.readScopes` | `MEMORY_READ_SCOPES` |
 | `config.memory.tools` | `MEMORY_TOOLS` |
 | `config.memory.failureMode` | `MEMORY_FAILURE_MODE` |
 | `config.memory.clientParams.tokenBudget` | `MEMORY_SHORT_TERM_TOKEN_BUDGET` |
