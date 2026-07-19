@@ -618,7 +618,7 @@ class TestSamples:
             [
                 "samples",
                 "deploy",
-                "memory",
+                "7-memory-agent",
                 "--namespace",
                 "support-demo",
                 "--model",
@@ -672,7 +672,7 @@ class TestSamples:
         store = next(d for d in docs if d["kind"] == "MemoryStore")
         assert store["spec"]["storage"]["type"] == "local"
         agent = next(d for d in docs if d["kind"] == "Agent")
-        assert agent["spec"]["config"]["memory"]["memoryStore"] == "shared-memory"
+        assert agent["spec"]["config"]["memory"]["memoryStore"] == "support-memory"
         assert agent["spec"]["config"]["memory"]["scope"] == "user"
         result = runner.invoke(
             app, ["samples", "deploy", "1-simple-echo-agent", "--dry-run"]
@@ -891,7 +891,7 @@ class TestPackageData:
         from kaos_cli.samples import _get_sample_files
 
         files = _get_sample_files()
-        assert len(files) == 9
+        assert len(files) == 8
         names = [f.stem for f in files]
         assert "1-simple-echo-agent" in names
         assert "5-proxy-external-api" in names

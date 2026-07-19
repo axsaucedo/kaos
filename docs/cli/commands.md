@@ -574,7 +574,7 @@ kaos samples deploy 3-hierarchical-agents --namespace my-ns
 kaos samples deploy 1-simple-echo-agent --model "llama3:8b" --dry-run
 kaos samples deploy 1-simple-echo-agent --api-secret nebius-secrets:api-key
 kaos samples deploy 1-simple-echo-agent -n my-ns --modelapi my-existing-api
-kaos samples deploy memory -n support-demo --model gpt-4o-mini
+kaos samples deploy 7-memory-agent -n support-demo --model gpt-4o-mini
 ```
 
 ### kaos samples delete

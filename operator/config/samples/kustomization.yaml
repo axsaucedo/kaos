@@ -18,4 +18,3 @@ resources:
 - 6-autonomous-monitor.yaml
 - 7-memory-agent.yaml
 - 8-access-grant.yaml
-- memory.yaml

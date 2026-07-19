@@ -67,7 +67,7 @@ The important part is the agent's `config.memory` block:
 `DEBUG_MOCK_RESPONSES` makes the agent return a canned reply instead of calling the model, so the run is deterministic.
 
 ```bash
-kaos samples deploy memory -n "$NAMESPACE"
+kaos samples deploy 7-memory-agent -n "$NAMESPACE"
 ```
 
 ## Step 2: Wait for the Store and the Agent
