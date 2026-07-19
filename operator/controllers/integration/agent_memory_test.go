@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"strings"
 	"context"
 	"fmt"
 
@@ -224,6 +225,56 @@ var _ = Describe("Agent memory binding", func() {
 		overrideEnv := agentMemoryEnv(ctx, namespace, overrideName)
 		Expect(overrideEnv["MEMORY_DEFAULT_READ_SCOPE"]).To(Equal("agent"))
 		Expect(overrideEnv["MEMORY_READ_SCOPES"]).To(Equal("agent"))
+	})
+
+	It("rejects a user read scope when the cluster has no user identity", func() {
+		modelAPIName := uniqueAgentName("agent-mem-model")
+		modelAPI := createReadyModelAPI(ctx, namespace, modelAPIName)
+		defer func() { k8sClient.Delete(ctx, modelAPI) }()
+
+		storeName := uniqueAgentName("agent-store")
+		store := createReadyMemoryStore(ctx, namespace, storeName, modelAPIName)
+		defer func() { k8sClient.Delete(ctx, store) }()
+
+		agentName := uniqueAgentName("agent")
+		agent := &kaosv1alpha1.Agent{
+			ObjectMeta: metav1.ObjectMeta{Name: agentName, Namespace: namespace},
+			Spec: kaosv1alpha1.AgentSpec{
+				ModelAPI:            modelAPIName,
+				Model:               "mock-model",
+				WaitForDependencies: boolPtr(false),
+				Config: &kaosv1alpha1.AgentConfig{
+					Description: "user-scope agent without user identity",
+					Memory: &kaosv1alpha1.MemoryConfig{
+						Type:             "remote",
+						MemoryStore:      storeName,
+						DefaultReadScope: "user",
+						ReadScopes:       []string{"session", "user"},
+						Tools:            "read",
+					},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, agent)).To(Succeed())
+		defer func() { k8sClient.Delete(ctx, agent) }()
+
+		// The envtest posture has no user identity, so the reconcile fails
+		// closed with the named field instead of deploying a runtime error.
+		Eventually(func() bool {
+			updated := &kaosv1alpha1.Agent{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: agentName, Namespace: namespace}, updated); err != nil {
+				return false
+			}
+			if updated.Status.Phase != "Failed" || updated.Status.Ready {
+				return false
+			}
+			for _, c := range updated.Status.Conditions {
+				if c.Type == "Ready" && c.Status == metav1.ConditionFalse && c.Reason == "InvalidMemoryReadScope" {
+					return strings.Contains(c.Message, "config.memory.defaultReadScope")
+				}
+			}
+			return false
+		}, timeout, interval).Should(BeTrue())
 	})
 
 	It("stays Ready with a MemoryDegraded condition when the bound store is missing", func() {
