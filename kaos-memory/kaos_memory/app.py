@@ -168,12 +168,20 @@ def _thread_scheduler(thunk: Callable[[], None]) -> None:
 
 @dataclass
 class MemoryService:
-    """Holds the live store instances the request handlers operate on."""
+    """Holds the live store instances the request handlers operate on.
+
+    ``long_term_enabled=False`` turns the semantic tier off by configuration: the
+    write path skips fact extraction entirely and recall/list return no facts —
+    without marking responses degraded, because nothing failed. ``default_top_k``
+    is the recall result count used when a request omits ``top_k``.
+    """
 
     longterm: LongTermStore
     short_term: ShortTermStore
     scheduler: Scheduler = field(default=_thread_scheduler)
     default_failure_mode: FailureMode = "soft"
+    long_term_enabled: bool = True
+    default_top_k: int = 10
 
     def _resolve_failure_mode(self, requested: Optional[FailureMode]) -> FailureMode:
         """Layer the failure mode: an explicit per-request value wins, otherwise the
@@ -205,10 +213,12 @@ class MemoryService:
             span.set_attribute("kaos.memory.scope_level", req.scope.level.value)
             facts: list = []
             degraded = False
-            try:
-                facts = self.longterm.recall(req.scope, req.query, top_k=req.top_k)
-            except Exception:
-                degraded = True
+            if self.long_term_enabled:
+                top_k = req.top_k if req.top_k is not None else self.default_top_k
+                try:
+                    facts = self.longterm.recall(req.scope, req.query, top_k=top_k)
+                except Exception:
+                    degraded = True
 
             summary, recent = "", []
             if req.include_short_term and req.scope.session_id is not None:
@@ -234,10 +244,11 @@ class MemoryService:
             span.set_attribute("kaos.memory.scope_level", req.scope.level.value)
             facts: list = []
             degraded = False
-            try:
-                facts = self.longterm.get_all(req.scope)
-            except Exception:
-                degraded = True
+            if self.long_term_enabled:
+                try:
+                    facts = self.longterm.get_all(req.scope)
+                except Exception:
+                    degraded = True
 
             summary, recent = "", []
             if req.include_short_term and req.scope.session_id is not None:
@@ -290,6 +301,10 @@ class MemoryService:
             if not evicted:
                 # The turns are buffered in the window; nothing has left it yet, so there is
                 # no batch to consolidate. Extraction runs later, when a fold evicts.
+                return WriteResponse(accepted=True, scheduled=False, degraded=False)
+            if not self.long_term_enabled:
+                # The semantic tier is off by configuration: the evicted batch has been
+                # handled by the conversational tiers and no extraction runs. Not degraded.
                 return WriteResponse(accepted=True, scheduled=False, degraded=False)
 
             messages = [{"role": role, "content": content} for role, content in evicted]
@@ -440,6 +455,8 @@ def build_service(settings: MemorySettings) -> MemoryService:
         settings.summarization(),
         settings.embedding(),
         system_prompt=settings.extraction_system_prompt or None,
+        score_threshold=settings.score_threshold,
+        rerank=settings.rerank,
     )
     summarizer = ModelClient(
         settings.summarization(), system_prompt=settings.summarization_system_prompt or None
@@ -457,6 +474,8 @@ def build_service(settings: MemorySettings) -> MemoryService:
         short_term=short_term,
         scheduler=runner,
         default_failure_mode=settings.default_failure_mode,
+        long_term_enabled=settings.long_term_enabled,
+        default_top_k=settings.default_top_k,
     )
 
 
