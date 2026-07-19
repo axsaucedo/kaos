@@ -6,6 +6,8 @@ This page explains how KAOS memory works end to end — the tiers, the multi-ten
 
 Memory in KAOS is **augmentation, not a hard dependency**: it enriches an agent's context but a memory outage degrades an agent rather than stopping it. An agent binds to a `MemoryStore`, and the operator deploys a single central **memory service** that every bound agent calls over the network. The service composes three tiers behind one HTTP contract, applies a server-derived tenancy scope to every operation, and persists long-term facts through the Mem0 engine embedded as a library.
 
+The service exposes `POST /v1/recall` for semantic search, `POST /v1/list` for a complete scope-filtered long-term listing plus the current session's conversational tiers, `POST /v1/write` for turn persistence, and `POST /v1/forget` for scoped erasure. Recall and list both reject an unresolved owner before store access.
+
 ```mermaid
 graph LR
   subgraph agent["Agent pod"]

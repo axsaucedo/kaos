@@ -13,6 +13,9 @@ Subcommands:
 - `mcp` - MCPServer management
 - `agent` - Agent management  
 - `modelapi` - ModelAPI management
+- `memory` - MemoryStore recall and erasure
+- `memorystore` - MemoryStore creation
+- `samples` - Example deployment management
 - `ui` - Web UI
 
 ---
@@ -257,6 +260,10 @@ kaos agent deploy NAME --modelapi MODELAPI --model MODEL [OPTIONS]
 | `--instructions` | `-i` | Agent instructions |
 | `--mcp` | | MCP server references (multiple) |
 | `--sub-agent` | | Sub-agent references (multiple) |
+| `--memory-store` | | MemoryStore reference; enables remote memory |
+| `--memory-default-read-scope` | | Default read scope (requires `--memory-store`) |
+| `--memory-read-scopes` | | Comma-separated allowed read scopes (requires `--memory-store`) |
+| `--memory-tools` | | Memory tools to expose: `read`, `write`, or `all` (requires `--memory-store`) |
 
 **Examples:**
 ```bash
@@ -265,6 +272,9 @@ kaos agent deploy my-agent --modelapi my-api --model gpt-4o
 
 # With instructions and MCP tools
 kaos agent deploy my-agent -a my-api -m gpt-4o -i "You are a helpful assistant" --mcp calculator
+
+# With scoped remote memory
+kaos agent deploy my-agent -a my-api -m gpt-4o --memory-store support-memory --memory-default-read-scope user --memory-read-scopes session,agent,user,group --memory-tools read
 ```
 
 ### kaos agent list
@@ -302,13 +312,17 @@ kaos agent invoke NAME [OPTIONS]
 | Option | Short | Description |
 |--------|-------|-------------|
 | `--message` | `-m` | Message (required) |
+| `--namespace` | `-n` | Namespace of the Agent |
 | `--port` | `-p` | Local port (default: 9001) |
 | `--stream` | `-s` | Stream response |
+| `--session` | | Conversation session ID, sent as `X-Session-ID` |
 
 **Example:**
 ```bash
-kaos agent invoke my-agent --message "Hello, how are you?"
+kaos agent invoke my-agent -n my-namespace --session ticket-42 --message "Hello, how are you?"
 ```
+
+User identity is not selectable with an invoke flag. On OIDC-enabled clusters it comes from the verified bearer token presented through the gateway.
 
 ### kaos agent delete
 
@@ -316,6 +330,14 @@ Delete an Agent.
 
 ```bash
 kaos agent delete NAME [OPTIONS]
+```
+
+### kaos agent tools
+
+Show the tool names and JSON schemas an Agent presents to its model. This includes the entitled `level` enum on `search_memory`.
+
+```bash
+kaos agent tools NAME [-n NAMESPACE] [--json]
 ```
 
 ### kaos agent a2a send
@@ -375,6 +397,78 @@ kaos agent a2a cancel NAME --task-id TASK_ID [OPTIONS]
 | `--namespace` | `-n` | Namespace of the Agent |
 | `--port` | `-p` | Local port for port-forwarding (default: 9004) |
 | `--json` | | Output raw JSON response |
+
+---
+
+## kaos memory
+
+Inspect or erase a central `MemoryStore` through a temporary Kubernetes port-forward. `--store` can be omitted when the namespace contains exactly one `MemoryStore`.
+
+### kaos memory recall
+
+Use `--query` for semantic recall or `--all` for a complete scoped list. Add `--short-term` to include the current session's verbatim window and rolling summary.
+
+```bash
+kaos memory recall --store support-memory --scope session --session SESSION_ID --query TEXT [OPTIONS]
+kaos memory recall --store support-memory --scope agent --agent AGENT --all [OPTIONS]
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--store` | | MemoryStore name; optional when exactly one exists |
+| `--scope` | | `session`, `agent`, `user`, or `group` (required) |
+| `--session` | | Session ID; required only for session scope |
+| `--agent` | | Agent name; required only for agent scope |
+| `--user` | | User principal; required only for user scope. A username with a cached `kaos auth login` session resolves to its verified subject; anything else passes through verbatim |
+| `--query` | | Semantic query; mutually exclusive with `--all` |
+| `--all` | | List every long-term record visible at the scope |
+| `--short-term` | | Include conversational tiers when the scope carries a session |
+| `--top-k` | | Maximum semantic results (default: 10) |
+| `--namespace` | `-n` | Kubernetes namespace |
+| `--json` | | Output JSON |
+
+Agent names are expanded to the stable `kaos://agent/<namespace>/<name>` identity before the service call.
+
+### kaos memory forget
+
+Erase every long-term record and attributed conversational session at a scope. The command prints the resolved scope and prompts for confirmation unless `--yes` is passed.
+
+```bash
+kaos memory forget --store support-memory --scope user --user alice [-n NAMESPACE]
+kaos memory forget --store support-memory --scope group --yes
+```
+
+---
+
+## kaos memorystore
+
+MemoryStore creation commands.
+
+### kaos memorystore create
+
+Create a local, Chroma-backed MemoryStore with a 1Gi persistent volume.
+
+```bash
+kaos memorystore create NAME --modelapi MODELAPI [OPTIONS]
+```
+
+| Option | Short | Default | Description |
+|--------|-------|---------|-------------|
+| `NAME` | | | MemoryStore name (required) |
+| `--modelapi` | | | ModelAPI reference used by both models (required) |
+| `--summarization-model` | | `gpt-4o-mini` | Summarization model |
+| `--embedding-model` | | `text-embedding-3-small` | Embedding model |
+| `--short-term-token-budget` | | | Token budget, rendered as `KAOS_MEMORY_TOKEN_BUDGET` on this CRD version |
+| `--medium-term-enabled` | | false | Enable rolling summaries through `KAOS_MEMORY_ROLLING_SUMMARY` |
+| `--default-read-scope` | | | Default read scope |
+| `--failure-mode` | | | Default failure mode: `soft` or `strict` |
+| `--namespace` | `-n` | current | Target namespace |
+| `--dry-run` | | false | Print YAML instead of creating |
+
+**Example:**
+```bash
+kaos memorystore create support-memory --modelapi support-modelapi --short-term-token-budget 64 --medium-term-enabled -n support-demo
+```
 
 ---
 
@@ -520,6 +614,7 @@ kaos samples deploy 3-hierarchical-agents --namespace my-ns
 kaos samples deploy 1-simple-echo-agent --model "llama3:8b" --dry-run
 kaos samples deploy 1-simple-echo-agent --api-secret nebius-secrets:api-key
 kaos samples deploy 1-simple-echo-agent -n my-ns --modelapi my-existing-api
+kaos samples deploy 7-memory-agent -n support-demo --model gpt-4o-mini
 ```
 
 ### kaos samples delete

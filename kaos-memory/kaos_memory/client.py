@@ -1,7 +1,7 @@
 """The memory service HTTP client.
 
 :class:`MemoryServiceClient` is the framework-agnostic client for the KAOS memory
-service. It speaks the four endpoints of :mod:`kaos_memory.contract` over HTTP and
+service. It speaks the recall, write, and forget endpoints of :mod:`kaos_memory.contract` over HTTP and
 treats every call as best-effort: transport failures and degraded responses never
 raise (unless a write/forget explicitly selects ``failure_mode="strict"``), so a
 caller's request path is never taken down by memory being unavailable.

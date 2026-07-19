@@ -151,7 +151,8 @@ jobs:
           VERSION=${{ needs.validate.outputs.version }}
           sed -i "s/^version = .*/version = \"$VERSION\"/" pyproject.toml
           # Copy sample YAMLs from operator into package data
-          cp ../operator/config/samples/[0-9]*.yaml kaos_cli/samples/data/
+          cp ../operator/config/samples/*.yaml kaos_cli/samples/data/
+          rm kaos_cli/samples/data/kustomization.yaml
           # Guardrail: fail if no samples were copied
           SAMPLE_COUNT=$(ls kaos_cli/samples/data/*.yaml 2>/dev/null | wc -l)
           if [ "$SAMPLE_COUNT" -eq 0 ]; then

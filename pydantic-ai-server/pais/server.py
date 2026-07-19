@@ -5,7 +5,7 @@ import time
 import json
 import logging
 import sys
-from typing import Dict, Any, AsyncIterator, List, Optional, Union, TYPE_CHECKING
+from typing import Dict, Any, AsyncIterator, List, Optional, Union, TYPE_CHECKING, cast
 from contextlib import asynccontextmanager
 
 import kaos_identity
@@ -17,8 +17,9 @@ import uvicorn
 
 from pydantic_ai.mcp import MCPToolset
 from pydantic_ai.agent import Agent as PydanticAgent
+from pydantic_ai import RunContext
 from pydantic_ai.messages import ToolCallPart, ModelRequest, SystemPromptPart
-from pydantic_ai.usage import UsageLimits
+from pydantic_ai.usage import RunUsage, UsageLimits
 from pydantic_ai._agent_graph import CallToolsNode
 from pydantic_graph import End
 from pais.telemetry import (
@@ -261,6 +262,17 @@ class AgentServer:
             card = await self._get_agent_card(base_url)
             return JSONResponse(card.to_dict())
 
+        @self.app.get("/tools")
+        async def tools():
+            """Return the exact function definitions available to the model."""
+            try:
+                definitions = await self._get_tool_definitions()
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=503, detail=f"Could not list agent tools: {exc}"
+                ) from exc
+            return JSONResponse({"agent": self.settings.agent_name, "tools": definitions})
+
         # Memory endpoints (always enabled - used by UI and debugging)
         @self.app.get("/memory/events")
         async def get_memory_events(
@@ -400,6 +412,32 @@ class AgentServer:
             version=__version__,
             skills=skills,
             capabilities=capabilities,
+        )
+
+    async def _get_tool_definitions(self) -> list[dict[str, Any]]:
+        """Resolve the combined toolset into the definitions supplied to the model."""
+        configured_model = self._model or self._agent.model
+        if configured_model is None:
+            raise RuntimeError("agent model is not configured")
+        ctx: RunContext[AgentDeps] = RunContext(
+            deps=AgentDeps(session_id="", memory=self.memory, security_context={}),
+            model=cast(Any, configured_model),
+            usage=RunUsage(),
+            agent=self._agent,
+        )
+        toolset = self._agent._get_toolset()
+        async with toolset:
+            tools = await toolset.get_tools(ctx)
+        return sorted(
+            (
+                {
+                    "name": tool.tool_def.name,
+                    "description": tool.tool_def.description or "",
+                    "parameters_json_schema": tool.tool_def.parameters_json_schema,
+                }
+                for tool in tools.values()
+            ),
+            key=lambda tool: tool["name"],
         )
 
     async def _prepare_run(

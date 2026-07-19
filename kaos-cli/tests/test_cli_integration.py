@@ -249,6 +249,65 @@ class TestAgentDeployDryRun:
         )
         assert result.exit_code != 0
 
+    def test_agent_with_memory(self):
+        result = runner.invoke(
+            app,
+            [
+                "agent",
+                "deploy",
+                "assistant",
+                "--modelapi",
+                "support-modelapi",
+                "--model",
+                "gpt-4o-mini",
+                "--memory-store",
+                "support-memory",
+                "--memory-default-read-scope",
+                "user",
+                "--memory-read-scopes",
+                "session,agent,user,group",
+                "--memory-tools",
+                "read",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0
+        agent = yaml.safe_load(result.output)
+        assert agent["spec"]["config"]["memory"] == {
+            "type": "remote",
+            "memoryStore": "support-memory",
+            "defaultReadScope": "user",
+            "readScopes": ["session", "agent", "user", "group"],
+            "tools": "read",
+        }
+
+    @pytest.mark.parametrize(
+        "flag,value",
+        [
+            ("--memory-default-read-scope", "user"),
+            ("--memory-read-scopes", "session,user"),
+            ("--memory-tools", "read"),
+        ],
+    )
+    def test_memory_options_require_store(self, flag, value):
+        result = runner.invoke(
+            app,
+            [
+                "agent",
+                "deploy",
+                "assistant",
+                "--modelapi",
+                "api",
+                "--model",
+                "model",
+                flag,
+                value,
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code != 0
+        assert "require --memory-store" in result.output
+
 
 # ─── Agent deploy autonomous flags ─────────────────────────────────────
 
@@ -421,6 +480,79 @@ class TestAgentA2ACommands:
 
 
 # ─── ModelAPI deploy dry-run ────────────────────────────────────────────
+
+
+# ─── MemoryStore create dry-run ─────────────────────────────────────────
+
+
+class TestMemoryStoreCreateDryRun:
+    def test_default_store_shape_omits_optional_fields(self):
+        result = runner.invoke(
+            app,
+            [
+                "memorystore",
+                "create",
+                "support-memory",
+                "--modelapi",
+                "support-modelapi",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0
+        store = yaml.safe_load(result.output)
+        assert store == {
+            "apiVersion": "kaos.tools/v1alpha1",
+            "kind": "MemoryStore",
+            "metadata": {"name": "support-memory"},
+            "spec": {
+                "engine": "mem0",
+                "storage": {
+                    "type": "local",
+                    "local": {
+                        "provider": "chroma",
+                        "persistentVolume": {"size": "1Gi"},
+                    },
+                },
+                "models": {
+                    "summarization": {
+                        "modelAPI": "support-modelapi",
+                        "model": "gpt-4o-mini",
+                    },
+                    "embedding": {
+                        "modelAPI": "support-modelapi",
+                        "model": "text-embedding-3-small",
+                    },
+                },
+            },
+        }
+
+    def test_tier_and_default_flags(self):
+        result = runner.invoke(
+            app,
+            [
+                "memorystore",
+                "create",
+                "support-memory",
+                "--modelapi",
+                "support-modelapi",
+                "--short-term-token-budget",
+                "64",
+                "--medium-term-enabled",
+                "--default-read-scope",
+                "user",
+                "--failure-mode",
+                "strict",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0
+        spec = yaml.safe_load(result.output)["spec"]
+        assert spec["defaultReadScope"] == "user"
+        assert spec["defaultFailureMode"] == "strict"
+        assert spec["container"]["env"] == [
+            {"name": "KAOS_MEMORY_TOKEN_BUDGET", "value": "64"},
+            {"name": "KAOS_MEMORY_ROLLING_SUMMARY", "value": "true"},
+        ]
 
 
 class TestModelAPIDeployDryRun:
@@ -610,6 +742,54 @@ class TestSamples:
         assert "3-hierarchical-agents" in result.output
         assert "4-dev-ollama-proxy-agent" in result.output
         assert "5-proxy-external-api" in result.output
+        assert "memory" in result.output
+
+    def test_deploy_reusable_memory_sample_dry_run(self):
+        result = runner.invoke(
+            app,
+            [
+                "samples",
+                "deploy",
+                "7-memory-agent",
+                "--namespace",
+                "support-demo",
+                "--model",
+                "gpt-test",
+                "--dry-run",
+            ],
+        )
+
+        assert result.exit_code == 0
+        docs = [doc for doc in yaml.safe_load_all(result.output) if doc]
+        assert {doc["metadata"]["namespace"] for doc in docs} == {"support-demo"}
+        assert [doc["kind"] for doc in docs].count("ModelAPI") == 1
+        assert [doc["kind"] for doc in docs].count("MemoryStore") == 1
+        assert [doc["kind"] for doc in docs].count("Agent") == 3
+
+        store = next(doc for doc in docs if doc["kind"] == "MemoryStore")
+        assert store["metadata"]["name"] == "support-memory"
+        assert store["spec"]["storage"]["type"] == "local"
+        store_env = {
+            item["name"]: item["value"]
+            for item in store["spec"]["container"]["env"]
+        }
+        assert store_env["KAOS_MEMORY_TOKEN_BUDGET"] == "64"
+        assert store_env["KAOS_MEMORY_ROLLING_SUMMARY"] == "true"
+
+        agents = {
+            doc["metadata"]["name"]: doc for doc in docs if doc["kind"] == "Agent"
+        }
+        assert {agent["spec"]["model"] for agent in agents.values()} == {"gpt-test"}
+        assistant_memory = agents["assistant"]["spec"]["config"]["memory"]
+        assert assistant_memory["scope"] == "user"
+        assert assistant_memory["tools"] == "read"
+        assert assistant_memory["readScopes"] == ["session", "agent", "group"]
+        assert assistant_memory["clientParams"]["tokenBudget"] == 64
+        team_memory = agents["assistant-teamonly"]["spec"]["config"]["memory"]
+        assert team_memory["readScopes"] == ["session", "group"]
+        unrelated_memory = agents["unrelated-bot"]["spec"]["config"]["memory"]
+        assert unrelated_memory["scope"] == "agent"
+        assert "tools" not in unrelated_memory
 
     def test_deploy_memory_sample_dry_run(self):
         result = runner.invoke(
@@ -624,7 +804,7 @@ class TestSamples:
         store = next(d for d in docs if d["kind"] == "MemoryStore")
         assert store["spec"]["storage"]["type"] == "local"
         agent = next(d for d in docs if d["kind"] == "Agent")
-        assert agent["spec"]["config"]["memory"]["memoryStore"] == "shared-memory"
+        assert agent["spec"]["config"]["memory"]["memoryStore"] == "support-memory"
         assert agent["spec"]["config"]["memory"]["scope"] == "user"
         result = runner.invoke(
             app, ["samples", "deploy", "1-simple-echo-agent", "--dry-run"]

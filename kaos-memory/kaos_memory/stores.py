@@ -617,6 +617,11 @@ class LongTermStore:
         raw = self._memory.search(query, filters=scope.search_filters(self.group), top_k=top_k)
         return self._results(raw)
 
+    def get_all(self, scope: Scope) -> List[Dict[str, Any]]:
+        """Return every memory visible at ``scope`` using Mem0's filtered list surface."""
+        raw = self._memory.get_all(filters=scope.search_filters(self.group), top_k=1000)
+        return self._results(raw)
+
     def delete(self, memory_id: str) -> None:
         """Delete a single memory by id."""
         self._memory.delete(memory_id)
