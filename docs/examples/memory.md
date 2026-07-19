@@ -62,7 +62,7 @@ The important part is the agent's `config.memory` block:
 - `memoryStore: support-memory` binds all three agents to the store.
 - `assistant` and `assistant-teamonly` use a user home scope but expose different `search_memory` read levels.
 - `unrelated-bot` keeps agent-scoped memory and exposes no explicit memory tools.
-- A small `tokenBudget` makes conversational compaction easy to exercise.
+- The store tunes its tiers with typed fields: a small `shortTerm.tokenBudget` makes conversational compaction easy to exercise, and `mediumTerm.enabled` turns on the rolling digest that folds the overflow.
 
 `DEBUG_MOCK_RESPONSES` makes the agent return a canned reply instead of calling the model, so the run is deterministic.
 
