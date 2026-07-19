@@ -196,11 +196,13 @@ def scope_key(scope: Scope, group: Optional[str] = None) -> str:
 
 
 class RecallRequest(BaseModel):
-    """Synchronous recall: assemble context visible at ``scope`` for ``query``."""
+    """Synchronous recall: assemble context visible at ``scope`` for ``query``.
+
+    ``top_k`` overrides the store's configured default result count when set."""
 
     scope: Scope
     query: str
-    top_k: int = 10
+    top_k: Optional[int] = None
     include_short_term: bool = True
     short_term_token_budget: Optional[int] = None
 

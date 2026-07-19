@@ -146,6 +146,11 @@ class MemorySettings(BaseSettings):
 
     default_failure_mode: str = "soft"
 
+    long_term_enabled: bool = True
+    default_top_k: int = 10
+    score_threshold: Optional[float] = None
+    rerank: bool = False
+
     extraction_system_prompt: str = ""
     summarization_system_prompt: str = ""
 

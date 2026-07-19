@@ -570,6 +570,9 @@ class LongTermStore:
         storage: selects and configures the vector store (local Chroma / external pgvector).
         summarization: the extraction LLM binding (an OpenAI-compatible ModelAPI endpoint).
         embedding: the embedding model binding.
+        system_prompt: overrides Mem0's fact-extraction prompt when set.
+        score_threshold: minimum similarity score for recalled facts; None applies none.
+        rerank: enables Mem0's reranking of recall results.
     """
 
     def __init__(
@@ -578,6 +581,8 @@ class LongTermStore:
         summarization: ModelConfig,
         embedding: ModelConfig,
         system_prompt: Optional[str] = None,
+        score_threshold: Optional[float] = None,
+        rerank: bool = False,
     ) -> None:
         block = storage.resolved()
         # pgvector needs the embedding dimension; Chroma infers it.
@@ -592,6 +597,8 @@ class LongTermStore:
         # turn; unset leaves its built-in default extraction prompt in place.
         if system_prompt:
             config["custom_fact_extraction_prompt"] = system_prompt
+        self._score_threshold = score_threshold
+        self._rerank = rerank
         self._memory = Memory.from_config(config)
         # Mem0's dedup candidate search and insert are separate operations. Keep
         # them atomic within a service replica so overlapping session folds see
@@ -613,8 +620,18 @@ class LongTermStore:
         return self._results(raw)
 
     def recall(self, scope: Scope, query: str, top_k: int = 10) -> List[Dict[str, Any]]:
-        """Return memories relevant to ``query`` visible at ``scope`` (pre-filtered by owner)."""
-        raw = self._memory.search(query, filters=scope.search_filters(self.group), top_k=top_k)
+        """Return memories relevant to ``query`` visible at ``scope`` (pre-filtered by owner).
+
+        The configured score threshold and rerank flag are only passed through to the
+        engine when set, keeping the default call shape unchanged."""
+        kwargs: Dict[str, Any] = {}
+        if self._score_threshold is not None:
+            kwargs["threshold"] = self._score_threshold
+        if self._rerank:
+            kwargs["rerank"] = True
+        raw = self._memory.search(
+            query, filters=scope.search_filters(self.group), top_k=top_k, **kwargs
+        )
         return self._results(raw)
 
     def get_all(self, scope: Scope) -> List[Dict[str, Any]]:
