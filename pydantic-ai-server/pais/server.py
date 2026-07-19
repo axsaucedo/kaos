@@ -160,7 +160,7 @@ class AgentServer:
             principal=self.settings.security_principal or None,
             principal_resolver=(
                 _gateway_user_principal
-                if os.environ.get("MEMORY_USER_SCOPING", "").strip().lower() == "required"
+                if os.environ.get("MEMORY_REQUIRE_PRINCIPAL", "").strip().lower() == "true"
                 else None
             ),
         )
@@ -458,16 +458,11 @@ class AgentServer:
             security_context=kaos_identity.security_context(),
         )
 
-        # Keep the home scope on deps for post-run writes, and derive the
-        # independently configured read scope for this run's recall.
-        from pais.memory import scope_from_deps, reconstruct_message_history
+        from pais.memory import attribution_from_deps, scope_from_deps, reconstruct_message_history
 
-        home_scope = scope_from_deps(
-            deps,
-            level=self.settings.memory_scope,
-            agent_identity=self._agent_identity or None,
+        deps.memory_attribution = attribution_from_deps(
+            deps, agent_identity=self._agent_identity or None
         )
-        deps.memory_scope = home_scope
         read_scope = scope_from_deps(
             deps,
             level=self.settings.memory_default_read_scope,
@@ -510,8 +505,8 @@ class AgentServer:
         whole interaction lands together and eviction/extraction fires once per flush.
         No-op for short-term-only backends, whose ``write`` defaults to pass.
         """
-        scope = deps.memory_scope
-        if scope is None:
+        attribution = deps.memory_attribution
+        if attribution is None:
             return
         from pais.memory import pydantic_message_to_turns
 
@@ -521,7 +516,7 @@ class AgentServer:
         if not turns:
             return
         await self.memory.write(
-            scope,
+            attribution,
             turns,
             failure_mode=self.settings.memory_failure_mode or None,
         )
@@ -851,7 +846,6 @@ def create_agent_server(
 
     memory_toolset = build_memory_toolset(
         parse_memory_tools(settings.memory_tools),
-        ScopeLevel(settings.memory_scope),
         [ScopeLevel(scope) for scope in settings.memory_read_scopes.split(",")],
         agent_identity=settings.agent_identity or settings.security_actor or None,
     )

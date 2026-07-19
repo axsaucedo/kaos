@@ -83,7 +83,6 @@ class TestAgentCreationAndCard:
         )
         server._agent._user_toolsets.append(
             MemoryToolset(
-                ScopeLevel.USER,
                 [ScopeLevel.SESSION, ScopeLevel.GROUP],
                 expose_save=False,
             )

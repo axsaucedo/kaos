@@ -24,7 +24,7 @@ from pydantic_ai.messages import (
 from opentelemetry.propagate import inject
 
 if TYPE_CHECKING:
-    from pais.memory import Memory, MemoryScope
+    from pais.memory import Memory, MemoryAttribution
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +38,8 @@ class AgentDeps:
     # Non-secret request security context (request_id/session_id/principal/actor/scopes)
     # Populated by the identity runtime for audit/correlation; never carries raw bearer tokens.
     security_context: Optional[Dict[str, Any]] = None
-    # Server-derived memory scope for this run (principal/agent/session owner).
-    memory_scope: Optional["MemoryScope"] = None
+    # Server-derived attribution for writes in this run.
+    memory_attribution: Optional["MemoryAttribution"] = None
 
 
 class _MockResponseState:
@@ -412,10 +412,8 @@ class AgentServerSettings(BaseSettings):
     # backend; when empty the runtime falls back to the in-process short-term
     # LocalMemory backend (no long-term tier, pod-local).
     memory_store_endpoint: str = ""
-    memory_scope: str = "session"
-    # Automatic recall uses one default read scope. Empty values inherit the
-    # resolved home scope; read entitlements default to that one level.
-    memory_default_read_scope: str = ""
+    # Automatic recall uses one default read scope; read entitlements default to it.
+    memory_default_read_scope: str = "session"
     memory_read_scopes: str = ""
     # Additive explicit memory tools exposed to the agent on top of the automatic
     # recall-inject/write-extract baseline: "all" (save + search), "read" (search
@@ -461,11 +459,6 @@ class AgentServerSettings(BaseSettings):
     @model_validator(mode="after")
     def validate_memory_scopes(self):
         valid = {"session", "agent", "user", "group"}
-        if self.memory_scope not in valid:
-            raise ValueError(f"unknown memory_scope: {self.memory_scope}")
-
-        if not self.memory_default_read_scope:
-            self.memory_default_read_scope = self.memory_scope
         if self.memory_default_read_scope not in valid:
             raise ValueError(f"unknown memory_default_read_scope: {self.memory_default_read_scope}")
 

@@ -53,7 +53,7 @@ def test_request_through_server_runs_middleware_and_resets():
 
 
 def test_required_user_scoping_resolves_and_propagates_gateway_subject(monkeypatch):
-    monkeypatch.setenv("MEMORY_USER_SCOPING", "required")
+    monkeypatch.setenv("MEMORY_REQUIRE_PRINCIPAL", "true")
     server = create_agent_server(_settings())
 
     @server.app.get("/identity-test")
