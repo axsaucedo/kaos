@@ -14,6 +14,7 @@ Subcommands:
 - `agent` - Agent management  
 - `modelapi` - ModelAPI management
 - `memory` - MemoryStore recall and erasure
+- `memorystore` - MemoryStore creation
 - `samples` - Example deployment management
 - `ui` - Web UI
 
@@ -259,6 +260,10 @@ kaos agent deploy NAME --modelapi MODELAPI --model MODEL [OPTIONS]
 | `--instructions` | `-i` | Agent instructions |
 | `--mcp` | | MCP server references (multiple) |
 | `--sub-agent` | | Sub-agent references (multiple) |
+| `--memory-store` | | MemoryStore reference; enables remote memory |
+| `--memory-default-read-scope` | | Default read scope (requires `--memory-store`) |
+| `--memory-read-scopes` | | Comma-separated allowed read scopes (requires `--memory-store`) |
+| `--memory-tools` | | Memory tools to expose: `read`, `write`, or `all` (requires `--memory-store`) |
 
 **Examples:**
 ```bash
@@ -267,6 +272,9 @@ kaos agent deploy my-agent --modelapi my-api --model gpt-4o
 
 # With instructions and MCP tools
 kaos agent deploy my-agent -a my-api -m gpt-4o -i "You are a helpful assistant" --mcp calculator
+
+# With scoped remote memory
+kaos agent deploy my-agent -a my-api -m gpt-4o --memory-store support-memory --memory-default-read-scope user --memory-read-scopes session,agent,user,group --memory-tools read
 ```
 
 ### kaos agent list
@@ -428,6 +436,38 @@ Erase every long-term record and attributed conversational session at a scope. T
 ```bash
 kaos memory forget --store support-memory --scope user --user alice [-n NAMESPACE]
 kaos memory forget --store support-memory --scope group --yes
+```
+
+---
+
+## kaos memorystore
+
+MemoryStore creation commands.
+
+### kaos memorystore create
+
+Create a local, Chroma-backed MemoryStore with a 1Gi persistent volume.
+
+```bash
+kaos memorystore create NAME --modelapi MODELAPI [OPTIONS]
+```
+
+| Option | Short | Default | Description |
+|--------|-------|---------|-------------|
+| `NAME` | | | MemoryStore name (required) |
+| `--modelapi` | | | ModelAPI reference used by both models (required) |
+| `--summarization-model` | | `gpt-4o-mini` | Summarization model |
+| `--embedding-model` | | `text-embedding-3-small` | Embedding model |
+| `--short-term-token-budget` | | | Token budget, rendered as `KAOS_MEMORY_TOKEN_BUDGET` on this CRD version |
+| `--medium-term-enabled` | | false | Enable rolling summaries through `KAOS_MEMORY_ROLLING_SUMMARY` |
+| `--default-read-scope` | | | Default read scope |
+| `--failure-mode` | | | Default failure mode: `soft` or `strict` |
+| `--namespace` | `-n` | current | Target namespace |
+| `--dry-run` | | false | Print YAML instead of creating |
+
+**Example:**
+```bash
+kaos memorystore create support-memory --modelapi support-modelapi --short-term-token-budget 64 --medium-term-enabled -n support-demo
 ```
 
 ---
