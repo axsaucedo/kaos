@@ -300,6 +300,7 @@ var _ = Describe("MemoryStore Controller", func() {
 							Key:                  "dsn",
 						},
 						EmbeddingDims: int32Ptr(1536),
+						Collection:    "shared-col",
 					},
 				},
 				Models: kaosv1alpha1.MemoryModels{
@@ -331,6 +332,7 @@ var _ = Describe("MemoryStore Controller", func() {
 		}
 		Expect(envMap["KAOS_MEMORY_STORAGE_TYPE"]).To(Equal("external"))
 		Expect(envMap["KAOS_MEMORY_EXTERNAL_DIMS"]).To(Equal("1536"))
+		Expect(envMap["KAOS_MEMORY_EXTERNAL_COLLECTION"]).To(Equal("shared-col"))
 
 		// The DSN is sourced from the secret key, not rendered as a literal value.
 		Expect(dsnEnv).NotTo(BeNil())
@@ -359,6 +361,183 @@ var _ = Describe("MemoryStore Controller", func() {
 				Name: fmt.Sprintf("memorystore-%s-data", name), Namespace: namespace}, pvc)
 			return err != nil
 		}, "2s", interval).Should(BeTrue())
+	})
+
+	It("projects the conversational tier fields onto env with container.env overrides winning", func() {
+		modelAPIName := uniqueMemoryStoreName("mem-model")
+		modelAPI := createReadyModelAPI(ctx, namespace, modelAPIName)
+		defer func() { k8sClient.Delete(ctx, modelAPI) }()
+
+		boolPtr := func(v bool) *bool { return &v }
+		floatPtr := func(v float64) *float64 { return &v }
+
+		name := uniqueMemoryStoreName("tier-store")
+		store := &kaosv1alpha1.MemoryStore{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+			Spec: kaosv1alpha1.MemoryStoreSpec{
+				Storage: kaosv1alpha1.MemoryStorage{
+					Type:  kaosv1alpha1.MemoryStorageLocal,
+					Local: &kaosv1alpha1.LocalMemoryStorage{Collection: "support-col"},
+				},
+				Models: kaosv1alpha1.MemoryModels{
+					Summarization: kaosv1alpha1.MemoryModelRef{ModelAPI: modelAPIName, Model: "mock-model"},
+					Embedding:     kaosv1alpha1.MemoryModelRef{ModelAPI: modelAPIName, Model: "mock-embed"},
+				},
+				ShortTerm: &kaosv1alpha1.MemoryShortTermConfig{
+					TokenBudget:  int32Ptr(64),
+					HardEventCap: int32Ptr(10),
+				},
+				MediumTerm: &kaosv1alpha1.MemoryMediumTermConfig{
+					Enabled:           boolPtr(true),
+					CompactionTrigger: int32Ptr(48),
+					CompactionTarget:  int32Ptr(24),
+					DigestRetention:   int32Ptr(5),
+					SystemPrompt:      "fold tersely",
+				},
+				LongTerm: &kaosv1alpha1.MemoryLongTermConfig{
+					Enabled:        boolPtr(true),
+					DefaultTopK:    int32Ptr(5),
+					ScoreThreshold: floatPtr(0.4),
+					Rerank:         boolPtr(true),
+					Extraction: &kaosv1alpha1.MemoryExtractionConfig{
+						Concurrency:  int32Ptr(3),
+						MaxRetries:   int32Ptr(1),
+						SystemPrompt: "only extract deployment facts",
+					},
+				},
+				RequestConcurrency: int32Ptr(4),
+				Container: &kaosv1alpha1.ContainerOverride{
+					Env: []corev1.EnvVar{{Name: "KAOS_MEMORY_TOKEN_BUDGET", Value: "128"}},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, store)).To(Succeed())
+		defer func() { k8sClient.Delete(ctx, store) }()
+
+		deployment := &appsv1.Deployment{}
+		Eventually(func() error {
+			return k8sClient.Get(ctx, types.NamespacedName{
+				Name: fmt.Sprintf("memorystore-%s", name), Namespace: namespace}, deployment)
+		}, timeout, interval).Should(Succeed())
+
+		// The env map keeps the last occurrence of a name, mirroring how the kubelet
+		// resolves duplicates: the container.env override must win over the projection.
+		env := deployment.Spec.Template.Spec.Containers[0].Env
+		envMap := map[string]string{}
+		for _, e := range env {
+			envMap[e.Name] = e.Value
+		}
+		Expect(envMap["KAOS_MEMORY_LOCAL_COLLECTION"]).To(Equal("support-col"))
+		Expect(envMap["KAOS_MEMORY_HARD_EVENT_CAP"]).To(Equal("10"))
+		Expect(envMap["KAOS_MEMORY_ROLLING_SUMMARY"]).To(Equal("true"))
+		Expect(envMap["KAOS_MEMORY_COMPACTION_TRIGGER"]).To(Equal("48"))
+		Expect(envMap["KAOS_MEMORY_COMPACTION_TARGET"]).To(Equal("24"))
+		Expect(envMap["KAOS_MEMORY_DIGEST_RETENTION"]).To(Equal("5"))
+		Expect(envMap["KAOS_MEMORY_SUMMARIZATION_SYSTEM_PROMPT"]).To(Equal("fold tersely"))
+		Expect(envMap["KAOS_MEMORY_LONG_TERM_ENABLED"]).To(Equal("true"))
+		Expect(envMap["KAOS_MEMORY_DEFAULT_TOP_K"]).To(Equal("5"))
+		Expect(envMap["KAOS_MEMORY_SCORE_THRESHOLD"]).To(Equal("0.4"))
+		Expect(envMap["KAOS_MEMORY_RERANK"]).To(Equal("true"))
+		Expect(envMap["KAOS_MEMORY_EXTRACTION_CONCURRENCY"]).To(Equal("3"))
+		Expect(envMap["KAOS_MEMORY_EXTRACTION_MAX_RETRIES"]).To(Equal("1"))
+		Expect(envMap["KAOS_MEMORY_EXTRACTION_SYSTEM_PROMPT"]).To(Equal("only extract deployment facts"))
+		Expect(envMap["KAOS_MEMORY_REQUEST_CONCURRENCY"]).To(Equal("4"))
+
+		// The projected token budget appears before the explicit container.env
+		// override, so the override wins.
+		Expect(envMap["KAOS_MEMORY_TOKEN_BUDGET"]).To(Equal("128"))
+		values := []string{}
+		for _, e := range env {
+			if e.Name == "KAOS_MEMORY_TOKEN_BUDGET" {
+				values = append(values, e.Value)
+			}
+		}
+		Expect(values).To(Equal([]string{"64", "128"}))
+	})
+
+	It("projects no tier env when the tier blocks are absent", func() {
+		modelAPIName := uniqueMemoryStoreName("mem-model")
+		modelAPI := createReadyModelAPI(ctx, namespace, modelAPIName)
+		defer func() { k8sClient.Delete(ctx, modelAPI) }()
+
+		name := uniqueMemoryStoreName("untuned-store")
+		store := &kaosv1alpha1.MemoryStore{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+			Spec: kaosv1alpha1.MemoryStoreSpec{
+				Storage: kaosv1alpha1.MemoryStorage{Type: kaosv1alpha1.MemoryStorageLocal},
+				Models: kaosv1alpha1.MemoryModels{
+					Summarization: kaosv1alpha1.MemoryModelRef{ModelAPI: modelAPIName, Model: "mock-model"},
+					Embedding:     kaosv1alpha1.MemoryModelRef{ModelAPI: modelAPIName, Model: "mock-embed"},
+				},
+			},
+		}
+		Expect(k8sClient.Create(ctx, store)).To(Succeed())
+		defer func() { k8sClient.Delete(ctx, store) }()
+
+		deployment := &appsv1.Deployment{}
+		Eventually(func() error {
+			return k8sClient.Get(ctx, types.NamespacedName{
+				Name: fmt.Sprintf("memorystore-%s", name), Namespace: namespace}, deployment)
+		}, timeout, interval).Should(Succeed())
+
+		for _, e := range deployment.Spec.Template.Spec.Containers[0].Env {
+			Expect(e.Name).NotTo(BeElementOf(
+				"KAOS_MEMORY_TOKEN_BUDGET", "KAOS_MEMORY_HARD_EVENT_CAP",
+				"KAOS_MEMORY_ROLLING_SUMMARY", "KAOS_MEMORY_COMPACTION_TRIGGER",
+				"KAOS_MEMORY_COMPACTION_TARGET", "KAOS_MEMORY_DIGEST_RETENTION",
+				"KAOS_MEMORY_SUMMARIZATION_SYSTEM_PROMPT", "KAOS_MEMORY_LONG_TERM_ENABLED",
+				"KAOS_MEMORY_DEFAULT_TOP_K", "KAOS_MEMORY_SCORE_THRESHOLD",
+				"KAOS_MEMORY_RERANK", "KAOS_MEMORY_EXTRACTION_CONCURRENCY",
+				"KAOS_MEMORY_EXTRACTION_MAX_RETRIES", "KAOS_MEMORY_EXTRACTION_SYSTEM_PROMPT",
+				"KAOS_MEMORY_REQUEST_CONCURRENCY", "KAOS_MEMORY_LOCAL_COLLECTION",
+			))
+		}
+	})
+
+	It("rejects compaction marks the memory service would reject", func() {
+		base := func(name string) *kaosv1alpha1.MemoryStore {
+			return &kaosv1alpha1.MemoryStore{
+				ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+				Spec: kaosv1alpha1.MemoryStoreSpec{
+					Storage: kaosv1alpha1.MemoryStorage{Type: kaosv1alpha1.MemoryStorageLocal},
+					Models: kaosv1alpha1.MemoryModels{
+						Summarization: kaosv1alpha1.MemoryModelRef{ModelAPI: "m", Model: "mock-model"},
+						Embedding:     kaosv1alpha1.MemoryModelRef{ModelAPI: "m", Model: "mock-embed"},
+					},
+				},
+			}
+		}
+
+		// target >= trigger is rejected at admission, mirroring the service invariant.
+		invalid := base(uniqueMemoryStoreName("cel-target"))
+		invalid.Spec.MediumTerm = &kaosv1alpha1.MemoryMediumTermConfig{
+			CompactionTrigger: int32Ptr(100),
+			CompactionTarget:  int32Ptr(100),
+		}
+		Expect(k8sClient.Create(ctx, invalid)).NotTo(Succeed())
+
+		// trigger > tokenBudget is rejected.
+		invalid = base(uniqueMemoryStoreName("cel-trigger"))
+		invalid.Spec.ShortTerm = &kaosv1alpha1.MemoryShortTermConfig{TokenBudget: int32Ptr(64)}
+		invalid.Spec.MediumTerm = &kaosv1alpha1.MemoryMediumTermConfig{CompactionTrigger: int32Ptr(100)}
+		Expect(k8sClient.Create(ctx, invalid)).NotTo(Succeed())
+
+		// tokenBudget=1 derives target=1 and trigger=1 (target < trigger fails),
+		// exactly as ShortTermTierConfig rejects it at startup.
+		invalid = base(uniqueMemoryStoreName("cel-budget"))
+		invalid.Spec.ShortTerm = &kaosv1alpha1.MemoryShortTermConfig{TokenBudget: int32Ptr(1)}
+		Expect(k8sClient.Create(ctx, invalid)).NotTo(Succeed())
+
+		// 0-valued marks derive from the budget and pass, as the service accepts them.
+		valid := base(uniqueMemoryStoreName("cel-valid"))
+		valid.Spec.ShortTerm = &kaosv1alpha1.MemoryShortTermConfig{TokenBudget: int32Ptr(64)}
+		valid.Spec.MediumTerm = &kaosv1alpha1.MemoryMediumTermConfig{
+			Enabled:           func(v bool) *bool { return &v }(true),
+			CompactionTrigger: int32Ptr(0),
+			CompactionTarget:  int32Ptr(0),
+		}
+		Expect(k8sClient.Create(ctx, valid)).To(Succeed())
+		defer func() { k8sClient.Delete(ctx, valid) }()
 	})
 
 	It("should hold Pending until the referenced ModelAPIs are ready", func() {
