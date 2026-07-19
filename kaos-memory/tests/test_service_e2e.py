@@ -20,14 +20,19 @@ from kaos_memory.config import (
     StorageConfig,
     ShortTermTierConfig,
 )
-from kaos_memory.stores import LongTermStore
+from kaos_memory.stores import LongTermStore, Scope
 from kaos_memory.app import MemoryService, create_app
 from kaos_memory.stores import ShortTermStore
 from tests._fakes import DeterministicEmbedder
 
 OFFLINE = ModelConfig(base_url="http://127.0.0.1:0/v1", model="offline", api_key="t")
 
-USER_SCOPE = {"level": "user", "principal": "dave"}
+USER_SCOPE = {
+    "level": "user",
+    "principal": "dave",
+    "agent_client_id": "agent-a",
+    "session_id": "session-1",
+}
 
 
 @pytest.fixture(scope="module")
@@ -56,6 +61,7 @@ def _service(storage: StorageConfig, short_term_target: str) -> MemoryService:
         short_term_target,
         ShortTermTierConfig(hard_event_cap=1),
         lambda p, f: p,
+        group=storage.resolved().collection_name,
     )
     return MemoryService(longterm=longterm, short_term=short_term, scheduler=lambda thunk: thunk())
 
@@ -66,7 +72,7 @@ def _drive_and_assert(service: MemoryService, span_exporter, short_term_scope_ta
     def _write(content: str):
         return client.post(
             "/v1/write",
-            json={"scope": USER_SCOPE, "role": "user", "content": content, "infer": False},
+            json={"attribution": USER_SCOPE, "role": "user", "content": content, "infer": False},
         )
 
     # First turn buffers in the window without evicting: nothing consolidated yet.
@@ -107,6 +113,64 @@ def test_local_mode_end_to_end(tmp_path, span_exporter):
     storage = StorageConfig(type="local", local=LocalStorage(path=str(tmp_path / "lt")))
     service = _service(storage, str(tmp_path / "shortterm.db"))
     _drive_and_assert(service, span_exporter, str(tmp_path / "shortterm.db"))
+
+
+def test_user_forget_erases_compound_partition_across_all_tiers(tmp_path):
+    storage = StorageConfig(type="local", local=LocalStorage(path=str(tmp_path / "lt")))
+    longterm = LongTermStore(storage, OFFLINE, OFFLINE)
+    longterm._memory.embedding_model = DeterministicEmbedder()
+    short_term = ShortTermStore(
+        "local",
+        str(tmp_path / "shortterm.db"),
+        ShortTermTierConfig(token_budget=32, hard_event_cap=1, rolling_summary=True),
+        lambda prior, turns: (prior + " " + " ".join(text for _, text in turns)).strip(),
+        group=storage.resolved().collection_name,
+    )
+    service = MemoryService(
+        longterm=longterm, short_term=short_term, scheduler=lambda thunk: thunk()
+    )
+    client = TestClient(create_app(service))
+
+    alice = {
+        "level": "agent",
+        "principal": "alice",
+        "agent_client_id": "agent-a",
+        "session_id": "alice-session",
+        "user_scoping_required": True,
+    }
+    bob = {**alice, "principal": "bob", "session_id": "bob-session"}
+
+    for scope, owner in ((alice, "alice"), (bob, "bob")):
+        for content in (f"{owner} durable fact", f"{owner} recent turn"):
+            response = client.post(
+                "/v1/write",
+                json={"attribution": scope, "role": "user", "content": content, "infer": False},
+            )
+            assert response.status_code in (200, 202)
+
+    alice_scope = Scope.model_validate(alice)
+    bob_scope = Scope.model_validate(bob)
+    assert "alice durable fact" in short_term.summary(alice_scope)
+    assert short_term.active_window(alice_scope) == [("user", "alice recent turn")]
+    assert "bob durable fact" in short_term.summary(bob_scope)
+    assert short_term.active_window(bob_scope) == [("user", "bob recent turn")]
+
+    def longterm_texts(user_id):
+        raw = longterm._memory.get_all(filters={"user_id": user_id}, top_k=100)
+        return {item["memory"] for item in raw["results"]}
+
+    assert longterm_texts("alice") == {"alice durable fact"}
+    assert longterm_texts("bob") == {"bob durable fact"}
+
+    forgotten = client.post("/v1/forget", json={"scope": {"level": "user", "principal": "alice"}})
+    assert forgotten.status_code == 200
+
+    assert longterm_texts("alice") == set()
+    assert short_term.summary(alice_scope) == ""
+    assert short_term.active_window(alice_scope) == []
+    assert longterm_texts("bob") == {"bob durable fact"}
+    assert "bob durable fact" in short_term.summary(bob_scope)
+    assert short_term.active_window(bob_scope) == [("user", "bob recent turn")]
 
 
 @pytest.mark.pgvector

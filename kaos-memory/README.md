@@ -8,14 +8,14 @@
 | `kaos-memory[service]` | `kaos_memory.app`, `kaos_memory.stores`, `kaos_memory.config` | + Mem0, Chroma/pgvector, tiktoken, FastAPI |
 | `kaos-memory[pydantic-ai]` | `kaos_memory.pydantic_ai` | + Pydantic AI |
 
-- **`kaos_memory.contract`** — the single source of truth for the HTTP contract: the `Scope`/`ScopeLevel` identity and the recall/write/forget request and response schemas. Carries no engine or web-framework dependency, so both the service and the client import the same definitions.
+- **`kaos_memory.contract`** — the HTTP contract: `Scope` selects reads/erasure, while level-less `Attribution` carries write identities.
 - **`kaos_memory.client`** — `MemoryServiceClient`, the framework-agnostic best-effort HTTP client for the service (recall degrades to empty; write/forget are fail-soft unless `failure_mode="strict"`).
 - **`kaos_memory.pydantic_ai`** — direct Pydantic AI integration: message/turn adapters (`pydantic_message_to_turns`, `reconstruct_message_history`), server-side scope derivation (`scope_from_deps`), and the opt-in memory toolset (`MemoryTools`, `build_memory_toolset`).
 
 The service (`[service]` extra) composes two atomic, independently-testable stores:
 
-- **`LongTermStore`** — wraps [Mem0](https://github.com/mem0ai/mem0) as a library and exposes scope-mapped `write` / `recall` / `delete` / `delete_scope`. It is the only importer of `mem0`. Owner scoping is applied inside the vector query so recall never crosses tenants.
-- **`ShortTermStore`** — a scope-keyed relational short-term buffer bounding a verbatim recency window by a token budget, with an opt-in fold that compacts evicted turns into a versioned medium-term digest rather than truncating them. Folding is amortised by high/low water marks (evict down to the low mark on crossing the high mark), the digest is kept as append-only versions under a retention cap, and each fold's evicted batch is returned so callers can cascade it to long-term extraction. On Postgres the window is an UNLOGGED table and folds are serialised per scope by an advisory lock so replicas cannot double-fold.
+- **`LongTermStore`** — wraps [Mem0](https://github.com/mem0ai/mem0) as a library and exposes scope-mapped `write` / `recall` / `delete` / `delete_scope`. It is the only importer of `mem0`. Writes preserve compound user/agent attribution plus session/group metadata, and scope filters are applied inside vector queries so recall never crosses the selected boundary.
+- **`ShortTermStore`** — a per-session relational short-term buffer bounding a verbatim recency window by a token budget, with an opt-in fold that compacts evicted turns into a versioned per-session medium-term digest rather than truncating them. Every key combines the store group and session id, never the writing agent or principal, so the same run is addressable through any entitled recall scope while concurrent sessions never interleave raw turns. Folding is amortised by high/low water marks (evict down to the low mark on crossing the high mark), the digest is kept as append-only versions under a retention cap, and each fold's evicted batch is returned so callers can cascade it to long-term extraction. On Postgres the window is an UNLOGGED table and folds are serialised per session by an advisory lock so replicas cannot double-fold.
 
 Both bind their models to a resolved OpenAI-compatible endpoint (a KAOS `ModelAPI`) via a single `ModelConfig`, and run in one of two storage modes:
 
@@ -26,16 +26,18 @@ Both bind their models to a resolved OpenAI-compatible endpoint (a KAOS `ModelAP
 
 ## Scope model
 
-A `Scope` names whose memory an operation touches and maps onto a Mem0 owner identifier:
+A `Scope` selects long-term read visibility and erasure. An `Attribution` write carries every verified contributor (`user_id` and real `agent_id`) plus session/group metadata, with no scope level. The service authoritatively enforces `KAOS_MEMORY_REQUIRE_PRINCIPAL` and `KAOS_MEMORY_REQUIRE_AGENT_IDENTITY`; runtime checks are defence in depth.
 
-| Scope level | Mem0 owner key |
+| Scope level | Long-term read filter |
 | --- | --- |
-| `agent` | `agent_id` (this agent) |
-| `user` | `user_id` (a principal) |
-| `session` | `run_id` (one run) |
-| `group` | a reserved group owner id on `agent_id` |
+| `agent` | `agent_id = <real agent identity>` |
+| `user` | `user_id = <principal>`; includes everything that user contributed through any agent/session |
+| `session` | `user_id = "*"`, `kaos_run = <session id>` |
+| `group` | `user_id = "*"`, `kaos_group = <active collection name>` |
 
-`group` resolves to a reserved owner id rather than an empty filter because Mem0 rejects an owner-less search. This module ships only the correct translation; fail-closed enforcement is a later phase.
+The wildcard is the pinned Mem0 2.0.10 convention required for custom-metadata filters. The group value is the configured local/external collection name because one `MemoryStore` is the physical group boundary; there is no synthetic agent sentinel. User/agent erasure uses native entity deletion, while session/group erasure filters custom attribution and deletes matching ids when Mem0 lacks a filtered-delete surface.
+
+Short- and medium-term keys have the form `kaos_group:<store group>|run:<session id>` (or just `run:<session id>` without a configured group) for every scope. A missing session id fails loudly. The store group is the tenant boundary and the unguessable run id is the capability used through the scoped service and its network/RBAC boundary. A separate attribution index preserves user-, agent-, and group-level erasure without putting those identities into the session key. Group scope therefore shares extracted long-term facts across agents, not raw turns across sessions.
 
 ## Development
 

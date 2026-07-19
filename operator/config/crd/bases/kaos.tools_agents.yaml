@@ -127,6 +127,16 @@ spec:
                             minimum: 0
                             type: integer
                         type: object
+                      defaultReadScope:
+                        description: |-
+                          DefaultReadScope selects the single scope used by automatic recall. When
+                          omitted it resolves to the MemoryStore defaultReadScope, then session.
+                        enum:
+                        - agent
+                        - user
+                        - group
+                        - session
+                        type: string
                       enabled:
                         default: true
                         description: |-
@@ -146,17 +156,18 @@ spec:
                           MemoryStore is the name of a MemoryStore in the same namespace providing the
                           long-term tier for this agent.
                         type: string
-                      scope:
-                        default: agent
+                      readScopes:
                         description: |-
-                          Scope selects whose memory this agent reads and writes. "user" and "group"
-                          require a bound memoryStore.
-                        enum:
-                        - agent
-                        - user
-                        - group
-                        - session
-                        type: string
+                          ReadScopes lists the scope levels available to the explicit search_memory
+                          tool. When omitted it resolves to only DefaultReadScope.
+                        items:
+                          enum:
+                          - agent
+                          - user
+                          - group
+                          - session
+                          type: string
+                        type: array
                       tools:
                         description: |-
                           Tools exposes explicit memory tools to the agent on top of the automatic
@@ -183,12 +194,22 @@ spec:
                       rule: '!has(self.type) || self.type != ''remote'' || has(self.memoryStore)'
                     - message: type 'local' must not set memoryStore
                       rule: '!has(self.type) || self.type != ''local'' || !has(self.memoryStore)'
-                    - message: scope 'user' or 'group' requires memoryStore to be
-                        set
-                      rule: '!has(self.scope) || (self.scope != ''user'' && self.scope
-                        != ''group'') || has(self.memoryStore)'
                     - message: tools requires memoryStore to be set
                       rule: '!has(self.tools) || has(self.memoryStore)'
+                    - message: defaultReadScope must be included in readScopes
+                      rule: '!has(self.defaultReadScope) || !has(self.readScopes)
+                        || self.defaultReadScope in self.readScopes'
+                    - message: non-session defaultReadScope requires memoryStore to
+                        be set
+                      rule: '!has(self.defaultReadScope) || self.defaultReadScope
+                        == ''session'' || has(self.memoryStore)'
+                    - message: non-session readScopes require memoryStore to be set
+                      rule: '!has(self.readScopes) || self.readScopes.all(scope, scope
+                        == ''session'') || has(self.memoryStore)'
+                    - message: multiple readScopes require tools to be 'read' or 'all'
+                      rule: '!has(self.readScopes) || size(self.readScopes) <= 1 ||
+                        (has(self.tools) && (self.tools == ''read'' || self.tools
+                        == ''all''))'
                   reasoningLoopMaxSteps:
                     default: 5
                     description: ReasoningLoopMaxSteps is the maximum number of reasoning

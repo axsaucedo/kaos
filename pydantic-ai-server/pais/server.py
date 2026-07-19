@@ -5,7 +5,7 @@ import time
 import json
 import logging
 import sys
-from typing import Dict, Any, AsyncIterator, List, Optional, Union, TYPE_CHECKING
+from typing import Dict, Any, AsyncIterator, List, Optional, Union, TYPE_CHECKING, cast
 from contextlib import asynccontextmanager
 
 import kaos_identity
@@ -17,8 +17,9 @@ import uvicorn
 
 from pydantic_ai.mcp import MCPToolset
 from pydantic_ai.agent import Agent as PydanticAgent
+from pydantic_ai import RunContext
 from pydantic_ai.messages import ToolCallPart, ModelRequest, SystemPromptPart
-from pydantic_ai.usage import UsageLimits
+from pydantic_ai.usage import RunUsage, UsageLimits
 from pydantic_ai._agent_graph import CallToolsNode
 from pydantic_graph import End
 from pais.telemetry import (
@@ -99,6 +100,11 @@ def configure_logging(level: str = "INFO", otel_correlation: bool = False) -> No
 logger = logging.getLogger(__name__)
 
 
+def _gateway_user_principal(headers: Dict[str, str]) -> Optional[str]:
+    """Resolve the subject projected by the gateway's verified user JWT provider."""
+    return headers.get("x-user-claim-sub")
+
+
 class AgentServer:
     """AgentServer exposing OpenAI-compatible chat completions API."""
 
@@ -128,7 +134,7 @@ class AgentServer:
         self._agent_identity = settings.agent_identity or settings.security_actor or ""
         if task_manager_type == "local":
             setup_fn = self._mock_state.reset if self._mock_state else None
-            local_actor = self.settings.security_actor or f"kaos://agent/{self.settings.agent_name}"
+            local_actor = self._agent_identity or f"kaos://agent/{self.settings.agent_name}"
             self.task_manager: TaskManager = LocalTaskManager(
                 self._run_agent,
                 setup_fn=setup_fn,
@@ -146,12 +152,17 @@ class AgentServer:
         # Two-identity propagation: extract inbound user context at the
         # server boundary and inject the user subject + this agent's actor on outbound
         # A2A/MCP/ModelAPI calls. The SDK is not the enforcement boundary; it propagates.
-        local_actor = self.settings.security_actor or f"kaos://agent/{self.settings.agent_name}"
+        local_actor = self._agent_identity or f"kaos://agent/{self.settings.agent_name}"
         kaos_identity.instrument_fastapi(
             self.app,
             actor=local_actor,
             actor_token=self.settings.security_actor_token or None,
             principal=self.settings.security_principal or None,
+            principal_resolver=(
+                _gateway_user_principal
+                if os.environ.get("MEMORY_REQUIRE_PRINCIPAL", "").strip().lower() == "true"
+                else None
+            ),
         )
         # When no static actor token is configured, set up the managed actor-token
         # lifecycle: if broker credentials are mounted (AGENT_AUTH_CLIENT_ID/SECRET/
@@ -250,6 +261,17 @@ class AgentServer:
             base_url = f"http://localhost:{self.settings.agent_port}"
             card = await self._get_agent_card(base_url)
             return JSONResponse(card.to_dict())
+
+        @self.app.get("/tools")
+        async def tools():
+            """Return the exact function definitions available to the model."""
+            try:
+                definitions = await self._get_tool_definitions()
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=503, detail=f"Could not list agent tools: {exc}"
+                ) from exc
+            return JSONResponse({"agent": self.settings.agent_name, "tools": definitions})
 
         # Memory endpoints (always enabled - used by UI and debugging)
         @self.app.get("/memory/events")
@@ -392,6 +414,32 @@ class AgentServer:
             capabilities=capabilities,
         )
 
+    async def _get_tool_definitions(self) -> list[dict[str, Any]]:
+        """Resolve the combined toolset into the definitions supplied to the model."""
+        configured_model = self._model or self._agent.model
+        if configured_model is None:
+            raise RuntimeError("agent model is not configured")
+        ctx: RunContext[AgentDeps] = RunContext(
+            deps=AgentDeps(session_id="", memory=self.memory, security_context={}),
+            model=cast(Any, configured_model),
+            usage=RunUsage(),
+            agent=self._agent,
+        )
+        toolset = self._agent._get_toolset()
+        async with toolset:
+            tools = await toolset.get_tools(ctx)
+        return sorted(
+            (
+                {
+                    "name": tool.tool_def.name,
+                    "description": tool.tool_def.description or "",
+                    "parameters_json_schema": tool.tool_def.parameters_json_schema,
+                }
+                for tool in tools.values()
+            ),
+            key=lambda tool: tool["name"],
+        )
+
     async def _prepare_run(
         self,
         message: Union[str, List[Dict[str, str]]],
@@ -410,20 +458,21 @@ class AgentServer:
             security_context=kaos_identity.security_context(),
         )
 
-        # Derive the server-side memory scope (owner) for the long-term tier.
-        from pais.memory import scope_from_deps, reconstruct_message_history
+        from pais.memory import attribution_from_deps, scope_from_deps, reconstruct_message_history
 
-        scope = scope_from_deps(
+        deps.memory_attribution = attribution_from_deps(
+            deps, agent_identity=self._agent_identity or None
+        )
+        read_scope = scope_from_deps(
             deps,
-            level=self.settings.memory_scope,
+            level=self.settings.memory_default_read_scope,
             agent_identity=self._agent_identity or None,
         )
-        deps.memory_scope = scope
 
         # Recall long-term facts and the service-hosted short-term tier (best-effort;
         # short-term-only backends return an empty result and we fall back below).
         token_budget = self.settings.memory_short_term_token_budget or None
-        recalled = await self.memory.recall(scope, user_prompt, token_budget=token_budget)
+        recalled = await self.memory.recall(read_scope, user_prompt, token_budget=token_budget)
 
         # Local short-term tier log: keep recording the incoming turn for back-compat
         # (no-op for the service backend, whose short-term tier is written post-run).
@@ -456,8 +505,8 @@ class AgentServer:
         whole interaction lands together and eviction/extraction fires once per flush.
         No-op for short-term-only backends, whose ``write`` defaults to pass.
         """
-        scope = deps.memory_scope
-        if scope is None:
+        attribution = deps.memory_attribution
+        if attribution is None:
             return
         from pais.memory import pydantic_message_to_turns
 
@@ -467,7 +516,7 @@ class AgentServer:
         if not turns:
             return
         await self.memory.write(
-            scope,
+            attribution,
             turns,
             failure_mode=self.settings.memory_failure_mode or None,
         )
@@ -797,7 +846,7 @@ def create_agent_server(
 
     memory_toolset = build_memory_toolset(
         parse_memory_tools(settings.memory_tools),
-        ScopeLevel(settings.memory_scope),
+        [ScopeLevel(scope) for scope in settings.memory_read_scopes.split(",")],
         agent_identity=settings.agent_identity or settings.security_actor or None,
     )
     if memory_toolset is not None:

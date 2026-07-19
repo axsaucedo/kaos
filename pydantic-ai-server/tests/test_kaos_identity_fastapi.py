@@ -71,6 +71,18 @@ def test_principal_resolver_used_when_no_inbound_principal():
     assert seen["principal"] == "resolved://user"
 
 
+def test_verified_principal_resolver_overrides_inbound_principal():
+    client = _make_app(
+        actor="kaos://agent/default/a",
+        principal_resolver=lambda headers: headers.get("x-verified-sub"),
+    )
+    seen = client.get(
+        "/seen",
+        headers={"x-principal": "spoofed-user", "x-verified-sub": "verified-user"},
+    ).json()
+    assert seen["principal"] == "verified-user"
+
+
 def test_env_defaults_used(monkeypatch):
     monkeypatch.setenv("AGENT_AUTH_IDENTITY", "kaos://agent/default/env")
     monkeypatch.setenv("AGENT_AUTH_TOKEN", "env-token")

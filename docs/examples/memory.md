@@ -19,7 +19,7 @@ jupyter:
 
 This example shows how a KAOS **agent** uses a `MemoryStore`. When an agent is bound to a store, the runtime does two things automatically around every request: it **recalls** relevant memory and injects it into the model context *before* the run, and it **persists** the conversation *after* the run. On top of that automatic baseline, `memory.tools` optionally gives the model explicit `save_memory` / `search_memory` tools.
 
-The agent here uses **mock model responses**, so the demonstration is deterministic and needs no live LLM. What we actually verify is the integration: after the agent handles a message, we query the **memory service API** directly and confirm the conversation was written into the central store, then show a second, separate session reading the same memory back.
+The agent here uses **mock model responses**, so the demonstration is deterministic and needs no live LLM. What we actually verify is the integration: after the agent handles a message, we query the **memory service API** directly and confirm the conversation was written into that session's window, then show that a second session has its own window.
 
 ## Understanding the Flow
 
@@ -28,11 +28,11 @@ graph LR
     U1[Session 1: user message] --> A[Agent]
     A -->|automatic flush| M[(MemoryStore)]
     U2[Session 2: new session] --> A
-    M -->|automatic recall| A
-    A --> R[Earlier facts recalled ✓]
+    A -->|separate window| M
+    M --> R[Raw turns stay isolated ✓]
 ```
 
-Every request an agent handles flows through the same memory baseline — recall before, persist after — so memory written in one session is available to the next.
+Every request flows through the same baseline: scoped recall before the run, then a level-less attributed write. Identity requirements derive from cluster posture.
 
 ## Prerequisites
 
@@ -48,84 +48,26 @@ os.environ["NAMESPACE"] = "memory-example"
 ```
 
 ```bash
-kubectl create namespace "$NAMESPACE" 2>/dev/null || true
+mkdir -p ./tmp
+kubectl create namespace "$NAMESPACE" 2>./tmp/null || true
 kubectl config set-context --current --namespace="$NAMESPACE"
 ```
 
 ## Step 1: Deploy a Memory-Enabled Agent
 
-We deploy three resources: a `ModelAPI` (never actually called — the agent uses mock responses), a local-mode `MemoryStore` (embedded Chroma + a SQLite short-term window on a PersistentVolume, no external database), and an `Agent` bound to the store.
+We deploy the reusable `memory` sample: one `ModelAPI`, the local-mode `support-memory` store, and three agents with different read entitlements. The primary `user-assistant` uses a mock response, so the example never calls the model.
 
 The important part is the agent's `config.memory` block:
 
-- `memoryStore` binds the agent to the store.
-- `scope: group` keeps a single memory shared across every agent and session bound to this store (see [scopes](#scopes) below).
-- `tools: all` **enables the explicit memory tools** (`save_memory` and `search_memory`) on top of the automatic recall/persist baseline.
+- `memoryStore: support-memory` binds all three agents to the store.
+- `user-assistant` uses `defaultReadScope: user`; `session-assistant` keeps the session fallback.
+- `agent-bot` states `defaultReadScope: agent` and exposes no explicit memory tools.
+- The store tunes its tiers with typed fields: a small `shortTerm.tokenBudget` makes conversational compaction easy to exercise, and `mediumTerm.enabled` turns on the rolling digest that folds the overflow.
 
 `DEBUG_MOCK_RESPONSES` makes the agent return a canned reply instead of calling the model, so the run is deterministic.
 
 ```bash
-kubectl apply -n "$NAMESPACE" -f - <<'EOF'
-apiVersion: kaos.tools/v1alpha1
-kind: ModelAPI
-metadata:
-  name: memory-modelapi
-spec:
-  mode: Proxy
-  proxyConfig:
-    models:
-    - "*"
-  container:
-    env:
-    - name: OPENAI_API_KEY
-      value: "sk-placeholder"
----
-apiVersion: kaos.tools/v1alpha1
-kind: MemoryStore
-metadata:
-  name: shared-memory
-spec:
-  engine: mem0
-  storage:
-    type: local
-    local:
-      provider: chroma
-      persistentVolume:
-        size: "5Gi"
-  models:
-    summarization:
-      modelAPI: memory-modelapi
-      model: gpt-4o-mini
-    embedding:
-      modelAPI: memory-modelapi
-      model: text-embedding-3-small
-  defaultFailureMode: soft
----
-apiVersion: kaos.tools/v1alpha1
-kind: Agent
-metadata:
-  name: memory-agent
-spec:
-  modelAPI: memory-modelapi
-  model: gpt-4o-mini
-  container:
-    env:
-    - name: DEBUG_MOCK_RESPONSES
-      value: '["Noted — your favourite deployment port is 8080."]'
-  config:
-    description: "An assistant that remembers user facts across sessions"
-    instructions: |
-      You are a helpful assistant with long-term memory. Remember facts the
-      user tells you and recall them in later conversations.
-    memory:
-      type: remote
-      memoryStore: shared-memory
-      scope: group
-      tools: all
-      failureMode: soft
-  agentNetwork:
-    expose: true
-EOF
+kaos samples deploy 7-memory-agent -n "$NAMESPACE"
 ```
 
 ## Step 2: Wait for the Store and the Agent
@@ -134,49 +76,53 @@ The `MemoryStore` comes up first; the agent's Deployment is only created once it
 
 ```bash
 for i in $(seq 1 90); do
-  phase=$(kubectl get memorystore/shared-memory -n "$NAMESPACE" -o jsonpath='{.status.phase}' 2>/dev/null)
+  phase=$(kubectl get memorystore/support-memory -n "$NAMESPACE" -o jsonpath='{.status.phase}' 2>./tmp/null)
   [ "$phase" = "Ready" ] && break
   sleep 2
 done
 echo "MemoryStore phase: $phase"
 
 for i in $(seq 1 60); do
-  kubectl get deployment/agent-memory-agent -n "$NAMESPACE" >/dev/null 2>&1 && break
+  kubectl get deployment/agent-user-assistant -n "$NAMESPACE" >./tmp/null 2>&1 && break
   sleep 2
 done
-kubectl wait --for=condition=available deployment/agent-memory-agent -n "$NAMESPACE" --timeout=180s
+kubectl wait --for=condition=available deployment/agent-user-assistant -n "$NAMESPACE" --timeout=180s
+kaos agent tools user-assistant -n "$NAMESPACE" --json
 ```
+
+The tool output shows `search_memory.parameters_json_schema.properties.level.enum` as `session`, `agent`, `user`, and `group`. Run the same command for `session-assistant` to see its narrower `session`-only entitlement.
 
 ## Step 3: Session 1 — Talk to the Agent
 
 Send the agent a fact to remember. This is an ordinary chat request; the agent handles it and, because it is bound to the store, **automatically persists the conversation** afterwards:
 
 ```bash
-kaos agent invoke memory-agent -n "$NAMESPACE" \
-  -m "My favourite deployment port is 8080"
+AGENT_PORT=$(kubectl get svc/agent-user-assistant -n "$NAMESPACE" -o jsonpath='{.spec.ports[0].port}')
+kubectl port-forward -n "$NAMESPACE" svc/agent-user-assistant "19001:$AGENT_PORT" \
+  > ./tmp/memory-agent-port-forward.log 2>&1 &
+AGENT_PF=$!
+sleep 4
+curl --fail --retry 5 --retry-connrefused -s http://localhost:19001/v1/chat/completions \
+  -H 'content-type: application/json' \
+  -H 'x-principal: alice' \
+  -H 'x-session-id: memory-session-1' \
+  -d '{"messages": [{"role": "user", "content": "My favourite deployment port is 8080"}]}'
+kill "$AGENT_PF" 2>./tmp/null || true
 ```
 
 ## Step 4: Verify the Agent Wrote to the Store
 
-Now we confirm the integration by asking the **memory service** directly. The agent reaches the store at `memorystore-shared-memory:8080`; we port-forward it and recall the group scope. The turns the agent just handled are there — proof the agent persisted the conversation to the central store:
+Now we confirm the integration through `kaos memory`. `--all` uses the store's faithful list path, while session scope and `--short-term` return the same conversation's rolling summary and verbatim window:
 
 ```bash
-kubectl port-forward -n "$NAMESPACE" svc/memorystore-shared-memory 18080:8080 \
-  >/dev/null 2>&1 &
-PF=$!
-sleep 4
-curl -s http://localhost:18080/v1/recall \
-  -H 'content-type: application/json' \
-  -d '{"scope": {"level": "group"}, "query": "deployment port", "include_short_term": true}' \
-  > recall-session1.json
-kill "$PF" 2>/dev/null || true
-cat recall-session1.json
+kaos memory recall --store support-memory --scope session --session memory-session-1 --all --short-term -n "$NAMESPACE" --json > ./tmp/recall-session1.json
+cat ./tmp/recall-session1.json
 ```
 
 ```python
 import json
 
-recall = json.load(open("recall-session1.json"))
+recall = json.load(open("./tmp/recall-session1.json"))
 recent = [tuple(pair) for pair in recall["short_term"]["recent"]]
 print("Stored turns:", recent)
 
@@ -184,58 +130,42 @@ assert ("user", "My favourite deployment port is 8080") in recent
 print("SUCCESS: the agent persisted the conversation to the MemoryStore")
 ```
 
-## Step 5: Session 2 — A New Session Recalls Earlier Memory
+## Step 5: Session 2 — A Separate Conversational Window
 
-`kaos agent invoke` opens a fresh session each time. On this second, separate request the agent's automatic recall pulls the earlier turns from the shared store and injects them into the model context before it answers:
-
-```bash
-kaos agent invoke memory-agent -n "$NAMESPACE" \
-  -m "What deployment port did I choose earlier?"
-```
-
-The store now holds turns from **both** sessions — the agent read the shared memory on this run and wrote to it again. Recall once more to see the cross-session accumulation:
+Recall a different session directly. Its verbatim conversational window starts empty because conversational tiers are always session-keyed:
 
 ```bash
-kubectl port-forward -n "$NAMESPACE" svc/memorystore-shared-memory 18080:8080 \
-  >/dev/null 2>&1 &
-PF=$!
-sleep 4
-curl -s http://localhost:18080/v1/recall \
-  -H 'content-type: application/json' \
-  -d '{"scope": {"level": "group"}, "query": "deployment port", "include_short_term": true}' \
-  > recall-session2.json
-kill "$PF" 2>/dev/null || true
+kaos memory recall --store support-memory --scope session --session memory-session-2 --all --short-term -n "$NAMESPACE" --json > ./tmp/recall-session2.json
 ```
 
 ```python
-recall = json.load(open("recall-session2.json"))
+recall = json.load(open("./tmp/recall-session2.json"))
 recent = [tuple(pair) for pair in recall["short_term"]["recent"]]
-print("Cross-session memory:", recent)
+print("Session 2 window:", recent)
 
-assert ("user", "My favourite deployment port is 8080") in recent
-assert ("user", "What deployment port did I choose earlier?") in recent
-print("SUCCESS: both sessions share one cross-session memory the agent reads and writes")
+assert recent == []
+print("SUCCESS: each session keeps an independent verbatim window")
 ```
 
 ## Enabling the Tools
 
-The agent above sets `tools: all`. Memory always applies the **automatic baseline** (recall before a run, persist after) — that is what Steps 3–5 exercised. `tools` layers explicit, model-driven tools on top:
+The primary `user-assistant` sets `tools: read`. Memory always applies the **automatic baseline** (recall before a run, persist after) — that is what Steps 3–5 exercised. `tools` layers explicit, model-driven tools on top:
 
-| Setting | Tools exposed | The model can… |
-|---------|---------------|----------------|
-| _(unset)_ | none | rely purely on automatic recall/persist |
-| `read` | `search_memory` | look facts up on demand |
-| `write` | `save_memory` | save a durable fact on demand |
-| `all` | both | save and search on demand |
+| Setting | Tools exposed | Arguments | The model can… |
+|---------|---------------|-----------|----------------|
+| _(unset)_ | none | — | rely purely on automatic recall/persist |
+| `read` | `search_memory` | `query`, required entitled `level` | look facts up at `session`, `agent`, `user`, or `group` when configured |
+| `write` | `save_memory` | `content` | save a durable fact with server-derived attribution |
+| `all` | both | as above | save and search on demand |
 
-The tools never take a scope from the model — the scope is derived server-side from the agent's configured level and identity, so a tool call can only ever touch memory the agent is entitled to. Genuine semantic use of `save_memory` (distilling and recalling facts in natural language) needs a real embedding model, shown next.
+`search_memory` accepts a validated read level but never owner values. `save_memory` accepts content only; principal, agent, and session attribution come from authenticated dependencies.
 
 ## Scopes
 
-Memory is partitioned by `scope`, set on the agent's `config.memory` block:
+Reads are partitioned by scope through `defaultReadScope` and `readScopes`; writes attach every verified contributor without a level:
 
 - `session` — one conversation only.
-- `group` — shared by every agent and session on the store (used here).
+- `group` — extracted facts are shared by every agent and session on the store; raw turns remain session-local.
 - `user` — all sessions for an authenticated principal.
 - `agent` — only this specific agent.
 
@@ -268,14 +198,14 @@ With a real embedder, a `save_memory` tool call (or automatic extraction) distil
 ## How It Works
 
 - **Automatic recall + persist** — bound agents recall relevant memory before every run and persist the conversation after, with no code changes.
-- **Short-term window** — recent turns are stored verbatim per scope for conversational continuity; no model is needed.
-- **Long-term memory** — the embedding model makes distilled facts semantically searchable; `tools: all` lets the model save and search them explicitly.
+- **Short-term window** — recent turns are stored verbatim per session for conversational continuity; no model is needed.
+- **Long-term memory** — the embedding model makes distilled facts semantically searchable; `tools: read` lets the primary `user-assistant` search its entitled levels explicitly.
 - **Scope** — memory is isolated by scope, so sessions, users, and agents only see what they are entitled to.
 - **Storage** — `local` mode keeps everything in one pod (Chroma + SQLite on a PVC); `external` mode uses pgvector for production and horizontal scaling.
 
 ## Cleanup
 
 ```bash
-rm -f recall-session1.json recall-session2.json
-kubectl delete namespace "$NAMESPACE" --wait=false 2>/dev/null || true
+rm -f ./tmp/recall-session1.json ./tmp/recall-session2.json
+kubectl delete namespace "$NAMESPACE" --wait=false 2>./tmp/null || true
 ```

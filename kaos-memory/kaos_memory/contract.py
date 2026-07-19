@@ -2,13 +2,13 @@
 
 This module is the single source of truth for the HTTP contract between the
 memory service and its clients. It carries no storage-engine or web-framework
-dependencies (only Pydantic), so both the service (which serves these schemas)
-and the client (which speaks them) import the same definitions rather than
-maintaining parallel copies that can drift.
+dependencies (only Pydantic), so the service, runtime client, and administrative
+callers import the same definitions rather than maintaining parallel copies that
+can drift.
 
 The scope value objects (:class:`ScopeLevel`, :class:`Scope`) identify whose
-memory an operation touches; the request/response models mirror the four
-endpoints (recall, write, forget). Owner-key mapping onto the storage engine is
+memory an operation touches; the request/response models mirror the operation
+endpoints (recall, list, write, forget). Owner-key mapping onto the storage engine is
 kept here on :class:`Scope` because it depends only on the scope fields, but it
 is exercised solely by the service.
 """
@@ -19,11 +19,6 @@ from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field, model_validator
-
-#: Reserved owner id naming the store-wide group namespace. It is mapped onto
-#: ``agent_id`` and is deliberately distinct from any real agent client id, so a
-#: ``group`` operation never collides with an ``agent``-scoped one.
-GROUP_OWNER = "kaos:group"
 
 #: A write/forget failure mode: ``"soft"`` swallows long-term errors and returns
 #: degraded; ``"strict"`` surfaces them. When omitted the service default applies.
@@ -45,6 +40,40 @@ class ScopeLevel(str, Enum):
     SESSION = "session"
 
 
+class Attribution(BaseModel):
+    """Verified contributors attached to a memory write."""
+
+    principal: Optional[str] = None
+    agent_client_id: Optional[str] = None
+    session_id: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _normalise(self) -> "Attribution":
+        for field in ("principal", "agent_client_id", "session_id"):
+            value = getattr(self, field)
+            if value is not None and value.strip() == "":
+                object.__setattr__(self, field, None)
+        return self
+
+    def write_kwargs(self, group: Optional[str] = None) -> Dict[str, Any]:
+        """Return compound Mem0 attribution for every verified contributor."""
+        kwargs: Dict[str, Any] = {}
+        if self.principal is not None:
+            kwargs["user_id"] = self.principal
+        if self.agent_client_id is not None:
+            kwargs["agent_id"] = self.agent_client_id
+        if not kwargs:
+            raise ValueError("memory write requires principal or agent_client_id")
+        metadata = {}
+        if self.session_id is not None:
+            metadata["kaos_run"] = self.session_id
+        if group:
+            metadata["kaos_group"] = group
+        if metadata:
+            kwargs["metadata"] = metadata
+        return kwargs
+
+
 class Scope(BaseModel):
     """Identifies the owner of a memory operation.
 
@@ -62,6 +91,7 @@ class Scope(BaseModel):
     principal: Optional[str] = None
     agent_client_id: Optional[str] = None
     session_id: Optional[str] = None
+    user_scoping_required: bool = False
 
     @model_validator(mode="after")
     def _normalise(self) -> "Scope":
@@ -75,7 +105,9 @@ class Scope(BaseModel):
     def is_complete(self) -> bool:
         """Whether the field required by ``level`` is present (a usable owner key exists)."""
         if self.level is ScopeLevel.AGENT:
-            return self.agent_client_id is not None
+            return self.agent_client_id is not None and (
+                not self.user_scoping_required or self.principal is not None
+            )
         if self.level is ScopeLevel.USER:
             return self.principal is not None
         if self.level is ScopeLevel.SESSION:
@@ -83,15 +115,19 @@ class Scope(BaseModel):
         return True  # GROUP always resolves to the reserved owner.
 
     def owner_kwargs(self) -> Dict[str, Any]:
-        """Return the Mem0 owner keyword arguments for a write/search at this scope.
+        """Return the Mem0 entity owner keys selected by this scope.
 
-        Exactly one of ``user_id`` / ``agent_id`` / ``run_id`` is set. Raises if the
-        field required by ``level`` is missing, so an unusable scope never silently
-        widens to another owner.
+        Entity-scoped operations normally use one of ``user_id`` / ``agent_id`` /
+        ``run_id``. Required user-scoped agent operations use both user and agent.
+        Group scope has no synthetic entity owner and raises instead of mapping to a sentinel.
         """
         if self.level is ScopeLevel.AGENT:
             if self.agent_client_id is None:
                 raise ValueError("agent scope requires agent_client_id")
+            if self.user_scoping_required:
+                if self.principal is None:
+                    raise ValueError("user-scoped agent scope requires principal")
+                return {"user_id": self.principal, "agent_id": self.agent_client_id}
             return {"agent_id": self.agent_client_id}
         if self.level is ScopeLevel.USER:
             if self.principal is None:
@@ -101,22 +137,68 @@ class Scope(BaseModel):
             if self.session_id is None:
                 raise ValueError("session scope requires session_id")
             return {"run_id": self.session_id}
-        return {"agent_id": GROUP_OWNER}
+        raise ValueError("group scope has no Mem0 entity owner")
 
-    def search_filters(self) -> Dict[str, Any]:
+
+    def search_filters(self, group: Optional[str] = None) -> Dict[str, Any]:
         """Return the Mem0 ``filters`` dict for a search at this scope.
 
-        Identical to the owner kwargs: Mem0 2.x uses the same owner keys inside the
-        ``filters`` argument and requires at least one of them, which this always
-        provides.
+        User and agent visibility use their native entity ids. Session and group
+        visibility use custom attribution metadata plus Mem0's required entity
+        wildcard compatibility convention.
         """
-        return self.owner_kwargs()
+        if self.level is ScopeLevel.USER:
+            if self.principal is None:
+                raise ValueError("user scope requires principal")
+            return {"user_id": self.principal}
+        if self.level is ScopeLevel.AGENT:
+            if self.agent_client_id is None:
+                raise ValueError("agent scope requires agent_client_id")
+            if self.user_scoping_required:
+                if self.principal is None:
+                    raise ValueError("user-scoped agent scope requires principal")
+                return {"user_id": self.principal, "agent_id": self.agent_client_id}
+            return {"agent_id": self.agent_client_id}
+        if self.level is ScopeLevel.SESSION:
+            if self.session_id is None:
+                raise ValueError("session scope requires session_id")
+            return {"user_id": "*", "kaos_run": self.session_id}
+        if not group:
+            raise ValueError("group scope requires the store group")
+        return {"user_id": "*", "kaos_group": group}
 
 
-def scope_key(scope: Scope) -> str:
-    """Stable string key for a scope's short-term window (one owner key -> 'key:value')."""
-    ((key, value),) = scope.owner_kwargs().items()
-    return f"{key}:{value}"
+def scope_owner_key(scope: Scope, group: Optional[str] = None) -> str:
+    """Return the selected owner portion of a conversational-tier key."""
+    if scope.level is ScopeLevel.AGENT:
+        if scope.agent_client_id is None:
+            raise ValueError("agent scope requires agent_client_id")
+        return f"agent_id:{scope.agent_client_id}"
+    if scope.level is ScopeLevel.USER:
+        if scope.principal is None:
+            raise ValueError("user scope requires principal")
+        return f"user_id:{scope.principal}"
+    if scope.level is ScopeLevel.SESSION:
+        if scope.session_id is None:
+            raise ValueError("session scope requires session_id")
+        return f"kaos_run:{scope.session_id}"
+    if not group:
+        raise ValueError("group scope requires the store group")
+    return f"kaos_group:{group}"
+
+
+def scope_key(scope: Scope, group: Optional[str] = None) -> str:
+    """Return the stable store-local key for a conversational session.
+
+    Conversational tiers belong to the run, not to the agent or principal that
+    wrote a turn. The configured store group is the tenant boundary when one is
+    available; the unguessable session id is the capability within that boundary.
+    """
+    if scope.session_id is None:
+        raise ValueError("conversational memory requires session_id")
+    if group:
+        return f"kaos_group:{group}|run:{scope.session_id}"
+    return f"run:{scope.session_id}"
 
 
 # --------------------------------------------------------------------------- #
@@ -125,11 +207,21 @@ def scope_key(scope: Scope) -> str:
 
 
 class RecallRequest(BaseModel):
-    """Synchronous recall: assemble context visible at ``scope`` for ``query``."""
+    """Synchronous recall: assemble context visible at ``scope`` for ``query``.
+
+    ``top_k`` overrides the store's configured default result count when set."""
 
     scope: Scope
     query: str
-    top_k: int = 10
+    top_k: Optional[int] = None
+    include_short_term: bool = True
+    short_term_token_budget: Optional[int] = None
+
+
+class ListRequest(BaseModel):
+    """List every long-term record visible at a scope, with optional conversation tiers."""
+
+    scope: Scope
     include_short_term: bool = True
     short_term_token_budget: Optional[int] = None
 
@@ -152,7 +244,7 @@ class WriteRequest(BaseModel):
     strict (surface failures as an error); when omitted it inherits the service default.
     """
 
-    scope: Scope
+    attribution: Attribution
     turns: List[Turn] = Field(default_factory=list)
     role: Optional[str] = None
     content: Optional[str] = None

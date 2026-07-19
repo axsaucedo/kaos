@@ -9,6 +9,8 @@ from kaos_cli.system import app as system_app
 from kaos_cli.mcp import app as mcp_app
 from kaos_cli.agent import app as agent_app
 from kaos_cli.modelapi import app as modelapi_app
+from kaos_cli.memory import app as memory_app
+from kaos_cli.memorystore import app as memorystore_app
 from kaos_cli.samples import app as samples_app
 from kaos_cli.config_cli import app as config_app
 from kaos_cli.auth import app as auth_app
@@ -46,6 +48,8 @@ app.add_typer(system_app, name="system")
 app.add_typer(mcp_app, name="mcp")
 app.add_typer(agent_app, name="agent")
 app.add_typer(modelapi_app, name="modelapi")
+app.add_typer(memory_app, name="memory")
+app.add_typer(memorystore_app, name="memorystore")
 app.add_typer(samples_app, name="samples")
 app.add_typer(config_app, name="config")
 app.add_typer(auth_app, name="auth")

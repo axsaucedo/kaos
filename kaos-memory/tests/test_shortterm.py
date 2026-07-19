@@ -287,14 +287,71 @@ def test_clear_removes_turns_and_summary(tmp_path):
     assert store.summary(SCOPE) == ""
 
 
-def test_scopes_are_isolated(tmp_path):
+def test_sessions_are_isolated_within_the_same_owner(tmp_path):
     store = _sqlite_store(tmp_path, token_budget=10_000)
-    a = Scope(level=ScopeLevel.SESSION, session_id="run-a")
-    b = Scope(level=ScopeLevel.SESSION, session_id="run-b")
+    a = Scope(level=ScopeLevel.USER, principal="alice", session_id="run-a")
+    b = Scope(level=ScopeLevel.USER, principal="alice", session_id="run-b")
     store.add(a, [("user", "alpha")])
     store.add(b, [("user", "beta")])
     assert store.active_window(a) == [("user", "alpha")]
     assert store.active_window(b) == [("user", "beta")]
+
+
+def test_session_delete_removes_only_that_session(tmp_path):
+    store = _sqlite_store(tmp_path, token_budget=10_000)
+    first = Scope(level=ScopeLevel.SESSION, session_id="run-a")
+    second = Scope(level=ScopeLevel.SESSION, session_id="run-b")
+    store.add(first, [("user", "alpha")])
+    store.add(second, [("user", "beta")])
+
+    store.delete(first)
+
+    assert store.active_window(first) == []
+    assert store.active_window(second) == [("user", "beta")]
+
+
+def test_owner_delete_removes_all_sessions_under_exact_prefix(tmp_path):
+    store = _sqlite_store(tmp_path, token_budget=10_000)
+    alice_a = Scope(level=ScopeLevel.USER, principal="alice", session_id="run-a")
+    alice_b = Scope(level=ScopeLevel.USER, principal="alice", session_id="run-b")
+    alicia = Scope(level=ScopeLevel.USER, principal="alicia", session_id="run-c")
+    store.add(alice_a, [("user", "alpha")])
+    store.add(alice_b, [("user", "beta")])
+    store.add(alicia, [("user", "keep")])
+
+    store.delete(Scope(level=ScopeLevel.USER, principal="alice"))
+
+    assert store.active_window(alice_a) == []
+    assert store.active_window(alice_b) == []
+    assert store.active_window(alicia) == [("user", "keep")]
+
+
+def test_group_delete_removes_all_group_sessions(tmp_path):
+    path = str(tmp_path / "group.db")
+    store = ShortTermStore(
+        "local",
+        path,
+        ShortTermTierConfig(token_budget=10_000),
+        _fake_summarizer,
+        group="team-a",
+    )
+    first = Scope(level=ScopeLevel.GROUP, session_id="run-a")
+    second = Scope(level=ScopeLevel.GROUP, session_id="run-b")
+    store.add(first, [("user", "alpha")])
+    store.add(second, [("user", "beta")])
+
+    store.delete(Scope(level=ScopeLevel.GROUP))
+
+    assert store.active_window(first) == []
+    assert store.active_window(second) == []
+
+
+def test_conversational_store_fails_without_session(tmp_path):
+    store = _sqlite_store(tmp_path, token_budget=10_000)
+    scope = Scope(level=ScopeLevel.USER, principal="alice")
+
+    with pytest.raises(ValueError, match="requires session_id"):
+        store.add(scope, [("user", "must not be shared")])
 
 
 @pytest.mark.pgvector

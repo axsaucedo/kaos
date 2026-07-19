@@ -11,7 +11,7 @@ from typing import Dict, Any, List, Optional, Tuple, Union, Deque, Mapping
 from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
 
-from kaos_memory.contract import Scope, ScopeLevel
+from kaos_memory.contract import Attribution, Scope, ScopeLevel
 from kaos_memory.client import (
     MemoryServiceClient,
     RecalledMemory,
@@ -19,6 +19,7 @@ from kaos_memory.client import (
     MediumTermRecall,
 )
 from kaos_memory.pydantic_ai import (
+    attribution_from_deps,
     scope_from_deps,
     pydantic_message_to_turns,
     reconstruct_message_history,
@@ -27,6 +28,7 @@ from kaos_memory.pydantic_ai import (
 # Back-compat alias: the runtime historically named the scope MemoryScope; it is
 # the shared contract Scope, re-exported so existing imports keep working.
 MemoryScope = Scope
+MemoryAttribution = Attribution
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +114,7 @@ class Memory(ABC):
 
     async def write(
         self,
-        scope: "MemoryScope",
+        attribution: "MemoryAttribution",
         turns: List[Tuple[str, str]],
         *,
         infer: bool = True,
@@ -524,13 +526,13 @@ class RemoteMemory(Memory):
 
     async def write(
         self,
-        scope: "MemoryScope",
+        attribution: "MemoryAttribution",
         turns: List[Tuple[str, str]],
         *,
         infer: bool = True,
         failure_mode: Optional[str] = None,
     ) -> bool:
-        return await self._service.write(scope, turns, infer=infer, failure_mode=failure_mode)
+        return await self._service.write(attribution, turns, infer=infer, failure_mode=failure_mode)
 
     async def forget(self, scope: "MemoryScope", *, failure_mode: Optional[str] = None) -> bool:
         return await self._service.forget(scope, failure_mode=failure_mode)

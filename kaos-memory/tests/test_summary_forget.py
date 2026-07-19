@@ -7,7 +7,7 @@ from kaos_memory.stores import Scope, ScopeLevel
 from kaos_memory.app import MemoryService, create_app
 from kaos_memory.stores import ShortTermStore
 
-USER_SCOPE = {"level": "user", "principal": "carol"}
+USER_SCOPE = {"level": "user", "principal": "carol", "session_id": "session-1"}
 
 
 class _RecordingLongTerm:
@@ -51,7 +51,7 @@ def test_overflow_summarizes_server_side(tmp_path):
         ShortTermTierConfig(token_budget=4, rolling_summary=True),
         summarizer,
     )
-    scope = Scope(level=ScopeLevel.USER, principal="carol")
+    scope = Scope(level=ScopeLevel.USER, principal="carol", session_id="session-1")
     for i in range(5):
         short_term.add(scope, [("user", f"message number {i} with several tokens here")])
 
@@ -64,7 +64,7 @@ def test_forget_clears_both_tiers(tmp_path):
         "local", str(tmp_path / "w.db"), ShortTermTierConfig(), lambda p, f: p
     )
     longterm = _RecordingLongTerm()
-    scope = Scope(level=ScopeLevel.USER, principal="carol")
+    scope = Scope(level=ScopeLevel.USER, principal="carol", session_id="session-1")
     short_term.add(scope, [("user", "something to remember")])
     assert short_term.active_window(scope)
 
@@ -84,7 +84,7 @@ def test_forget_soft_degrades_on_longterm_failure(tmp_path):
     short_term = ShortTermStore(
         "local", str(tmp_path / "w.db"), ShortTermTierConfig(), lambda p, f: p
     )
-    scope = Scope(level=ScopeLevel.USER, principal="carol")
+    scope = Scope(level=ScopeLevel.USER, principal="carol", session_id="session-1")
     short_term.add(scope, [("user", "x")])
 
     resp = _client(_BrokenDelete(), short_term).post(
@@ -94,3 +94,60 @@ def test_forget_soft_degrades_on_longterm_failure(tmp_path):
     assert resp.json()["degraded"] is True
     # Short-term tier was still cleared despite the long-term failure.
     assert short_term.active_window(scope) == []
+
+
+def test_user_forget_clears_all_attributed_tiers_and_preserves_other_users(tmp_path):
+    class _AttributedLongTerm(_RecordingLongTerm):
+        def __init__(self):
+            super().__init__()
+            self.facts = [
+                {"principal": "alice", "agent": "agent-a", "memory": "alice one"},
+                {"principal": "alice", "agent": "agent-b", "memory": "alice two"},
+                {"principal": "bob", "agent": "agent-a", "memory": "bob control"},
+            ]
+
+        def delete_scope(self, scope):
+            super().delete_scope(scope)
+            self.facts = [fact for fact in self.facts if fact["principal"] != scope.principal]
+
+    short_term = ShortTermStore(
+        "local",
+        str(tmp_path / "w.db"),
+        ShortTermTierConfig(token_budget=4, rolling_summary=True),
+        lambda prior, turns: (prior + " " + " ".join(c for _, c in turns)).strip(),
+        group="team-a",
+    )
+    alice_first = Scope(
+        level=ScopeLevel.AGENT,
+        principal="alice",
+        agent_client_id="agent-a",
+        session_id="alice-1",
+    )
+    alice_second = alice_first.model_copy(
+        update={"agent_client_id": "agent-b", "session_id": "alice-2"}
+    )
+    bob = alice_first.model_copy(update={"principal": "bob", "session_id": "bob-1"})
+    for scope, marker in (
+        (alice_first, "alice first"),
+        (alice_second, "alice second"),
+        (bob, "bob control"),
+    ):
+        short_term.add(
+            scope,
+            [("user", f"remember {marker} across the rolling summary"), ("assistant", marker)],
+        )
+        assert short_term.summary(scope)
+        assert short_term.active_window(scope)
+
+    longterm = _AttributedLongTerm()
+    response = _client(longterm, short_term).post(
+        "/v1/forget", json={"scope": {"level": "user", "principal": "alice"}}
+    )
+
+    assert response.status_code == 200
+    for scope in (alice_first, alice_second):
+        assert short_term.summary(scope) == ""
+        assert short_term.active_window(scope) == []
+    assert short_term.summary(bob)
+    assert short_term.active_window(bob) == [("assistant", "bob control")]
+    assert longterm.facts == [{"principal": "bob", "agent": "agent-a", "memory": "bob control"}]

@@ -12,6 +12,7 @@ from kaos_cli.agent.deploy import deploy_agent
 from kaos_cli.agent.invoke import invoke_command
 from kaos_cli.agent.status import status_command
 from kaos_cli.agent.memory import memory_command
+from kaos_cli.agent.tools import tools_command
 from kaos_cli.agent.init import init_command
 from kaos_cli.agent.build import build_command
 from kaos_cli.agent.run import run_command
@@ -252,6 +253,18 @@ def deploy_agent_cmd(
     task_max_tool_calls: int = typer.Option(
         None, "--task-max-tool-calls", help="Max cumulative tool calls for A2A async tasks (0=unlimited)."
     ),
+    memory_store: str = typer.Option(
+        None, "--memory-store", help="MemoryStore reference."
+    ),
+    memory_default_read_scope: str = typer.Option(
+        None, "--memory-default-read-scope", help="Default memory read scope."
+    ),
+    memory_read_scopes: str = typer.Option(
+        None, "--memory-read-scopes", help="Comma-separated allowed memory read scopes."
+    ),
+    memory_tools: str = typer.Option(
+        None, "--memory-tools", help="Memory tools to expose: read, write, or all."
+    ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Print YAML instead of deploying."
     ),
@@ -272,6 +285,19 @@ def deploy_agent_cmd(
     if build is not None and not image:
         typer.echo("Error: --build requires --image to be set", err=True)
         sys.exit(1)
+
+    if not memory_store and any(
+        (memory_default_read_scope, memory_read_scopes, memory_tools)
+    ):
+        typer.echo(
+            "Error: memory read scope and tools flags require --memory-store",
+            err=True,
+        )
+        raise typer.Exit(1)
+    if memory_tools not in (None, "read", "write", "all"):
+        raise typer.BadParameter(
+            "must be 'read', 'write', or 'all'", param_hint="--memory-tools"
+        )
 
     # Run build if requested
     if build is not None:
@@ -308,6 +334,10 @@ def deploy_agent_cmd(
         task_max_iterations=task_max_iterations,
         task_max_runtime=task_max_runtime,
         task_max_tool_calls=task_max_tool_calls,
+        memory_store=memory_store,
+        memory_default_read_scope=memory_default_read_scope,
+        memory_read_scopes=memory_read_scopes,
+        memory_tools=memory_tools,
         wait=wait,
         wait_timeout=wait_timeout,
         dry_run=dry_run,
@@ -343,11 +373,21 @@ def invoke_agent(
         "--user",
         help="Invoke through the gateway with this user's cached token.",
     ),
+    session: str = typer.Option(
+        None,
+        "--session",
+        help="Conversation session ID.",
+    ),
 ) -> None:
     """Send a message to an Agent directly or through the configured gateway."""
     invoke_command(
-        name=name, namespace=namespace, message=message, port=port, stream=stream,
+        name=name,
+        namespace=namespace,
+        message=message,
+        port=port,
+        stream=stream,
         user=user,
+        session=session,
     )
 
 
@@ -423,3 +463,22 @@ def memory_agent(
         port=port,
         output_json=output_json,
     )
+
+
+@app.command(name="tools")
+def tools_agent(
+    name: str = typer.Argument(..., help="Name of the Agent."),
+    namespace: str = typer.Option(
+        None,
+        "--namespace",
+        "-n",
+        help="Namespace of the Agent.",
+    ),
+    output_json: bool = typer.Option(
+        False,
+        "--json",
+        help="Output in JSON format.",
+    ),
+) -> None:
+    """Show the tool definitions presented to the model."""
+    tools_command(name=name, namespace=namespace, output_json=output_json)

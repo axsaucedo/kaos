@@ -71,7 +71,9 @@ def _access_control_ready(namespace: str) -> bool:
     return bool(ready) and ready == desired and desired != "0"
 
 
-def _invoke_gateway(name: str, namespace: str | None, message: str, user: str | None) -> None:
+def _invoke_gateway(
+    name: str, namespace: str | None, message: str, user: str | None, session: str | None = None
+) -> None:
     """Invoke an agent through the configured gateway and print its verdict."""
     import httpx
 
@@ -83,6 +85,8 @@ def _invoke_gateway(name: str, namespace: str | None, message: str, user: str | 
         return
     token = session_token(config, user) if user else None
     headers = {"Authorization": f"Bearer {token}"} if token else {}
+    if session:
+        headers["X-Session-ID"] = session
     try:
         with local_service_url(address) as local_address:
             response = httpx.post(
@@ -155,6 +159,7 @@ def invoke_command(
     port: int,
     stream: bool,
     user: str | None = None,
+    session: str | None = None,
 ) -> None:
     """Send a message to an Agent via port-forward."""
     import httpx
@@ -165,7 +170,7 @@ def invoke_command(
         config["gateway"].get("through_gateway")
         and not _is_autonomous(name, direct_namespace)
     ):
-        _invoke_gateway(name, namespace, message, user)
+        _invoke_gateway(name, namespace, message, user, session)
         return
     namespace = direct_namespace
 
@@ -224,6 +229,7 @@ def invoke_command(
             sys.exit(1)
 
         typer.echo(f"Sending message: {message}")
+        headers = {"X-Session-ID": session} if session else None
 
         try:
             if stream:
@@ -235,6 +241,7 @@ def invoke_command(
                         "messages": [{"role": "user", "content": message}],
                         "stream": True,
                     },
+                    headers=headers,
                     timeout=120.0,
                 ) as response:
                     typer.echo("\n📤 Response:")
@@ -265,6 +272,7 @@ def invoke_command(
                         "messages": [{"role": "user", "content": message}],
                         "stream": False,
                     },
+                    headers=headers,
                     timeout=120.0,
                 )
 

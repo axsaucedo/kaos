@@ -99,6 +99,26 @@ func TestConstructNetworkPolicyDefaultNamespaces(t *testing.T) {
 	}
 }
 
+func TestConstructNetworkPolicyAllowsSameNamespacePods(t *testing.T) {
+	np := constructNetworkPolicy(NetworkPolicyParams{
+		Name:                       "modelapi-openai",
+		Namespace:                  "default",
+		PodSelector:                map[string]string{"app": "modelapi"},
+		AllowedIngressPodSelectors: []map[string]string{{"app": "memorystore"}},
+	}, Config{ExtAuthzURL: "svc:9191"})
+
+	peers := np.Spec.Ingress[0].From
+	if len(peers) != 3 {
+		t.Fatalf("expected gateway, operator, and MemoryStore peers, got %d", len(peers))
+	}
+	if got := peers[2].PodSelector; got == nil || got.MatchLabels["app"] != "memorystore" {
+		t.Fatalf("expected same-namespace app=memorystore peer, got %#v", got)
+	}
+	if peers[2].NamespaceSelector != nil {
+		t.Fatalf("same-namespace peer must not select every pod in a namespace")
+	}
+}
+
 func TestConstructNetworkPolicyEgressRules(t *testing.T) {
 	cfg := Config{
 		ExtAuthzURL:         "aib-ext-authz.aib-system.svc.cluster.local:9191",

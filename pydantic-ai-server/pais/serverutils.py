@@ -7,7 +7,7 @@ import logging
 from typing import Dict, Any, List, Optional, Union, TYPE_CHECKING
 from dataclasses import dataclass
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, model_validator
 from pydantic.alias_generators import to_camel
 from pydantic_settings import BaseSettings
 import httpx
@@ -24,7 +24,7 @@ from pydantic_ai.messages import (
 from opentelemetry.propagate import inject
 
 if TYPE_CHECKING:
-    from pais.memory import Memory, MemoryScope
+    from pais.memory import Memory, MemoryAttribution
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +38,8 @@ class AgentDeps:
     # Non-secret request security context (request_id/session_id/principal/actor/scopes)
     # Populated by the identity runtime for audit/correlation; never carries raw bearer tokens.
     security_context: Optional[Dict[str, Any]] = None
-    # Server-derived memory scope for this run (principal/agent/session owner).
-    memory_scope: Optional["MemoryScope"] = None
+    # Server-derived attribution for writes in this run.
+    memory_attribution: Optional["MemoryAttribution"] = None
 
 
 class _MockResponseState:
@@ -412,7 +412,9 @@ class AgentServerSettings(BaseSettings):
     # backend; when empty the runtime falls back to the in-process short-term
     # LocalMemory backend (no long-term tier, pod-local).
     memory_store_endpoint: str = ""
-    memory_scope: str = "session"
+    # Automatic recall uses one default read scope; read entitlements default to it.
+    memory_default_read_scope: str = "session"
+    memory_read_scopes: str = ""
     # Additive explicit memory tools exposed to the agent on top of the automatic
     # recall-inject/write-extract baseline: "all" (save + search), "read" (search
     # only), "write" (save only), or empty (none). Long-term tools require a bound
@@ -453,3 +455,23 @@ class AgentServerSettings(BaseSettings):
     otel_instrumentation_version: int = 5
 
     model_config = {"env_file": ".env", "case_sensitive": False}
+
+    @model_validator(mode="after")
+    def validate_memory_scopes(self):
+        valid = {"session", "agent", "user", "group"}
+        if self.memory_default_read_scope not in valid:
+            raise ValueError(f"unknown memory_default_read_scope: {self.memory_default_read_scope}")
+
+        if not self.memory_read_scopes:
+            scopes = [self.memory_default_read_scope]
+        else:
+            scopes = [scope.strip() for scope in self.memory_read_scopes.split(",")]
+            if any(not scope for scope in scopes):
+                raise ValueError("memory_read_scopes contains an empty scope")
+        unknown = [scope for scope in scopes if scope not in valid]
+        if unknown:
+            raise ValueError(f"unknown memory_read_scopes: {', '.join(unknown)}")
+        if self.memory_default_read_scope not in scopes:
+            raise ValueError("memory_default_read_scope must be included in memory_read_scopes")
+        self.memory_read_scopes = ",".join(scopes)
+        return self

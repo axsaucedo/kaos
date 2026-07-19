@@ -18,9 +18,25 @@ importable without the framework when only :func:`scope_from_deps` is needed.
 from __future__ import annotations
 
 import json
+import os
 from typing import Any, List, Optional, Tuple, Union
 
-from kaos_memory.contract import Scope, ScopeLevel
+from kaos_memory.contract import Attribution, Scope, ScopeLevel
+
+
+def attribution_from_deps(deps: Any, *, agent_identity: Optional[str] = None) -> Attribution:
+    """Build write attribution from authenticated, server-derived context."""
+    security_context = getattr(deps, "security_context", None) or {}
+    attribution = Attribution(
+        principal=security_context.get("principal") or None,
+        agent_client_id=agent_identity or security_context.get("actor") or None,
+        session_id=getattr(deps, "session_id", None) or None,
+    )
+    if os.environ.get("MEMORY_REQUIRE_PRINCIPAL", "").strip().lower() == "true" and not attribution.principal:
+        raise ValueError("memory write requires an authenticated principal")
+    if os.environ.get("MEMORY_REQUIRE_AGENT_IDENTITY", "").strip().lower() == "true" and not attribution.agent_client_id:
+        raise ValueError("memory write requires a stable agent identity")
+    return attribution
 
 
 def scope_from_deps(
@@ -47,16 +63,26 @@ def scope_from_deps(
     resolved_level = level if isinstance(level, ScopeLevel) else ScopeLevel(str(level))
     security_context = getattr(deps, "security_context", None) or {}
     agent_client_id = agent_identity or security_context.get("actor") or None
+    principal = security_context.get("principal") or None
+    user_scoping_required = (
+        resolved_level is ScopeLevel.AGENT
+        and os.environ.get("MEMORY_REQUIRE_PRINCIPAL", "").strip().lower() == "true"
+    )
     if resolved_level is ScopeLevel.AGENT and not agent_client_id:
         raise ValueError(
             "AGENT memory scope requires a stable agent identity; refusing to "
             "operate on an ambiguously-owned agent partition"
         )
+    if user_scoping_required and not principal:
+        raise ValueError(
+            "AGENT memory scope requires an authenticated principal when user scoping is required"
+        )
     return Scope(
         level=resolved_level,
-        principal=security_context.get("principal") or None,
+        principal=principal,
         agent_client_id=agent_client_id,
         session_id=getattr(deps, "session_id", None) or None,
+        user_scoping_required=user_scoping_required,
     )
 
 

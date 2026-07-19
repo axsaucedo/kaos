@@ -235,9 +235,9 @@ def _extract_inbound(
     request_id = headers.get(HEADER_REQUEST_ID) or f"req-{uuid.uuid4().hex[:16]}"
     session_id = headers.get(HEADER_SESSION_ID) or headers.get(_LEGACY_SESSION_HEADER)
 
-    principal = headers.get(HEADER_PRINCIPAL)
-    if not principal and principal_resolver is not None:
-        principal = principal_resolver(headers)
+    principal = principal_resolver(headers) if principal_resolver is not None else None
+    if not principal:
+        principal = headers.get(HEADER_PRINCIPAL)
     if not principal:
         principal = default_principal
 
@@ -306,9 +306,9 @@ def instrument_fastapi(
     Local runtime identity (``actor``/``actor_token``/``principal``) falls back to the
     ``AGENT_AUTH_IDENTITY`` / ``AGENT_AUTH_TOKEN`` / ``AGENT_AUTH_PRINCIPAL`` environment
     variables (provider-agnostic; populated by the operator from the configured broker). The
-    user principal is normally taken from the inbound ``x-principal`` header or the
-    ``principal_resolver``; the fixed ``principal`` is only a fallback for processes with
-    a constant trusted principal.
+    user principal is taken from the ``principal_resolver`` when it returns a verified
+    value, then from inbound ``x-principal``; the fixed ``principal`` is only a fallback
+    for processes with a constant trusted principal.
     """
     app.add_middleware(
         _PropagationMiddleware,
@@ -353,14 +353,18 @@ def suppress_instrumentation() -> Iterator[None]:
 def _inject_request_headers(request: Any) -> None:
     """Merge the current context's propagation headers into an outbound request.
 
-    Strictly **additive**: a header already present on the request (for example the
-    ModelAPI/LLM provider's own ``Authorization`` API key) is never overwritten. When the
-    request-local context carries no actor token but a managed actor-token lifecycle is
-    active (see :func:`kaos_identity.instrument_agent_identity`), this agent's minted actor token is
-    injected so each hop authenticates as itself even without a static token.
+    Additive except for PAIS's ``Bearer not-needed`` no-auth sentinel, which is replaced
+    by the propagated subject. Real ModelAPI/LLM provider API keys remain untouched. When
+    the request-local context carries no actor token but a managed actor-token lifecycle
+    is active (see :func:`kaos_identity.instrument_agent_identity`), this agent's minted
+    actor token is injected so each hop authenticates as itself without a static token.
     """
     for header, value in ctx.to_headers().items():
-        if header not in request.headers:
+        placeholder_subject = (
+            header == HEADER_SUBJECT_TOKEN
+            and request.headers.get(header, "").strip().lower() == "bearer not-needed"
+        )
+        if header not in request.headers or placeholder_subject:
             request.headers[header] = value
     if HEADER_ACTOR_TOKEN not in request.headers:
         token = _managed_actor_token()
@@ -384,7 +388,11 @@ async def _inject_request_headers_async(request: Any) -> None:
     Acquires the managed actor token without blocking the event loop on a refresh.
     """
     for header, value in ctx.to_headers().items():
-        if header not in request.headers:
+        placeholder_subject = (
+            header == HEADER_SUBJECT_TOKEN
+            and request.headers.get(header, "").strip().lower() == "bearer not-needed"
+        )
+        if header not in request.headers or placeholder_subject:
             request.headers[header] = value
     if HEADER_ACTOR_TOKEN not in request.headers:
         from . import identity

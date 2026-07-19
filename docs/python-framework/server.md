@@ -45,6 +45,14 @@ A2A-compliant agent card (v0.3.0) with name, description, skills (discovered fro
 curl http://localhost:8000/.well-known/agent.json
 ```
 
+### GET /tools
+
+Returns the model-facing tool definitions, including each tool's JSON parameter schema:
+
+```bash
+curl http://localhost:8000/tools
+```
+
 ### GET /memory/events
 
 ```bash

@@ -37,6 +37,7 @@ from kaos_memory.contract import (
     FailureMode,
     ForgetRequest,
     ForgetResponse,
+    ListRequest,
     MediumTermContext,
     RecallRequest,
     RecallResponse,
@@ -167,12 +168,20 @@ def _thread_scheduler(thunk: Callable[[], None]) -> None:
 
 @dataclass
 class MemoryService:
-    """Holds the live store instances the request handlers operate on."""
+    """Holds the live store instances the request handlers operate on.
+
+    ``long_term_enabled=False`` turns the semantic tier off by configuration: the
+    write path skips fact extraction entirely and recall/list return no facts —
+    without marking responses degraded, because nothing failed. ``default_top_k``
+    is the recall result count used when a request omits ``top_k``.
+    """
 
     longterm: LongTermStore
     short_term: ShortTermStore
     scheduler: Scheduler = field(default=_thread_scheduler)
     default_failure_mode: FailureMode = "soft"
+    long_term_enabled: bool = True
+    default_top_k: int = 10
 
     def _resolve_failure_mode(self, requested: Optional[FailureMode]) -> FailureMode:
         """Layer the failure mode: an explicit per-request value wins, otherwise the
@@ -204,13 +213,15 @@ class MemoryService:
             span.set_attribute("kaos.memory.scope_level", req.scope.level.value)
             facts: list = []
             degraded = False
-            try:
-                facts = self.longterm.recall(req.scope, req.query, top_k=req.top_k)
-            except Exception:
-                degraded = True
+            if self.long_term_enabled:
+                top_k = req.top_k if req.top_k is not None else self.default_top_k
+                try:
+                    facts = self.longterm.recall(req.scope, req.query, top_k=top_k)
+                except Exception:
+                    degraded = True
 
             summary, recent = "", []
-            if req.include_short_term:
+            if req.include_short_term and req.scope.session_id is not None:
                 summary = self.short_term.summary(req.scope)
                 recent = self.short_term.active_window(
                     req.scope, token_budget=req.short_term_token_budget
@@ -224,6 +235,35 @@ class MemoryService:
                 short_term=ShortTermContext(recent=recent),
                 medium_term=MediumTermContext(summary=summary),
                 block=block,
+                degraded=degraded,
+            )
+
+    def list_all(self, req: ListRequest) -> RecallResponse:
+        """List all long-term records visible at a scope and its conversation tiers."""
+        with tracer.start_as_current_span("kaos.memory.list") as span:
+            span.set_attribute("kaos.memory.scope_level", req.scope.level.value)
+            facts: list = []
+            degraded = False
+            if self.long_term_enabled:
+                try:
+                    facts = self.longterm.get_all(req.scope)
+                except Exception:
+                    degraded = True
+
+            summary, recent = "", []
+            if req.include_short_term and req.scope.session_id is not None:
+                summary = self.short_term.summary(req.scope)
+                recent = self.short_term.active_window(
+                    req.scope, token_budget=req.short_term_token_budget
+                )
+
+            span.set_attribute("kaos.memory.degraded", degraded)
+            span.set_attribute("kaos.memory.fact_count", len(facts))
+            return RecallResponse(
+                facts=facts,
+                short_term=ShortTermContext(recent=recent),
+                medium_term=MediumTermContext(summary=summary),
+                block=assemble_block(facts),
                 degraded=degraded,
             )
 
@@ -243,12 +283,11 @@ class MemoryService:
         acknowledgement instead of failing the request.
         """
         with tracer.start_as_current_span("kaos.memory.write") as span:
-            span.set_attribute("kaos.memory.scope_level", req.scope.level.value)
             strict = self._resolve_failure_mode(req.failure_mode) == "strict"
 
             try:
                 evicted = self.short_term.add(
-                    req.scope, [(turn.role, turn.content) for turn in req.turns]
+                    req.attribution, [(turn.role, turn.content) for turn in req.turns]
                 )
             except Exception:
                 span.set_attribute("kaos.memory.degraded", True)
@@ -262,12 +301,16 @@ class MemoryService:
                 # The turns are buffered in the window; nothing has left it yet, so there is
                 # no batch to consolidate. Extraction runs later, when a fold evicts.
                 return WriteResponse(accepted=True, scheduled=False, degraded=False)
+            if not self.long_term_enabled:
+                # The semantic tier is off by configuration: the evicted batch has been
+                # handled by the conversational tiers and no extraction runs. Not degraded.
+                return WriteResponse(accepted=True, scheduled=False, degraded=False)
 
             messages = [{"role": role, "content": content} for role, content in evicted]
 
             def _extract() -> None:
                 with tracer.start_as_current_span("kaos.memory.consolidate"):
-                    self.longterm.add(req.scope, messages, infer=req.infer)
+                    self.longterm.add(req.attribution, messages, infer=req.infer)
 
             try:
                 self.scheduler(_extract)
@@ -286,7 +329,7 @@ class MemoryService:
         the response but the short-term tier is still cleared."""
         with tracer.start_as_current_span("kaos.memory.forget") as span:
             span.set_attribute("kaos.memory.scope_level", req.scope.level.value)
-            self.short_term.clear(req.scope)
+            self.short_term.delete(req.scope)
             try:
                 self.longterm.delete_scope(req.scope)
             except Exception:
@@ -302,7 +345,11 @@ class MemoryService:
 # --------------------------------------------------------------------------- #
 
 
-def create_app(service: MemoryService, request_concurrency: int = 8) -> FastAPI:
+def create_app(
+    service: MemoryService,
+    request_concurrency: int = 8,
+    settings: Optional[MemorySettings] = None,
+) -> FastAPI:
     """Build the FastAPI app bound to a ``MemoryService``.
 
     The request handlers are async, but the store and Mem0 calls they make are synchronous
@@ -324,6 +371,7 @@ def create_app(service: MemoryService, request_concurrency: int = 8) -> FastAPI:
 
     app = FastAPI(title="KAOS Memory Service", lifespan=lifespan)
     app.state.memory = service
+    app.state.settings = settings or MemorySettings()
     app.state.request_pool = ThreadPoolExecutor(max_workers=request_concurrency)
     setup_telemetry(app)
 
@@ -345,13 +393,31 @@ def create_app(service: MemoryService, request_concurrency: int = 8) -> FastAPI:
         return JSONResponse(result, status_code=code)
 
     @app.post("/v1/recall", response_model=RecallResponse)
-    async def recall(req: RecallRequest) -> RecallResponse:
+    async def recall(req: RecallRequest) -> RecallResponse | JSONResponse:
         """Synchronous recall: assemble long-term facts and short-term context for a scope."""
+        if not req.scope.is_complete():
+            return JSONResponse(
+                {"error": f"incomplete {req.scope.level.value} scope"}, status_code=400
+            )
         return await _offload(lambda: app.state.memory.recall(req))
+
+    @app.post("/v1/list", response_model=RecallResponse)
+    async def list_all(req: ListRequest) -> RecallResponse | JSONResponse:
+        """List all long-term records and conversation tiers visible at a scope."""
+        if not req.scope.is_complete():
+            return JSONResponse(
+                {"error": f"incomplete {req.scope.level.value} scope"}, status_code=400
+            )
+        return await _offload(lambda: app.state.memory.list_all(req))
 
     @app.post("/v1/write", response_model=WriteResponse)
     async def write(req: WriteRequest) -> JSONResponse:
         """Record turns: durable short-term append now, long-term extraction scheduled on fold."""
+        settings = app.state.settings
+        if settings.require_principal and not req.attribution.principal:
+            return JSONResponse({"accepted": False, "error": "missing required principal"}, status_code=403)
+        if settings.require_agent_identity and not req.attribution.agent_client_id:
+            return JSONResponse({"accepted": False, "error": "missing required agent identity"}, status_code=403)
         try:
             result = await _offload(lambda: app.state.memory.write(req))
         except Exception as exc:
@@ -398,6 +464,8 @@ def build_service(settings: MemorySettings) -> MemoryService:
         settings.summarization(),
         settings.embedding(),
         system_prompt=settings.extraction_system_prompt or None,
+        score_threshold=settings.score_threshold,
+        rerank=settings.rerank,
     )
     summarizer = ModelClient(
         settings.summarization(), system_prompt=settings.summarization_system_prompt or None
@@ -408,19 +476,24 @@ def build_service(settings: MemorySettings) -> MemoryService:
         settings.short_term_tier(),
         summarizer,
         scheduler=runner,
+        group=storage.resolved().collection_name,
     )
     return MemoryService(
         longterm=longterm,
         short_term=short_term,
         scheduler=runner,
         default_failure_mode=settings.default_failure_mode,
+        long_term_enabled=settings.long_term_enabled,
+        default_top_k=settings.default_top_k,
     )
 
 
 def main() -> None:
     """Entrypoint: build the service from the environment and serve it with uvicorn."""
     settings = MemorySettings()
-    app = create_app(build_service(settings), request_concurrency=settings.request_concurrency)
+    app = create_app(
+        build_service(settings), request_concurrency=settings.request_concurrency, settings=settings
+    )
     uvicorn.run(app, host=settings.host, port=settings.port)
 
 

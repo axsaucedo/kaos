@@ -24,6 +24,7 @@ spec:
       provider: chroma          # only chroma is supported
       persistentVolume:
         size: "5Gi"             # default 5Gi
+      collection: kaos_memory   # vector collection name (default kaos_memory)
 
     # For external storage: managed pgvector database
     # external:
@@ -32,6 +33,7 @@ spec:
     #     name: pgvector-dsn
     #     key: dsn
     #   embeddingDims: 1536      # vector dimensions (default 1536)
+    #   collection: kaos_memory  # vector collection name (default kaos_memory)
 
   # Replicas override. When unset, defaults by storage mode: external stores
   # run 2 replicas for availability, local stores run 1. Must be 1 in local mode.
@@ -46,13 +48,40 @@ spec:
       modelAPI: my-modelapi
       model: text-embedding-3-small
 
-  # Optional: knowledge extraction tuning
-  extraction:
-    concurrency: 4              # concurrent extraction workers (default 4)
+  # Optional: verbatim short-term window tuning
+  shortTerm:
+    tokenBudget: 4096           # token bound on the verbatim window (default 4096)
+    hardEventCap: 2000          # event-count ceiling on the window (default 2000)
+
+  # Optional: medium-term rolling digest tuning (folds short-term overflow)
+  mediumTerm:
+    enabled: false              # rolling digest off by default (overflow is dropped)
+    compactionTrigger: 0        # fold trigger in tokens; 0 = tokenBudget
+    compactionTarget: 0         # fold target in tokens; 0 = tokenBudget / 2
+    digestRetention: 20         # digest versions retained (default 20)
+    systemPrompt: ""            # summariser prompt override (default: built-in)
+
+  # Optional: long-term semantic tier tuning (recall shape + fact extraction)
+  longTerm:
+    enabled: true               # false skips extraction and recalls no facts
+    defaultTopK: 10             # recall result count when a request omits top_k
+    # scoreThreshold: 0.4       # minimum similarity in [0,1]; unset = no threshold
+    rerank: false               # engine reranking of recalled facts
+    extraction:
+      concurrency: 4            # concurrent extraction workers (default 4)
+      maxRetries: 2             # retries per failed extraction task (default 2)
+      systemPrompt: ""          # fact-extraction prompt override (default: built-in)
+
+  # Optional: bounded request executor size (default 8)
+  requestConcurrency: 8
 
   # Default write/forget failure mode for bound agents (default: soft)
   # "soft" tolerates memory-write failures; "strict" surfaces them as errors.
   defaultFailureMode: soft
+
+  # Default read scope for agents that omit config.memory.defaultReadScope.
+  # When omitted, agents fall back to "agent".
+  defaultReadScope: agent
 ```
 
 ## Storage Modes
@@ -92,7 +121,7 @@ The DSN is injected into the service as `KAOS_MEMORY_EXTERNAL_DSN` via a `secret
 
 ## Models
 
-Both `summarization` and `embedding` model references are required. Each points at a `ModelAPI` in the same namespace plus a concrete model name. The controller resolves the referenced ModelAPIs and holds the MemoryStore in `Pending` until they are `Ready`; the summarization endpoint (suffixed with `/v1`) becomes the service's model base URL. Models bind lazily at first use, so the store can reach `Ready` from storage reachability before any embedding or summarization call is made.
+Both `summarization` and `embedding` model references are required. Each points at a `ModelAPI` in the same namespace plus a concrete model name. The controller resolves the referenced ModelAPIs and holds the MemoryStore in `Pending` until they are `Ready`; the summarization ModelAPI's cluster-local Service endpoint (suffixed with `/v1`) becomes the service's model base URL. Generated ModelAPI NetworkPolicies admit same-namespace MemoryStore pods for this direct model traffic while other workload pods remain gateway-only. Models bind lazily at first use, so the store can reach `Ready` from storage reachability before any embedding or summarization call is made.
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -100,6 +129,14 @@ Both `summarization` and `embedding` model references are required. Each points 
 | `models.summarization.model` | string | Summarization model name |
 | `models.embedding.modelAPI` | string | ModelAPI providing the embedding model |
 | `models.embedding.model` | string | Embedding model name |
+
+## Memory Tiers
+
+The `shortTerm`, `mediumTerm`, and `longTerm` blocks tune the three memory tiers as typed fields. Every field is optional: an absent field projects nothing onto the service, leaving the memory-service default in place, and an explicit `container.env` entry still overrides the projected value.
+
+- **shortTerm** bounds the verbatim conversation window by `tokenBudget` and `hardEventCap`.
+- **mediumTerm** opts into the rolling digest that folds short-term overflow instead of dropping it. Folding is amortised by two compaction marks: `compactionTrigger` (fold starts) and `compactionTarget` (fold evicts down to). `0` means derived — the token budget and half the token budget respectively. The CRD enforces the service invariant at apply time: `0 < compactionTarget < compactionTrigger <= tokenBudget` (after derivation), so a misconfigured store is rejected by `kubectl apply` instead of crash-looping at pod startup.
+- **longTerm** shapes semantic recall (`defaultTopK`, `scoreThreshold`, `rerank`) and the fact-extraction executor (`extraction`). Setting `enabled: false` turns the semantic tier off by configuration: writes skip fact extraction entirely and recall returns no facts (not degraded); the conversational tiers keep working.
 
 ## Spec Reference
 
@@ -112,11 +149,27 @@ Both `summarization` and `embedding` model references are required. Each points 
 | `storage.external.provider` | string | `pgvector` | External vector store provider |
 | `storage.external.connectionSecretRef` | SecretKeySelector | — | Secret + key holding the pgvector DSN (required for external) |
 | `storage.external.embeddingDims` | int | `1536` | Embedding vector dimensions |
+| `storage.local.collection` / `storage.external.collection` | string | `kaos_memory` | Vector collection name |
 | `replicas` | int | mode-aware | Service replicas. Defaults to 2 for external, 1 for local. Must be 1 in local mode |
 | `models.summarization` | object | — | Summarization/extraction model reference (required) |
 | `models.embedding` | object | — | Embedding model reference (required) |
-| `extraction.concurrency` | int | `4` | Concurrent extraction workers |
+| `shortTerm.tokenBudget` | int | `4096` | Token bound on the verbatim short-term window |
+| `shortTerm.hardEventCap` | int | `2000` | Event-count ceiling on the short-term window |
+| `mediumTerm.enabled` | bool | `false` | Fold short-term overflow into the rolling digest instead of dropping it |
+| `mediumTerm.compactionTrigger` | int | `0` | Token level that triggers a fold; `0` derives it from `tokenBudget` |
+| `mediumTerm.compactionTarget` | int | `0` | Token level a fold evicts down to; `0` derives `tokenBudget / 2` |
+| `mediumTerm.digestRetention` | int | `20` | Digest versions retained |
+| `mediumTerm.systemPrompt` | string | built-in | Summariser prompt override for digest folds |
+| `longTerm.enabled` | bool | `true` | Long-term tier switch; `false` skips extraction and recalls no facts |
+| `longTerm.defaultTopK` | int | `10` | Recall result count when a request omits `top_k` |
+| `longTerm.scoreThreshold` | float | unset | Minimum similarity score for recalled facts, in `[0,1]` |
+| `longTerm.rerank` | bool | `false` | Engine reranking of recalled facts |
+| `longTerm.extraction.concurrency` | int | `4` | Concurrent extraction workers |
+| `longTerm.extraction.maxRetries` | int | `2` | Retries per failed extraction task |
+| `longTerm.extraction.systemPrompt` | string | built-in | Fact-extraction prompt override |
+| `requestConcurrency` | int | `8` | Bounded request executor size |
 | `defaultFailureMode` | string | `soft` | Default write/forget failure mode for bound agents (`soft` or `strict`) |
+| `defaultReadScope` | string | `session` | Default automatic read scope for bound agents: `agent`, `user`, `group`, or `session`; an Agent `config.memory.defaultReadScope` overrides it |
 
 ## Status
 
@@ -138,11 +191,13 @@ When ready, the store exposes an endpoint of the form `http://memorystore-<name>
 
 **Failure mode and degradation.** The store's `defaultFailureMode` (`soft` by default) governs how write and forget failures surface to bound agents. Under `soft`, a memory-write failure is tolerated: the agent's turn proceeds and the write is retried in the background. Under `strict`, the failure is surfaced as an error. Recall is always best-effort regardless of mode — if the long-term tier is unavailable, recall degrades to the short-term window rather than failing the turn. An individual Agent can override the store default in its `config.memory.failureMode`.
 
+**Default read scope.** `defaultReadScope` supplies the automatic recall level for bound agents that omit their own value. Resolution is Agent `defaultReadScope`, then store `defaultReadScope`, then `session`.
+
 **Provisioning a development database.** For local development, `kaos system install --pgvector-memory-enabled` provisions a pgvector Postgres in the install namespace and writes a `kaos-memory-pgvector` connection Secret, ready to reference from an `external`-mode store's `connectionSecretRef`. This is a development convenience — production deployments point `connectionSecretRef` at a managed pgvector database.
 
 ## Binding an Agent
 
-Agents attach to a MemoryStore through their `config.memory` block. See the [Agent CRD](./agent-crd.md) memory section for the full binding surface (type, scope, tools, and failure mode).
+Agents attach to a MemoryStore through their `config.memory` block. See the [Agent CRD](./agent-crd.md) memory section for the full binding surface (type, read scopes, tools, and failure mode).
 
 ```yaml
 apiVersion: kaos.tools/v1alpha1
@@ -157,7 +212,7 @@ spec:
     memory:
       type: remote
       memoryStore: shared-memory
-      scope: user
+      defaultReadScope: user
       tools: all
 ```
 

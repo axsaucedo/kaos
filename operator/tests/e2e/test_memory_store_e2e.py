@@ -145,7 +145,7 @@ async def test_short_term_round_trips_verbatim_through_the_service(test_namespac
         ]
         write = httpx.post(
             f"{base_url}/v1/write",
-            json={"scope": scope, "turns": turns, "infer": False},
+            json={"attribution": scope, "turns": turns, "infer": False},
             timeout=30.0,
         )
         assert write.status_code == 200, write.text
@@ -172,8 +172,16 @@ async def test_short_term_is_isolated_between_scopes(test_namespace: str):
 
     process, base_url = _forward_memory_service(test_namespace, "iso-store")
     try:
-        alice = {"level": "user", "principal": "alice"}
-        bob = {"level": "user", "principal": "bob"}
+        alice = {
+            "level": "user",
+            "principal": "alice",
+            "session_id": "alice-session",
+        }
+        bob = {
+            "level": "user",
+            "principal": "bob",
+            "session_id": "bob-session",
+        }
         httpx.post(
             f"{base_url}/v1/write",
             json={
@@ -304,7 +312,7 @@ async def test_short_term_survives_a_pod_restart(test_namespace: str):
     try:
         write = httpx.post(
             f"{base_url}/v1/write",
-            json={"scope": scope, "turns": turns, "infer": False},
+            json={"attribution": scope, "turns": turns, "infer": False},
             timeout=30.0,
         )
         assert write.status_code == 200, write.text

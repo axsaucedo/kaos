@@ -8,9 +8,10 @@ exposes no way for request content to influence the scope.
 
 import inspect
 
+import kaos_identity
 import pytest
 
-from pais.memory import MemoryScope, ScopeLevel, scope_from_deps
+from pais.memory import MemoryAttribution, MemoryScope, ScopeLevel, attribution_from_deps, scope_from_deps
 from pais.serverutils import AgentDeps
 
 
@@ -59,6 +60,59 @@ class TestScopeFromDeps:
         deps = _deps(actor="agent-actor")
         scope = scope_from_deps(deps, level=ScopeLevel.AGENT)
         assert scope.agent_client_id == "agent-actor"
+
+    def test_required_agent_scope_fails_closed_without_principal(self, monkeypatch):
+        monkeypatch.setenv("MEMORY_REQUIRE_PRINCIPAL", "true")
+        deps = _deps(actor="agent-actor")
+        with pytest.raises(ValueError, match="authenticated principal"):
+            scope_from_deps(deps, level=ScopeLevel.AGENT)
+
+    def test_required_agent_scope_marks_agent_and_user_partition(self, monkeypatch):
+        monkeypatch.setenv("MEMORY_REQUIRE_PRINCIPAL", "true")
+        scope = scope_from_deps(
+            _deps(principal="alice", actor="agent-actor"),
+            level=ScopeLevel.AGENT,
+        )
+        assert scope.agent_client_id == "agent-actor"
+        assert scope.principal == "alice"
+        assert scope.user_scoping_required is True
+
+    def test_autonomous_principal_uses_uniform_required_partition(self, monkeypatch):
+        monkeypatch.setenv("MEMORY_REQUIRE_PRINCIPAL", "true")
+        identity = "kaos://agent/default/researcher"
+        with kaos_identity.autonomous_identity_context("agent-token", identity):
+            deps = AgentDeps(
+                session_id="loop-1",
+                security_context=kaos_identity.security_context(),
+            )
+            scope = scope_from_deps(
+                deps,
+                level=ScopeLevel.AGENT,
+                agent_identity=identity,
+            )
+
+        assert scope.agent_client_id == identity
+        assert scope.principal == identity
+        assert scope.user_scoping_required is True
+
+    def test_write_attribution_keeps_every_verified_contributor(self):
+        attribution = attribution_from_deps(_deps(principal="alice", actor="agent-actor"))
+        assert isinstance(attribution, MemoryAttribution)
+        assert attribution.write_kwargs() == {
+            "user_id": "alice",
+            "agent_id": "agent-actor",
+            "metadata": {"kaos_run": "sess-1"},
+        }
+
+    def test_write_attribution_requires_principal_from_posture(self, monkeypatch):
+        monkeypatch.setenv("MEMORY_REQUIRE_PRINCIPAL", "true")
+        with pytest.raises(ValueError, match="authenticated principal"):
+            attribution_from_deps(_deps(actor="agent-actor"))
+
+    def test_write_attribution_requires_agent_identity_from_posture(self, monkeypatch):
+        monkeypatch.setenv("MEMORY_REQUIRE_AGENT_IDENTITY", "true")
+        with pytest.raises(ValueError, match="stable agent identity"):
+            attribution_from_deps(_deps(principal="alice"))
 
     def test_helper_takes_no_scope_argument(self):
         # The derivation must not accept caller/model-supplied scope: there is no

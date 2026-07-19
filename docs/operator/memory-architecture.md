@@ -6,6 +6,8 @@ This page explains how KAOS memory works end to end — the tiers, the multi-ten
 
 Memory in KAOS is **augmentation, not a hard dependency**: it enriches an agent's context but a memory outage degrades an agent rather than stopping it. An agent binds to a `MemoryStore`, and the operator deploys a single central **memory service** that every bound agent calls over the network. The service composes three tiers behind one HTTP contract, applies a server-derived tenancy scope to every operation, and persists long-term facts through the Mem0 engine embedded as a library.
 
+The service exposes `POST /v1/recall` for semantic search, `POST /v1/list` for a complete scope-filtered long-term listing plus the current session's conversational tiers, `POST /v1/write` for turn persistence, and `POST /v1/forget` for scoped erasure. Recall and list both reject an unresolved owner before store access.
+
 ```mermaid
 graph LR
   subgraph agent["Agent pod"]
@@ -35,7 +37,7 @@ A remote-memory agent layers three tiers behind one client. KAOS owns the two co
 
 Design choices:
 
-- **The short-term window is session-scoped only.** User-, agent-, or store-wide verbatim windows are rejected because they would interleave concurrent conversations; cross-session continuity is served by long-term facts, not by merging live turns. The window is bounded by a configurable **token budget** (with a hard event-count safety cap), not by turn count.
+- **The short-term window is session-scoped only.** Every window and digest key combines the stable store group with the session id; agent and principal identities are deliberately excluded, so a run written by an agent can be recalled through any entitled scope using the same session id. A missing session id fails rather than falling back to a shared owner window. User-, agent-, or store-wide verbatim windows would interleave concurrent conversations, so cross-session continuity is served by long-term facts instead of merging live turns. In particular, `scope: group` does not share raw turns across sessions; cross-agent sharing flows through extracted long-term facts. The window is bounded by a configurable **token budget** (with a hard event-count safety cap), not by turn count.
 - **The medium-term digest stays out of Mem0.** Mem0 decomposes input into atomic, individually revisable facts for vector retrieval, whereas a rolling digest is a coherent narrative that should be injected directly at recall time. Indexing it into Mem0 would shred narrative continuity into fragments and pollute vector search, so the digest is a relational, append-only, versioned row and Mem0 receives only the raw evicted turns.
 - **Short-term is never on Redis and never in Mem0.** It is a cheap append-and-read-window operation co-located with the long-term store (a SQLite table beside embedded Chroma in `local` mode; a plain table on the same Postgres that backs pgvector in `external` mode).
 - **Folding and extraction are always off the write path.** The active window is computed lazily on read; when a compaction trigger is crossed, older turns fold into the digest and the raw turns are handed to Mem0 for long-term extraction — all as background work, never blocking the response.
@@ -44,26 +46,41 @@ Temporal (bi-temporal validity) and procedural (skill) memory are **deferred** a
 
 ## Multi-tenancy: the scope model
 
-Every operation carries a **scope** that decides whose memory is read or written. The scope is a single `scope` value on the Agent memory block, and the service maps it onto exactly one owner key — a **flat owner-key model**, not a nested path.
+Reads and erasure carry a **scope** selecting long-term visibility. Writes instead carry level-less compound attribution: every verified principal and agent identity is attached, plus session and store-group metadata. Scope and attribution are derived server-side, never accepted from model arguments.
 
-| `scope` | Owner key applied | Isolation boundary |
-|---------|-------------------|--------------------|
-| `agent` (default) | `agent_id = <agent identity>` | the single agent (its own `kaos://agent/<ns>/<name>` identity) |
-| `user` | `user_id = <principal>` | every agent serving the same user principal |
-| `group` | `agent_id = "kaos:group"` (reserved constant) | every agent on the same `MemoryStore` |
-| `session` | `run_id = <session id>` | a single conversation/run |
+| `scope` | Long-term read filter | Isolation boundary |
+|---------|-----------------------|--------------------|
+| `agent` (default) | OIDC off: `agent_id = <agent identity>`; OIDC on: `agent_id = <agent identity>` AND `user_id = <principal>` | this agent's pool, partitioned per user when OIDC is enabled |
+| `user` | `user_id = <principal>` | every fact this user contributed through any agent or session |
+| `group` | `user_id = "*"` plus `kaos_group = <store group>` | every attributed fact on the same `MemoryStore` |
+| `session` | `user_id = "*"` plus `kaos_run = <session id>` | facts attributed to one conversation/run |
 
-`agent` and `group` both use the `agent_id` key: the difference is the **value** — `agent` uses the agent's own unique identity, while `group` uses one reserved sentinel (`kaos:group`) shared by all agents, deliberately distinct from any real agent identity so a group write can never collide with an agent's own partition.
+The `user_id = "*"` entry is Mem0 2.0.10's required wildcard convention for filtering by custom metadata; KAOS pins and regression-tests that behavior. Group membership is metadata, never a synthetic agent identity: `agent_id` always contains the real contributing agent. The group value comes from the active vector collection binding (`KAOS_MEMORY_LOCAL_COLLECTION` or `KAOS_MEMORY_EXTERNAL_COLLECTION`, default `kaos_memory`). That signal is always present even when telemetry is disabled, and the `MemoryStore` itself is the physical group boundary, so the collection name only needs to be stable within that store.
+
+### Posture-derived enforcement
+
+Identity requirements follow one static cluster posture; agents cannot weaken or strengthen them.
+
+| Cluster mode | `agent` owner | Missing principal |
+|--------------|---------------|-------------------|
+| OIDC user identity enabled (`SecurityEnabled()` plus a configured user issuer) | `{agent_id, user_id}` | writes fail closed; agent reads retain the two-key partition |
+| OIDC user identity disabled | `{agent_id}` | allowed; no user key participates in the agent read partition |
+
+The operator injects `MEMORY_REQUIRE_PRINCIPAL=true` when secured user identity is enabled and `MEMORY_REQUIRE_AGENT_IDENTITY=true` whenever security is enabled. It projects equivalent `KAOS_MEMORY_*` settings into the MemoryStore pod, whose write check is authoritative. The runtime repeats the checks as defence in depth. Admin CLI recall and forget remain trusted in-cluster read/erasure paths and do not require agent identity.
+
+Autonomous execution uses the same rule without an exception. The loop's agent bearer self-subjects the run, so its owner is `{agent_id, agent-as-user}`. For a hybrid agent, this means autonomous findings are private to the loop and are not recalled into a human user's agent partition; making those findings human-visible is an explicit publication at `group` level.
 
 Design choices:
 
 - **The store is the group.** A logical group is the set of agents bound to the same `MemoryStore`; there is no separate group CRD. The four scope levels express per-agent, per-user, per-group, and per-session memory.
 - **Isolation strength is chosen by how many stores you deploy.** The default is a shared store with scope filtering; deploying one `MemoryStore` per tenant gives **physical** isolation (data is not co-located), so a filtering defect cannot leak across tenants. No isolation-mode field exists.
-- **Scope governs only the long-term tier.** The verbatim short-term window and medium-term digest are always session-scoped; `scope: user` does not create a user-wide conversational window.
+- **Scope selects long-term visibility, not write ownership.** A user-level read is deliberately broad: it returns everything that principal contributed through any agent and session. Compound attribution lets narrower agent/session reads and user/agent erasure reach the same physical fact without duplicating it.
+- **Conversational tiers are always per-session.** The verbatim window and medium-term digest use `kaos_group:<store group>|run:<session id>`; without a configured group an embedded store uses `run:<session id>`. The group is the consistent tenant component supplied by the service on both write and recall, while the unguessable run id is the capability that addresses one window through the scoped service and its network/RBAC boundary. Agent and principal identities live in a separate erasure index rather than the conversational key, so changing the recall scope cannot change the physical session partition. `scope: user` does not create a user-wide conversational window. Session forget deletes one key; user, agent, and group forget use the erasure index to delete every attributed session.
+- **Agent configuration is read-only.** `defaultReadScope` selects baseline recall and resolves Agent → MemoryStore → `session`; `readScopes` limits `search_memory`. Writes, including `save_memory`, carry attribution without a level.
 - **Enforcement is fail-closed at the service.** Scope is derived **server-side** from the authenticated agent identity and request context — never trusted from model- or tool-supplied arguments. An operation that cannot resolve a usable owner key fails rather than querying an unscoped store. Because the vector providers pre-filter during the query, a tenant's relevant memories are never dropped by an unfiltered nearest-neighbour window.
-- **Erasure fans out synchronously across tiers.** Right-to-erasure deletes the session short-term rows, the medium-term summaries, and the scope-filtered Mem0 long-term facts in one pass.
+- **Erasure fans out synchronously across tiers.** User and agent long-term erasure use Mem0's native entity deletion. Session and group erasure use wildcard-qualified custom filters, falling back to filtered id listing plus per-id deletion where the pinned Mem0 version lacks filtered deletion. Pre-existing alpha records without compound attribution cannot be reached by a newly available user-level erasure; there is no data migration.
 
-Cross-agent (A2A) delegation scope propagation and admin cross-user erasure depend on per-request principal propagation from the identity track and are deferred.
+Gateway-derived principals propagate automatically over cross-agent (A2A) delegation. Administrative cross-user erasure remains deferred.
 
 ## Deployment topology
 
@@ -78,13 +95,13 @@ Cross-agent (A2A) delegation scope propagation and admin cross-user erasure depe
 
 ## Control plane
 
-The `MemoryStore` CRD describes **infrastructure, model bindings, and two store-level knobs** (extraction concurrency and the store-wide default failure mode). It deliberately does not carry the shared-window, digest, or sweeper marks — those are service-side configuration with env defaults, because they govern a window the service owns and are not per-agent policy. The two model roles reference an existing `ModelAPI`: `summarization` drives both Mem0's extraction prompt and the medium-term digest; `embedding` drives the vector index.
+The `MemoryStore` CRD describes infrastructure, model bindings, extraction/failure defaults, and the store-wide default read scope. The two model roles reference an existing `ModelAPI`: `summarization` drives extraction and digest generation; `embedding` drives the vector index.
 
-The Agent memory block selects a store by name and carries the agent-specific policy — `scope`, `tools`, `failureMode`, and the two forwarded `clientParams` (`tokenBudget`, `rollingSummary`). Enabling memory applies an **automatic baseline** unconditionally (recall-and-inject before each run, flush-for-extraction after); the `tools` knob layers **additive** explicit tools on top (`read` → `search_memory`, `write` → `save_memory`, `all` → both).
+The Agent memory block selects a store and configures reads with `defaultReadScope`, `readScopes`, and tools. Enabling memory recalls before each run and flushes level-less attributed turns afterward.
 
 Binding is fail-closed and degradation-aware:
 
-- `type: remote` requires a `memoryStore`; `type: local` forbids one. `user`/`group` scope and any `tools` require a `memoryStore` (a pod-local store cannot serve cross-agent scopes or long-term tools), and are rejected rather than silently degraded.
+- `type: remote` requires a `memoryStore`; `type: local` forbids one. Non-session read scopes and any tools require a `memoryStore`. User read scopes additionally require a secured user-identity posture.
 - An `agent` owner is resolved from the injected `AGENT_IDENTITY` (`kaos://agent/<ns>/<name>`), never a name-only or empty owner, so identity-less agents cannot collapse onto one agent partition.
 - **Already-running** agents treat a missing/not-ready store as degraded: the operator surfaces a `MemoryDegraded` condition and keeps the pod Ready serving short-term-only — a store outage never removes a serving agent. Only **initial creation** is gated: with `waitForDependencies` (default) the agent stays `Waiting` until the bound store is Ready, so it never starts up degraded.
 
@@ -98,7 +115,7 @@ In the agent runtime, `RemoteMemory` is a thin adapter over the `kaos-memory` `M
 |----------|-----|
 | Central service, Mem0 as a library | thin agents, isolated extraction, cross-agent sharing, one datastore connection pool |
 | KAOS owns short/medium-term relationally | cheap append-and-read; a narrative digest must not be shredded into vector fragments |
-| Flat owner-key scope, four values | maps cleanly onto the engine's native owner filters; the store is the group, no extra CRD |
+| Compound write attribution, selected read scope | one fact remains reachable through its user and agent while session/group remain filterable metadata; the store is the group, no extra CRD |
 | Server-side, fail-closed scope | scope is non-spoofable and an unresolved scope never widens to an unscoped query |
 | Store-per-tenant for physical isolation | isolation strength is a deployment choice, not a code path |
 | Fire-and-forget extraction, no queue | LLM-dominated turn latency makes the async hop marginal; durability follow-up built only when measured |

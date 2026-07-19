@@ -17,6 +17,9 @@ class _FakeLongTerm:
             raise RuntimeError("vector store unreachable")
         return self._facts
 
+    def add(self, scope, messages, infer=True):
+        return []
+
     def ping(self):
         return None
 
@@ -29,7 +32,7 @@ def _client(longterm, short_term):
     return TestClient(create_app(MemoryService(longterm=longterm, short_term=short_term)))
 
 
-USER_SCOPE = {"level": "user", "principal": "alice"}
+USER_SCOPE = {"level": "user", "principal": "alice", "session_id": "s1"}
 
 
 def test_recall_surfaces_medium_term_digest(tmp_path):
@@ -43,7 +46,7 @@ def test_recall_surfaces_medium_term_digest(tmp_path):
         ShortTermTierConfig(token_budget=4, rolling_summary=True),
         lambda prior, turns: (prior + " " + " ".join(c for _, c in turns)).strip(),
     )
-    s = Scope(level=ScopeLevel.USER, principal="alice")
+    s = Scope(level=ScopeLevel.USER, principal="alice", session_id="s1")
     for i in range(6):
         short_term.add(s, [("user", f"message number {i}")])
 
@@ -61,11 +64,10 @@ def test_recall_surfaces_medium_term_digest(tmp_path):
 def test_recall_returns_facts_and_short_term_context(tmp_path):
     short_term = _short_term(tmp_path)
     longterm = _FakeLongTerm(facts=[{"memory": "alice prefers dark mode", "score": 0.9}])
-    scope = {"level": "user", "principal": "alice", "session_id": "s1"}
     # Seed short-term turns under the same owner key.
     from kaos_memory.stores import Scope, ScopeLevel
 
-    s = Scope(level=ScopeLevel.USER, principal="alice")
+    s = Scope(level=ScopeLevel.USER, principal="alice", session_id="s1")
     short_term.add(s, [("user", "hello there")])
     short_term.add(s, [("assistant", "hi alice")])
 
@@ -88,7 +90,8 @@ def test_recall_degrades_to_short_term_only_on_longterm_failure(tmp_path):
     from kaos_memory.stores import Scope, ScopeLevel
 
     short_term.add(
-        Scope(level=ScopeLevel.USER, principal="alice"), [("user", "remember the budget is 5000")]
+        Scope(level=ScopeLevel.USER, principal="alice", session_id="s1"),
+        [("user", "remember the budget is 5000")],
     )
     longterm = _FakeLongTerm(fail=True)
 
@@ -116,3 +119,97 @@ def test_recall_can_exclude_short_term(tmp_path):
     assert body["short_term"]["recent"] == []
     assert "fact one" in body["block"]
     assert "## Recent turns" not in body["block"]
+
+
+def test_user_recall_without_session_returns_long_term_and_empty_conversation(tmp_path):
+    longterm = _FakeLongTerm(facts=[{"memory": "alice prefers dark mode"}])
+
+    response = _client(longterm, _short_term(tmp_path)).post(
+        "/v1/recall",
+        json={"scope": {"level": "user", "principal": "alice"}, "query": "preferences"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["facts"] == [{"memory": "alice prefers dark mode"}]
+    assert body["short_term"]["recent"] == []
+    assert body["medium_term"]["summary"] == ""
+    assert body["degraded"] is False
+
+
+def test_recall_rejects_incomplete_scope_before_fail_soft_recall(tmp_path):
+    response = _client(_FakeLongTerm(), _short_term(tmp_path)).post(
+        "/v1/recall",
+        json={
+            "scope": {
+                "level": "agent",
+                "principal": "alice",
+                "user_scoping_required": True,
+            },
+            "query": "anything",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"error": "incomplete agent scope"}
+
+
+def test_conversation_round_trips_across_recall_scopes_without_session_leakage(tmp_path):
+    short_term = ShortTermStore(
+        "local",
+        str(tmp_path / "w.db"),
+        ShortTermTierConfig(token_budget=4, rolling_summary=True),
+        lambda prior, turns: (prior + " " + " ".join(c for _, c in turns)).strip(),
+        group="team-a",
+    )
+    client = _client(_FakeLongTerm(), short_term)
+    base_scope = {
+        "level": "agent",
+        "principal": "alice",
+        "agent_client_id": "agent-a",
+    }
+    for session_id, marker in (("session-1", "amber notebook"), ("session-2", "silver compass")):
+        response = client.post(
+            "/v1/write",
+            json={
+                "attribution": {**base_scope, "session_id": session_id},
+                "turns": [
+                    {"role": "user", "content": f"remember the {marker} in this session"},
+                    {"role": "assistant", "content": f"noted {marker}"},
+                ],
+            },
+        )
+        assert response.status_code == 202
+
+    recalled = []
+    for session_id in ("session-1", "session-2"):
+        response = client.post(
+            "/v1/recall",
+            json={
+                "scope": {**base_scope, "level": "session", "session_id": session_id},
+                "query": "notebook compass",
+            },
+        )
+        assert response.status_code == 200
+        recalled.append(response.json())
+
+    for level_scope in (
+        {**base_scope, "session_id": "session-1"},
+        {"level": "group", "session_id": "session-1"},
+    ):
+        response = client.post(
+            "/v1/recall",
+            json={"scope": level_scope, "query": "notebook compass"},
+        )
+        assert response.status_code == 200
+        body = response.json()
+        assert "amber notebook" in body["medium_term"]["summary"]
+        assert body["short_term"]["recent"] == [["assistant", "noted amber notebook"]]
+        assert "silver compass" not in str(body)
+
+    assert "amber notebook" in recalled[0]["medium_term"]["summary"]
+    assert recalled[0]["short_term"]["recent"] == [["assistant", "noted amber notebook"]]
+    assert "silver compass" not in str(recalled[0])
+    assert "silver compass" in recalled[1]["medium_term"]["summary"]
+    assert recalled[1]["short_term"]["recent"] == [["assistant", "noted silver compass"]]
+    assert "amber notebook" not in str(recalled[1])
