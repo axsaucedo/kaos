@@ -53,9 +53,15 @@ spec:
             type: object
           spec:
             description: |-
-              MemoryStoreSpec defines the desired state of MemoryStore. It carries only
-              infrastructure, model bindings, and the two store-level operational knobs; the
-              short-term-window, digest, and sweeper marks are memory-service defaults.
+              MemoryStoreSpec defines the desired state of MemoryStore. It carries the
+              infrastructure, model bindings, and the typed conversational-tier tuning;
+              absent tier fields leave the memory-service defaults in place.
+  
+              The compaction rule mirrors the service invariant exactly, including the
+              0-means-derived semantics: effective trigger is compactionTrigger (or the
+              token budget when 0/absent), effective target is compactionTarget (or half
+              the budget, floored to 1, when 0/absent), and the effective budget defaults
+              to 4096. The service requires 0 < target < trigger <= budget.
             properties:
               container:
                 description: |-
@@ -317,23 +323,6 @@ spec:
                 enum:
                 - mem0
                 type: string
-              extraction:
-                description: Extraction tunes the long-term extraction executor.
-                properties:
-                  concurrency:
-                    default: 4
-                    description: Concurrency is the size of the Mem0 extraction executor
-                      pool.
-                    format: int32
-                    minimum: 1
-                    type: integer
-                  systemPrompt:
-                    description: |-
-                      SystemPrompt overrides the system prompt for Mem0's long-term fact
-                      extraction, steering which facts are distilled into long-term memory. When
-                      empty the engine's built-in extraction prompt is used.
-                    type: string
-                type: object
               gatewayRoute:
                 description: |-
                   GatewayRoute configures Gateway API routing (timeout, etc.) for the memory
@@ -348,6 +337,93 @@ spec:
                       and "30s" for Agent and MCPServer.
                       Set to "0s" to disable timeout (use Gateway's default).
                     pattern: ^([0-9]+(h|m|s|ms)){1,4}$
+                    type: string
+                type: object
+              longTerm:
+                description: 'LongTerm tunes the long-term semantic tier: recall shape
+                  and extraction.'
+                properties:
+                  defaultTopK:
+                    description: |-
+                      DefaultTopK is the recall result count used when a request omits top_k
+                      (service default 10).
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  enabled:
+                    description: |-
+                      Enabled turns the long-term tier on (service default true). When false the
+                      write path skips fact extraction entirely and recall returns no facts;
+                      conversational tiers keep working.
+                    type: boolean
+                  extraction:
+                    description: Extraction tunes the long-term extraction executor.
+                    properties:
+                      concurrency:
+                        default: 4
+                        description: Concurrency is the size of the Mem0 extraction
+                          executor pool.
+                        format: int32
+                        minimum: 1
+                        type: integer
+                      maxRetries:
+                        description: MaxRetries bounds retries of a failed extraction
+                          task (service default 2).
+                        format: int32
+                        minimum: 0
+                        type: integer
+                      systemPrompt:
+                        description: |-
+                          SystemPrompt overrides the system prompt for Mem0's long-term fact
+                          extraction, steering which facts are distilled into long-term memory. When
+                          empty the engine's built-in extraction prompt is used.
+                        type: string
+                    type: object
+                  rerank:
+                    description: Rerank enables the engine's reranking of recalled facts
+                      (service default false).
+                    type: boolean
+                  scoreThreshold:
+                    description: |-
+                      ScoreThreshold is the minimum similarity score for recalled facts, in
+                      [0,1]. When unset no threshold is applied.
+                    maximum: 1
+                    minimum: 0
+                    type: number
+                type: object
+              mediumTerm:
+                description: MediumTerm tunes the opt-in medium-term rolling digest.
+                properties:
+                  compactionTarget:
+                    description: |-
+                      CompactionTarget is the token level folding evicts back down to.
+                      0 means derived: half the short-term token budget.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  compactionTrigger:
+                    description: |-
+                      CompactionTrigger is the token level at which folding is triggered.
+                      0 means derived: the short-term token budget.
+                    format: int32
+                    minimum: 0
+                    type: integer
+                  digestRetention:
+                    description: DigestRetention is how many digest versions are retained
+                      (service default 20).
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  enabled:
+                    description: |-
+                      Enabled turns the rolling digest on (service default false: overflow is
+                      dropped as a recency window).
+                    type: boolean
+                  systemPrompt:
+                    description: |-
+                      SystemPrompt overrides the system prompt used when folding overflowed
+                      short-term turns into the rolling digest. When empty the service's built-in
+                      summariser prompt is used.
                     type: string
                 type: object
               models:
@@ -395,12 +471,41 @@ spec:
                 format: int32
                 minimum: 1
                 type: integer
+              requestConcurrency:
+                description: |-
+                  RequestConcurrency sizes the service's bounded request executor (service
+                  default 8).
+                format: int32
+                minimum: 1
+                type: integer
+              shortTerm:
+                description: ShortTerm tunes the verbatim short-term window.
+                properties:
+                  hardEventCap:
+                    description: HardEventCap is the event-count ceiling on the window
+                      (service default 2000).
+                    format: int32
+                    minimum: 1
+                    type: integer
+                  tokenBudget:
+                    description: |-
+                      TokenBudget bounds the verbatim short-term window in tokens (service
+                      default 4096).
+                    format: int32
+                    minimum: 1
+                    type: integer
+                type: object
               storage:
                 description: Storage selects and configures the storage backend.
                 properties:
                   external:
                     description: External configures the external pgvector mode.
                     properties:
+                      collection:
+                        description: |-
+                          Collection is the vector collection name. When empty the service default
+                          ("kaos_memory") is used.
+                        type: string
                       connectionSecretRef:
                         description: ConnectionSecretRef references the Secret key holding
                           the database DSN.
@@ -447,6 +552,11 @@ spec:
                       Local configures the single-container local mode. When omitted in local
                       mode the provider and persistent-volume size fall back to their defaults.
                     properties:
+                      collection:
+                        description: |-
+                          Collection is the vector collection name. When empty the service default
+                          ("kaos_memory") is used.
+                        type: string
                       persistentVolume:
                         description: PersistentVolume sizes the PVC that backs Chroma
                           and the SQLite short-term window.
@@ -477,18 +587,6 @@ spec:
                 x-kubernetes-validations:
                 - message: storage.external is required when storage.type is external
                   rule: self.type != 'external' || has(self.external)
-              summarization:
-                description: |-
-                  Summarization tunes the medium-term rolling-digest summariser prompt. The
-                  summariser model itself is bound via models.summarization.
-                properties:
-                  systemPrompt:
-                    description: |-
-                      SystemPrompt overrides the system prompt used when folding overflowed
-                      short-term turns into the rolling digest. When empty the service's built-in
-                      summariser prompt is used.
-                    type: string
-                type: object
               telemetry:
                 description: Telemetry configures OpenTelemetry instrumentation for
                   the memory service.
@@ -513,6 +611,22 @@ spec:
             - message: replicas must be 1 in local storage mode
               rule: self.storage.type != 'local' || !has(self.replicas) || self.replicas
                 == 1
+            - message: short-term compaction marks must satisfy 0 < compactionTarget
+                < compactionTrigger <= tokenBudget (0 or absent marks derive from the
+                token budget)
+              rule: '((has(self.mediumTerm) && has(self.mediumTerm.compactionTarget)
+                && self.mediumTerm.compactionTarget != 0) ? self.mediumTerm.compactionTarget
+                : (((has(self.shortTerm) && has(self.shortTerm.tokenBudget)) ? self.shortTerm.tokenBudget
+                : 4096) / 2 < 1 ? 1 : ((has(self.shortTerm) && has(self.shortTerm.tokenBudget))
+                ? self.shortTerm.tokenBudget : 4096) / 2)) < ((has(self.mediumTerm)
+                && has(self.mediumTerm.compactionTrigger) && self.mediumTerm.compactionTrigger
+                != 0) ? self.mediumTerm.compactionTrigger : ((has(self.shortTerm) &&
+                has(self.shortTerm.tokenBudget)) ? self.shortTerm.tokenBudget : 4096))
+                && ((has(self.mediumTerm) && has(self.mediumTerm.compactionTrigger)
+                && self.mediumTerm.compactionTrigger != 0) ? self.mediumTerm.compactionTrigger
+                : ((has(self.shortTerm) && has(self.shortTerm.tokenBudget)) ? self.shortTerm.tokenBudget
+                : 4096)) <= ((has(self.shortTerm) && has(self.shortTerm.tokenBudget))
+                ? self.shortTerm.tokenBudget : 4096)'
           status:
             description: MemoryStoreStatus defines the observed state of MemoryStore.
             properties:

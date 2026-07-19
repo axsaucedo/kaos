@@ -86,11 +86,13 @@ var _ = Describe("MemoryStore Controller", func() {
 					Summarization: kaosv1alpha1.MemoryModelRef{ModelAPI: modelAPIName, Model: "mock-model"},
 					Embedding:     kaosv1alpha1.MemoryModelRef{ModelAPI: modelAPIName, Model: "mock-embed"},
 				},
-				Extraction: &kaosv1alpha1.MemoryExtractionConfig{
-					Concurrency:  int32Ptr(3),
-					SystemPrompt: "only extract deployment facts",
+				LongTerm: &kaosv1alpha1.MemoryLongTermConfig{
+					Extraction: &kaosv1alpha1.MemoryExtractionConfig{
+						Concurrency:  int32Ptr(3),
+						SystemPrompt: "only extract deployment facts",
+					},
 				},
-				Summarization:      &kaosv1alpha1.MemorySummarizationConfig{SystemPrompt: "fold tersely"},
+				MediumTerm:         &kaosv1alpha1.MemoryMediumTermConfig{SystemPrompt: "fold tersely"},
 				DefaultFailureMode: "strict",
 			},
 		}

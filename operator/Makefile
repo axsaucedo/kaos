@@ -3,7 +3,8 @@
 # Configuration
 IMG ?= axsauze/kaos-operator:latest
 CONTROLLER_GEN ?= $(shell which controller-gen || echo "$(shell pwd)/bin/controller-gen")
-CRD_OPTIONS ?= "crd:generateEmbeddedObjectMeta=true"
+# allowDangerousTypes permits the float64 longTerm.scoreThreshold field on MemoryStore.
+CRD_OPTIONS ?= "crd:generateEmbeddedObjectMeta=true,allowDangerousTypes=true"
 SETUP_ENVTEST ?= $(shell which setup-envtest)
 HELMIFY ?= $(shell which helmify || echo "$(HOME)/go/bin/helmify")
 
