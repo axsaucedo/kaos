@@ -72,7 +72,7 @@ def _drive_and_assert(service: MemoryService, span_exporter, short_term_scope_ta
     def _write(content: str):
         return client.post(
             "/v1/write",
-            json={"scope": USER_SCOPE, "role": "user", "content": content, "infer": False},
+            json={"attribution": USER_SCOPE, "role": "user", "content": content, "infer": False},
         )
 
     # First turn buffers in the window without evicting: nothing consolidated yet.
@@ -144,7 +144,7 @@ def test_user_forget_erases_compound_partition_across_all_tiers(tmp_path):
         for content in (f"{owner} durable fact", f"{owner} recent turn"):
             response = client.post(
                 "/v1/write",
-                json={"scope": scope, "role": "user", "content": content, "infer": False},
+                json={"attribution": scope, "role": "user", "content": content, "infer": False},
             )
             assert response.status_code in (200, 202)
 

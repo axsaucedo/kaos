@@ -172,7 +172,7 @@ def test_conversation_round_trips_across_recall_scopes_without_session_leakage(t
         response = client.post(
             "/v1/write",
             json={
-                "scope": {**base_scope, "session_id": session_id},
+                "attribution": {**base_scope, "session_id": session_id},
                 "turns": [
                     {"role": "user", "content": f"remember the {marker} in this session"},
                     {"role": "assistant", "content": f"noted {marker}"},

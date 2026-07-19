@@ -19,6 +19,7 @@ package never drags in the engine or an agent framework.
 
 from kaos_memory.client import MemoryServiceClient
 from kaos_memory.contract import (
+    Attribution,
     FailureMode,
     ForgetRequest,
     ForgetResponse,
@@ -39,6 +40,7 @@ __version__ = "0.4.8.dev0"
 
 __all__ = [
     "MemoryServiceClient",
+    "Attribution",
     "Scope",
     "ScopeLevel",
     "scope_key",

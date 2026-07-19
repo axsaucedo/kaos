@@ -2,6 +2,7 @@
 
 import pytest
 
+from kaos_memory.contract import Attribution
 from kaos_memory.stores import Scope, ScopeLevel, scope_key
 
 
@@ -68,8 +69,7 @@ def test_group_has_no_synthetic_entity_owner():
 
 
 def test_write_kwargs_carry_all_known_attribution():
-    scope = Scope(
-        level=ScopeLevel.GROUP,
+    scope = Attribution(
         principal="alice",
         agent_client_id="agent-a",
         session_id="run-1",
@@ -82,13 +82,13 @@ def test_write_kwargs_carry_all_known_attribution():
 
 
 def test_write_kwargs_omit_unknown_attribution():
-    scope = Scope(level=ScopeLevel.AGENT, agent_client_id="agent-a")
+    scope = Attribution(agent_client_id="agent-a")
     assert scope.write_kwargs() == {"agent_id": "agent-a"}
 
 
 def test_write_requires_an_entity_contributor():
     with pytest.raises(ValueError, match="principal or agent_client_id"):
-        Scope(level=ScopeLevel.GROUP, session_id="run-1").write_kwargs("team-a")
+        Attribution(session_id="run-1").write_kwargs("team-a")
 
 
 @pytest.mark.parametrize(
