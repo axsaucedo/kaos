@@ -38,12 +38,10 @@ spec:
       modelAPI: support-modelapi
       model: text-embedding-3-small
   defaultFailureMode: soft
-  container:
-    env:
-    - name: KAOS_MEMORY_TOKEN_BUDGET
-      value: "64"
-    - name: KAOS_MEMORY_ROLLING_SUMMARY
-      value: "true"
+  shortTerm:
+    tokenBudget: 64
+  mediumTerm:
+    enabled: true
 
 ---
 apiVersion: kaos.tools/v1alpha1
