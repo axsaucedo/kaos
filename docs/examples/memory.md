@@ -55,7 +55,7 @@ kubectl config set-context --current --namespace="$NAMESPACE"
 
 ## Step 1: Deploy a Memory-Enabled Agent
 
-We deploy the reusable `memory` sample: one `ModelAPI`, the local-mode `support-memory` store, and three agents with different read entitlements. The primary `user-assistant` uses a mock response, so the example never calls the model.
+We deploy the reusable `memory` sample: one `ModelAPI`, the local-mode `support-memory` store, and three agents with different read entitlements. This walkthrough uses the session-scoped `session-assistant`, which works without cluster user identity and uses a mock response so the example never calls the model.
 
 The important part is the agent's `config.memory` block:
 
@@ -83,22 +83,22 @@ done
 echo "MemoryStore phase: $phase"
 
 for i in $(seq 1 60); do
-  kubectl get deployment/agent-user-assistant -n "$NAMESPACE" >./tmp/null 2>&1 && break
+  kubectl get deployment/agent-session-assistant -n "$NAMESPACE" >./tmp/null 2>&1 && break
   sleep 2
 done
-kubectl wait --for=condition=available deployment/agent-user-assistant -n "$NAMESPACE" --timeout=180s
-kaos agent tools user-assistant -n "$NAMESPACE" --json
+kubectl wait --for=condition=available deployment/agent-session-assistant -n "$NAMESPACE" --timeout=180s
+kaos agent tools session-assistant -n "$NAMESPACE" --json
 ```
 
-The tool output shows `search_memory.parameters_json_schema.properties.level.enum` as `session`, `agent`, `user`, and `group`. Run the same command for `session-assistant` to see its narrower `session`-only entitlement.
+The tool output shows the `session-assistant` has a `session`-only entitlement. On a cluster configured with user identity, run the same command for `user-assistant` to see `search_memory.parameters_json_schema.properties.level.enum` include `session`, `agent`, `user`, and `group`.
 
 ## Step 3: Session 1 — Talk to the Agent
 
 Send the agent a fact to remember. This is an ordinary chat request; the agent handles it and, because it is bound to the store, **automatically persists the conversation** afterwards:
 
 ```bash
-AGENT_PORT=$(kubectl get svc/agent-user-assistant -n "$NAMESPACE" -o jsonpath='{.spec.ports[0].port}')
-kubectl port-forward -n "$NAMESPACE" svc/agent-user-assistant "19001:$AGENT_PORT" \
+AGENT_PORT=$(kubectl get svc/agent-session-assistant -n "$NAMESPACE" -o jsonpath='{.spec.ports[0].port}')
+kubectl port-forward -n "$NAMESPACE" svc/agent-session-assistant "19001:$AGENT_PORT" \
   > ./tmp/memory-agent-port-forward.log 2>&1 &
 AGENT_PF=$!
 sleep 4
@@ -149,7 +149,7 @@ print("SUCCESS: each session keeps an independent verbatim window")
 
 ## Enabling the Tools
 
-The primary `user-assistant` sets `tools: read`. Memory always applies the **automatic baseline** (recall before a run, persist after) — that is what Steps 3–5 exercised. `tools` layers explicit, model-driven tools on top:
+Both assistants set `tools: read`. Memory always applies the **automatic baseline** (recall before a run, persist after) — that is what Steps 3–5 exercised. `tools` layers explicit, model-driven tools on top:
 
 | Setting | Tools exposed | Arguments | The model can… |
 |---------|---------------|-----------|----------------|

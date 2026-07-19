@@ -139,7 +139,6 @@ class Scope(BaseModel):
             return {"run_id": self.session_id}
         raise ValueError("group scope has no Mem0 entity owner")
 
-
     def search_filters(self, group: Optional[str] = None) -> Dict[str, Any]:
         """Return the Mem0 ``filters`` dict for a search at this scope.
 
@@ -187,7 +186,7 @@ def scope_owner_key(scope: Scope, group: Optional[str] = None) -> str:
     return f"kaos_group:{group}"
 
 
-def scope_key(scope: Scope, group: Optional[str] = None) -> str:
+def scope_key(scope: Scope | Attribution, group: Optional[str] = None) -> str:
     """Return the stable store-local key for a conversational session.
 
     Conversational tiers belong to the run, not to the agent or principal that

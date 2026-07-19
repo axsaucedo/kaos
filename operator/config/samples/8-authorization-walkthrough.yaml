@@ -1,0 +1,78 @@
+# Authorization walkthrough: user-facing and autonomous echo agents, an echo MCP tool, and a mock model
+---
+apiVersion: kaos.tools/v1alpha1
+kind: ModelAPI
+metadata:
+  name: model-api
+spec:
+  mode: Proxy
+  proxyConfig:
+    models:
+      - "*"
+
+---
+apiVersion: kaos.tools/v1alpha1
+kind: MCPServer
+metadata:
+  name: echo-mcp
+spec:
+  runtime: python-string
+  params: |
+    def echo(message: str) -> str:
+        """Echo a message for the authorization walkthrough."""
+        return f"Echo: {message}"
+
+---
+apiVersion: kaos.tools/v1alpha1
+kind: Agent
+metadata:
+  name: researcher
+spec:
+  modelAPI: model-api
+  model: echo
+  mcpServers:
+    - echo-mcp
+  config:
+    description: User-facing echo agent for authorization checks
+    instructions: Echo the user's request and use echo-mcp when asked.
+  container:
+    env:
+      - name: DEBUG_MOCK_RESPONSES
+        value: '["{\"tool_calls\": [{\"id\": \"call_1\", \"name\": \"echo\", \"arguments\": {\"message\": \"authorization note\"}}]}", "Researcher echo response"]'
+  agentNetwork:
+    expose: true
+
+---
+apiVersion: kaos.tools/v1alpha1
+kind: Agent
+metadata:
+  name: autobot
+spec:
+  modelAPI: model-api
+  model: echo
+  config:
+    description: Autonomous echo agent for authorization checks
+    instructions: Echo a short automated report.
+    autonomous:
+      goal: Produce the automated echo report.
+      intervalSeconds: 3600
+  container:
+    env:
+      - name: DEBUG_MOCK_RESPONSES
+        value: '["Autobot echo response"]'
+  agentNetwork:
+    expose: true
+
+---
+# Who may use the researcher agent: the "researchers" group.
+apiVersion: kaos.tools/v1alpha1
+kind: AccessGrant
+metadata:
+  name: researchers-to-researcher
+spec:
+  subjects:
+    - kind: Group
+      name: researchers
+  resources:
+    - kind: Agent
+      name: researcher

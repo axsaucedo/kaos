@@ -82,6 +82,10 @@ metadata:
 spec:
   modelAPI: support-modelapi
   model: gpt-4o-mini
+  container:
+    env:
+    - name: DEBUG_MOCK_RESPONSES
+      value: '["Noted — your favourite deployment port is 8080."]'
   config:
     description: Conversation-only assistant limited to the current session's memory
     instructions: Help users using only the current conversation's memory.

@@ -7,6 +7,150 @@ import time
 import signal
 import typer
 
+from kaos_cli.cluster_http import local_service_url
+from kaos_cli.config import load_config, session_token
+from kaos_cli.utils import current_context_namespace
+from kaos_cli.auth.consent import (
+    active_service_alias,
+    reauth_url,
+    service_alias,
+    service_id_from_reauth_url,
+)
+
+
+REASON_TEXT = {
+    "platform_grant_missing": "not granted",
+    "user_grant_required": "user not in a granted group",
+    "access-control unreachable": "access-control unavailable (failing closed)",
+    "access_control_unreachable": "access-control unavailable (failing closed)",
+    "missing token": "no valid identity",
+    "missing_token": "no valid identity",
+}
+
+
+def plain_access_reason(reason: str) -> str:
+    """Translate gateway reason codes into concise user-facing text."""
+    normalized = reason.strip().lower()
+    if normalized in REASON_TEXT:
+        return REASON_TEXT[normalized]
+    if "access-control" in normalized and "unreachable" in normalized:
+        return REASON_TEXT["access-control unreachable"]
+    if "missing" in normalized and "token" in normalized:
+        return REASON_TEXT["missing token"]
+    return reason.replace("_", " ") or "request permitted"
+
+
+def _response_content(response) -> str:
+    try:
+        data = response.json()
+        choices = data.get("choices", [])
+        if choices:
+            return choices[0].get("message", {}).get("content", "")
+        return json.dumps(data, indent=2)
+    except (ValueError, AttributeError):
+        return response.text
+
+
+def _access_control_ready(namespace: str) -> bool:
+    result = subprocess.run(
+        [
+            "kubectl",
+            "get",
+            "deployment/kaos-pdp",
+            "-n",
+            namespace,
+            "-o",
+            "jsonpath={.status.readyReplicas}/{.spec.replicas}",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return False
+    ready, _, desired = result.stdout.partition("/")
+    return bool(ready) and ready == desired and desired != "0"
+
+
+def _invoke_gateway(
+    name: str, namespace: str | None, message: str, user: str | None, session: str | None = None
+) -> None:
+    """Invoke an agent through the configured gateway and print its verdict."""
+    import httpx
+
+    config = load_config()
+    address = config["gateway"].get("address", "").rstrip("/")
+    namespace = namespace or config.get("namespace") or "default"
+    if not address:
+        typer.echo("✗ denied — no gateway address configured")
+        return
+    token = session_token(config, user) if user else None
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    if session:
+        headers["X-Session-ID"] = session
+    try:
+        with local_service_url(address) as local_address:
+            response = httpx.post(
+                f"{local_address}/{namespace}/agent/{name}/v1/chat/completions",
+                headers=headers,
+                json={"messages": [{"role": "user", "content": message}], "stream": False},
+                timeout=120.0,
+            )
+    except (httpx.HTTPError, RuntimeError) as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        return
+    content = _response_content(response)
+    approval_url = reauth_url(response)
+    if approval_url:
+        service_id = service_id_from_reauth_url(approval_url)
+        try:
+            service = service_alias(config, service_id or "")
+        except (httpx.HTTPError, RuntimeError, ValueError):
+            service = "service"
+        typer.echo(
+            f"✗ needs approval — run: kaos auth connect {service} --user {user}"
+        )
+        return
+    if content:
+        typer.echo(content)
+    reason = response.headers.get("x-kaos-access-reason", "")
+    allowed = response.status_code < 400
+    if not reason:
+        if response.status_code in (401, 403) and not token:
+            reason = "missing token"
+        elif response.status_code in (401, 403) and not _access_control_ready(namespace):
+            reason = "access-control unreachable"
+        elif response.status_code in (401, 403) and token:
+            reason = "user_grant_required"
+        elif response.status_code >= 500:
+            reason = "access-control unreachable"
+        else:
+            reason = "request permitted" if allowed else f"HTTP {response.status_code}"
+    if allowed and user:
+        try:
+            service = active_service_alias(config, user, message)
+        except (httpx.HTTPError, RuntimeError, ValueError):
+            service = None
+        if service:
+            typer.echo(f"✓ allowed — acting as {user} on {service}")
+            return
+    mark = "✓ allowed" if allowed else "✗ denied"
+    typer.echo(f"{mark} — {plain_access_reason(reason)}")
+
+
+def _is_autonomous(name: str, namespace: str | None) -> bool:
+    cmd = [
+        "kubectl",
+        "get",
+        "agent",
+        name,
+        "-o",
+        "jsonpath={.spec.config.autonomous.goal}",
+    ]
+    if namespace:
+        cmd.extend(["-n", namespace])
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    return result.returncode == 0 and bool(result.stdout.strip())
+
 
 def invoke_command(
     name: str,
@@ -14,10 +158,21 @@ def invoke_command(
     message: str,
     port: int,
     stream: bool,
+    user: str | None = None,
     session: str | None = None,
 ) -> None:
     """Send a message to an Agent via port-forward."""
     import httpx
+
+    config = load_config()
+    direct_namespace = namespace or current_context_namespace()
+    if user or (
+        config["gateway"].get("through_gateway")
+        and not _is_autonomous(name, direct_namespace)
+    ):
+        _invoke_gateway(name, namespace, message, user, session)
+        return
+    namespace = direct_namespace
 
     # Find the service for this Agent
     cmd = [
@@ -131,6 +286,7 @@ def invoke_command(
                         typer.echo(content)
                     else:
                         typer.echo(json.dumps(result, indent=2))
+                    typer.echo("✓ allowed — request permitted")
                 else:
                     typer.echo(
                         f"Error: HTTP {response.status_code}: {response.text}", err=True

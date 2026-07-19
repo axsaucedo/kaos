@@ -17,7 +17,13 @@ from kaos_cli.install import (
     DEFAULT_RELEASE_NAME,
     MONITORING_BACKENDS,
     _expand_auth_flags,
+    _default_auth_admin_url,
+    _default_auth_issuer,
+    _default_user_auth_issuer,
+    DEFAULT_USER_AUTH_CLIENT_ID,
+    DEFAULT_USER_AUTH_REALM,
 )
+from kaos_cli.config import load_config, save_config
 from kaos_cli.system.runtimes import runtimes_command
 from kaos_cli.utils import DEFAULT_MONITORING_BACKEND, preprocess_optional_value_flag
 
@@ -54,6 +60,52 @@ app = typer.Typer(
     help="System management commands for KAOS operator.",
     no_args_is_help=True,
 )
+
+
+@app.command(name="access-control")
+def access_control(
+    turn_on: bool = typer.Option(False, "--on", help="Start access control."),
+    turn_off: bool = typer.Option(False, "--off", help="Stop access control."),
+    namespace: str = typer.Option("kaos-system", "--namespace", "-n"),
+) -> None:
+    """Start or stop the access-control service."""
+    if turn_on == turn_off:
+        typer.echo("Error: specify exactly one of --on or --off", err=True)
+        raise typer.Exit(1)
+    state = "on" if turn_on else "off"
+    replicas = "2" if turn_on else "0"
+    result = subprocess.run(
+        [
+            "kubectl",
+            "scale",
+            "deployment/kaos-pdp",
+            "-n",
+            namespace,
+            f"--replicas={replicas}",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        typer.echo(result.stderr.strip() or "Error: unable to scale access control", err=True)
+        raise typer.Exit(result.returncode)
+    rollout = subprocess.run(
+        [
+            "kubectl",
+            "rollout",
+            "status",
+            "deployment/kaos-pdp",
+            "-n",
+            namespace,
+            "--timeout=60s",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if rollout.returncode != 0:
+        typer.echo(rollout.stderr.strip() or "Error: access-control rollout timed out", err=True)
+        raise typer.Exit(rollout.returncode)
+    typer.echo(f"✓ access-control {state}")
 
 
 @app.command(name="install")
@@ -96,6 +148,36 @@ def install(
         "--gateway-enabled",
         help="Install Gateway API (Envoy Gateway) and configure routing. Implied by "
         "an authentication flag.",
+    ),
+    gateway_strict: bool = typer.Option(
+        False,
+        "--gateway-strict",
+        help="Allow application traffic only through the gateway.",
+    ),
+    authz_enabled: bool = typer.Option(
+        False,
+        "--authz-enabled",
+        help="Enable fail-closed gateway access-control enforcement.",
+    ),
+    agent_auth: str | None = typer.Option(
+        None,
+        "--agent-auth",
+        help="Agent identity mode: serviceaccount|oidc|keycloak.",
+    ),
+    user_auth: str | None = typer.Option(
+        None,
+        "--user-auth",
+        help="User identity mode: keycloak or none.",
+    ),
+    create_cli_config: bool = typer.Option(
+        False,
+        "--create-cli-config",
+        help="Write a KAOS CLI config after a successful install.",
+    ),
+    config_path_override: str | None = typer.Option(
+        None,
+        "--config-path",
+        help="Path written by --create-cli-config (default: ./.kaos-config.yaml).",
     ),
     metallb_enabled: bool = typer.Option(
         False,
@@ -179,9 +261,35 @@ def install(
         )
         raise typer.Exit(1)
 
+    if agent_auth_enabled is not None and agent_auth is not None:
+        typer.echo("Error: use only one of --agent-auth and --agent-auth-enabled", err=True)
+        raise typer.Exit(1)
+    if user_auth_enabled is not None and user_auth is not None:
+        typer.echo("Error: use only one of --user-auth and --user-auth-enabled", err=True)
+        raise typer.Exit(1)
+    if agent_auth not in (None, "serviceaccount", "oidc", "keycloak"):
+        typer.echo(
+            "Error: --agent-auth must be serviceaccount, oidc, or keycloak", err=True
+        )
+        raise typer.Exit(1)
+    if user_auth not in (None, "keycloak", "none"):
+        typer.echo("Error: --user-auth must be keycloak or none", err=True)
+        raise typer.Exit(1)
+
+    selected_agent_auth = (
+        {
+            "serviceaccount": "service-account",
+            "oidc": "keycloak",
+            "keycloak": "keycloak",
+        }.get(agent_auth)
+        if agent_auth is not None
+        else agent_auth_enabled
+    )
+    selected_user_auth = user_auth if user_auth is not None else user_auth_enabled
+
     auth_kwargs: dict = {}
     if token_exchange_enabled:
-        if agent_auth_enabled not in (None, "keycloak"):
+        if selected_agent_auth not in (None, "keycloak"):
             typer.echo(
                 "Error: --token-exchange-enabled requires "
                 "--agent-auth-enabled keycloak; service-account-only and AIB "
@@ -189,7 +297,7 @@ def install(
                 err=True,
             )
             raise typer.Exit(1)
-        if user_auth_enabled not in (None, "keycloak"):
+        if selected_user_auth not in (None, "keycloak"):
             typer.echo(
                 "Error: --token-exchange-enabled requires "
                 "--user-auth-enabled keycloak.",
@@ -205,14 +313,17 @@ def install(
             raise typer.Exit(1)
 
     if (
-        agent_auth_enabled is not None
-        or user_auth_enabled is not None
+        selected_agent_auth is not None
+        or selected_user_auth is not None
         or token_exchange_enabled
+        or authz_enabled
     ):
-        agent_mode = agent_auth_enabled or (
+        agent_mode = selected_agent_auth or (
             "keycloak" if token_exchange_enabled else DEFAULT_AGENT_AUTH_MODE
         )
-        user_mode = user_auth_enabled or DEFAULT_USER_AUTH_MODE
+        user_mode = selected_user_auth or (
+            "none" if authz_enabled else DEFAULT_USER_AUTH_MODE
+        )
         if agent_mode not in AGENT_AUTH_MODES:
             typer.echo(
                 f"Error: Invalid agent auth mode '{agent_mode}'. Options: "
@@ -247,10 +358,30 @@ def install(
         aib_chart_path=aib_chart_path,
         aib_values_path=aib_values_path,
         keycloak_chart_path=keycloak_chart_path,
-        gateway_api_strict=gateway_api_strict,
+        gateway_api_strict=gateway_api_strict or gateway_strict,
     )
     call_kwargs.update(auth_kwargs)
     install_command(**call_kwargs)
+
+    if create_cli_config:
+        output_path = config_path_override or ".kaos-config.yaml"
+        cli_config = load_config(output_path)
+        cli_config["namespace"] = namespace
+        if gateway_enabled or auth_kwargs.get("gateway_enabled"):
+            cli_config["gateway"] = {
+                "address": f"http://kaos-gateway.{namespace}.svc.cluster.local",
+                "through_gateway": True,
+            }
+        if selected_user_auth == "keycloak" or auth_kwargs.get("user_auth"):
+            cli_config["auth"] = {
+                "issuer": _default_user_auth_issuer(keycloak_namespace, "keycloak"),
+                "client_id": DEFAULT_USER_AUTH_CLIENT_ID,
+                "realm": DEFAULT_USER_AUTH_REALM,
+                "broker_url": _default_auth_issuer(auth_namespace, "aib"),
+                "broker_admin_url": _default_auth_admin_url(auth_namespace, "aib"),
+            }
+        path = save_config(cli_config, output_path)
+        typer.echo(f"✓ wrote CLI config {path}")
 
 
 @app.command(name="uninstall")

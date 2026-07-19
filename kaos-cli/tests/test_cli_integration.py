@@ -1029,7 +1029,7 @@ class TestPackageData:
         assert "1-simple-echo-agent" in names
         assert "5-proxy-external-api" in names
         assert "7-memory-agent" in names
-        assert "8-access-grant" in names
+        assert "8-authorization-walkthrough" in names
 
 
 # ─── Monitoring validation ──────────────────────────────────────────────

@@ -268,7 +268,9 @@ class ShortTermStore:
         self._lock = threading.Lock()
         self.db = _Backend(storage_type, target)
 
-    def add(self, scope: Scope | Attribution, turns: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
+    def add(
+        self, scope: Scope | Attribution, turns: List[Tuple[str, str]]
+    ) -> List[Tuple[str, str]]:
         """Append a batch of turns, enforce the budget/cap, and return the evicted turns.
 
         ``turns`` is an ordered ``(role, content)`` list appended in a single transaction;
@@ -364,7 +366,7 @@ class ShortTermStore:
         """Backward-compatible alias for :meth:`delete`."""
         self.delete(scope)
 
-    def fold_pending_into_summary(self, scope: Scope) -> None:
+    def fold_pending_into_summary(self, scope: Scope | Attribution) -> None:
         """Fold all pending (marked) turns for the scope into a new digest version.
 
         Reads every turn marked ``pending_summary=1``, folds them into the prior digest
@@ -404,7 +406,9 @@ class ShortTermStore:
 
     # -- internals -------------------------------------------------------- #
 
-    def _drop_stale_window(self, scope: Scope, key: str, overflow_ids: List[int]) -> None:
+    def _drop_stale_window(
+        self, scope: Scope | Attribution, key: str, overflow_ids: List[int]
+    ) -> None:
         """Evict the computed overflow: drop it (recency window) or fold it (rolling summary)."""
         if not overflow_ids:
             return
@@ -613,7 +617,9 @@ class LongTermStore:
         items = raw["results"] if isinstance(raw, dict) else raw
         return items or []
 
-    def add(self, scope: Attribution, messages: Any, infer: bool = True) -> List[Dict[str, Any]]:
+    def add(
+        self, scope: Scope | Attribution, messages: Any, infer: bool = True
+    ) -> List[Dict[str, Any]]:
         """Store ``messages`` under ``scope``. With ``infer`` the engine extracts facts."""
         if isinstance(scope, Scope):
             scope = Attribution(

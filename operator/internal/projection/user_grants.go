@@ -20,6 +20,9 @@ func UserGrantData(state DesiredState) map[string][]string {
 	for _, grant := range state.AccessGrants {
 		resources := resolveGrantResources(grant, state.Resources)
 		for _, subject := range grant.Subjects {
+			if subject.Kind == "Agent" {
+				continue
+			}
 			prefix := "user:"
 			if subject.Kind == "Group" {
 				prefix = "group:"

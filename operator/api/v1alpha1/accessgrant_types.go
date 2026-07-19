@@ -10,6 +10,8 @@ const (
 	AccessGrantSubjectKindUser AccessGrantSubjectKind = "User"
 	// AccessGrantSubjectKindGroup matches an entry in the token groups claim.
 	AccessGrantSubjectKindGroup AccessGrantSubjectKind = "Group"
+	// AccessGrantSubjectKindAgent grants an agent access to another KAOS resource.
+	AccessGrantSubjectKindAgent AccessGrantSubjectKind = "Agent"
 )
 
 // AccessGrantResourceKind identifies a KAOS resource kind.
@@ -22,13 +24,13 @@ const (
 	AccessGrantResourceKindMemoryStore AccessGrantResourceKind = "MemoryStore"
 )
 
-// AccessGrantSubject identifies a user or group receiving access.
+// AccessGrantSubject identifies a user, group, or agent receiving access.
 type AccessGrantSubject struct {
-	// Kind specifies whether Name identifies a user or group.
-	// +kubebuilder:validation:Enum=User;Group
+	// Kind specifies whether Name identifies a user, group, or agent.
+	// +kubebuilder:validation:Enum=User;Group;Agent
 	Kind AccessGrantSubjectKind `json:"kind"`
 
-	// Name is a token subject/email claim for users or a groups claim entry for groups.
+	// Name is a token claim value for users/groups or a KAOS Agent name.
 	// +kubebuilder:validation:MinLength=1
 	Name string `json:"name"`
 }
@@ -52,7 +54,7 @@ type AccessGrantResource struct {
 
 // AccessGrantSpec defines user-to-resource authorization bindings.
 type AccessGrantSpec struct {
-	// Subjects identifies the users and groups receiving access.
+	// Subjects identifies the users, groups, and agents receiving access.
 	// +kubebuilder:validation:MinItems=1
 	Subjects []AccessGrantSubject `json:"subjects"`
 

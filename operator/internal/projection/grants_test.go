@@ -68,3 +68,26 @@ func TestGrantDataOmitsMemoryStoreForUnboundAgent(t *testing.T) {
 		t.Fatalf("grants = %v, want %v", got, want)
 	}
 }
+
+func TestGrantDataIncludesAgentAccessGrant(t *testing.T) {
+	state := DesiredState{
+		Resources: []Resource{
+			{Kind: MCPServer.ResourceKind, Namespace: "demo", Name: "notes"},
+			{Kind: ModelAPI.ResourceKind, Namespace: "demo", Name: "chat"},
+		},
+		AccessGrants: []AccessGrant{{
+			Namespace: "demo",
+			Subjects:  []AccessGrantSubject{{Kind: "Agent", Name: "researcher"}},
+			Resources: []AccessGrantResource{
+				{Kind: MCPServer.ResourceKind, Name: "notes"},
+				{Kind: ModelAPI.ResourceKind, Name: "chat"},
+			},
+		}},
+	}
+
+	got := GrantData(state)["kaos://agent/demo/researcher"]
+	want := []string{"kaos://mcpserver/demo/notes", "kaos://modelapi/demo/chat"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("grants = %v, want %v", got, want)
+	}
+}

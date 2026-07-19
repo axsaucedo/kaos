@@ -1,13 +1,14 @@
 """Write endpoint tests: synchronous short-term append + scheduled extraction."""
 
 import threading
+from typing import cast
 
 from fastapi.testclient import TestClient
 
 from kaos_memory.config import MemorySettings, ShortTermTierConfig
 from kaos_memory.stores import Scope, ScopeLevel
 from kaos_memory.app import MemoryService, create_app
-from kaos_memory.stores import ShortTermStore
+from kaos_memory.stores import LongTermStore, ShortTermStore
 
 USER_SCOPE = {"level": "user", "principal": "bob", "session_id": "session-1"}
 
@@ -46,23 +47,35 @@ def _write(client, content, **extra):
 
 
 def test_write_posture_rejects_missing_required_identities(tmp_path):
-    service = MemoryService(longterm=_RecordingLongTerm(), short_term=_short_term(tmp_path))
+    service = MemoryService(
+        longterm=cast(LongTermStore, _RecordingLongTerm()), short_term=_short_term(tmp_path)
+    )
     client = TestClient(create_app(service, settings=MemorySettings(require_principal=True)))
     response = client.post(
         "/v1/write",
-        json={"attribution": {"agent_client_id": "agent-a", "session_id": "s"}, "role": "user", "content": "x"},
+        json={
+            "attribution": {"agent_client_id": "agent-a", "session_id": "s"},
+            "role": "user",
+            "content": "x",
+        },
     )
     assert response.status_code == 403
     assert "principal" in response.json()["error"]
 
 
 def test_write_posture_accepts_complete_attribution(tmp_path):
-    service = MemoryService(longterm=_RecordingLongTerm(), short_term=_short_term(tmp_path))
+    service = MemoryService(
+        longterm=cast(LongTermStore, _RecordingLongTerm()), short_term=_short_term(tmp_path)
+    )
     settings = MemorySettings(require_principal=True, require_agent_identity=True)
     client = TestClient(create_app(service, settings=settings))
     response = client.post(
         "/v1/write",
-        json={"attribution": {"principal": "alice", "agent_client_id": "agent-a", "session_id": "s"}, "role": "user", "content": "x"},
+        json={
+            "attribution": {"principal": "alice", "agent_client_id": "agent-a", "session_id": "s"},
+            "role": "user",
+            "content": "x",
+        },
     )
     assert response.status_code == 200
 

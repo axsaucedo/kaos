@@ -107,21 +107,23 @@ spec:
                 minItems: 1
                 type: array
               subjects:
-                description: Subjects identifies the users and groups receiving access.
+                description: Subjects identifies the users, groups, and agents receiving
+                  access.
                 items:
-                  description: AccessGrantSubject identifies a user or group receiving
-                    access.
+                  description: AccessGrantSubject identifies a user, group, or agent
+                    receiving access.
                   properties:
                     kind:
-                      description: Kind specifies whether Name identifies a user or
-                        group.
+                      description: Kind specifies whether Name identifies a user,
+                        group, or agent.
                       enum:
                       - User
                       - Group
+                      - Agent
                       type: string
                     name:
-                      description: Name is a token subject/email claim for users or
-                        a groups claim entry for groups.
+                      description: Name is a token claim value for users/groups or
+                        a KAOS Agent name.
                       minLength: 1
                       type: string
                   required:

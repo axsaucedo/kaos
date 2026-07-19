@@ -10,7 +10,7 @@ default and raise under strict, and degraded responses never raise.
 import httpx
 import pytest
 
-from pais.memory import MemoryScope, RecalledMemory, ScopeLevel, RemoteMemory
+from pais.memory import MemoryAttribution, MemoryScope, RecalledMemory, ScopeLevel, RemoteMemory
 
 
 def _client(handler) -> RemoteMemory:
@@ -25,6 +25,10 @@ def _scope() -> MemoryScope:
         agent_client_id="agent-1",
         session_id="sess-1",
     )
+
+
+def _attribution() -> MemoryAttribution:
+    return MemoryAttribution(principal="alice", agent_client_id="agent-1", session_id="sess-1")
 
 
 class TestRecall:
@@ -126,7 +130,7 @@ class TestWrite:
             )
 
         mem = _client(handler)
-        ok = await mem.write(_scope(), [("user", "remember the sky is blue")], infer=True)
+        ok = await mem.write(_attribution(), [("user", "remember the sky is blue")], infer=True)
         assert ok is True
         assert seen["url"].endswith("/v1/write")
         assert seen["payload"]["turns"] == [{"role": "user", "content": "remember the sky is blue"}]
@@ -147,7 +151,7 @@ class TestWrite:
             )
 
         mem = _client(handler)
-        await mem.write(_scope(), [("user", "x")], failure_mode="soft")
+        await mem.write(_attribution(), [("user", "x")], failure_mode="soft")
         assert seen["payload"]["failure_mode"] == "soft"
         await mem.close()
 
@@ -157,7 +161,7 @@ class TestWrite:
             raise httpx.ConnectError("service down")
 
         mem = _client(handler)
-        ok = await mem.write(_scope(), [("user", "x")])
+        ok = await mem.write(_attribution(), [("user", "x")])
         assert ok is False
         await mem.close()
 
@@ -168,7 +172,7 @@ class TestWrite:
 
         mem = _client(handler)
         with pytest.raises(httpx.ConnectError):
-            await mem.write(_scope(), [("user", "x")], failure_mode="strict")
+            await mem.write(_attribution(), [("user", "x")], failure_mode="strict")
         await mem.close()
 
 
