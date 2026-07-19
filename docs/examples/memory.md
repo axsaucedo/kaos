@@ -32,7 +32,7 @@ graph LR
     M --> R[Raw turns stay isolated ✓]
 ```
 
-Every request an agent handles flows through the same memory baseline — recall before, persist after. Verbatim conversational windows are session-local; extracted long-term facts can be recalled across sessions according to the configured scope.
+Every request flows through the same baseline: scoped recall before the run, then a level-less attributed write. Identity requirements derive from cluster posture.
 
 ## Prerequisites
 
@@ -60,8 +60,8 @@ We deploy the reusable `memory` sample: one `ModelAPI`, the local-mode `support-
 The important part is the agent's `config.memory` block:
 
 - `memoryStore: support-memory` binds all three agents to the store.
-- `user-assistant` uses a user home scope with `defaultReadScope: user`, so the user's facts are auto-recalled on every turn; `session-assistant` is conversation-only, scoped to the current session.
-- `agent-bot` keeps agent-scoped memory and exposes no explicit memory tools.
+- `user-assistant` uses `defaultReadScope: user`; `session-assistant` keeps the session fallback.
+- `agent-bot` states `defaultReadScope: agent` and exposes no explicit memory tools.
 - The store tunes its tiers with typed fields: a small `shortTerm.tokenBudget` makes conversational compaction easy to exercise, and `mediumTerm.enabled` turns on the rolling digest that folds the overflow.
 
 `DEBUG_MOCK_RESPONSES` makes the agent return a canned reply instead of calling the model, so the run is deterministic.
@@ -155,14 +155,14 @@ The primary `user-assistant` sets `tools: read`. Memory always applies the **aut
 |---------|---------------|-----------|----------------|
 | _(unset)_ | none | — | rely purely on automatic recall/persist |
 | `read` | `search_memory` | `query`, required entitled `level` | look facts up at `session`, `agent`, `user`, or `group` when configured |
-| `write` | `save_memory` | `content` | save a durable fact at the home scope |
+| `write` | `save_memory` | `content` | save a durable fact with server-derived attribution |
 | `all` | both | as above | save and search on demand |
 
-`search_memory` accepts a level but never accepts owner values: the enum is generated from `readScopes`, revalidated by the handler, and combined with the server-derived principal, agent identity, and current session. `save_memory` remains fixed to the home `scope`. Genuine semantic use of `save_memory` (distilling and recalling facts in natural language) needs a real embedding model, shown next.
+`search_memory` accepts a validated read level but never owner values. `save_memory` accepts content only; principal, agent, and session attribution come from authenticated dependencies.
 
 ## Scopes
 
-Memory is partitioned by `scope`, set on the agent's `config.memory` block:
+Reads are partitioned by scope through `defaultReadScope` and `readScopes`; writes attach every verified contributor without a level:
 
 - `session` — one conversation only.
 - `group` — extracted facts are shared by every agent and session on the store; raw turns remain session-local.

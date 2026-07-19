@@ -43,8 +43,7 @@ spec:
       enabled: true           # Enable/disable memory (default: true)
       type: remote            # "remote" (bound MemoryStore) or "local" (pod-local)
       memoryStore: shared-memory  # MemoryStore in the same namespace (remote)
-      scope: user             # agent | user | group | session
-      defaultReadScope: user  # Automatic recall level; defaults to resolved scope
+      defaultReadScope: user  # Automatic recall level; defaults to store, then session
       readScopes: [user, agent] # Levels offered to search_memory
       tools: all              # Expose memory tools: all | read | write
       failureMode: soft       # Override store default: soft | strict
@@ -234,8 +233,7 @@ config:
     enabled: true               # Enable/disable memory (default: true)
     type: remote                # "remote" or "local" (derived from memoryStore when omitted)
     memoryStore: shared-memory  # MemoryStore in the same namespace (required for remote)
-    scope: user                 # Home/write scope; inherits store default, then agent
-    defaultReadScope: user      # Automatic recall scope; defaults to resolved scope
+    defaultReadScope: user      # Automatic recall scope; defaults to store, then session
     readScopes: [user, agent]   # search_memory entitlements; defaults to defaultReadScope
     tools: all                  # Expose memory tools: all | read | write
     failureMode: soft           # Override store default write/forget mode: soft | strict
@@ -249,25 +247,24 @@ config:
 | `enabled` | bool | `true` | Enable memory; when `false`, uses a no-op memory implementation |
 | `type` | string | derived | `remote` (bound MemoryStore) or `local` (pod-local short-term). Derived from `memoryStore` presence when omitted |
 | `memoryStore` | string | — | Name of a MemoryStore in the same namespace. Required for `remote`; forbidden for `local` |
-| `scope` | string | store `defaultScope`, then `agent` | Home scope used for writes: `agent`, `user`, `group`, or `session`. An explicit Agent value overrides the store default; `user` and `group` require a `memoryStore` |
-| `defaultReadScope` | string | resolved `scope` | Single level used by automatic recall: `agent`, `user`, `group`, or `session` |
+| `defaultReadScope` | string | store `defaultReadScope`, then `session` | Single level used by automatic recall: `agent`, `user`, `group`, or `session` |
 | `readScopes` | string[] | `[defaultReadScope]` | Levels exposed through the required `level` argument of `search_memory` |
 | `tools` | string | — | Explicit memory tools on top of automatic recall/write: `all` (save + search), `read` (search), `write` (save). Requires a `memoryStore`; multiple `readScopes` require `read` or `all` |
 | `failureMode` | string | store default | Override the store's write/forget failure mode: `soft` (tolerate) or `strict` (surface errors) |
 | `clientParams.tokenBudget` | int | runtime default | Cap on the verbatim short-term window replayed, in tokens |
 | `clientParams.rollingSummary` | bool | `true` | Maintain a rolling summary of evicted turns |
 
-**Memory scope (multi-tenancy):**
+**Memory read scope (multi-tenancy):**
 - `agent` (default) — memory is isolated to this single agent; each agent identity owns its own store partition.
 - `user` — memory is keyed by the calling principal, so any agent bound to the same store shares that user's memory across sessions. Requires a `memoryStore`.
 - `group` — a single common partition read/written by every agent bound to the store. Requires a `memoryStore`; the store defines the group.
 - `session` — memory is scoped to an individual conversation/session and not carried across sessions.
 
-**Read-scope policy:** `defaultReadScope` controls the one long-term filter used by automatic recall; it does not change the per-session conversational window or the home scope used for writes. `readScopes` is the entitlement list for the single `search_memory(query, level)` tool. When both fields are set, `defaultReadScope` must be in `readScopes`. Explicit non-session read levels require a `memoryStore`, and more than one `readScopes` value requires `tools: read` or `tools: all`.
+**Read-scope policy:** `defaultReadScope` controls the one long-term filter used by automatic recall. `readScopes` is the entitlement list for `search_memory(query, level)`. Writes have no level: the runtime attaches every verified identity and the service enforces cluster posture. User read configuration is rejected when the cluster has no user identity.
 
 **Remote memory:**
 - Set `type: remote` and reference a ready MemoryStore via `memoryStore`.
-- The operator injects `MEMORY_STORE_ENDPOINT`, the resolved `MEMORY_SCOPE`, `MEMORY_DEFAULT_READ_SCOPE`, comma-separated `MEMORY_READ_SCOPES`, and a qualified `AGENT_IDENTITY` (`kaos://agent/<namespace>/<name>`) into the agent container.
+- The operator injects `MEMORY_STORE_ENDPOINT`, resolved `MEMORY_DEFAULT_READ_SCOPE`, comma-separated `MEMORY_READ_SCOPES`, posture requirements, and a qualified `AGENT_IDENTITY` (`kaos://agent/<namespace>/<name>`) into the agent container.
 - Binding is degraded-aware for a running agent: if the store later becomes missing or not-ready it does not block serving — the agent reports a `MemoryDegraded` status condition and falls back to its local short-term window. Initial creation is gated, though: with `waitForDependencies` enabled (default) the agent stays `Waiting` until the bound store is Ready, so it never starts up degraded.
 
 **When to disable memory:**

@@ -777,18 +777,19 @@ class TestSamples:
         }
         assert {agent["spec"]["model"] for agent in agents.values()} == {"gpt-test"}
         user_memory = agents["user-assistant"]["spec"]["config"]["memory"]
-        assert user_memory["scope"] == "user"
+        assert "scope" not in user_memory
         assert user_memory["defaultReadScope"] == "user"
         assert user_memory["tools"] == "read"
         assert user_memory["readScopes"] == ["session", "agent", "user", "group"]
         assert user_memory["clientParams"]["tokenBudget"] == 64
         session_memory = agents["session-assistant"]["spec"]["config"]["memory"]
-        assert session_memory["scope"] == "session"
+        assert "scope" not in session_memory
         assert session_memory["tools"] == "read"
         assert "defaultReadScope" not in session_memory
         assert "readScopes" not in session_memory
         agent_memory = agents["agent-bot"]["spec"]["config"]["memory"]
-        assert agent_memory["scope"] == "agent"
+        assert agent_memory["defaultReadScope"] == "agent"
+        assert "scope" not in agent_memory
         assert "tools" not in agent_memory
 
     def test_deploy_memory_sample_dry_run(self):
@@ -805,7 +806,7 @@ class TestSamples:
         assert store["spec"]["storage"]["type"] == "local"
         agent = next(d for d in docs if d["kind"] == "Agent")
         assert agent["spec"]["config"]["memory"]["memoryStore"] == "support-memory"
-        assert agent["spec"]["config"]["memory"]["scope"] == "user"
+        assert agent["spec"]["config"]["memory"]["defaultReadScope"] == "user"
         result = runner.invoke(
             app, ["samples", "deploy", "1-simple-echo-agent", "--dry-run"]
         )
