@@ -8,7 +8,7 @@
 | `kaos-memory[service]` | `kaos_memory.app`, `kaos_memory.stores`, `kaos_memory.config` | + Mem0, Chroma/pgvector, tiktoken, FastAPI |
 | `kaos-memory[pydantic-ai]` | `kaos_memory.pydantic_ai` | + Pydantic AI |
 
-- **`kaos_memory.contract`** — the single source of truth for the HTTP contract: the `Scope`/`ScopeLevel` identity and the recall/write/forget request and response schemas. Carries no engine or web-framework dependency, so both the service and the client import the same definitions.
+- **`kaos_memory.contract`** — the HTTP contract: `Scope` selects reads/erasure, while level-less `Attribution` carries write identities.
 - **`kaos_memory.client`** — `MemoryServiceClient`, the framework-agnostic best-effort HTTP client for the service (recall degrades to empty; write/forget are fail-soft unless `failure_mode="strict"`).
 - **`kaos_memory.pydantic_ai`** — direct Pydantic AI integration: message/turn adapters (`pydantic_message_to_turns`, `reconstruct_message_history`), server-side scope derivation (`scope_from_deps`), and the opt-in memory toolset (`MemoryTools`, `build_memory_toolset`).
 
@@ -26,7 +26,7 @@ Both bind their models to a resolved OpenAI-compatible endpoint (a KAOS `ModelAP
 
 ## Scope model
 
-A `Scope` selects long-term read visibility. Long-term writes always carry every known contributor (`user_id` and the real `agent_id`) plus `kaos_run` and `kaos_group` custom metadata; the session is not a Mem0 entity id, which preserves cross-session deduplication.
+A `Scope` selects long-term read visibility and erasure. An `Attribution` write carries every verified contributor (`user_id` and real `agent_id`) plus session/group metadata, with no scope level. The service authoritatively enforces `KAOS_MEMORY_REQUIRE_PRINCIPAL` and `KAOS_MEMORY_REQUIRE_AGENT_IDENTITY`; runtime checks are defence in depth.
 
 | Scope level | Long-term read filter |
 | --- | --- |

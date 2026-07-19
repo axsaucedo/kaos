@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import httpx
 from opentelemetry import trace as trace_api
 
-from kaos_memory.contract import Scope
+from kaos_memory.contract import Attribution, Scope
 
 logger = logging.getLogger("kaos.memory.client")
 
@@ -150,19 +150,16 @@ class MemoryServiceClient:
 
     async def write(
         self,
-        scope: Scope,
+        attribution: Attribution,
         turns: List[Tuple[str, str]],
         *,
         infer: bool = True,
         failure_mode: Optional[str] = None,
     ) -> bool:
         tracer = trace_api.get_tracer(_TRACER_NAME)
-        with tracer.start_as_current_span(
-            "kaos.memory.write",
-            attributes={"kaos.memory.scope_level": scope.level.value},
-        ) as span:
+        with tracer.start_as_current_span("kaos.memory.write") as span:
             payload: Dict[str, Any] = {
-                "scope": scope.model_dump(mode="json"),
+                "attribution": attribution.model_dump(mode="json"),
                 "turns": [{"role": role, "content": content} for role, content in turns],
                 "infer": infer,
             }

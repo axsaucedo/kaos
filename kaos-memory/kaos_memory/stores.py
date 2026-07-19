@@ -37,7 +37,7 @@ from kaos_memory.config import (
     ShortTermTierConfig,
     StorageConfig,
 )
-from kaos_memory.contract import Scope, ScopeLevel, scope_key, scope_owner_key
+from kaos_memory.contract import Attribution, Scope, ScopeLevel, scope_key, scope_owner_key
 
 # --------------------------------------------------------------------------- #
 # Token counting and short-term helpers                                        #
@@ -268,7 +268,7 @@ class ShortTermStore:
         self._lock = threading.Lock()
         self.db = _Backend(storage_type, target)
 
-    def add(self, scope: Scope, turns: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
+    def add(self, scope: Scope | Attribution, turns: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
         """Append a batch of turns, enforce the budget/cap, and return the evicted turns.
 
         ``turns`` is an ordered ``(role, content)`` list appended in a single transaction;
@@ -613,8 +613,14 @@ class LongTermStore:
         items = raw["results"] if isinstance(raw, dict) else raw
         return items or []
 
-    def add(self, scope: Scope, messages: Any, infer: bool = True) -> List[Dict[str, Any]]:
+    def add(self, scope: Attribution, messages: Any, infer: bool = True) -> List[Dict[str, Any]]:
         """Store ``messages`` under ``scope``. With ``infer`` the engine extracts facts."""
+        if isinstance(scope, Scope):
+            scope = Attribution(
+                principal=scope.principal,
+                agent_client_id=scope.agent_client_id,
+                session_id=scope.session_id,
+            )
         with self._consolidation_lock:
             raw = self._memory.add(messages, infer=infer, **scope.write_kwargs(self.group))
         return self._results(raw)

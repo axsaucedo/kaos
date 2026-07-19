@@ -125,6 +125,9 @@ class MemorySettings(BaseSettings):
 
     storage_type: str = "local"
 
+    require_principal: bool = False
+    require_agent_identity: bool = False
+
     local_path: str = "/data/memory"
     local_collection: str = "kaos_memory"
 

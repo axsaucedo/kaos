@@ -40,7 +40,6 @@ def _ctx(deps) -> Any:
 @pytest.mark.asyncio
 async def test_search_schema_enum_matches_entitlements_with_usage_help():
     toolset = MemoryToolset(
-        ScopeLevel.AGENT,
         [ScopeLevel.SESSION, ScopeLevel.USER, ScopeLevel.GROUP],
         expose_save=False,
     )
@@ -55,7 +54,7 @@ async def test_search_schema_enum_matches_entitlements_with_usage_help():
 
 @pytest.mark.asyncio
 async def test_single_entitlement_remains_a_required_one_value_enum():
-    toolset = MemoryToolset(ScopeLevel.AGENT, [ScopeLevel.AGENT], expose_save=False)
+    toolset = MemoryToolset([ScopeLevel.AGENT], expose_save=False)
     tool = (await toolset.get_tools(_ctx(_Deps())))[SEARCH_MEMORY_TOOL]
     schema = tool.tool_def.parameters_json_schema
 
@@ -65,7 +64,7 @@ async def test_single_entitlement_remains_a_required_one_value_enum():
 
 @pytest.mark.asyncio
 async def test_schema_rejects_out_of_enum_and_owner_arguments_before_handler():
-    toolset = MemoryToolset(ScopeLevel.AGENT, [ScopeLevel.USER], expose_save=False)
+    toolset = MemoryToolset([ScopeLevel.USER], expose_save=False)
     tool = (await toolset.get_tools(_ctx(_Deps())))[SEARCH_MEMORY_TOOL]
 
     with pytest.raises(ValidationError):
@@ -81,7 +80,7 @@ async def test_schema_rejects_out_of_enum_and_owner_arguments_before_handler():
 @pytest.mark.asyncio
 async def test_handler_revalidates_entitlement():
     deps = _Deps()
-    toolset = MemoryToolset(ScopeLevel.AGENT, [ScopeLevel.USER], expose_save=False)
+    toolset = MemoryToolset([ScopeLevel.USER], expose_save=False)
 
     with pytest.raises(ValueError, match="not entitled"):
         await toolset.call_tool(
@@ -105,7 +104,6 @@ async def test_handler_revalidates_entitlement():
 async def test_handler_derives_each_level_owner_from_server_dependencies(level):
     deps = _Deps()
     toolset = MemoryToolset(
-        ScopeLevel.AGENT,
         list(ScopeLevel),
         agent_identity="stable-agent",
         expose_save=False,

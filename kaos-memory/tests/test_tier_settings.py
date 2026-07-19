@@ -67,7 +67,7 @@ def test_long_term_disabled_write_skips_extraction(tmp_path):
 
     for content in ("deploy nginx", "scale to three"):
         resp = client.post(
-            "/v1/write", json={"scope": USER_SCOPE, "role": "user", "content": content}
+            "/v1/write", json={"attribution": USER_SCOPE, "role": "user", "content": content}
         )
         assert resp.status_code == 200
         body = resp.json()
