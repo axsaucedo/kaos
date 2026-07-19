@@ -353,14 +353,18 @@ def suppress_instrumentation() -> Iterator[None]:
 def _inject_request_headers(request: Any) -> None:
     """Merge the current context's propagation headers into an outbound request.
 
-    Strictly **additive**: a header already present on the request (for example the
-    ModelAPI/LLM provider's own ``Authorization`` API key) is never overwritten. When the
-    request-local context carries no actor token but a managed actor-token lifecycle is
-    active (see :func:`kaos_identity.instrument_agent_identity`), this agent's minted actor token is
-    injected so each hop authenticates as itself even without a static token.
+    Additive except for PAIS's ``Bearer not-needed`` no-auth sentinel, which is replaced
+    by the propagated subject. Real ModelAPI/LLM provider API keys remain untouched. When
+    the request-local context carries no actor token but a managed actor-token lifecycle
+    is active (see :func:`kaos_identity.instrument_agent_identity`), this agent's minted
+    actor token is injected so each hop authenticates as itself without a static token.
     """
     for header, value in ctx.to_headers().items():
-        if header not in request.headers:
+        placeholder_subject = (
+            header == HEADER_SUBJECT_TOKEN
+            and request.headers.get(header, "").strip().lower() == "bearer not-needed"
+        )
+        if header not in request.headers or placeholder_subject:
             request.headers[header] = value
     if HEADER_ACTOR_TOKEN not in request.headers:
         token = _managed_actor_token()
@@ -384,7 +388,11 @@ async def _inject_request_headers_async(request: Any) -> None:
     Acquires the managed actor token without blocking the event loop on a refresh.
     """
     for header, value in ctx.to_headers().items():
-        if header not in request.headers:
+        placeholder_subject = (
+            header == HEADER_SUBJECT_TOKEN
+            and request.headers.get(header, "").strip().lower() == "bearer not-needed"
+        )
+        if header not in request.headers or placeholder_subject:
             request.headers[header] = value
     if HEADER_ACTOR_TOKEN not in request.headers:
         from . import identity

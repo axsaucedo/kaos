@@ -36,6 +36,9 @@ type NetworkPolicyParams struct {
 	PodSelector map[string]string
 	// Labels are applied to the generated NetworkPolicy.
 	Labels map[string]string
+	// AllowedIngressPodSelectors admit same-namespace workload clients without
+	// opening direct access to every pod in the namespace.
+	AllowedIngressPodSelectors []map[string]string
 	// AllowExternalEgress permits provider-facing egress that cannot be enumerated
 	// by namespace. Set only for ModelAPI workloads that proxy to external LLMs.
 	AllowExternalEgress bool
@@ -59,6 +62,13 @@ func constructNetworkPolicy(params NetworkPolicyParams, cfg Config) *networkingv
 	// Avoid emitting a duplicate peer when the operator shares the gateway namespace.
 	if operatorNS != gatewayNS {
 		from = append(from, namespacePeer(operatorNS))
+	}
+	for _, selector := range params.AllowedIngressPodSelectors {
+		if len(selector) > 0 {
+			from = append(from, networkingv1.NetworkPolicyPeer{
+				PodSelector: &metav1.LabelSelector{MatchLabels: selector},
+			})
+		}
 	}
 
 	policyTypes := []networkingv1.PolicyType{networkingv1.PolicyTypeIngress}
