@@ -37,7 +37,7 @@ from kaos_memory.config import (
     ShortTermTierConfig,
     StorageConfig,
 )
-from kaos_memory.contract import Scope, ScopeLevel, scope_key, scope_owner_key
+from kaos_memory.contract import Attribution, Scope, ScopeLevel, scope_key, scope_owner_key
 
 # --------------------------------------------------------------------------- #
 # Token counting and short-term helpers                                        #
@@ -268,7 +268,7 @@ class ShortTermStore:
         self._lock = threading.Lock()
         self.db = _Backend(storage_type, target)
 
-    def add(self, scope: Scope, turns: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
+    def add(self, scope: Scope | Attribution, turns: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
         """Append a batch of turns, enforce the budget/cap, and return the evicted turns.
 
         ``turns`` is an ordered ``(role, content)`` list appended in a single transaction;
@@ -570,6 +570,9 @@ class LongTermStore:
         storage: selects and configures the vector store (local Chroma / external pgvector).
         summarization: the extraction LLM binding (an OpenAI-compatible ModelAPI endpoint).
         embedding: the embedding model binding.
+        system_prompt: overrides Mem0's fact-extraction prompt when set.
+        score_threshold: minimum similarity score for recalled facts; None applies none.
+        rerank: enables Mem0's reranking of recall results.
     """
 
     def __init__(
@@ -578,6 +581,8 @@ class LongTermStore:
         summarization: ModelConfig,
         embedding: ModelConfig,
         system_prompt: Optional[str] = None,
+        score_threshold: Optional[float] = None,
+        rerank: bool = False,
     ) -> None:
         block = storage.resolved()
         # pgvector needs the embedding dimension; Chroma infers it.
@@ -592,6 +597,8 @@ class LongTermStore:
         # turn; unset leaves its built-in default extraction prompt in place.
         if system_prompt:
             config["custom_fact_extraction_prompt"] = system_prompt
+        self._score_threshold = score_threshold
+        self._rerank = rerank
         self._memory = Memory.from_config(config)
         # Mem0's dedup candidate search and insert are separate operations. Keep
         # them atomic within a service replica so overlapping session folds see
@@ -606,15 +613,31 @@ class LongTermStore:
         items = raw["results"] if isinstance(raw, dict) else raw
         return items or []
 
-    def add(self, scope: Scope, messages: Any, infer: bool = True) -> List[Dict[str, Any]]:
+    def add(self, scope: Attribution, messages: Any, infer: bool = True) -> List[Dict[str, Any]]:
         """Store ``messages`` under ``scope``. With ``infer`` the engine extracts facts."""
+        if isinstance(scope, Scope):
+            scope = Attribution(
+                principal=scope.principal,
+                agent_client_id=scope.agent_client_id,
+                session_id=scope.session_id,
+            )
         with self._consolidation_lock:
             raw = self._memory.add(messages, infer=infer, **scope.write_kwargs(self.group))
         return self._results(raw)
 
     def recall(self, scope: Scope, query: str, top_k: int = 10) -> List[Dict[str, Any]]:
-        """Return memories relevant to ``query`` visible at ``scope`` (pre-filtered by owner)."""
-        raw = self._memory.search(query, filters=scope.search_filters(self.group), top_k=top_k)
+        """Return memories relevant to ``query`` visible at ``scope`` (pre-filtered by owner).
+
+        The configured score threshold and rerank flag are only passed through to the
+        engine when set, keeping the default call shape unchanged."""
+        kwargs: Dict[str, Any] = {}
+        if self._score_threshold is not None:
+            kwargs["threshold"] = self._score_threshold
+        if self._rerank:
+            kwargs["rerank"] = True
+        raw = self._memory.search(
+            query, filters=scope.search_filters(self.group), top_k=top_k, **kwargs
+        )
         return self._results(raw)
 
     def get_all(self, scope: Scope) -> List[Dict[str, Any]]:

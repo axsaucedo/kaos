@@ -40,6 +40,40 @@ class ScopeLevel(str, Enum):
     SESSION = "session"
 
 
+class Attribution(BaseModel):
+    """Verified contributors attached to a memory write."""
+
+    principal: Optional[str] = None
+    agent_client_id: Optional[str] = None
+    session_id: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _normalise(self) -> "Attribution":
+        for field in ("principal", "agent_client_id", "session_id"):
+            value = getattr(self, field)
+            if value is not None and value.strip() == "":
+                object.__setattr__(self, field, None)
+        return self
+
+    def write_kwargs(self, group: Optional[str] = None) -> Dict[str, Any]:
+        """Return compound Mem0 attribution for every verified contributor."""
+        kwargs: Dict[str, Any] = {}
+        if self.principal is not None:
+            kwargs["user_id"] = self.principal
+        if self.agent_client_id is not None:
+            kwargs["agent_id"] = self.agent_client_id
+        if not kwargs:
+            raise ValueError("memory write requires principal or agent_client_id")
+        metadata = {}
+        if self.session_id is not None:
+            metadata["kaos_run"] = self.session_id
+        if group:
+            metadata["kaos_group"] = group
+        if metadata:
+            kwargs["metadata"] = metadata
+        return kwargs
+
+
 class Scope(BaseModel):
     """Identifies the owner of a memory operation.
 
@@ -105,29 +139,6 @@ class Scope(BaseModel):
             return {"run_id": self.session_id}
         raise ValueError("group scope has no Mem0 entity owner")
 
-    def write_kwargs(self, group: Optional[str] = None) -> Dict[str, Any]:
-        """Return compound Mem0 attribution for a long-term write.
-
-        Entity ids identify every known contributor. The conversation and store
-        group are custom metadata so they remain filterable without narrowing
-        Mem0's deduplication candidates across sessions.
-        """
-        kwargs: Dict[str, Any] = {}
-        if self.principal is not None:
-            kwargs["user_id"] = self.principal
-        if self.agent_client_id is not None:
-            kwargs["agent_id"] = self.agent_client_id
-        if not kwargs:
-            raise ValueError("memory write requires principal or agent_client_id")
-
-        metadata = {}
-        if self.session_id is not None:
-            metadata["kaos_run"] = self.session_id
-        if group:
-            metadata["kaos_group"] = group
-        if metadata:
-            kwargs["metadata"] = metadata
-        return kwargs
 
     def search_filters(self, group: Optional[str] = None) -> Dict[str, Any]:
         """Return the Mem0 ``filters`` dict for a search at this scope.
@@ -196,11 +207,13 @@ def scope_key(scope: Scope, group: Optional[str] = None) -> str:
 
 
 class RecallRequest(BaseModel):
-    """Synchronous recall: assemble context visible at ``scope`` for ``query``."""
+    """Synchronous recall: assemble context visible at ``scope`` for ``query``.
+
+    ``top_k`` overrides the store's configured default result count when set."""
 
     scope: Scope
     query: str
-    top_k: int = 10
+    top_k: Optional[int] = None
     include_short_term: bool = True
     short_term_token_budget: Optional[int] = None
 
@@ -231,7 +244,7 @@ class WriteRequest(BaseModel):
     strict (surface failures as an error); when omitted it inherits the service default.
     """
 
-    scope: Scope
+    attribution: Attribution
     turns: List[Turn] = Field(default_factory=list)
     role: Optional[str] = None
     content: Optional[str] = None

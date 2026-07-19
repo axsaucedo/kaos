@@ -31,7 +31,7 @@ from pydantic_ai.toolsets.abstract import AbstractToolset, ToolsetTool
 from pydantic_core import SchemaValidator, core_schema
 
 from kaos_memory.contract import ScopeLevel
-from kaos_memory.pydantic_ai.adapters import scope_from_deps
+from kaos_memory.pydantic_ai.adapters import attribution_from_deps, scope_from_deps
 
 logger = logging.getLogger(__name__)
 
@@ -140,15 +140,13 @@ class MemoryToolset(AbstractToolset[Any]):
 
     def __init__(
         self,
-        scope_level: ScopeLevel,
-        read_scopes: Optional[Iterable[ScopeLevel]] = None,
+        read_scopes: Iterable[ScopeLevel],
         agent_identity: Optional[str] = None,
         *,
         expose_save: bool = True,
         expose_search: bool = True,
     ):
-        self._level = scope_level
-        self._read_scopes = tuple(dict.fromkeys(read_scopes or (scope_level,)))
+        self._read_scopes = tuple(dict.fromkeys(read_scopes))
         if expose_search and not self._read_scopes:
             raise ValueError("search_memory requires at least one entitled read scope")
         self._identity = agent_identity
@@ -199,11 +197,11 @@ class MemoryToolset(AbstractToolset[Any]):
         if memory is None:
             return "Memory is not available."
         if name == SAVE_MEMORY_TOOL:
-            scope = scope_from_deps(ctx.deps, level=self._level, agent_identity=self._identity)
+            attribution = attribution_from_deps(ctx.deps, agent_identity=self._identity)
             content = str(tool_args.get("content", "")).strip()
             if not content:
                 return "Nothing to save."
-            ok = await memory.write(scope, [("user", content)], infer=True)
+            ok = await memory.write(attribution, [("user", content)], infer=True)
             return "Saved to long-term memory." if ok else "Could not save to memory right now."
 
         if name == SEARCH_MEMORY_TOOL:
@@ -230,7 +228,6 @@ class MemoryToolset(AbstractToolset[Any]):
 
 def build_memory_toolset(
     tools: Optional["MemoryTools"],
-    scope_level: ScopeLevel,
     read_scopes: Iterable[ScopeLevel],
     agent_identity: Optional[str] = None,
 ) -> Optional[MemoryToolset]:
@@ -240,7 +237,6 @@ def build_memory_toolset(
     if not (expose_save or expose_search):
         return None
     return MemoryToolset(
-        scope_level,
         read_scopes,
         agent_identity,
         expose_save=expose_save,

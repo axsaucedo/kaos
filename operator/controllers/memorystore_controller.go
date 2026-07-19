@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -66,6 +68,23 @@ func (r *MemoryStoreReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 			return ctrl.Result{}, err
 		}
 		return ctrl.Result{Requeue: true}, nil
+	}
+
+	// A user default read scope needs a verified principal on every read, which
+	// only a cluster with user identity can supply; fail the store closed at
+	// reconcile time so bound agents do not inherit a scope that can never work.
+	if store.Spec.DefaultReadScope == "user" {
+		secCfg := security.GetConfig()
+		if !secCfg.SecurityEnabled() || strings.TrimSpace(secCfg.UserIssuer) == "" {
+			msg := "spec.defaultReadScope references user scope, but cluster security posture has no user identity"
+			store.Status.Phase = "Failed"
+			store.Status.Ready = false
+			store.Status.Message = msg
+			if err := r.Status().Update(ctx, store); err != nil {
+				return ctrl.Result{}, err
+			}
+			return ctrl.Result{}, nil
+		}
 	}
 
 	// Resolve and ready-gate the referenced ModelAPIs before deploying.
@@ -371,6 +390,12 @@ func (r *MemoryStoreReconciler) buildStorageEnv(store *kaosv1alpha1.MemoryStore)
 			{Name: "KAOS_MEMORY_STORAGE_TYPE", Value: "local"},
 			{Name: "KAOS_MEMORY_LOCAL_PATH", Value: memoryDataPath},
 		}
+		if local := store.Spec.Storage.Local; local != nil && local.Collection != "" {
+			env = append(env, corev1.EnvVar{
+				Name:  "KAOS_MEMORY_LOCAL_COLLECTION",
+				Value: local.Collection,
+			})
+		}
 		volumes := []corev1.Volume{{
 			Name: "data",
 			VolumeSource: corev1.VolumeSource{
@@ -400,37 +425,74 @@ func (r *MemoryStoreReconciler) buildStorageEnv(store *kaosv1alpha1.MemoryStore)
 				Value: fmt.Sprintf("%d", *ext.EmbeddingDims),
 			})
 		}
+		if ext.Collection != "" {
+			env = append(env, corev1.EnvVar{
+				Name:  "KAOS_MEMORY_EXTERNAL_COLLECTION",
+				Value: ext.Collection,
+			})
+		}
 	}
 	return env, nil, nil
 }
 
-// buildOperationalEnv returns the store-level operational knobs.
+// buildOperationalEnv returns the store-level operational knobs: the typed
+// conversational-tier fields projected onto their KAOS_MEMORY_* env vars. Only
+// set fields are projected, so an absent field leaves the service default in
+// place, and explicit container.env entries (appended later) still win.
 func (r *MemoryStoreReconciler) buildOperationalEnv(store *kaosv1alpha1.MemoryStore) []corev1.EnvVar {
 	var env []corev1.EnvVar
-	if store.Spec.Extraction != nil && store.Spec.Extraction.Concurrency != nil {
-		env = append(env, corev1.EnvVar{
-			Name:  "KAOS_MEMORY_EXTRACTION_CONCURRENCY",
-			Value: fmt.Sprintf("%d", *store.Spec.Extraction.Concurrency),
-		})
+	secCfg := security.GetConfig()
+	if secCfg.SecurityEnabled() && strings.TrimSpace(secCfg.UserIssuer) != "" {
+		env = append(env, corev1.EnvVar{Name: "KAOS_MEMORY_REQUIRE_PRINCIPAL", Value: "true"})
 	}
-	if store.Spec.Extraction != nil && store.Spec.Extraction.SystemPrompt != "" {
-		env = append(env, corev1.EnvVar{
-			Name:  "KAOS_MEMORY_EXTRACTION_SYSTEM_PROMPT",
-			Value: store.Spec.Extraction.SystemPrompt,
-		})
+	if secCfg.SecurityEnabled() {
+		env = append(env, corev1.EnvVar{Name: "KAOS_MEMORY_REQUIRE_AGENT_IDENTITY", Value: "true"})
 	}
-	if store.Spec.Summarization != nil && store.Spec.Summarization.SystemPrompt != "" {
-		env = append(env, corev1.EnvVar{
-			Name:  "KAOS_MEMORY_SUMMARIZATION_SYSTEM_PROMPT",
-			Value: store.Spec.Summarization.SystemPrompt,
-		})
+	addInt := func(name string, value *int32) {
+		if value != nil {
+			env = append(env, corev1.EnvVar{Name: name, Value: fmt.Sprintf("%d", *value)})
+		}
 	}
-	if store.Spec.DefaultFailureMode != "" {
-		env = append(env, corev1.EnvVar{
-			Name:  "KAOS_MEMORY_DEFAULT_FAILURE_MODE",
-			Value: store.Spec.DefaultFailureMode,
-		})
+	addBool := func(name string, value *bool) {
+		if value != nil {
+			env = append(env, corev1.EnvVar{Name: name, Value: fmt.Sprintf("%t", *value)})
+		}
 	}
+	addString := func(name, value string) {
+		if value != "" {
+			env = append(env, corev1.EnvVar{Name: name, Value: value})
+		}
+	}
+
+	if st := store.Spec.ShortTerm; st != nil {
+		addInt("KAOS_MEMORY_TOKEN_BUDGET", st.TokenBudget)
+		addInt("KAOS_MEMORY_HARD_EVENT_CAP", st.HardEventCap)
+	}
+	if mt := store.Spec.MediumTerm; mt != nil {
+		addBool("KAOS_MEMORY_ROLLING_SUMMARY", mt.Enabled)
+		addInt("KAOS_MEMORY_COMPACTION_TRIGGER", mt.CompactionTrigger)
+		addInt("KAOS_MEMORY_COMPACTION_TARGET", mt.CompactionTarget)
+		addInt("KAOS_MEMORY_DIGEST_RETENTION", mt.DigestRetention)
+		addString("KAOS_MEMORY_SUMMARIZATION_SYSTEM_PROMPT", mt.SystemPrompt)
+	}
+	if lt := store.Spec.LongTerm; lt != nil {
+		addBool("KAOS_MEMORY_LONG_TERM_ENABLED", lt.Enabled)
+		addInt("KAOS_MEMORY_DEFAULT_TOP_K", lt.DefaultTopK)
+		if lt.ScoreThreshold != nil {
+			env = append(env, corev1.EnvVar{
+				Name:  "KAOS_MEMORY_SCORE_THRESHOLD",
+				Value: strconv.FormatFloat(*lt.ScoreThreshold, 'f', -1, 64),
+			})
+		}
+		addBool("KAOS_MEMORY_RERANK", lt.Rerank)
+		if ex := lt.Extraction; ex != nil {
+			addInt("KAOS_MEMORY_EXTRACTION_CONCURRENCY", ex.Concurrency)
+			addInt("KAOS_MEMORY_EXTRACTION_MAX_RETRIES", ex.MaxRetries)
+			addString("KAOS_MEMORY_EXTRACTION_SYSTEM_PROMPT", ex.SystemPrompt)
+		}
+	}
+	addInt("KAOS_MEMORY_REQUEST_CONCURRENCY", store.Spec.RequestConcurrency)
+	addString("KAOS_MEMORY_DEFAULT_FAILURE_MODE", store.Spec.DefaultFailureMode)
 	return env
 }
 

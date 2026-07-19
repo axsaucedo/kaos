@@ -6,21 +6,19 @@ from pydantic import ValidationError
 from pais.serverutils import AgentServerSettings
 
 
-def test_read_scope_defaults_follow_home_scope():
-    settings = AgentServerSettings(agent_name="test", memory_scope="user")
+def test_read_scope_defaults_to_session():
+    settings = AgentServerSettings(agent_name="test")
 
-    assert settings.memory_default_read_scope == "user"
-    assert settings.memory_read_scopes == "user"
+    assert settings.memory_default_read_scope == "session"
+    assert settings.memory_read_scopes == "session"
 
 
 def test_read_scopes_parse_from_environment(monkeypatch):
-    monkeypatch.setenv("MEMORY_SCOPE", "agent")
     monkeypatch.setenv("MEMORY_DEFAULT_READ_SCOPE", "user")
     monkeypatch.setenv("MEMORY_READ_SCOPES", "agent, user,group")
 
     settings = AgentServerSettings(agent_name="test")
 
-    assert settings.memory_scope == "agent"
     assert settings.memory_default_read_scope == "user"
     assert settings.memory_read_scopes == "agent,user,group"
 
@@ -28,7 +26,6 @@ def test_read_scopes_parse_from_environment(monkeypatch):
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("memory_scope", "tenant"),
         ("memory_default_read_scope", "tenant"),
         ("memory_read_scopes", "session,tenant"),
         ("memory_read_scopes", "session,,agent"),

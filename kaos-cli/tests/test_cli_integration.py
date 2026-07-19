@@ -549,10 +549,9 @@ class TestMemoryStoreCreateDryRun:
         spec = yaml.safe_load(result.output)["spec"]
         assert spec["defaultReadScope"] == "user"
         assert spec["defaultFailureMode"] == "strict"
-        assert spec["container"]["env"] == [
-            {"name": "KAOS_MEMORY_TOKEN_BUDGET", "value": "64"},
-            {"name": "KAOS_MEMORY_ROLLING_SUMMARY", "value": "true"},
-        ]
+        assert spec["shortTerm"] == {"tokenBudget": 64}
+        assert spec["mediumTerm"] == {"enabled": True}
+        assert "container" not in spec
 
 
 class TestModelAPIDeployDryRun:
@@ -769,27 +768,29 @@ class TestSamples:
         store = next(doc for doc in docs if doc["kind"] == "MemoryStore")
         assert store["metadata"]["name"] == "support-memory"
         assert store["spec"]["storage"]["type"] == "local"
-        store_env = {
-            item["name"]: item["value"]
-            for item in store["spec"]["container"]["env"]
-        }
-        assert store_env["KAOS_MEMORY_TOKEN_BUDGET"] == "64"
-        assert store_env["KAOS_MEMORY_ROLLING_SUMMARY"] == "true"
+        assert "container" not in store["spec"]
+        assert store["spec"]["shortTerm"]["tokenBudget"] == 64
+        assert store["spec"]["mediumTerm"]["enabled"] is True
 
         agents = {
             doc["metadata"]["name"]: doc for doc in docs if doc["kind"] == "Agent"
         }
         assert {agent["spec"]["model"] for agent in agents.values()} == {"gpt-test"}
-        assistant_memory = agents["assistant"]["spec"]["config"]["memory"]
-        assert assistant_memory["scope"] == "user"
-        assert assistant_memory["tools"] == "read"
-        assert assistant_memory["readScopes"] == ["session", "agent", "group"]
-        assert assistant_memory["clientParams"]["tokenBudget"] == 64
-        team_memory = agents["assistant-teamonly"]["spec"]["config"]["memory"]
-        assert team_memory["readScopes"] == ["session", "group"]
-        unrelated_memory = agents["unrelated-bot"]["spec"]["config"]["memory"]
-        assert unrelated_memory["scope"] == "agent"
-        assert "tools" not in unrelated_memory
+        user_memory = agents["user-assistant"]["spec"]["config"]["memory"]
+        assert "scope" not in user_memory
+        assert user_memory["defaultReadScope"] == "user"
+        assert user_memory["tools"] == "read"
+        assert user_memory["readScopes"] == ["session", "agent", "user", "group"]
+        assert user_memory["clientParams"]["tokenBudget"] == 64
+        session_memory = agents["session-assistant"]["spec"]["config"]["memory"]
+        assert "scope" not in session_memory
+        assert session_memory["tools"] == "read"
+        assert "defaultReadScope" not in session_memory
+        assert "readScopes" not in session_memory
+        agent_memory = agents["agent-bot"]["spec"]["config"]["memory"]
+        assert agent_memory["defaultReadScope"] == "agent"
+        assert "scope" not in agent_memory
+        assert "tools" not in agent_memory
 
     def test_deploy_memory_sample_dry_run(self):
         result = runner.invoke(
@@ -805,7 +806,7 @@ class TestSamples:
         assert store["spec"]["storage"]["type"] == "local"
         agent = next(d for d in docs if d["kind"] == "Agent")
         assert agent["spec"]["config"]["memory"]["memoryStore"] == "support-memory"
-        assert agent["spec"]["config"]["memory"]["scope"] == "user"
+        assert agent["spec"]["config"]["memory"]["defaultReadScope"] == "user"
         result = runner.invoke(
             app, ["samples", "deploy", "1-simple-echo-agent", "--dry-run"]
         )

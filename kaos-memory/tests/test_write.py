@@ -4,7 +4,7 @@ import threading
 
 from fastapi.testclient import TestClient
 
-from kaos_memory.config import ShortTermTierConfig
+from kaos_memory.config import MemorySettings, ShortTermTierConfig
 from kaos_memory.stores import Scope, ScopeLevel
 from kaos_memory.app import MemoryService, create_app
 from kaos_memory.stores import ShortTermStore
@@ -41,8 +41,30 @@ def _client(longterm, short_term, scheduler):
 
 def _write(client, content, **extra):
     return client.post(
-        "/v1/write", json={"scope": USER_SCOPE, "role": "user", "content": content, **extra}
+        "/v1/write", json={"attribution": USER_SCOPE, "role": "user", "content": content, **extra}
     )
+
+
+def test_write_posture_rejects_missing_required_identities(tmp_path):
+    service = MemoryService(longterm=_RecordingLongTerm(), short_term=_short_term(tmp_path))
+    client = TestClient(create_app(service, settings=MemorySettings(require_principal=True)))
+    response = client.post(
+        "/v1/write",
+        json={"attribution": {"agent_client_id": "agent-a", "session_id": "s"}, "role": "user", "content": "x"},
+    )
+    assert response.status_code == 403
+    assert "principal" in response.json()["error"]
+
+
+def test_write_posture_accepts_complete_attribution(tmp_path):
+    service = MemoryService(longterm=_RecordingLongTerm(), short_term=_short_term(tmp_path))
+    settings = MemorySettings(require_principal=True, require_agent_identity=True)
+    client = TestClient(create_app(service, settings=settings))
+    response = client.post(
+        "/v1/write",
+        json={"attribution": {"principal": "alice", "agent_client_id": "agent-a", "session_id": "s"}, "role": "user", "content": "x"},
+    )
+    assert response.status_code == 200
 
 
 def test_write_buffers_without_eviction_then_extracts_the_evicted_batch(tmp_path):
@@ -93,7 +115,7 @@ def test_batch_write_appends_all_turns_and_extracts_combined_eviction(tmp_path):
     resp = client.post(
         "/v1/write",
         json={
-            "scope": USER_SCOPE,
+            "attribution": USER_SCOPE,
             "turns": [
                 {"role": "user", "content": "one"},
                 {"role": "assistant", "content": "two"},
@@ -129,7 +151,7 @@ def test_strict_surfaces_short_term_append_failure(tmp_path):
     client = _client(_RecordingLongTerm(), _BrokenShortTerm(), lambda t: None)
     resp = client.post(
         "/v1/write",
-        json={"scope": USER_SCOPE, "role": "user", "content": "x", "failure_mode": "strict"},
+        json={"attribution": USER_SCOPE, "role": "user", "content": "x", "failure_mode": "strict"},
     )
     assert resp.status_code == 500
     assert resp.json()["accepted"] is False

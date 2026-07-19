@@ -1,5 +1,7 @@
 ---
-# Sample 7: shared support memory with scope-specific read entitlements.
+# Sample 7: shared support memory with three read policies:
+# user-assistant (personalised recall), session-assistant (conversation-only),
+# and agent-bot (agent-level recall without explicit memory tools).
 # Deploy: kaos samples deploy 7-memory-agent -n <namespace>
 # Override the agent model with: kaos samples deploy 7-memory-agent --model <model>
 
@@ -38,18 +40,16 @@ spec:
       modelAPI: support-modelapi
       model: text-embedding-3-small
   defaultFailureMode: soft
-  container:
-    env:
-    - name: KAOS_MEMORY_TOKEN_BUDGET
-      value: "64"
-    - name: KAOS_MEMORY_ROLLING_SUMMARY
-      value: "true"
+  shortTerm:
+    tokenBudget: 64
+  mediumTerm:
+    enabled: true
 
 ---
 apiVersion: kaos.tools/v1alpha1
 kind: Agent
 metadata:
-  name: assistant
+  name: user-assistant
 spec:
   modelAPI: support-modelapi
   model: gpt-4o-mini
@@ -58,16 +58,16 @@ spec:
     - name: DEBUG_MOCK_RESPONSES
       value: '["Noted — your favourite deployment port is 8080."]'
   config:
-    description: Support assistant with session, agent, and team memory reads
-    instructions: Help users and use entitled memory when prior context is useful.
+    description: Personalised assistant that recalls the user's facts on every turn
+    instructions: Help users, drawing on their remembered preferences and entitled memory.
     memory:
       type: remote
       memoryStore: support-memory
-      scope: user
-      defaultReadScope: session
+      defaultReadScope: user
       readScopes:
       - session
       - agent
+      - user
       - group
       tools: read
       clientParams:
@@ -78,21 +78,16 @@ spec:
 apiVersion: kaos.tools/v1alpha1
 kind: Agent
 metadata:
-  name: assistant-teamonly
+  name: session-assistant
 spec:
   modelAPI: support-modelapi
   model: gpt-4o-mini
   config:
-    description: Support assistant limited to session and team memory reads
-    instructions: Help users using only conversation and shared team memory.
+    description: Conversation-only assistant limited to the current session's memory
+    instructions: Help users using only the current conversation's memory.
     memory:
       type: remote
       memoryStore: support-memory
-      scope: user
-      defaultReadScope: session
-      readScopes:
-      - session
-      - group
       tools: read
       clientParams:
         tokenBudget: 64
@@ -102,7 +97,7 @@ spec:
 apiVersion: kaos.tools/v1alpha1
 kind: Agent
 metadata:
-  name: unrelated-bot
+  name: agent-bot
 spec:
   modelAPI: support-modelapi
   model: gpt-4o-mini
@@ -112,7 +107,7 @@ spec:
     memory:
       type: remote
       memoryStore: support-memory
-      scope: agent
+      defaultReadScope: agent
       clientParams:
         tokenBudget: 64
         rollingSummary: true
