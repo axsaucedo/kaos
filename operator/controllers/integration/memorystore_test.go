@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"strings"
 	"context"
 	"fmt"
 	"sync/atomic"
@@ -538,6 +539,34 @@ var _ = Describe("MemoryStore Controller", func() {
 		}
 		Expect(k8sClient.Create(ctx, valid)).To(Succeed())
 		defer func() { k8sClient.Delete(ctx, valid) }()
+	})
+
+	It("fails closed when defaultReadScope is user without user identity", func() {
+		name := uniqueMemoryStoreName("user-scope-store")
+		store := &kaosv1alpha1.MemoryStore{
+			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+			Spec: kaosv1alpha1.MemoryStoreSpec{
+				Storage: kaosv1alpha1.MemoryStorage{Type: kaosv1alpha1.MemoryStorageLocal},
+				Models: kaosv1alpha1.MemoryModels{
+					Summarization: kaosv1alpha1.MemoryModelRef{ModelAPI: "m", Model: "mock-model"},
+					Embedding:     kaosv1alpha1.MemoryModelRef{ModelAPI: "m", Model: "mock-embed"},
+				},
+				DefaultReadScope: "user",
+			},
+		}
+		Expect(k8sClient.Create(ctx, store)).To(Succeed())
+		defer func() { k8sClient.Delete(ctx, store) }()
+
+		// The envtest posture has no user identity, so the store fails closed
+		// before bound agents can inherit a scope that can never resolve.
+		Eventually(func() bool {
+			updated := &kaosv1alpha1.MemoryStore{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, updated); err != nil {
+				return false
+			}
+			return updated.Status.Phase == "Failed" && !updated.Status.Ready &&
+				strings.Contains(updated.Status.Message, "spec.defaultReadScope")
+		}, timeout, interval).Should(BeTrue())
 	})
 
 	It("should hold Pending until the referenced ModelAPIs are ready", func() {
