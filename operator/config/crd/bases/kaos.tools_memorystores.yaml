@@ -308,10 +308,10 @@ spec:
                 - soft
                 - strict
                 type: string
-              defaultScope:
+              defaultReadScope:
                 description: |-
-                  DefaultScope is the store-wide home scope for bound agents that do not set
-                  config.memory.scope. When unset the agent scope is used.
+                  DefaultReadScope is the store-wide default read scope for bound agents that
+                  do not set their own. When unset, session is used.
                 enum:
                 - agent
                 - user

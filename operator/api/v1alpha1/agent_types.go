@@ -73,7 +73,6 @@ type MemoryClientParams struct {
 // MemoryStore for the long-term tier and configures the runtime memory client.
 // +kubebuilder:validation:XValidation:rule="!has(self.type) || self.type != 'remote' || has(self.memoryStore)",message="type 'remote' requires memoryStore to be set"
 // +kubebuilder:validation:XValidation:rule="!has(self.type) || self.type != 'local' || !has(self.memoryStore)",message="type 'local' must not set memoryStore"
-// +kubebuilder:validation:XValidation:rule="!has(self.scope) || (self.scope != 'user' && self.scope != 'group') || has(self.memoryStore)",message="scope 'user' or 'group' requires memoryStore to be set"
 // +kubebuilder:validation:XValidation:rule="!has(self.tools) || has(self.memoryStore)",message="tools requires memoryStore to be set"
 // +kubebuilder:validation:XValidation:rule="!has(self.defaultReadScope) || !has(self.readScopes) || self.defaultReadScope in self.readScopes",message="defaultReadScope must be included in readScopes"
 // +kubebuilder:validation:XValidation:rule="!has(self.defaultReadScope) || self.defaultReadScope == 'session' || has(self.memoryStore)",message="non-session defaultReadScope requires memoryStore to be set"
@@ -98,14 +97,8 @@ type MemoryConfig struct {
 	// +kubebuilder:validation:Optional
 	MemoryStore string `json:"memoryStore,omitempty"`
 
-	// Scope selects whose memory this agent reads and writes. "user" and "group"
-	// require a bound memoryStore.
-	// +kubebuilder:validation:Enum=agent;user;group;session
-	// +kubebuilder:validation:Optional
-	Scope string `json:"scope,omitempty"`
-
 	// DefaultReadScope selects the single scope used by automatic recall. When
-	// omitted it resolves to the effective home Scope.
+	// omitted it resolves to the MemoryStore defaultReadScope, then session.
 	// +kubebuilder:validation:Enum=agent;user;group;session
 	// +kubebuilder:validation:Optional
 	DefaultReadScope string `json:"defaultReadScope,omitempty"`

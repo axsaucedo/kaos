@@ -6,7 +6,7 @@ import (
 	kaosv1alpha1 "github.com/axsaucedo/kaos/operator/api/v1alpha1"
 )
 
-func TestMemoryUserScopingEnvUsesUserSecurityMode(t *testing.T) {
+func TestMemoryPostureEnvUsesUserSecurityMode(t *testing.T) {
 	t.Setenv("SECURITY_PDP_ENABLED", "true")
 	t.Setenv("SECURITY_USER_AUTH_ISSUER", "https://users.example")
 
@@ -17,15 +17,16 @@ func TestMemoryUserScopingEnvUsesUserSecurityMode(t *testing.T) {
 		agent, model, nil, nil, "", "agent", "",
 	)
 
+	want := map[string]string{"MEMORY_REQUIRE_PRINCIPAL": "true", "MEMORY_REQUIRE_AGENT_IDENTITY": "true"}
 	for _, item := range env {
-		if item.Name == "MEMORY_USER_SCOPING" && item.Value == "required" {
-			return
-		}
+		delete(want, item.Name)
 	}
-	t.Fatal("memory-configured agent did not receive required user scoping")
+	if len(want) != 0 {
+		t.Fatalf("missing posture env vars: %v", want)
+	}
 }
 
-func TestMemoryUserScopingEnvIsNotSetForAgentOnlySecurity(t *testing.T) {
+func TestMemoryPostureEnvForAgentOnlySecurity(t *testing.T) {
 	t.Setenv("SECURITY_PDP_ENABLED", "true")
 	t.Setenv("SECURITY_AGENT_AUTH_ISSUER", "https://agents.example")
 
@@ -36,14 +37,21 @@ func TestMemoryUserScopingEnvIsNotSetForAgentOnlySecurity(t *testing.T) {
 		agent, model, nil, nil, "", "agent", "",
 	)
 
+	gotAgent := false
 	for _, item := range env {
-		if item.Name == "MEMORY_USER_SCOPING" {
-			t.Fatalf("agent-only security unexpectedly enabled user scoping: %#v", item)
+		if item.Name == "MEMORY_REQUIRE_PRINCIPAL" {
+			t.Fatalf("agent-only security unexpectedly required principal: %#v", item)
 		}
+		if item.Name == "MEMORY_REQUIRE_AGENT_IDENTITY" && item.Value == "true" {
+			gotAgent = true
+		}
+	}
+	if !gotAgent {
+		t.Fatal("agent-only security did not require agent identity")
 	}
 }
 
-func TestMemoryUserScopingEnvRequiresSecurityEnforcement(t *testing.T) {
+func TestMemoryPostureEnvRequiresSecurityEnforcement(t *testing.T) {
 	t.Setenv("SECURITY_USER_AUTH_ISSUER", "https://users.example")
 
 	agent := &kaosv1alpha1.Agent{}
@@ -54,8 +62,21 @@ func TestMemoryUserScopingEnvRequiresSecurityEnforcement(t *testing.T) {
 	)
 
 	for _, item := range env {
-		if item.Name == "MEMORY_USER_SCOPING" {
-			t.Fatalf("unenforced user auth unexpectedly enabled user scoping: %#v", item)
+		if item.Name == "MEMORY_REQUIRE_PRINCIPAL" || item.Name == "MEMORY_REQUIRE_AGENT_IDENTITY" {
+			t.Fatalf("unenforced auth unexpectedly enabled posture requirement: %#v", item)
 		}
+	}
+}
+
+func TestMemoryStorePostureProjection(t *testing.T) {
+	t.Setenv("SECURITY_PDP_ENABLED", "true")
+	t.Setenv("SECURITY_USER_AUTH_ISSUER", "https://users.example")
+	env := (&MemoryStoreReconciler{}).buildOperationalEnv(&kaosv1alpha1.MemoryStore{})
+	got := map[string]string{}
+	for _, item := range env {
+		got[item.Name] = item.Value
+	}
+	if got["KAOS_MEMORY_REQUIRE_PRINCIPAL"] != "true" || got["KAOS_MEMORY_REQUIRE_AGENT_IDENTITY"] != "true" {
+		t.Fatalf("MemoryStore posture env = %v", got)
 	}
 }
