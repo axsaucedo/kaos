@@ -38,6 +38,11 @@ type LocalMemoryStorage struct {
 	// PersistentVolume sizes the PVC that backs Chroma and the SQLite short-term window.
 	// +kubebuilder:validation:Optional
 	PersistentVolume *MemoryPersistentVolume `json:"persistentVolume,omitempty"`
+
+	// Collection is the vector collection name. When empty the service default
+	// ("kaos_memory") is used.
+	// +kubebuilder:validation:Optional
+	Collection string `json:"collection,omitempty"`
 }
 
 // +kubebuilder:object:generate=true
@@ -57,6 +62,11 @@ type ExternalMemoryStorage struct {
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:default=1536
 	EmbeddingDims *int32 `json:"embeddingDims,omitempty"`
+
+	// Collection is the vector collection name. When empty the service default
+	// ("kaos_memory") is used.
+	// +kubebuilder:validation:Optional
+	Collection string `json:"collection,omitempty"`
 }
 
 // +kubebuilder:object:generate=true
@@ -108,12 +118,63 @@ type MemoryModels struct {
 
 // +kubebuilder:object:generate=true
 
+// MemoryShortTermConfig tunes the verbatim short-term window. Absent fields
+// leave the memory-service defaults in place.
+type MemoryShortTermConfig struct {
+	// TokenBudget bounds the verbatim short-term window in tokens (service
+	// default 4096).
+	// +kubebuilder:validation:Minimum=1
+	TokenBudget *int32 `json:"tokenBudget,omitempty"`
+
+	// HardEventCap is the event-count ceiling on the window (service default 2000).
+	// +kubebuilder:validation:Minimum=1
+	HardEventCap *int32 `json:"hardEventCap,omitempty"`
+}
+
+// +kubebuilder:object:generate=true
+
+// MemoryMediumTermConfig tunes the opt-in medium-term rolling digest that folds
+// short-term overflow instead of dropping it. The summariser model itself is
+// bound via models.summarization.
+type MemoryMediumTermConfig struct {
+	// Enabled turns the rolling digest on (service default false: overflow is
+	// dropped as a recency window).
+	// +kubebuilder:validation:Optional
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// CompactionTrigger is the token level at which folding is triggered.
+	// 0 means derived: the short-term token budget.
+	// +kubebuilder:validation:Minimum=0
+	CompactionTrigger *int32 `json:"compactionTrigger,omitempty"`
+
+	// CompactionTarget is the token level folding evicts back down to.
+	// 0 means derived: half the short-term token budget.
+	// +kubebuilder:validation:Minimum=0
+	CompactionTarget *int32 `json:"compactionTarget,omitempty"`
+
+	// DigestRetention is how many digest versions are retained (service default 20).
+	// +kubebuilder:validation:Minimum=1
+	DigestRetention *int32 `json:"digestRetention,omitempty"`
+
+	// SystemPrompt overrides the system prompt used when folding overflowed
+	// short-term turns into the rolling digest. When empty the service's built-in
+	// summariser prompt is used.
+	// +kubebuilder:validation:Optional
+	SystemPrompt string `json:"systemPrompt,omitempty"`
+}
+
+// +kubebuilder:object:generate=true
+
 // MemoryExtractionConfig tunes the long-term extraction executor.
 type MemoryExtractionConfig struct {
 	// Concurrency is the size of the Mem0 extraction executor pool.
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:default=4
 	Concurrency *int32 `json:"concurrency,omitempty"`
+
+	// MaxRetries bounds retries of a failed extraction task (service default 2).
+	// +kubebuilder:validation:Minimum=0
+	MaxRetries *int32 `json:"maxRetries,omitempty"`
 
 	// SystemPrompt overrides the system prompt for Mem0's long-term fact
 	// extraction, steering which facts are distilled into long-term memory. When
@@ -124,22 +185,48 @@ type MemoryExtractionConfig struct {
 
 // +kubebuilder:object:generate=true
 
-// MemorySummarizationConfig tunes the medium-term rolling digest summariser. It
-// tunes the prompt only; the model itself is bound via models.summarization.
-type MemorySummarizationConfig struct {
-	// SystemPrompt overrides the system prompt used when folding overflowed
-	// short-term turns into the rolling digest. When empty the service's built-in
-	// summariser prompt is used.
+// MemoryLongTermConfig tunes the long-term semantic tier: recall shape and the
+// fact-extraction executor.
+type MemoryLongTermConfig struct {
+	// Enabled turns the long-term tier on (service default true). When false the
+	// write path skips fact extraction entirely and recall returns no facts;
+	// conversational tiers keep working.
 	// +kubebuilder:validation:Optional
-	SystemPrompt string `json:"systemPrompt,omitempty"`
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// DefaultTopK is the recall result count used when a request omits top_k
+	// (service default 10).
+	// +kubebuilder:validation:Minimum=1
+	DefaultTopK *int32 `json:"defaultTopK,omitempty"`
+
+	// ScoreThreshold is the minimum similarity score for recalled facts, in
+	// [0,1]. When unset no threshold is applied.
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=1
+	ScoreThreshold *float64 `json:"scoreThreshold,omitempty"`
+
+	// Rerank enables the engine's reranking of recalled facts (service default false).
+	// +kubebuilder:validation:Optional
+	Rerank *bool `json:"rerank,omitempty"`
+
+	// Extraction tunes the long-term extraction executor.
+	// +kubebuilder:validation:Optional
+	Extraction *MemoryExtractionConfig `json:"extraction,omitempty"`
 }
 
 // +kubebuilder:object:generate=true
 
-// MemoryStoreSpec defines the desired state of MemoryStore. It carries only
-// infrastructure, model bindings, and the two store-level operational knobs; the
-// short-term-window, digest, and sweeper marks are memory-service defaults.
+// MemoryStoreSpec defines the desired state of MemoryStore. It carries the
+// infrastructure, model bindings, and the typed conversational-tier tuning;
+// absent tier fields leave the memory-service defaults in place.
+//
+// The compaction rule mirrors the service invariant exactly, including the
+// 0-means-derived semantics: effective trigger is compactionTrigger (or the
+// token budget when 0/absent), effective target is compactionTarget (or half
+// the budget, floored to 1, when 0/absent), and the effective budget defaults
+// to 4096. The service requires 0 < target < trigger <= budget.
 // +kubebuilder:validation:XValidation:rule="self.storage.type != 'local' || !has(self.replicas) || self.replicas == 1",message="replicas must be 1 in local storage mode"
+// +kubebuilder:validation:XValidation:rule="((has(self.mediumTerm) && has(self.mediumTerm.compactionTarget) && self.mediumTerm.compactionTarget != 0) ? self.mediumTerm.compactionTarget : (((has(self.shortTerm) && has(self.shortTerm.tokenBudget)) ? self.shortTerm.tokenBudget : 4096) / 2 < 1 ? 1 : ((has(self.shortTerm) && has(self.shortTerm.tokenBudget)) ? self.shortTerm.tokenBudget : 4096) / 2)) < ((has(self.mediumTerm) && has(self.mediumTerm.compactionTrigger) && self.mediumTerm.compactionTrigger != 0) ? self.mediumTerm.compactionTrigger : ((has(self.shortTerm) && has(self.shortTerm.tokenBudget)) ? self.shortTerm.tokenBudget : 4096)) && ((has(self.mediumTerm) && has(self.mediumTerm.compactionTrigger) && self.mediumTerm.compactionTrigger != 0) ? self.mediumTerm.compactionTrigger : ((has(self.shortTerm) && has(self.shortTerm.tokenBudget)) ? self.shortTerm.tokenBudget : 4096)) <= ((has(self.shortTerm) && has(self.shortTerm.tokenBudget)) ? self.shortTerm.tokenBudget : 4096)",message="short-term compaction marks must satisfy 0 < compactionTarget < compactionTrigger <= tokenBudget (0 or absent marks derive from the token budget)"
 type MemoryStoreSpec struct {
 	// Engine is the long-term memory engine. Mem0 is the only supported engine today.
 	// +kubebuilder:validation:Enum=mem0
@@ -160,14 +247,22 @@ type MemoryStoreSpec struct {
 	// +kubebuilder:validation:Required
 	Models MemoryModels `json:"models"`
 
-	// Extraction tunes the long-term extraction executor.
+	// ShortTerm tunes the verbatim short-term window.
 	// +kubebuilder:validation:Optional
-	Extraction *MemoryExtractionConfig `json:"extraction,omitempty"`
+	ShortTerm *MemoryShortTermConfig `json:"shortTerm,omitempty"`
 
-	// Summarization tunes the medium-term rolling-digest summariser prompt. The
-	// summariser model itself is bound via models.summarization.
+	// MediumTerm tunes the opt-in medium-term rolling digest.
 	// +kubebuilder:validation:Optional
-	Summarization *MemorySummarizationConfig `json:"summarization,omitempty"`
+	MediumTerm *MemoryMediumTermConfig `json:"mediumTerm,omitempty"`
+
+	// LongTerm tunes the long-term semantic tier: recall shape and extraction.
+	// +kubebuilder:validation:Optional
+	LongTerm *MemoryLongTermConfig `json:"longTerm,omitempty"`
+
+	// RequestConcurrency sizes the service's bounded request executor (service
+	// default 8).
+	// +kubebuilder:validation:Minimum=1
+	RequestConcurrency *int32 `json:"requestConcurrency,omitempty"`
 
 	// DefaultFailureMode is the store-wide default for the write/forget path.
 	// +kubebuilder:validation:Enum=soft;strict
