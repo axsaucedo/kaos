@@ -55,13 +55,13 @@ kubectl config set-context --current --namespace="$NAMESPACE"
 
 ## Step 1: Deploy a Memory-Enabled Agent
 
-We deploy the reusable `memory` sample: one `ModelAPI`, the local-mode `support-memory` store, and three agents with different read entitlements. The primary `assistant` uses a mock response, so the example never calls the model.
+We deploy the reusable `memory` sample: one `ModelAPI`, the local-mode `support-memory` store, and three agents with different read entitlements. The primary `user-assistant` uses a mock response, so the example never calls the model.
 
 The important part is the agent's `config.memory` block:
 
 - `memoryStore: support-memory` binds all three agents to the store.
-- `assistant` and `assistant-teamonly` use a user home scope but expose different `search_memory` read levels.
-- `unrelated-bot` keeps agent-scoped memory and exposes no explicit memory tools.
+- `user-assistant` uses a user home scope with `defaultReadScope: user`, so the user's facts are auto-recalled on every turn; `session-assistant` is conversation-only, scoped to the current session.
+- `agent-bot` keeps agent-scoped memory and exposes no explicit memory tools.
 - The store tunes its tiers with typed fields: a small `shortTerm.tokenBudget` makes conversational compaction easy to exercise, and `mediumTerm.enabled` turns on the rolling digest that folds the overflow.
 
 `DEBUG_MOCK_RESPONSES` makes the agent return a canned reply instead of calling the model, so the run is deterministic.
@@ -83,22 +83,22 @@ done
 echo "MemoryStore phase: $phase"
 
 for i in $(seq 1 60); do
-  kubectl get deployment/agent-assistant -n "$NAMESPACE" >./tmp/null 2>&1 && break
+  kubectl get deployment/agent-user-assistant -n "$NAMESPACE" >./tmp/null 2>&1 && break
   sleep 2
 done
-kubectl wait --for=condition=available deployment/agent-assistant -n "$NAMESPACE" --timeout=180s
-kaos agent tools assistant -n "$NAMESPACE" --json
+kubectl wait --for=condition=available deployment/agent-user-assistant -n "$NAMESPACE" --timeout=180s
+kaos agent tools user-assistant -n "$NAMESPACE" --json
 ```
 
-The tool output shows `search_memory.parameters_json_schema.properties.level.enum` as `session`, `agent`, and `group`. Run the same command for `assistant-teamonly` to see its narrower `session`, `group` entitlement.
+The tool output shows `search_memory.parameters_json_schema.properties.level.enum` as `session`, `agent`, `user`, and `group`. Run the same command for `session-assistant` to see its narrower `session`-only entitlement.
 
 ## Step 3: Session 1 — Talk to the Agent
 
 Send the agent a fact to remember. This is an ordinary chat request; the agent handles it and, because it is bound to the store, **automatically persists the conversation** afterwards:
 
 ```bash
-AGENT_PORT=$(kubectl get svc/agent-assistant -n "$NAMESPACE" -o jsonpath='{.spec.ports[0].port}')
-kubectl port-forward -n "$NAMESPACE" svc/agent-assistant "19001:$AGENT_PORT" \
+AGENT_PORT=$(kubectl get svc/agent-user-assistant -n "$NAMESPACE" -o jsonpath='{.spec.ports[0].port}')
+kubectl port-forward -n "$NAMESPACE" svc/agent-user-assistant "19001:$AGENT_PORT" \
   > ./tmp/memory-agent-port-forward.log 2>&1 &
 AGENT_PF=$!
 sleep 4
@@ -149,7 +149,7 @@ print("SUCCESS: each session keeps an independent verbatim window")
 
 ## Enabling the Tools
 
-The primary assistant sets `tools: read`. Memory always applies the **automatic baseline** (recall before a run, persist after) — that is what Steps 3–5 exercised. `tools` layers explicit, model-driven tools on top:
+The primary `user-assistant` sets `tools: read`. Memory always applies the **automatic baseline** (recall before a run, persist after) — that is what Steps 3–5 exercised. `tools` layers explicit, model-driven tools on top:
 
 | Setting | Tools exposed | Arguments | The model can… |
 |---------|---------------|-----------|----------------|
@@ -199,7 +199,7 @@ With a real embedder, a `save_memory` tool call (or automatic extraction) distil
 
 - **Automatic recall + persist** — bound agents recall relevant memory before every run and persist the conversation after, with no code changes.
 - **Short-term window** — recent turns are stored verbatim per session for conversational continuity; no model is needed.
-- **Long-term memory** — the embedding model makes distilled facts semantically searchable; `tools: read` lets the primary assistant search its entitled levels explicitly.
+- **Long-term memory** — the embedding model makes distilled facts semantically searchable; `tools: read` lets the primary `user-assistant` search its entitled levels explicitly.
 - **Scope** — memory is isolated by scope, so sessions, users, and agents only see what they are entitled to.
 - **Storage** — `local` mode keeps everything in one pod (Chroma + SQLite on a PVC); `external` mode uses pgvector for production and horizontal scaling.
 

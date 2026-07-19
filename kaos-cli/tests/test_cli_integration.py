@@ -777,16 +777,20 @@ class TestSamples:
             doc["metadata"]["name"]: doc for doc in docs if doc["kind"] == "Agent"
         }
         assert {agent["spec"]["model"] for agent in agents.values()} == {"gpt-test"}
-        assistant_memory = agents["assistant"]["spec"]["config"]["memory"]
-        assert assistant_memory["scope"] == "user"
-        assert assistant_memory["tools"] == "read"
-        assert assistant_memory["readScopes"] == ["session", "agent", "group"]
-        assert assistant_memory["clientParams"]["tokenBudget"] == 64
-        team_memory = agents["assistant-teamonly"]["spec"]["config"]["memory"]
-        assert team_memory["readScopes"] == ["session", "group"]
-        unrelated_memory = agents["unrelated-bot"]["spec"]["config"]["memory"]
-        assert unrelated_memory["scope"] == "agent"
-        assert "tools" not in unrelated_memory
+        user_memory = agents["user-assistant"]["spec"]["config"]["memory"]
+        assert user_memory["scope"] == "user"
+        assert user_memory["defaultReadScope"] == "user"
+        assert user_memory["tools"] == "read"
+        assert user_memory["readScopes"] == ["session", "agent", "user", "group"]
+        assert user_memory["clientParams"]["tokenBudget"] == 64
+        session_memory = agents["session-assistant"]["spec"]["config"]["memory"]
+        assert session_memory["scope"] == "session"
+        assert session_memory["tools"] == "read"
+        assert "defaultReadScope" not in session_memory
+        assert "readScopes" not in session_memory
+        agent_memory = agents["agent-bot"]["spec"]["config"]["memory"]
+        assert agent_memory["scope"] == "agent"
+        assert "tools" not in agent_memory
 
     def test_deploy_memory_sample_dry_run(self):
         result = runner.invoke(
