@@ -99,6 +99,22 @@ async def test_does_not_overwrite_existing_authorization():
 
 @respx.mock
 @pytest.mark.asyncio
+async def test_replaces_no_auth_placeholder_with_subject():
+    route = respx.post("http://modelapi/v1/chat/completions").respond(200)
+    kaos_identity.ctx.update({"subject_token": "user-token", "actor_token": "actor-token"})
+    async with httpx.AsyncClient() as client:
+        await client.post(
+            "http://modelapi/v1/chat/completions",
+            headers={"Authorization": "Bearer not-needed"},
+        )
+
+    sent = route.calls.last.request.headers
+    assert sent["authorization"] == "Bearer user-token"
+    assert sent["x-agent-authorization"] == "Bearer actor-token"
+
+
+@respx.mock
+@pytest.mark.asyncio
 async def test_empty_context_injects_nothing():
     route = respx.get("http://downstream/ping").respond(200)
     async with httpx.AsyncClient() as client:
