@@ -45,14 +45,10 @@ spec:
         yaml_content += f"  defaultReadScope: {default_read_scope}\n"
     if failure_mode:
         yaml_content += f"  defaultFailureMode: {failure_mode}\n"
-    if short_term_token_budget is not None or medium_term_enabled:
-        yaml_content += "  container:\n    env:\n"
-        if short_term_token_budget is not None:
-            yaml_content += "    - name: KAOS_MEMORY_TOKEN_BUDGET\n"
-            yaml_content += f'      value: "{short_term_token_budget}"\n'
-        if medium_term_enabled:
-            yaml_content += "    - name: KAOS_MEMORY_ROLLING_SUMMARY\n"
-            yaml_content += '      value: "true"\n'
+    if short_term_token_budget is not None:
+        yaml_content += f"  shortTerm:\n    tokenBudget: {short_term_token_budget}\n"
+    if medium_term_enabled:
+        yaml_content += "  mediumTerm:\n    enabled: true\n"
 
     if dry_run:
         typer.echo(yaml_content)
