@@ -115,3 +115,22 @@ spec:
       clientParams:
         tokenBudget: 64
         rollingSummary: true
+
+---
+# Who may use the memory agents: the "researchers" group. Entry through the
+# gateway is deny-by-default; this grant is what admits verified group members.
+apiVersion: kaos.tools/v1alpha1
+kind: AccessGrant
+metadata:
+  name: researchers-to-memory-agents
+spec:
+  subjects:
+    - kind: Group
+      name: researchers
+  resources:
+    - kind: Agent
+      name: user-assistant
+    - kind: Agent
+      name: session-assistant
+    - kind: Agent
+      name: agent-bot
