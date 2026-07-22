@@ -34,6 +34,13 @@ def test_session_maps_to_run_id():
     assert scope.search_filters() == {"user_id": "*", "kaos_run": "run-1"}
 
 
+def test_session_long_term_filter_binds_principal_when_present():
+    scoped = Scope(level=ScopeLevel.SESSION, session_id="run-1", principal="alice")
+    assert scoped.search_filters() == {"user_id": "alice", "kaos_run": "run-1"}
+    anon = Scope(level=ScopeLevel.SESSION, session_id="run-1")
+    assert anon.search_filters() == {"user_id": "*", "kaos_run": "run-1"}
+
+
 def test_store_search_uses_wildcard_and_store_group():
     scope = Scope(level=ScopeLevel.STORE)
     assert scope.search_filters("team-a") == {"user_id": "*", "kaos_group": "team-a"}
