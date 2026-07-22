@@ -406,23 +406,22 @@ Inspect or erase a central `MemoryStore` through a temporary Kubernetes port-for
 
 ### kaos memory recall
 
-Use `--query` for semantic recall or `--all` for a complete scoped list. Add `--short-term` to include the current session's verbatim window and rolling summary.
+Without a query the command lists the selected tiers. Add `--long-term-query`/`-q` for semantic long-term recall. `--include` is repeatable and comma-separated, defaults to all tiers, and accepts `a|all|s|short-term|m|medium-term|l|long-term`.
 
 ```bash
-kaos memory recall --store support-memory --scope session --session SESSION_ID --query TEXT [OPTIONS]
-kaos memory recall --store support-memory --scope agent --agent AGENT --all [OPTIONS]
+kaos memory recall --store support-memory --scope session --session SESSION_ID -q TEXT [OPTIONS]
+kaos memory recall --store support-memory --scope store --include l [OPTIONS]
 ```
 
 | Option | Short | Description |
 |--------|-------|-------------|
 | `--store` | | MemoryStore name; optional when exactly one exists |
-| `--scope` | | `session`, `agent`, `user`, or `group` (required) |
+| `--scope` | | `session`, `agent`, `user`, or `store` (required) |
 | `--session` | | Session ID; required only for session scope |
 | `--agent` | | Agent name; required only for agent scope |
 | `--user` | | User principal; required only for user scope. A username with a cached `kaos auth login` session resolves to its verified subject; anything else passes through verbatim |
-| `--query` | | Semantic query; mutually exclusive with `--all` |
-| `--all` | | List every long-term record visible at the scope |
-| `--short-term` | | Include conversational tiers when the scope carries a session |
+| `--long-term-query` | `-q` | Semantic query; without it the command uses the list endpoint |
+| `--include` | | Selected tiers; repeat or comma-separate aliases. Defaults to all |
 | `--top-k` | | Maximum semantic results (default: 10) |
 | `--namespace` | `-n` | Kubernetes namespace |
 | `--json` | | Output JSON |
@@ -435,7 +434,7 @@ Erase every long-term record and attributed conversational session at a scope. T
 
 ```bash
 kaos memory forget --store support-memory --scope user --user alice [-n NAMESPACE]
-kaos memory forget --store support-memory --scope group --yes
+kaos memory forget --store support-memory --scope store --yes
 ```
 
 ---
@@ -460,7 +459,7 @@ kaos memorystore create NAME --modelapi MODELAPI [OPTIONS]
 | `--embedding-model` | | `text-embedding-3-small` | Embedding model |
 | `--short-term-token-budget` | | | Token budget, rendered as `KAOS_MEMORY_TOKEN_BUDGET` on this CRD version |
 | `--medium-term-enabled` | | false | Enable rolling summaries through `KAOS_MEMORY_ROLLING_SUMMARY` |
-| `--default-read-scope` | | | Default read scope |
+| `--max-read-scope` | | | Store read-scope ceiling: `session`, `agent`, or `user` |
 | `--failure-mode` | | | Default failure mode: `soft` or `strict` |
 | `--namespace` | `-n` | current | Target namespace |
 | `--dry-run` | | false | Print YAML instead of creating |

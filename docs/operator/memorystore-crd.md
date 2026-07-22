@@ -79,9 +79,9 @@ spec:
   # "soft" tolerates memory-write failures; "strict" surfaces them as errors.
   defaultFailureMode: soft
 
-  # Default read scope for agents that omit config.memory.defaultReadScope.
+  # Maximum read scope for every bound agent.
   # When omitted, agents fall back to "agent".
-  defaultReadScope: agent
+  maxReadScope: agent
 ```
 
 ## Storage Modes
@@ -169,7 +169,7 @@ The `shortTerm`, `mediumTerm`, and `longTerm` blocks tune the three memory tiers
 | `longTerm.extraction.systemPrompt` | string | built-in | Fact-extraction prompt override |
 | `requestConcurrency` | int | `8` | Bounded request executor size |
 | `defaultFailureMode` | string | `soft` | Default write/forget failure mode for bound agents (`soft` or `strict`) |
-| `defaultReadScope` | string | `session` | Default automatic read scope for bound agents: `agent`, `user`, `group`, or `session`; an Agent `config.memory.defaultReadScope` overrides it |
+| `maxReadScope` | string | `agent` | Maximum read scope for bound agents: `session`, `agent`, or `user` |
 
 ## Status
 
@@ -191,7 +191,7 @@ When ready, the store exposes an endpoint of the form `http://memorystore-<name>
 
 **Failure mode and degradation.** The store's `defaultFailureMode` (`soft` by default) governs how write and forget failures surface to bound agents. Under `soft`, a memory-write failure is tolerated: the agent's turn proceeds and the write is retried in the background. Under `strict`, the failure is surfaced as an error. Recall is always best-effort regardless of mode — if the long-term tier is unavailable, recall degrades to the short-term window rather than failing the turn. An individual Agent can override the store default in its `config.memory.failureMode`.
 
-**Default read scope.** `defaultReadScope` supplies the automatic recall level for bound agents that omit their own value. Resolution is Agent `defaultReadScope`, then store `defaultReadScope`, then `session`.
+**Maximum read scope.** `maxReadScope` is the store-owner ceiling. An Agent's `config.memory.maxReadScope` cannot exceed it; when omitted, the agent inherits the store ceiling.
 
 **Provisioning a development database.** For local development, `kaos system install --pgvector-memory-enabled` provisions a pgvector Postgres in the install namespace and writes a `kaos-memory-pgvector` connection Secret, ready to reference from an `external`-mode store's `connectionSecretRef`. This is a development convenience — production deployments point `connectionSecretRef` at a managed pgvector database.
 
@@ -212,7 +212,7 @@ spec:
     memory:
       type: remote
       memoryStore: shared-memory
-      defaultReadScope: user
+      maxReadScope: user
       tools: all
 ```
 
