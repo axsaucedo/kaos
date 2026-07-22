@@ -262,10 +262,8 @@ class TestAgentDeployDryRun:
                 "gpt-4o-mini",
                 "--memory-store",
                 "support-memory",
-                "--memory-default-read-scope",
+                "--memory-max-read-scope",
                 "user",
-                "--memory-read-scopes",
-                "session,agent,user,group",
                 "--memory-tools",
                 "read",
                 "--dry-run",
@@ -276,16 +274,14 @@ class TestAgentDeployDryRun:
         assert agent["spec"]["config"]["memory"] == {
             "type": "remote",
             "memoryStore": "support-memory",
-            "defaultReadScope": "user",
-            "readScopes": ["session", "agent", "user", "group"],
+            "maxReadScope": "user",
             "tools": "read",
         }
 
     @pytest.mark.parametrize(
         "flag,value",
         [
-            ("--memory-default-read-scope", "user"),
-            ("--memory-read-scopes", "session,user"),
+            ("--memory-max-read-scope", "user"),
             ("--memory-tools", "read"),
         ],
     )
@@ -538,7 +534,7 @@ class TestMemoryStoreCreateDryRun:
                 "--short-term-token-budget",
                 "64",
                 "--medium-term-enabled",
-                "--default-read-scope",
+                "--max-read-scope",
                 "user",
                 "--failure-mode",
                 "strict",
@@ -547,7 +543,7 @@ class TestMemoryStoreCreateDryRun:
         )
         assert result.exit_code == 0
         spec = yaml.safe_load(result.output)["spec"]
-        assert spec["defaultReadScope"] == "user"
+        assert spec["maxReadScope"] == "user"
         assert spec["defaultFailureMode"] == "strict"
         assert spec["shortTerm"] == {"tokenBudget": 64}
         assert spec["mediumTerm"] == {"enabled": True}
@@ -778,17 +774,15 @@ class TestSamples:
         assert {agent["spec"]["model"] for agent in agents.values()} == {"gpt-test"}
         user_memory = agents["user-assistant"]["spec"]["config"]["memory"]
         assert "scope" not in user_memory
-        assert user_memory["defaultReadScope"] == "user"
+        assert user_memory["maxReadScope"] == "user"
         assert user_memory["tools"] == "read"
-        assert user_memory["readScopes"] == ["session", "agent", "user", "group"]
         assert user_memory["clientParams"]["tokenBudget"] == 64
         session_memory = agents["session-assistant"]["spec"]["config"]["memory"]
         assert "scope" not in session_memory
         assert session_memory["tools"] == "read"
-        assert "defaultReadScope" not in session_memory
-        assert "readScopes" not in session_memory
+        assert session_memory["maxReadScope"] == "session"
         agent_memory = agents["agent-bot"]["spec"]["config"]["memory"]
-        assert agent_memory["defaultReadScope"] == "agent"
+        assert agent_memory["maxReadScope"] == "agent"
         assert "scope" not in agent_memory
         assert "tools" not in agent_memory
 
@@ -806,7 +800,7 @@ class TestSamples:
         assert store["spec"]["storage"]["type"] == "local"
         agent = next(d for d in docs if d["kind"] == "Agent")
         assert agent["spec"]["config"]["memory"]["memoryStore"] == "support-memory"
-        assert agent["spec"]["config"]["memory"]["defaultReadScope"] == "user"
+        assert agent["spec"]["config"]["memory"]["maxReadScope"] == "user"
         result = runner.invoke(
             app, ["samples", "deploy", "1-simple-echo-agent", "--dry-run"]
         )

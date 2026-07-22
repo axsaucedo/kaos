@@ -47,7 +47,9 @@ def build_agent(
         "agent:agent",
         help="Module:object target (default: agent:agent). No .py extension.",
     ),
-    image: str = typer.Option(..., "--image", "-i", help="Image name with tag (e.g. my-agent:latest)."),
+    image: str = typer.Option(
+        ..., "--image", "-i", help="Image name with tag (e.g. my-agent:latest)."
+    ),
     directory: str = typer.Option(".", "--dir", "-d", help="Source directory."),
     kind_load: bool = typer.Option(
         False, "--kind-load", help="Load image to KIND cluster."
@@ -94,7 +96,9 @@ def run_agent(
     ),
     host: str = typer.Option("0.0.0.0", "--host", help="Bind host."),
     port: int = typer.Option(8000, "--port", "-p", help="Bind port."),
-    reload: bool = typer.Option(False, "--reload", "-r", help="Auto-reload on changes."),
+    reload: bool = typer.Option(
+        False, "--reload", "-r", help="Auto-reload on changes."
+    ),
 ) -> None:
     """Run a Pydantic AI agent server locally."""
     run_command(target=target, host=host, port=port, reload=reload)
@@ -245,22 +249,25 @@ def deploy_agent_cmd(
         None, "--auto-interval", help="Seconds between autonomous iterations."
     ),
     task_max_iterations: int = typer.Option(
-        None, "--task-max-iterations", help="Max iterations for A2A async tasks (0=unlimited)."
+        None,
+        "--task-max-iterations",
+        help="Max iterations for A2A async tasks (0=unlimited).",
     ),
     task_max_runtime: int = typer.Option(
-        None, "--task-max-runtime", help="Max runtime in seconds for A2A async tasks (0=unlimited)."
+        None,
+        "--task-max-runtime",
+        help="Max runtime in seconds for A2A async tasks (0=unlimited).",
     ),
     task_max_tool_calls: int = typer.Option(
-        None, "--task-max-tool-calls", help="Max cumulative tool calls for A2A async tasks (0=unlimited)."
+        None,
+        "--task-max-tool-calls",
+        help="Max cumulative tool calls for A2A async tasks (0=unlimited).",
     ),
     memory_store: str = typer.Option(
         None, "--memory-store", help="MemoryStore reference."
     ),
-    memory_default_read_scope: str = typer.Option(
-        None, "--memory-default-read-scope", help="Default memory read scope."
-    ),
-    memory_read_scopes: str = typer.Option(
-        None, "--memory-read-scopes", help="Comma-separated allowed memory read scopes."
+    memory_max_read_scope: str = typer.Option(
+        None, "--memory-max-read-scope", help="Maximum memory read scope."
     ),
     memory_tools: str = typer.Option(
         None, "--memory-tools", help="Memory tools to expose: read, write, or all."
@@ -286,9 +293,7 @@ def deploy_agent_cmd(
         typer.echo("Error: --build requires --image to be set", err=True)
         sys.exit(1)
 
-    if not memory_store and any(
-        (memory_default_read_scope, memory_read_scopes, memory_tools)
-    ):
+    if not memory_store and any((memory_max_read_scope, memory_tools)):
         typer.echo(
             "Error: memory read scope and tools flags require --memory-store",
             err=True,
@@ -335,8 +340,7 @@ def deploy_agent_cmd(
         task_max_runtime=task_max_runtime,
         task_max_tool_calls=task_max_tool_calls,
         memory_store=memory_store,
-        memory_default_read_scope=memory_default_read_scope,
-        memory_read_scopes=memory_read_scopes,
+        memory_max_read_scope=memory_max_read_scope,
         memory_tools=memory_tools,
         wait=wait,
         wait_timeout=wait_timeout,
@@ -413,7 +417,7 @@ def status_agent(
     ),
 ) -> None:
     """Get agent status and capabilities via agent card.
-    
+
     Examples:
       kaos agent status my-agent
       kaos agent status my-agent --json
@@ -450,7 +454,7 @@ def memory_agent(
     ),
 ) -> None:
     """Get agent memory events.
-    
+
     Examples:
       kaos agent memory my-agent
       kaos agent memory my-agent --json

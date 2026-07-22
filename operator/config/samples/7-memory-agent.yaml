@@ -40,6 +40,7 @@ spec:
       modelAPI: support-modelapi
       model: text-embedding-3-small
   defaultFailureMode: soft
+  maxReadScope: user
   shortTerm:
     tokenBudget: 64
   mediumTerm:
@@ -63,12 +64,7 @@ spec:
     memory:
       type: remote
       memoryStore: support-memory
-      defaultReadScope: user
-      readScopes:
-      - session
-      - agent
-      - user
-      - group
+      maxReadScope: user
       tools: read
       clientParams:
         tokenBudget: 64
@@ -92,6 +88,7 @@ spec:
     memory:
       type: remote
       memoryStore: support-memory
+      maxReadScope: session
       tools: read
       clientParams:
         tokenBudget: 64
@@ -111,7 +108,7 @@ spec:
     memory:
       type: remote
       memoryStore: support-memory
-      defaultReadScope: agent
+      maxReadScope: agent
       clientParams:
         tokenBudget: 64
         rollingSummary: true

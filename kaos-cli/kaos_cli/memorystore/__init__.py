@@ -29,8 +29,8 @@ def create_memorystore_cmd(
     medium_term_enabled: bool = typer.Option(
         False, "--medium-term-enabled", help="Enable rolling medium-term summaries."
     ),
-    default_read_scope: str = typer.Option(
-        None, "--default-read-scope", help="Default memory read scope."
+    max_read_scope: str = typer.Option(
+        None, "--max-read-scope", help="Maximum memory read scope."
     ),
     failure_mode: str = typer.Option(
         None, "--failure-mode", help="Default failure mode: soft or strict."
@@ -55,7 +55,7 @@ def create_memorystore_cmd(
         embedding_model=embedding_model,
         short_term_token_budget=short_term_token_budget,
         medium_term_enabled=medium_term_enabled,
-        default_read_scope=default_read_scope,
+        max_read_scope=max_read_scope,
         failure_mode=failure_mode,
         namespace=namespace,
         dry_run=dry_run,

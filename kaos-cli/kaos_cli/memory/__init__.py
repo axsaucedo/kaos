@@ -19,7 +19,7 @@ class ScopeChoice(str, Enum):
     SESSION = "session"
     AGENT = "agent"
     USER = "user"
-    GROUP = "group"
+    STORE = "store"
 
 
 class MemoryCLIError(RuntimeError):
@@ -40,10 +40,19 @@ def build_scope(
         raise ValueError(f"unknown memory scope: {level}")
 
     supplied = [name for name, value in owners.items() if value is not None]
-    if level == "group":
+    if level == "store":
         if supplied:
-            raise ValueError("group scope does not take an owner flag")
-        return {"level": "group"}
+            raise ValueError("store scope does not take an owner flag")
+        return {"level": "store"}
+
+    if level == "session" and supplied == ["session", "user"]:
+        if not session or not session.strip() or not user or not user.strip():
+            raise ValueError("--session and --user require non-empty values")
+        return {
+            "level": "session",
+            "session_id": session.strip(),
+            "principal": user.strip(),
+        }
 
     if supplied != [level]:
         flag = f"--{level}"
@@ -173,13 +182,15 @@ def _request(
 
 def _print_recall(data: dict[str, Any], scope: dict[str, str]) -> None:
     typer.echo(f"Scope: {json.dumps(scope, sort_keys=True)}")
-    facts = data.get("facts", [])
-    typer.echo(f"Long-term records: {len(facts)}")
-    for fact in facts:
-        typer.echo(f"  - {fact.get('memory', json.dumps(fact, sort_keys=True))}")
+    long_term = data.get("long_term")
+    if long_term is not None:
+        facts = long_term.get("facts", [])
+        typer.echo(f"Long-term records: {len(facts)}")
+        for fact in facts:
+            typer.echo(f"  - {fact.get('memory', json.dumps(fact, sort_keys=True))}")
 
     summary = (data.get("medium_term") or {}).get("summary", "")
-    recent = (data.get("short_term") or {}).get("recent", [])
+    recent = (data.get("short_term") or {}).get("window", [])
     if summary:
         typer.echo(f"Medium-term summary: {summary}")
     if recent:
@@ -209,7 +220,6 @@ def _scope_from_options(
         raise MemoryCLIError(str(exc)) from exc
 
 
-
 def _resolve_user(user: str | None) -> str | None:
     """Resolve a login username to its verified subject via the cached session.
 
@@ -233,13 +243,43 @@ def _resolve_user(user: str | None) -> str | None:
         except (KeyError, IndexError, ValueError, AttributeError, OSError):
             return user
         if sub:
-            typer.echo(f"Resolved user '{user}' to principal '{sub}' from the cached login.", err=True)
+            typer.echo(
+                f"Resolved user '{user}' to principal '{sub}' from the cached login.",
+                err=True,
+            )
             return sub
         return user
     return user
 
 
 app = typer.Typer(help="Inspect and erase central memory stores.", no_args_is_help=True)
+
+
+def parse_include(values: list[str] | None) -> list[str]:
+    """Expand repeatable, comma-separated recall tier aliases."""
+    aliases = {
+        "s": "short_term",
+        "short-term": "short_term",
+        "m": "medium_term",
+        "medium-term": "medium_term",
+        "l": "long_term",
+        "long-term": "long_term",
+    }
+    requested = values or ["all"]
+    tiers: list[str] = []
+    for value in requested:
+        for member in value.split(","):
+            member = member.strip().lower()
+            if member in {"a", "all"}:
+                expanded = ["short_term", "medium_term", "long_term"]
+            elif member in aliases:
+                expanded = [aliases[member]]
+            else:
+                raise MemoryCLIError(f"unknown --include value: {member or value}")
+            for tier in expanded:
+                if tier not in tiers:
+                    tiers.append(tier)
+    return tiers
 
 
 @app.command(name="recall")
@@ -249,10 +289,13 @@ def recall_memory(
     session: str = typer.Option(None, "--session", help="Session owner ID."),
     agent: str = typer.Option(None, "--agent", help="Agent owner name."),
     user: str = typer.Option(None, "--user", help="User principal owner."),
-    query: str = typer.Option(None, "--query", help="Semantic recall query."),
-    all_records: bool = typer.Option(False, "--all", help="List every scoped record."),
-    short_term: bool = typer.Option(
-        False, "--short-term", help="Include conversational memory tiers."
+    long_term_query: str = typer.Option(
+        None, "--long-term-query", "-q", help="Semantic long-term recall query."
+    ),
+    include: list[str] = typer.Option(
+        None,
+        "--include",
+        help="Tier: a|all|s|short-term|m|medium-term|l|long-term; repeat or comma-separate.",
     ),
     top_k: int = typer.Option(10, "--top-k", min=1, help="Maximum semantic results."),
     namespace: str = typer.Option(
@@ -262,10 +305,11 @@ def recall_memory(
 ) -> None:
     """Recall semantic or complete memory at one scope."""
     try:
-        if (query is None and not all_records) or (query is not None and all_records):
-            raise MemoryCLIError("exactly one of --query or --all is required")
-        if query is not None and not query.strip():
-            raise MemoryCLIError("--query requires non-empty text")
+        tiers = parse_include(include)
+        if long_term_query is not None and not long_term_query.strip():
+            raise MemoryCLIError("--long-term-query requires non-empty text")
+        if long_term_query is not None and "long_term" not in tiers:
+            raise MemoryCLIError("--long-term-query requires long-term in --include")
 
         user = _resolve_user(user)
         # Validate owner flags before consulting Kubernetes for the default namespace.
@@ -280,13 +324,13 @@ def recall_memory(
 
         payload: dict[str, Any] = {
             "scope": resolved_scope,
-            "include_short_term": short_term,
+            "include": tiers,
         }
-        if all_records:
-            path = "/v1/list"
-        else:
+        if long_term_query is not None:
             path = "/v1/recall"
-            payload.update({"query": query, "top_k": top_k})
+            payload.update({"query": long_term_query.strip(), "top_k": top_k})
+        else:
+            path = "/v1/list"
         data = _request("POST", path, payload, target, remote_port, resolved_namespace)
 
         if output_json:

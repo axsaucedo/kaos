@@ -541,7 +541,7 @@ var _ = Describe("MemoryStore Controller", func() {
 		defer func() { k8sClient.Delete(ctx, valid) }()
 	})
 
-	It("fails closed when defaultReadScope is user without user identity", func() {
+	It("fails closed when maxReadScope is user without user identity", func() {
 		name := uniqueMemoryStoreName("user-scope-store")
 		store := &kaosv1alpha1.MemoryStore{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
@@ -551,7 +551,7 @@ var _ = Describe("MemoryStore Controller", func() {
 					Summarization: kaosv1alpha1.MemoryModelRef{ModelAPI: "m", Model: "mock-model"},
 					Embedding:     kaosv1alpha1.MemoryModelRef{ModelAPI: "m", Model: "mock-embed"},
 				},
-				DefaultReadScope: "user",
+				MaxReadScope: "user",
 			},
 		}
 		Expect(k8sClient.Create(ctx, store)).To(Succeed())
@@ -565,7 +565,7 @@ var _ = Describe("MemoryStore Controller", func() {
 				return false
 			}
 			return updated.Status.Phase == "Failed" && !updated.Status.Ready &&
-				strings.Contains(updated.Status.Message, "spec.defaultReadScope")
+				strings.Contains(updated.Status.Message, "spec.maxReadScope")
 		}, timeout, interval).Should(BeTrue())
 	})
 

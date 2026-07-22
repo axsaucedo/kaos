@@ -57,8 +57,7 @@ def deploy_agent(
     task_max_runtime: int | None = None,
     task_max_tool_calls: int | None = None,
     memory_store: str | None = None,
-    memory_default_read_scope: str | None = None,
-    memory_read_scopes: str | None = None,
+    memory_max_read_scope: str | None = None,
     memory_tools: str | None = None,
     wait: bool = False,
     wait_timeout: int = DEFAULT_WAIT_TIMEOUT,
@@ -72,8 +71,19 @@ def deploy_agent(
     )
 
     # Add config section if description, instructions, telemetry, autonomous, or task budgets provided
-    has_task_budgets = task_max_iterations is not None or task_max_runtime is not None or task_max_tool_calls is not None
-    has_config = description or instructions or otel_endpoint or autonomous or has_task_budgets or memory_store
+    has_task_budgets = (
+        task_max_iterations is not None
+        or task_max_runtime is not None
+        or task_max_tool_calls is not None
+    )
+    has_config = (
+        description
+        or instructions
+        or otel_endpoint
+        or autonomous
+        or has_task_budgets
+        or memory_store
+    )
     if has_config:
         yaml_content += "  config:\n"
         if description:
@@ -106,18 +116,8 @@ def deploy_agent(
             yaml_content += "    memory:\n"
             yaml_content += "      type: remote\n"
             yaml_content += f"      memoryStore: {memory_store}\n"
-            if memory_default_read_scope:
-                yaml_content += f"      defaultReadScope: {memory_default_read_scope}\n"
-            if memory_read_scopes:
-                scopes = [
-                    scope.strip()
-                    for scope in memory_read_scopes.split(",")
-                    if scope.strip()
-                ]
-                if scopes:
-                    yaml_content += "      readScopes:\n"
-                    for scope in scopes:
-                        yaml_content += f"      - {scope}\n"
+            if memory_max_read_scope:
+                yaml_content += f"      maxReadScope: {memory_max_read_scope}\n"
             if memory_tools:
                 yaml_content += f"      tools: {memory_tools}\n"
 

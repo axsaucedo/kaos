@@ -1,9 +1,9 @@
 package integration
 
 import (
-	"strings"
 	"context"
 	"fmt"
+	"strings"
 
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -99,12 +99,11 @@ var _ = Describe("Agent memory binding", func() {
 				Config: &kaosv1alpha1.AgentConfig{
 					Description: "mem agent",
 					Memory: &kaosv1alpha1.MemoryConfig{
-						Type:             "remote",
-						MemoryStore:      storeName,
-						DefaultReadScope: "group",
-						ReadScopes:       []string{"session", "group"},
-						Tools:            "all",
-						FailureMode:      "strict",
+						Type:         "remote",
+						MemoryStore:  storeName,
+						MaxReadScope: "agent",
+						Tools:        "all",
+						FailureMode:  "strict",
 						ClientParams: &kaosv1alpha1.MemoryClientParams{
 							TokenBudget:    int32Ptr(4096),
 							RollingSummary: boolPtr(false),
@@ -120,8 +119,7 @@ var _ = Describe("Agent memory binding", func() {
 		Expect(env["MEMORY_ENABLED"]).To(Equal("true"))
 		Expect(env["MEMORY_TYPE"]).To(Equal("remote"))
 		Expect(env["MEMORY_STORE_ENDPOINT"]).To(Equal(fmt.Sprintf("http://memorystore-%s.%s.svc.cluster.local:8080", storeName, namespace)))
-		Expect(env["MEMORY_DEFAULT_READ_SCOPE"]).To(Equal("group"))
-		Expect(env["MEMORY_READ_SCOPES"]).To(Equal("session,group"))
+		Expect(env["MEMORY_MAX_READ_SCOPE"]).To(Equal("agent"))
 		Expect(env["MEMORY_TOOLS"]).To(Equal("all"))
 		Expect(env["MEMORY_FAILURE_MODE"]).To(Equal("strict"))
 		Expect(env["MEMORY_SHORT_TERM_TOKEN_BUDGET"]).To(Equal("4096"))
@@ -170,12 +168,11 @@ var _ = Describe("Agent memory binding", func() {
 		env := agentMemoryEnv(ctx, namespace, agentName)
 		Expect(env["MEMORY_TYPE"]).To(Equal("local"))
 		Expect(env).NotTo(HaveKey("MEMORY_STORE_ENDPOINT"))
-		Expect(env["MEMORY_DEFAULT_READ_SCOPE"]).To(Equal("session"))
-		Expect(env["MEMORY_READ_SCOPES"]).To(Equal("session"))
+		Expect(env["MEMORY_MAX_READ_SCOPE"]).To(Equal("session"))
 		Expect(env["AGENT_IDENTITY"]).To(Equal(fmt.Sprintf("kaos://agent/%s/%s", namespace, agentName)))
 	})
 
-	It("inherits the store default read scope and allows an agent override", func() {
+	It("inherits the store ceiling and rejects an agent scope above it", func() {
 		modelAPIName := uniqueAgentName("agent-mem-model")
 		modelAPI := createReadyModelAPI(ctx, namespace, modelAPIName)
 		defer func() { k8sClient.Delete(ctx, modelAPI) }()
@@ -185,7 +182,7 @@ var _ = Describe("Agent memory binding", func() {
 		defer func() { k8sClient.Delete(ctx, store) }()
 		currentStore := &kaosv1alpha1.MemoryStore{}
 		Expect(k8sClient.Get(ctx, types.NamespacedName{Name: storeName, Namespace: namespace}, currentStore)).To(Succeed())
-		currentStore.Spec.DefaultReadScope = "group"
+		currentStore.Spec.MaxReadScope = "session"
 		Expect(k8sClient.Update(ctx, currentStore)).To(Succeed())
 
 		agentName := uniqueAgentName("agent")
@@ -204,8 +201,7 @@ var _ = Describe("Agent memory binding", func() {
 		defer func() { k8sClient.Delete(ctx, agent) }()
 
 		env := agentMemoryEnv(ctx, namespace, agentName)
-		Expect(env["MEMORY_DEFAULT_READ_SCOPE"]).To(Equal("group"))
-		Expect(env["MEMORY_READ_SCOPES"]).To(Equal("group"))
+		Expect(env["MEMORY_MAX_READ_SCOPE"]).To(Equal("session"))
 
 		overrideName := uniqueAgentName("agent")
 		override := &kaosv1alpha1.Agent{
@@ -215,16 +211,20 @@ var _ = Describe("Agent memory binding", func() {
 				Model:               "mock-model",
 				WaitForDependencies: boolPtr(false),
 				Config: &kaosv1alpha1.AgentConfig{Memory: &kaosv1alpha1.MemoryConfig{
-					Type: "remote", MemoryStore: storeName, DefaultReadScope: "agent",
+					Type: "remote", MemoryStore: storeName, MaxReadScope: "agent",
 				}},
 			},
 		}
 		Expect(k8sClient.Create(ctx, override)).To(Succeed())
 		defer func() { k8sClient.Delete(ctx, override) }()
 
-		overrideEnv := agentMemoryEnv(ctx, namespace, overrideName)
-		Expect(overrideEnv["MEMORY_DEFAULT_READ_SCOPE"]).To(Equal("agent"))
-		Expect(overrideEnv["MEMORY_READ_SCOPES"]).To(Equal("agent"))
+		Eventually(func() bool {
+			updated := &kaosv1alpha1.Agent{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: overrideName, Namespace: namespace}, updated); err != nil {
+				return false
+			}
+			return updated.Status.Phase == "Failed" && strings.Contains(updated.Status.Message, "exceeds MemoryStore")
+		}, timeout, interval).Should(BeTrue())
 	})
 
 	It("rejects a user read scope when the cluster has no user identity", func() {
@@ -246,11 +246,10 @@ var _ = Describe("Agent memory binding", func() {
 				Config: &kaosv1alpha1.AgentConfig{
 					Description: "user-scope agent without user identity",
 					Memory: &kaosv1alpha1.MemoryConfig{
-						Type:             "remote",
-						MemoryStore:      storeName,
-						DefaultReadScope: "user",
-						ReadScopes:       []string{"session", "user"},
-						Tools:            "read",
+						Type:         "remote",
+						MemoryStore:  storeName,
+						MaxReadScope: "user",
+						Tools:        "read",
 					},
 				},
 			},
@@ -270,7 +269,7 @@ var _ = Describe("Agent memory binding", func() {
 			}
 			for _, c := range updated.Status.Conditions {
 				if c.Type == "Ready" && c.Status == metav1.ConditionFalse && c.Reason == "InvalidMemoryReadScope" {
-					return strings.Contains(c.Message, "config.memory.defaultReadScope")
+					return strings.Contains(c.Message, "config.memory.maxReadScope")
 				}
 			}
 			return false
@@ -502,30 +501,14 @@ var _ = Describe("Agent memory binding", func() {
 		By("rejecting tools without a memoryStore")
 		Expect(k8sClient.Create(ctx, makeAgent(&kaosv1alpha1.MemoryConfig{Tools: "all"}))).NotTo(Succeed())
 
-		By("rejecting a defaultReadScope outside readScopes")
-		Expect(k8sClient.Create(ctx, makeAgent(&kaosv1alpha1.MemoryConfig{
-			MemoryStore:      "store",
-			DefaultReadScope: "user",
-			ReadScopes:       []string{"agent"},
-		}))).NotTo(Succeed())
-
 		By("rejecting non-session read policy without a memoryStore")
-		Expect(k8sClient.Create(ctx, makeAgent(&kaosv1alpha1.MemoryConfig{DefaultReadScope: "agent"}))).NotTo(Succeed())
-		Expect(k8sClient.Create(ctx, makeAgent(&kaosv1alpha1.MemoryConfig{ReadScopes: []string{"session", "user"}, Tools: "read"}))).NotTo(Succeed())
+		Expect(k8sClient.Create(ctx, makeAgent(&kaosv1alpha1.MemoryConfig{MaxReadScope: "agent"}))).NotTo(Succeed())
 
-		By("rejecting multiple readScopes without a read tool")
-		Expect(k8sClient.Create(ctx, makeAgent(&kaosv1alpha1.MemoryConfig{
-			MemoryStore: "store",
-			ReadScopes:  []string{"session", "agent"},
-			Tools:       "write",
-		}))).NotTo(Succeed())
-
-		By("accepting an entitled multi-scope read policy")
+		By("accepting a max read scope with a store")
 		validReadPolicy := makeAgent(&kaosv1alpha1.MemoryConfig{
-			MemoryStore:      "store",
-			DefaultReadScope: "session",
-			ReadScopes:       []string{"session", "agent"},
-			Tools:            "read",
+			MemoryStore:  "store",
+			MaxReadScope: "session",
+			Tools:        "read",
 		})
 		Expect(k8sClient.Create(ctx, validReadPolicy)).To(Succeed())
 		defer func() { k8sClient.Delete(ctx, validReadPolicy) }()

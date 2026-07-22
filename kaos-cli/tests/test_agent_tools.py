@@ -33,7 +33,7 @@ def _mock_tools(monkeypatch):
                     "properties": {
                         "level": {
                             "type": "string",
-                            "enum": ["session", "agent", "group"],
+                            "enum": ["session", "agent", "store"],
                         }
                     },
                 },

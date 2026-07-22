@@ -732,11 +732,6 @@ func (in *MemoryConfig) DeepCopyInto(out *MemoryConfig) {
 		*out = new(bool)
 		**out = **in
 	}
-	if in.ReadScopes != nil {
-		in, out := &in.ReadScopes, &out.ReadScopes
-		*out = make([]string, len(*in))
-		copy(*out, *in)
-	}
 	if in.ClientParams != nil {
 		in, out := &in.ClientParams, &out.ClientParams
 		*out = new(MemoryClientParams)
