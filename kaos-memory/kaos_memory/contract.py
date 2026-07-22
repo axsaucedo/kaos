@@ -30,14 +30,22 @@ class ScopeLevel(str, Enum):
 
     - ``AGENT``: only this agent (mapped to ``agent_id``).
     - ``USER``: all agents acting for a principal (mapped to ``user_id``).
-    - ``GROUP``: every agent on the store (mapped to the reserved group owner).
+    - ``STORE``: every memory on the store (admin plane only).
     - ``SESSION``: a single run/conversation (mapped to ``run_id``).
     """
 
+    SESSION = "session"
     AGENT = "agent"
     USER = "user"
-    GROUP = "group"
-    SESSION = "session"
+    STORE = "store"
+
+
+class MemoryTier(str, Enum):
+    """A recall response tier selected by the request."""
+
+    SHORT_TERM = "short_term"
+    MEDIUM_TERM = "medium_term"
+    LONG_TERM = "long_term"
 
 
 class Attribution(BaseModel):
@@ -91,7 +99,6 @@ class Scope(BaseModel):
     principal: Optional[str] = None
     agent_client_id: Optional[str] = None
     session_id: Optional[str] = None
-    user_scoping_required: bool = False
 
     @model_validator(mode="after")
     def _normalise(self) -> "Scope":
@@ -105,28 +112,24 @@ class Scope(BaseModel):
     def is_complete(self) -> bool:
         """Whether the field required by ``level`` is present (a usable owner key exists)."""
         if self.level is ScopeLevel.AGENT:
-            return self.agent_client_id is not None and (
-                not self.user_scoping_required or self.principal is not None
-            )
+            return self.agent_client_id is not None
         if self.level is ScopeLevel.USER:
             return self.principal is not None
         if self.level is ScopeLevel.SESSION:
             return self.session_id is not None
-        return True  # GROUP always resolves to the reserved owner.
+        return True  # STORE always resolves to the configured store filter.
 
     def owner_kwargs(self) -> Dict[str, Any]:
         """Return the Mem0 entity owner keys selected by this scope.
 
         Entity-scoped operations normally use one of ``user_id`` / ``agent_id`` /
         ``run_id``. Required user-scoped agent operations use both user and agent.
-        Group scope has no synthetic entity owner and raises instead of mapping to a sentinel.
+        Store scope has no synthetic entity owner and raises instead of mapping to a sentinel.
         """
         if self.level is ScopeLevel.AGENT:
             if self.agent_client_id is None:
                 raise ValueError("agent scope requires agent_client_id")
-            if self.user_scoping_required:
-                if self.principal is None:
-                    raise ValueError("user-scoped agent scope requires principal")
+            if self.principal is not None:
                 return {"user_id": self.principal, "agent_id": self.agent_client_id}
             return {"agent_id": self.agent_client_id}
         if self.level is ScopeLevel.USER:
@@ -137,7 +140,7 @@ class Scope(BaseModel):
             if self.session_id is None:
                 raise ValueError("session scope requires session_id")
             return {"run_id": self.session_id}
-        raise ValueError("group scope has no Mem0 entity owner")
+        raise ValueError("store scope has no Mem0 entity owner")
 
     def search_filters(self, group: Optional[str] = None) -> Dict[str, Any]:
         """Return the Mem0 ``filters`` dict for a search at this scope.
@@ -153,17 +156,18 @@ class Scope(BaseModel):
         if self.level is ScopeLevel.AGENT:
             if self.agent_client_id is None:
                 raise ValueError("agent scope requires agent_client_id")
-            if self.user_scoping_required:
-                if self.principal is None:
-                    raise ValueError("user-scoped agent scope requires principal")
+            if self.principal is not None:
                 return {"user_id": self.principal, "agent_id": self.agent_client_id}
             return {"agent_id": self.agent_client_id}
         if self.level is ScopeLevel.SESSION:
             if self.session_id is None:
                 raise ValueError("session scope requires session_id")
-            return {"user_id": "*", "kaos_run": self.session_id}
+            return {
+                "user_id": self.principal if self.principal is not None else "*",
+                "kaos_run": self.session_id,
+            }
         if not group:
-            raise ValueError("group scope requires the store group")
+            raise ValueError("store scope requires the store group")
         return {"user_id": "*", "kaos_group": group}
 
 
@@ -182,7 +186,7 @@ def scope_owner_key(scope: Scope, group: Optional[str] = None) -> str:
             raise ValueError("session scope requires session_id")
         return f"kaos_run:{scope.session_id}"
     if not group:
-        raise ValueError("group scope requires the store group")
+        raise ValueError("store scope requires the store group")
     return f"kaos_group:{group}"
 
 
@@ -213,7 +217,7 @@ class RecallRequest(BaseModel):
     scope: Scope
     query: str
     top_k: Optional[int] = None
-    include_short_term: bool = True
+    include: List[MemoryTier] = Field(default_factory=lambda: list(MemoryTier))
     short_term_token_budget: Optional[int] = None
 
 
@@ -221,7 +225,7 @@ class ListRequest(BaseModel):
     """List every long-term record visible at a scope, with optional conversation tiers."""
 
     scope: Scope
-    include_short_term: bool = True
+    include: List[MemoryTier] = Field(default_factory=lambda: list(MemoryTier))
     short_term_token_budget: Optional[int] = None
 
 
@@ -288,13 +292,20 @@ class ForgetResponse(BaseModel):
 class ShortTermContext(BaseModel):
     """The short-term tier slice of a recall response: the verbatim active window."""
 
-    recent: List[Tuple[str, str]] = Field(default_factory=list)
+    window: List[Tuple[str, str]] = Field(default_factory=list)
 
 
 class MediumTermContext(BaseModel):
     """The medium-term tier slice of a recall response: the rolling conversation digest."""
 
     summary: str = ""
+
+
+class LongTermContext(BaseModel):
+    """The long-term tier slice of a recall response."""
+
+    facts: List[Dict[str, Any]] = Field(default_factory=list)
+    block: str = ""
 
 
 class RecallResponse(BaseModel):
@@ -308,8 +319,7 @@ class RecallResponse(BaseModel):
     only the conversational tiers are present.
     """
 
-    facts: List[Dict[str, Any]] = Field(default_factory=list)
-    short_term: ShortTermContext = Field(default_factory=ShortTermContext)
-    medium_term: MediumTermContext = Field(default_factory=MediumTermContext)
-    block: str = ""
+    long_term: Optional[LongTermContext] = None
+    medium_term: Optional[MediumTermContext] = None
+    short_term: Optional[ShortTermContext] = None
     degraded: bool = False

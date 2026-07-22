@@ -12,21 +12,11 @@ def test_agent_maps_to_agent_id():
     assert scope.search_filters() == {"agent_id": "agent-a"}
 
 
-def test_required_agent_scope_is_incomplete_without_user():
-    scope = Scope(
-        level=ScopeLevel.AGENT,
-        agent_client_id="agent-a",
-        user_scoping_required=True,
-    )
-    assert scope.is_complete() is False
-
-
-def test_required_agent_maps_to_user_and_agent_filter():
+def test_agent_with_principal_maps_to_user_and_agent_filter():
     scope = Scope(
         level=ScopeLevel.AGENT,
         principal="alice",
         agent_client_id="agent-a",
-        user_scoping_required=True,
     )
     assert scope.search_filters() == {"user_id": "alice", "agent_id": "agent-a"}
     assert scope.owner_kwargs() == {"user_id": "alice", "agent_id": "agent-a"}
@@ -44,14 +34,14 @@ def test_session_maps_to_run_id():
     assert scope.search_filters() == {"user_id": "*", "kaos_run": "run-1"}
 
 
-def test_group_search_uses_wildcard_and_store_group():
-    scope = Scope(level=ScopeLevel.GROUP)
+def test_store_search_uses_wildcard_and_store_group():
+    scope = Scope(level=ScopeLevel.STORE)
     assert scope.search_filters("team-a") == {"user_id": "*", "kaos_group": "team-a"}
 
 
-def test_group_search_requires_store_group():
+def test_store_search_requires_store_group():
     with pytest.raises(ValueError, match="store group"):
-        Scope(level=ScopeLevel.GROUP).search_filters()
+        Scope(level=ScopeLevel.STORE).search_filters()
 
 
 def test_entity_scopes_yield_exactly_one_owner_key():
@@ -63,9 +53,9 @@ def test_entity_scopes_yield_exactly_one_owner_key():
         assert len(scope.owner_kwargs()) == 1
 
 
-def test_group_has_no_synthetic_entity_owner():
+def test_store_has_no_synthetic_entity_owner():
     with pytest.raises(ValueError, match="no Mem0 entity owner"):
-        Scope(level=ScopeLevel.GROUP).owner_kwargs()
+        Scope(level=ScopeLevel.STORE).owner_kwargs()
 
 
 def test_write_kwargs_carry_all_known_attribution():
@@ -110,7 +100,7 @@ def test_write_requires_an_entity_contributor():
             "run:run-1",
         ),
         (
-            Scope(level=ScopeLevel.GROUP, session_id="run-1"),
+            Scope(level=ScopeLevel.STORE, session_id="run-1"),
             "team-a",
             "kaos_group:team-a|run:run-1",
         ),
@@ -127,7 +117,7 @@ def test_scope_key_ignores_write_attribution_and_recall_level():
         agent_client_id="agent-a",
         session_id="run-1",
     )
-    group = Scope(level=ScopeLevel.GROUP, session_id="run-1")
+    group = Scope(level=ScopeLevel.STORE, session_id="run-1")
 
     expected = "kaos_group:team-a|run:run-1"
     assert scope_key(agent, "team-a") == expected
@@ -155,6 +145,6 @@ def test_empty_string_owner_is_treated_as_unset():
 
 
 def test_complete_flags():
-    assert Scope(level=ScopeLevel.GROUP).is_complete()
+    assert Scope(level=ScopeLevel.STORE).is_complete()
     assert Scope(level=ScopeLevel.USER, principal="p").is_complete()
     assert not Scope(level=ScopeLevel.SESSION).is_complete()

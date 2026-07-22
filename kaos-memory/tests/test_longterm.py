@@ -94,13 +94,13 @@ def test_local_delete_session_uses_custom_attribution(tmp_path, offline_models):
 def test_local_delete_group_removes_store_group(tmp_path, offline_models):
     store = _local_store(tmp_path, offline_models)
     alice = Scope(
-        level=ScopeLevel.GROUP,
+        level=ScopeLevel.STORE,
         principal="alice",
         agent_client_id="agent-a",
         session_id="run-1",
     )
     bob = Scope(
-        level=ScopeLevel.GROUP,
+        level=ScopeLevel.STORE,
         principal="bob",
         agent_client_id="agent-b",
         session_id="run-2",
@@ -108,9 +108,9 @@ def test_local_delete_group_removes_store_group(tmp_path, offline_models):
     store.add(alice, "alice group fact", infer=False)
     store.add(bob, "bob group fact", infer=False)
 
-    store.delete_scope(Scope(level=ScopeLevel.GROUP))
+    store.delete_scope(Scope(level=ScopeLevel.STORE))
 
-    assert store.recall(Scope(level=ScopeLevel.GROUP), "group fact", top_k=10) == []
+    assert store.recall(Scope(level=ScopeLevel.STORE), "group fact", top_k=10) == []
 
 
 def test_agent_read_includes_same_agent_session_contribution(tmp_path, offline_models):
@@ -137,14 +137,14 @@ def test_agent_read_includes_same_agent_session_contribution(tmp_path, offline_m
 def test_group_read_uses_collection_attribution(tmp_path, offline_models):
     store = _local_store(tmp_path, offline_models)
     scope = Scope(
-        level=ScopeLevel.GROUP,
+        level=ScopeLevel.STORE,
         principal="alice",
         agent_client_id="agent-a",
         session_id="run-1",
     )
     store.add(scope, "group deployment fact", infer=False)
 
-    hits = store.recall(Scope(level=ScopeLevel.GROUP), "deployment", top_k=10)
+    hits = store.recall(Scope(level=ScopeLevel.STORE), "deployment", top_k=10)
 
     assert [hit["memory"] for hit in hits] == ["group deployment fact"]
 
@@ -332,7 +332,7 @@ def test_filtered_delete_falls_back_to_get_all_and_ids(tmp_path, offline_models,
     )
     store = LongTermStore(storage, offline_models["summarization"], offline_models["embedding"])
 
-    store.delete_scope(Scope(level=ScopeLevel.GROUP))
+    store.delete_scope(Scope(level=ScopeLevel.STORE))
 
     filters = {"user_id": "*", "kaos_group": "store-team"}
     assert calls == [

@@ -91,14 +91,14 @@ def _drive_and_assert(service: MemoryService, span_exporter, short_term_scope_ta
     assert r.status_code == 200
     body = r.json()
     assert body["degraded"] is False
-    assert any("us-east-1" in c for _, c in body["short_term"]["recent"])
-    assert isinstance(body["facts"], list)
+    assert any("us-east-1" in c for _, c in body["short_term"]["window"])
+    assert isinstance(body["long_term"]["facts"], list)
 
     # Forget: clears both tiers.
     f = client.post("/v1/forget", json={"scope": USER_SCOPE})
     assert f.status_code == 200
     after = client.post("/v1/recall", json={"scope": USER_SCOPE, "query": "cluster"})
-    assert after.json()["short_term"]["recent"] == []
+    assert after.json()["short_term"]["window"] == []
 
     names = {s.name for s in span_exporter.get_finished_spans()}
     assert {
@@ -136,7 +136,6 @@ def test_user_forget_erases_compound_partition_across_all_tiers(tmp_path):
         "principal": "alice",
         "agent_client_id": "agent-a",
         "session_id": "alice-session",
-        "user_scoping_required": True,
     }
     bob = {**alice, "principal": "bob", "session_id": "bob-session"}
 

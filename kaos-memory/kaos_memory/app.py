@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, Header
 from fastapi.responses import JSONResponse
 from opentelemetry import trace
 
@@ -38,6 +38,8 @@ from kaos_memory.contract import (
     ForgetRequest,
     ForgetResponse,
     ListRequest,
+    LongTermContext,
+    MemoryTier,
     MediumTermContext,
     RecallRequest,
     RecallResponse,
@@ -213,7 +215,7 @@ class MemoryService:
             span.set_attribute("kaos.memory.scope_level", req.scope.level.value)
             facts: list = []
             degraded = False
-            if self.long_term_enabled:
+            if MemoryTier.LONG_TERM in req.include and self.long_term_enabled:
                 top_k = req.top_k if req.top_k is not None else self.default_top_k
                 try:
                     facts = self.longterm.recall(req.scope, req.query, top_k=top_k)
@@ -221,8 +223,9 @@ class MemoryService:
                     degraded = True
 
             summary, recent = "", []
-            if req.include_short_term and req.scope.session_id is not None:
+            if MemoryTier.MEDIUM_TERM in req.include and req.scope.session_id is not None:
                 summary = self.short_term.summary(req.scope)
+            if MemoryTier.SHORT_TERM in req.include and req.scope.session_id is not None:
                 recent = self.short_term.active_window(
                     req.scope, token_budget=req.short_term_token_budget
                 )
@@ -231,10 +234,21 @@ class MemoryService:
             span.set_attribute("kaos.memory.fact_count", len(facts))
             block = assemble_block(facts)
             return RecallResponse(
-                facts=facts,
-                short_term=ShortTermContext(recent=recent),
-                medium_term=MediumTermContext(summary=summary),
-                block=block,
+                long_term=(
+                    LongTermContext(facts=facts, block=block)
+                    if MemoryTier.LONG_TERM in req.include
+                    else None
+                ),
+                short_term=(
+                    ShortTermContext(window=recent)
+                    if MemoryTier.SHORT_TERM in req.include
+                    else None
+                ),
+                medium_term=(
+                    MediumTermContext(summary=summary)
+                    if MemoryTier.MEDIUM_TERM in req.include
+                    else None
+                ),
                 degraded=degraded,
             )
 
@@ -244,15 +258,16 @@ class MemoryService:
             span.set_attribute("kaos.memory.scope_level", req.scope.level.value)
             facts: list = []
             degraded = False
-            if self.long_term_enabled:
+            if MemoryTier.LONG_TERM in req.include and self.long_term_enabled:
                 try:
                     facts = self.longterm.get_all(req.scope)
                 except Exception:
                     degraded = True
 
             summary, recent = "", []
-            if req.include_short_term and req.scope.session_id is not None:
+            if MemoryTier.MEDIUM_TERM in req.include and req.scope.session_id is not None:
                 summary = self.short_term.summary(req.scope)
+            if MemoryTier.SHORT_TERM in req.include and req.scope.session_id is not None:
                 recent = self.short_term.active_window(
                     req.scope, token_budget=req.short_term_token_budget
                 )
@@ -260,10 +275,21 @@ class MemoryService:
             span.set_attribute("kaos.memory.degraded", degraded)
             span.set_attribute("kaos.memory.fact_count", len(facts))
             return RecallResponse(
-                facts=facts,
-                short_term=ShortTermContext(recent=recent),
-                medium_term=MediumTermContext(summary=summary),
-                block=assemble_block(facts),
+                long_term=(
+                    LongTermContext(facts=facts, block=assemble_block(facts))
+                    if MemoryTier.LONG_TERM in req.include
+                    else None
+                ),
+                short_term=(
+                    ShortTermContext(window=recent)
+                    if MemoryTier.SHORT_TERM in req.include
+                    else None
+                ),
+                medium_term=(
+                    MediumTermContext(summary=summary)
+                    if MemoryTier.MEDIUM_TERM in req.include
+                    else None
+                ),
                 degraded=degraded,
             )
 
@@ -392,22 +418,30 @@ def create_app(
         code = 200 if result["ready"] else 503
         return JSONResponse(result, status_code=code)
 
-    @app.post("/v1/recall", response_model=RecallResponse)
-    async def recall(req: RecallRequest) -> RecallResponse | JSONResponse:
+    @app.post("/v1/recall", response_model=RecallResponse, response_model_exclude_none=True)
+    async def recall(
+        req: RecallRequest, x_actor: Optional[str] = Header(default=None)
+    ) -> RecallResponse | JSONResponse:
         """Synchronous recall: assemble long-term facts and short-term context for a scope."""
         if not req.scope.is_complete():
             return JSONResponse(
                 {"error": f"incomplete {req.scope.level.value} scope"}, status_code=400
             )
+        if x_actor and req.scope.level.value == "store":
+            return JSONResponse({"error": "store scope is admin-only"}, status_code=403)
         return await _offload(lambda: app.state.memory.recall(req))
 
-    @app.post("/v1/list", response_model=RecallResponse)
-    async def list_all(req: ListRequest) -> RecallResponse | JSONResponse:
+    @app.post("/v1/list", response_model=RecallResponse, response_model_exclude_none=True)
+    async def list_all(
+        req: ListRequest, x_actor: Optional[str] = Header(default=None)
+    ) -> RecallResponse | JSONResponse:
         """List all long-term records and conversation tiers visible at a scope."""
         if not req.scope.is_complete():
             return JSONResponse(
                 {"error": f"incomplete {req.scope.level.value} scope"}, status_code=400
             )
+        if x_actor and req.scope.level.value == "store":
+            return JSONResponse({"error": "store scope is admin-only"}, status_code=403)
         return await _offload(lambda: app.state.memory.list_all(req))
 
     @app.post("/v1/write", response_model=WriteResponse)
@@ -431,8 +465,14 @@ def create_app(
         return JSONResponse(result.model_dump(), status_code=202 if result.scheduled else 200)
 
     @app.post("/v1/forget", response_model=ForgetResponse)
-    async def forget(req: ForgetRequest) -> JSONResponse:
+    async def forget(
+        req: ForgetRequest, x_actor: Optional[str] = Header(default=None)
+    ) -> JSONResponse:
         """Erase a scope across both tiers."""
+        if x_actor and req.scope.level.value == "store":
+            return JSONResponse(
+                {"forgotten": False, "error": "store scope is admin-only"}, status_code=403
+            )
         try:
             result = await _offload(lambda: app.state.memory.forget(req))
         except Exception as exc:

@@ -53,7 +53,7 @@ _LEVEL_DESCRIPTIONS = {
     ScopeLevel.SESSION: "this conversation",
     ScopeLevel.AGENT: "this agent's durable experience",
     ScopeLevel.USER: "what is known about this user across agents",
-    ScopeLevel.GROUP: "knowledge shared across the group",
+    ScopeLevel.STORE: "all memory on the store",
 }
 
 
@@ -217,10 +217,10 @@ class MemoryToolset(AbstractToolset[Any]):
                 return "No query provided."
             scope = scope_from_deps(ctx.deps, level=level, agent_identity=self._identity)
             recalled = await memory.recall(scope, query)
-            if recalled.block:
-                return recalled.block
-            if recalled.facts:
-                return "\n".join(str(fact.get("memory", fact)) for fact in recalled.facts)
+            if recalled.long_term.block:
+                return recalled.long_term.block
+            if recalled.long_term.facts:
+                return "\n".join(str(fact.get("memory", fact)) for fact in recalled.long_term.facts)
             return "No relevant memories found."
 
         return f"Unknown memory tool: {name}"

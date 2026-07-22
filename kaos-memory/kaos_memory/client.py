@@ -32,7 +32,7 @@ _TRACER_NAME = "kaos.memory"
 class ShortTermRecall:
     """Short-term tier slice of a recall: the verbatim active window, oldest first."""
 
-    recent: List[Tuple[str, str]] = field(default_factory=list)
+    window: List[Tuple[str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -40,6 +40,14 @@ class MediumTermRecall:
     """Medium-term tier slice of a recall: the rolling conversation digest."""
 
     summary: str = ""
+
+
+@dataclass
+class LongTermRecall:
+    """Long-term tier slice of a recall."""
+
+    facts: List[Dict[str, Any]] = field(default_factory=list)
+    block: str = ""
 
 
 @dataclass
@@ -57,23 +65,16 @@ class RecalledMemory:
     medium-term slices so existing call sites read a single field per tier.
     """
 
-    facts: List[Dict[str, Any]] = field(default_factory=list)
-    short_term: ShortTermRecall = field(default_factory=ShortTermRecall)
+    long_term: LongTermRecall = field(default_factory=LongTermRecall)
     medium_term: MediumTermRecall = field(default_factory=MediumTermRecall)
-    block: str = ""
+    short_term: ShortTermRecall = field(default_factory=ShortTermRecall)
     degraded: bool = False
 
     @property
-    def recent(self) -> List[Tuple[str, str]]:
-        return self.short_term.recent
-
-    @property
-    def summary(self) -> str:
-        return self.medium_term.summary
-
-    @property
     def is_empty(self) -> bool:
-        return not self.facts and not self.medium_term.summary and not self.short_term.recent
+        return (
+            not self.long_term.facts and not self.medium_term.summary and not self.short_term.window
+        )
 
 
 class MemoryServiceClient:
@@ -108,7 +109,7 @@ class MemoryServiceClient:
         query: str,
         *,
         top_k: int = 10,
-        include_short_term: bool = True,
+        include: Optional[List[str]] = None,
         token_budget: Optional[int] = None,
     ) -> RecalledMemory:
         tracer = trace_api.get_tracer(_TRACER_NAME)
@@ -120,7 +121,11 @@ class MemoryServiceClient:
                 "scope": scope.model_dump(mode="json"),
                 "query": query,
                 "top_k": top_k,
-                "include_short_term": include_short_term,
+                "include": (
+                    include
+                    if include is not None
+                    else ["short_term", "medium_term", "long_term"]
+                ),
             }
             if token_budget is not None:
                 payload["short_term_token_budget"] = token_budget
@@ -137,15 +142,17 @@ class MemoryServiceClient:
 
             short_term = data.get("short_term") or {}
             medium_term = data.get("medium_term") or {}
+            long_term = data.get("long_term") or {}
             recalled = RecalledMemory(
-                facts=data.get("facts", []),
-                short_term=ShortTermRecall(recent=[tuple(r) for r in short_term.get("recent", [])]),
+                long_term=LongTermRecall(
+                    facts=long_term.get("facts", []), block=long_term.get("block", "")
+                ),
                 medium_term=MediumTermRecall(summary=medium_term.get("summary", "")),
-                block=data.get("block", ""),
+                short_term=ShortTermRecall(window=[tuple(r) for r in short_term.get("window", [])]),
                 degraded=bool(data.get("degraded", False)),
             )
             span.set_attribute("kaos.memory.degraded", recalled.degraded)
-            span.set_attribute("kaos.memory.fact_count", len(recalled.facts))
+            span.set_attribute("kaos.memory.fact_count", len(recalled.long_term.facts))
             return recalled
 
     async def write(

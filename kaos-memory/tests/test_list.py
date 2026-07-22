@@ -79,7 +79,7 @@ def test_list_isolates_every_scope_and_returns_session_tiers(tmp_path, offline_m
             {"alice session one"},
         ),
         (
-            {"level": "group", "session_id": "session-1"},
+            {"level": "store", "session_id": "session-1"},
             {"alice session one", "bob session two"},
         ),
     ]
@@ -89,9 +89,9 @@ def test_list_isolates_every_scope_and_returns_session_tiers(tmp_path, offline_m
 
         assert response.status_code == 200
         body = response.json()
-        assert {fact["memory"] for fact in body["facts"]} == expected
-        assert "foreign store group" not in str(body["facts"])
-        assert body["short_term"]["recent"] == [["user", "alice recent turn"]]
+        assert {fact["memory"] for fact in body["long_term"]["facts"]} == expected
+        assert "foreign store group" not in str(body["long_term"]["facts"])
+        assert body["short_term"]["window"] == [["user", "alice recent turn"]]
         assert "bob recent turn" not in str(body["short_term"])
 
 

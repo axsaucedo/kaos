@@ -93,12 +93,12 @@ def test_long_term_disabled_recall_returns_empty_facts_not_degraded(tmp_path):
     resp = client.post("/v1/recall", json={"scope": USER_SCOPE, "query": "preferences"})
     assert resp.status_code == 200
     body = resp.json()
-    assert body["facts"] == []
-    assert body["block"] == ""
+    assert body["long_term"]["facts"] == []
+    assert body["long_term"]["block"] == ""
     assert body["degraded"] is False
 
     resp = client.post("/v1/list", json={"scope": USER_SCOPE})
-    assert resp.json()["facts"] == [] and resp.json()["degraded"] is False
+    assert resp.json()["long_term"]["facts"] == [] and resp.json()["degraded"] is False
 
 
 def test_recall_uses_default_top_k_when_request_omits_it(tmp_path):

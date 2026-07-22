@@ -70,25 +70,16 @@ def scope_from_deps(
     security_context = getattr(deps, "security_context", None) or {}
     agent_client_id = agent_identity or security_context.get("actor") or None
     principal = security_context.get("principal") or None
-    user_scoping_required = (
-        resolved_level is ScopeLevel.AGENT
-        and os.environ.get("MEMORY_REQUIRE_PRINCIPAL", "").strip().lower() == "true"
-    )
     if resolved_level is ScopeLevel.AGENT and not agent_client_id:
         raise ValueError(
             "AGENT memory scope requires a stable agent identity; refusing to "
             "operate on an ambiguously-owned agent partition"
-        )
-    if user_scoping_required and not principal:
-        raise ValueError(
-            "AGENT memory scope requires an authenticated principal when user scoping is required"
         )
     return Scope(
         level=resolved_level,
         principal=principal,
         agent_client_id=agent_client_id,
         session_id=getattr(deps, "session_id", None) or None,
-        user_scoping_required=user_scoping_required,
     )
 
 

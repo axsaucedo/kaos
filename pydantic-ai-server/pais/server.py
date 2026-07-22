@@ -465,7 +465,7 @@ class AgentServer:
         )
         read_scope = scope_from_deps(
             deps,
-            level=self.settings.memory_default_read_scope,
+            level=self.settings.memory_max_read_scope,
             agent_identity=self._agent_identity or None,
         )
 
@@ -479,9 +479,11 @@ class AgentServer:
         await self.memory.add_event(session_id, "user_message", user_prompt)
 
         # Prefer the service short-term tier for history; else the local event log.
-        if recalled.recent or recalled.summary:
+        if recalled.short_term.window or recalled.medium_term.summary:
             message_history = reconstruct_message_history(
-                recalled.recent, recalled.summary, self.settings.memory_context_limit
+                recalled.short_term.window,
+                recalled.medium_term.summary,
+                self.settings.memory_context_limit,
             )
         else:
             message_history = await self.memory.build_message_history(
@@ -490,8 +492,8 @@ class AgentServer:
 
         # Automatic recall: inject the recalled long-term block as leading system
         # context whenever memory is enabled (the baseline behavior of enabling memory).
-        if recalled.block:
-            block_msg = ModelRequest(parts=[SystemPromptPart(content=recalled.block)])
+        if recalled.long_term.block:
+            block_msg = ModelRequest(parts=[SystemPromptPart(content=recalled.long_term.block)])
             message_history = [block_msg] + (message_history or [])
 
         usage_limits = UsageLimits(request_limit=self.settings.agentic_loop_max_steps)
@@ -846,7 +848,12 @@ def create_agent_server(
 
     memory_toolset = build_memory_toolset(
         parse_memory_tools(settings.memory_tools),
-        [ScopeLevel(scope) for scope in settings.memory_read_scopes.split(",")],
+        list((ScopeLevel.SESSION, ScopeLevel.AGENT, ScopeLevel.USER))[
+            : (ScopeLevel.SESSION, ScopeLevel.AGENT, ScopeLevel.USER).index(
+                ScopeLevel(settings.memory_max_read_scope)
+            )
+            + 1
+        ],
         agent_identity=settings.agent_identity or settings.security_actor or None,
     )
     if memory_toolset is not None:

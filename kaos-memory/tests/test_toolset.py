@@ -40,16 +40,16 @@ def _ctx(deps) -> Any:
 @pytest.mark.asyncio
 async def test_search_schema_enum_matches_entitlements_with_usage_help():
     toolset = MemoryToolset(
-        [ScopeLevel.SESSION, ScopeLevel.USER, ScopeLevel.GROUP],
+        [ScopeLevel.SESSION, ScopeLevel.USER, ScopeLevel.STORE],
         expose_save=False,
     )
     tool = (await toolset.get_tools(_ctx(_Deps())))[SEARCH_MEMORY_TOOL]
     level = tool.tool_def.parameters_json_schema["properties"]["level"]
 
-    assert level["enum"] == ["session", "user", "group"]
+    assert level["enum"] == ["session", "user", "store"]
     assert "session = this conversation" in level["description"]
     assert "user = what is known about this user across agents" in level["description"]
-    assert "group = knowledge shared across the group" in level["description"]
+    assert "store = all memory on the store" in level["description"]
 
 
 @pytest.mark.asyncio
@@ -68,7 +68,7 @@ async def test_schema_rejects_out_of_enum_and_owner_arguments_before_handler():
     tool = (await toolset.get_tools(_ctx(_Deps())))[SEARCH_MEMORY_TOOL]
 
     with pytest.raises(ValidationError):
-        tool.args_validator.validate_python({"query": "tea", "level": "group"})
+        tool.args_validator.validate_python({"query": "tea", "level": "store"})
     with pytest.raises(ValidationError):
         tool.args_validator.validate_python({"query": "tea"})
     with pytest.raises(ValidationError):
@@ -85,7 +85,7 @@ async def test_handler_revalidates_entitlement():
     with pytest.raises(ValueError, match="not entitled"):
         await toolset.call_tool(
             SEARCH_MEMORY_TOOL,
-            {"query": "tea", "level": "group"},
+            {"query": "tea", "level": "store"},
             _ctx(deps),
             cast(Any, None),
         )

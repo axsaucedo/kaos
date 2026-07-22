@@ -9,7 +9,7 @@ import pytest
 from typing import Any, cast
 from pydantic_ai.messages import ModelRequest, UserPromptPart
 
-from pais.memory import MemoryAttribution, NullMemory, RecalledMemory, ScopeLevel
+from pais.memory import LongTermRecall, MemoryAttribution, NullMemory, RecalledMemory, ScopeLevel
 from pais.memory_tools import (
     MemoryTools,
     MemoryToolset,
@@ -119,7 +119,9 @@ class TestMemoryToolset:
 
     @pytest.mark.asyncio
     async def test_search_returns_block_when_present(self):
-        mem = _RecordingMemory(RecalledMemory(block="## Relevant memory\nalice likes tea"))
+        mem = _RecordingMemory(
+            RecalledMemory(long_term=LongTermRecall(block="## Relevant memory\nalice likes tea"))
+        )
         deps = AgentDeps(session_id="s1", memory=mem, security_context={"principal": "alice"})
         ts = MemoryToolset([ScopeLevel.USER])
         result = await ts.call_tool(
@@ -133,7 +135,9 @@ class TestMemoryToolset:
 
     @pytest.mark.asyncio
     async def test_search_falls_back_to_facts(self):
-        mem = _RecordingMemory(RecalledMemory(facts=[{"memory": "fact one"}]))
+        mem = _RecordingMemory(
+            RecalledMemory(long_term=LongTermRecall(facts=[{"memory": "fact one"}]))
+        )
         deps = AgentDeps(
             session_id="s1",
             memory=mem,
@@ -178,7 +182,7 @@ class TestMemoryToolset:
         ts = MemoryToolset([ScopeLevel.AGENT])
         await ts.call_tool(
             SAVE_MEMORY_TOOL,
-            {"content": "x", "scope": "group", "principal": "attacker"},
+            {"content": "x", "scope": "store", "principal": "attacker"},
             _ctx(deps),
             cast(Any, None),
         )
@@ -190,13 +194,13 @@ class TestMemoryToolset:
 async def test_baseline_recall_uses_read_scope_and_flush_uses_attribution():
     mem = _RecordingMemory()
     server = make_test_server(memory=mem)
-    server.settings.memory_default_read_scope = "group"
+    server.settings.memory_max_read_scope = "user"
 
     _prompt, _history, deps, _limits = await server._prepare_run("hello", "current-session")
 
     recalled_scope, query = mem.recalls[0]
     assert query == "hello"
-    assert recalled_scope.level is ScopeLevel.GROUP
+    assert recalled_scope.level is ScopeLevel.USER
     assert recalled_scope.session_id == "current-session"
     assert deps.memory_attribution is not None
     assert deps.memory_attribution.session_id == "current-session"
