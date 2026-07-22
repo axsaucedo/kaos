@@ -122,9 +122,7 @@ class MemoryServiceClient:
                 "query": query,
                 "top_k": top_k,
                 "include": (
-                    include
-                    if include is not None
-                    else ["short_term", "medium_term", "long_term"]
+                    include if include is not None else ["short_term", "medium_term", "long_term"]
                 ),
             }
             if token_budget is not None:
