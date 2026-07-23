@@ -1,7 +1,6 @@
 package integration
 
 import (
-	"strings"
 	"context"
 	"fmt"
 	"sync/atomic"
@@ -541,7 +540,7 @@ var _ = Describe("MemoryStore Controller", func() {
 		defer func() { k8sClient.Delete(ctx, valid) }()
 	})
 
-	It("fails closed when maxReadScope is user without user identity", func() {
+	It("accepts maxReadScope user regardless of identity posture", func() {
 		name := uniqueMemoryStoreName("user-scope-store")
 		store := &kaosv1alpha1.MemoryStore{
 			ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
@@ -557,16 +556,19 @@ var _ = Describe("MemoryStore Controller", func() {
 		Expect(k8sClient.Create(ctx, store)).To(Succeed())
 		defer func() { k8sClient.Delete(ctx, store) }()
 
-		// The envtest posture has no user identity, so the store fails closed
-		// before bound agents can inherit a scope that can never resolve.
-		Eventually(func() bool {
+		// The ceiling grants permission and performs no reads, so it needs no
+		// posture; the store proceeds normally (held Pending here on the
+		// unresolved ModelAPI). Rejecting a user ceiling without user identity
+		// happens on the claiming Agent, never on the store.
+		getPhase := func() string {
 			updated := &kaosv1alpha1.MemoryStore{}
 			if err := k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, updated); err != nil {
-				return false
+				return ""
 			}
-			return updated.Status.Phase == "Failed" && !updated.Status.Ready &&
-				strings.Contains(updated.Status.Message, "spec.maxReadScope")
-		}, timeout, interval).Should(BeTrue())
+			return updated.Status.Phase
+		}
+		Eventually(getPhase, timeout, interval).Should(Equal("Pending"))
+		Consistently(getPhase, "2s", interval).ShouldNot(Equal("Failed"))
 	})
 
 	It("should hold Pending until the referenced ModelAPIs are ready", func() {
