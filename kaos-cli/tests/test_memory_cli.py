@@ -6,7 +6,12 @@ import pytest
 from typer.testing import CliRunner
 
 from kaos_cli.main import app
-from kaos_cli.memory import MemoryCLIError, build_scope, resolve_memory_store
+from kaos_cli.memory import (
+    MemoryCLIError,
+    build_scope,
+    parse_include,
+    resolve_memory_store,
+)
 
 runner = CliRunner()
 
@@ -24,7 +29,12 @@ runner = CliRunner()
             },
         ),
         ("user", {"user": "alice"}, {"level": "user", "principal": "alice"}),
-        ("group", {}, {"level": "group"}),
+        ("store", {}, {"level": "store"}),
+        (
+            "session",
+            {"session": "s1", "user": "alice"},
+            {"level": "session", "session_id": "s1", "principal": "alice"},
+        ),
     ],
 )
 def test_build_scope_matches_memory_contract(level, kwargs, expected):
@@ -37,7 +47,7 @@ def test_build_scope_matches_memory_contract(level, kwargs, expected):
         ("session", {}, "--session is required"),
         ("agent", {"user": "alice"}, "--agent is the only owner flag"),
         ("user", {"user": "alice", "session": "s1"}, "--user is the only owner flag"),
-        ("group", {"agent": "assistant"}, "group scope does not take"),
+        ("store", {"agent": "assistant"}, "store scope does not take"),
     ],
 )
 def test_build_scope_rejects_owner_mismatch(level, kwargs, message):
@@ -110,7 +120,10 @@ def test_recall_query_sends_qualified_agent_scope(monkeypatch):
             remote_port=remote_port,
             namespace=namespace,
         )
-        return {"facts": [{"memory": "known fact"}], "degraded": False}
+        return {
+            "long_term": {"facts": [{"memory": "known fact"}], "block": ""},
+            "degraded": False,
+        }
 
     monkeypatch.setattr("kaos_cli.memory._request", request)
 
@@ -123,11 +136,12 @@ def test_recall_query_sends_qualified_agent_scope(monkeypatch):
             "agent",
             "--agent",
             "assistant",
-            "--query",
+            "-q",
             "preferences",
             "--top-k",
             "4",
-            "--short-term",
+            "--include",
+            "s,l",
             "-n",
             "support",
             "--json",
@@ -135,14 +149,14 @@ def test_recall_query_sends_qualified_agent_scope(monkeypatch):
     )
 
     assert result.exit_code == 0
-    assert json.loads(result.output)["facts"] == [{"memory": "known fact"}]
+    assert json.loads(result.output)["long_term"]["facts"] == [{"memory": "known fact"}]
     assert captured["path"] == "/v1/recall"
     assert captured["payload"] == {
         "scope": {
             "level": "agent",
             "agent_client_id": "kaos://agent/support/assistant",
         },
-        "include_short_term": True,
+        "include": ["short_term", "long_term"],
         "query": "preferences",
         "top_k": 4,
     }
@@ -160,13 +174,16 @@ def test_recall_all_uses_list_path(monkeypatch):
 
     result = runner.invoke(
         app,
-        ["memory", "recall", "--scope", "group", "--all", "--json"],
+        ["memory", "recall", "--scope", "store", "--json"],
     )
 
     assert result.exit_code == 0
     assert captured == {
         "path": "/v1/list",
-        "payload": {"scope": {"level": "group"}, "include_short_term": False},
+        "payload": {
+            "scope": {"level": "store"},
+            "include": ["short_term", "medium_term", "long_term"],
+        },
     }
 
 
@@ -185,7 +202,7 @@ def test_recall_rejects_owner_mismatch_before_cluster_access(monkeypatch):
             "user",
             "--agent",
             "assistant",
-            "--query",
+            "-q",
             "x",
         ],
     )
@@ -221,11 +238,43 @@ def test_forget_yes_prints_result_and_degraded_is_failure(monkeypatch):
 
     result = runner.invoke(
         app,
-        ["memory", "forget", "--scope", "group", "--yes"],
+        ["memory", "forget", "--scope", "store", "--yes"],
     )
 
     assert result.exit_code == 1
     assert '{"forgotten": true, "degraded": true}' in result.output
+
+
+@pytest.mark.parametrize(
+    ("values", "expected"),
+    [
+        (None, ["short_term", "medium_term", "long_term"]),
+        (["S,m", "long-term", "s"], ["short_term", "medium_term", "long_term"]),
+        (["a", "l"], ["short_term", "medium_term", "long_term"]),
+    ],
+)
+def test_parse_include_aliases_commas_repeats_and_dedupes(values, expected):
+    assert parse_include(values) == expected
+
+
+def test_parse_include_rejects_unknown_value():
+    with pytest.raises(MemoryCLIError, match="unknown --include value"):
+        parse_include(["archive"])
+
+
+def test_query_requires_long_term_include(monkeypatch):
+    monkeypatch.setattr(
+        "kaos_cli.memory._effective_namespace",
+        lambda namespace: pytest.fail("Kubernetes should not be consulted"),
+    )
+
+    result = runner.invoke(
+        app,
+        ["memory", "recall", "--scope", "store", "-q", "x", "--include", "s,m"],
+    )
+
+    assert result.exit_code == 1
+    assert "requires long-term" in result.output
 
 
 def test_forget_yes_returns_successful_service_result(monkeypatch):
@@ -247,7 +296,9 @@ def test_forget_yes_returns_successful_service_result(monkeypatch):
 def _fake_jwt(sub: str) -> str:
     import base64
 
-    payload = base64.urlsafe_b64encode(json.dumps({"sub": sub}).encode()).decode().rstrip("=")
+    payload = (
+        base64.urlsafe_b64encode(json.dumps({"sub": sub}).encode()).decode().rstrip("=")
+    )
     return f"header.{payload}.signature"
 
 
@@ -256,7 +307,9 @@ def test_resolve_user_substitutes_cached_login_sub(tmp_path, monkeypatch):
 
     config = tmp_path / ".kaos-config.yaml"
     config.write_text(
-        json.dumps({"sessions": {"alice": {"token": _fake_jwt("sub-123"), "active": True}}})
+        json.dumps(
+            {"sessions": {"alice": {"token": _fake_jwt("sub-123"), "active": True}}}
+        )
     )
     monkeypatch.chdir(tmp_path)
     assert _resolve_user("alice") == "sub-123"
@@ -266,7 +319,9 @@ def test_resolve_user_passes_through_unknown_and_raw_subs(tmp_path, monkeypatch)
     from kaos_cli.memory import _resolve_user
 
     config = tmp_path / ".kaos-config.yaml"
-    config.write_text(json.dumps({"sessions": {"alice": {"token": _fake_jwt("sub-123")}}}))
+    config.write_text(
+        json.dumps({"sessions": {"alice": {"token": _fake_jwt("sub-123")}}})
+    )
     monkeypatch.chdir(tmp_path)
     assert _resolve_user("bob") == "bob"
     assert _resolve_user("9dfcf3f2-7ec0-485d") == "9dfcf3f2-7ec0-485d"

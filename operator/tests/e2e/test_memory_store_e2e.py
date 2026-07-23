@@ -153,11 +153,11 @@ async def test_short_term_round_trips_verbatim_through_the_service(test_namespac
 
         recall = httpx.post(
             f"{base_url}/v1/recall",
-            json={"scope": scope, "query": "what port", "include_short_term": True},
+            json={"scope": scope, "query": "what port", "include": ["short_term", "medium_term", "long_term"]},
             timeout=30.0,
         )
         assert recall.status_code == 200, recall.text
-        recent = recall.json()["short_term"]["recent"]
+        recent = recall.json()["short_term"]["window"]
         flattened = [tuple(pair) for pair in recent]
         assert ("user", "my favourite port is 8080") in flattened
         assert ("assistant", "noted, port 8080") in flattened
@@ -203,14 +203,14 @@ async def test_short_term_is_isolated_between_scopes(test_namespace: str):
 
         a_recent = httpx.post(
             f"{base_url}/v1/recall",
-            json={"scope": alice, "query": "x", "include_short_term": True},
+            json={"scope": alice, "query": "x", "include": ["short_term", "medium_term", "long_term"]},
             timeout=30.0,
-        ).json()["short_term"]["recent"]
+        ).json()["short_term"]["window"]
         b_recent = httpx.post(
             f"{base_url}/v1/recall",
-            json={"scope": bob, "query": "x", "include_short_term": True},
+            json={"scope": bob, "query": "x", "include": ["short_term", "medium_term", "long_term"]},
             timeout=30.0,
-        ).json()["short_term"]["recent"]
+        ).json()["short_term"]["window"]
 
         a_text = " ".join(content for _, content in (tuple(p) for p in a_recent))
         b_text = " ".join(content for _, content in (tuple(p) for p in b_recent))
@@ -339,11 +339,11 @@ async def test_short_term_survives_a_pod_restart(test_namespace: str):
     try:
         recall = httpx.post(
             f"{base_url}/v1/recall",
-            json={"scope": scope, "query": "launch code", "include_short_term": True},
+            json={"scope": scope, "query": "launch code", "include": ["short_term", "medium_term", "long_term"]},
             timeout=30.0,
         )
         assert recall.status_code == 200, recall.text
-        recent = [tuple(pair) for pair in recall.json()["short_term"]["recent"]]
+        recent = [tuple(pair) for pair in recall.json()["short_term"]["window"]]
         assert ("user", "remember the launch code is orbit-42") in recent
         assert ("assistant", "stored launch code orbit-42") in recent
     finally:

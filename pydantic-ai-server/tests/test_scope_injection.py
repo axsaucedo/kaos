@@ -50,7 +50,7 @@ class TestScopeFromDeps:
 
     def test_missing_security_context_yields_unset_owner_fields(self):
         deps = AgentDeps(session_id="sess-9", security_context=None)
-        scope = scope_from_deps(deps, level=ScopeLevel.GROUP)
+        scope = scope_from_deps(deps, level=ScopeLevel.STORE)
         assert scope.principal is None
         assert scope.agent_client_id is None
         assert scope.session_id == "sess-9"
@@ -67,13 +67,13 @@ class TestScopeFromDeps:
         scope = scope_from_deps(deps, level=ScopeLevel.AGENT)
         assert scope.agent_client_id == "agent-actor"
 
-    def test_required_agent_scope_fails_closed_without_principal(self, monkeypatch):
+    def test_agent_scope_is_pool_without_principal(self, monkeypatch):
         monkeypatch.setenv("MEMORY_REQUIRE_PRINCIPAL", "true")
         deps = _deps(actor="agent-actor")
-        with pytest.raises(ValueError, match="authenticated principal"):
-            scope_from_deps(deps, level=ScopeLevel.AGENT)
+        scope = scope_from_deps(deps, level=ScopeLevel.AGENT)
+        assert scope.search_filters() == {"agent_id": "agent-actor"}
 
-    def test_required_agent_scope_marks_agent_and_user_partition(self, monkeypatch):
+    def test_agent_scope_with_principal_uses_agent_and_user_partition(self, monkeypatch):
         monkeypatch.setenv("MEMORY_REQUIRE_PRINCIPAL", "true")
         scope = scope_from_deps(
             _deps(principal="alice", actor="agent-actor"),
@@ -81,7 +81,7 @@ class TestScopeFromDeps:
         )
         assert scope.agent_client_id == "agent-actor"
         assert scope.principal == "alice"
-        assert scope.user_scoping_required is True
+        assert scope.search_filters() == {"user_id": "alice", "agent_id": "agent-actor"}
 
     def test_autonomous_principal_uses_uniform_required_partition(self, monkeypatch):
         monkeypatch.setenv("MEMORY_REQUIRE_PRINCIPAL", "true")
@@ -99,7 +99,6 @@ class TestScopeFromDeps:
 
         assert scope.agent_client_id == identity
         assert scope.principal == identity
-        assert scope.user_scoping_required is True
 
     def test_write_attribution_keeps_every_verified_contributor(self):
         attribution = attribution_from_deps(_deps(principal="alice", actor="agent-actor"))
@@ -129,7 +128,7 @@ class TestScopeFromDeps:
     def test_model_supplied_fields_on_deps_are_ignored(self):
         # Even if extra attributes are attached, only the known identity fields are read.
         deps = _deps(principal="alice", actor="agent-1")
-        setattr(deps, "scope", "group")  # would-be injected override
+        setattr(deps, "scope", "store")  # would-be injected override
         setattr(deps, "principal", "attacker")
         scope = scope_from_deps(deps, level=ScopeLevel.AGENT)
         assert scope.level is ScopeLevel.AGENT

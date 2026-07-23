@@ -45,14 +45,16 @@ class TestRecall:
             return httpx.Response(
                 200,
                 json={
-                    "facts": [{"memory": "alice likes tea", "score": 0.9}],
+                    "long_term": {
+                        "facts": [{"memory": "alice likes tea", "score": 0.9}],
+                        "block": "## Relevant memory\nalice likes tea",
+                    },
                     "short_term": {
-                        "recent": [["user", "hi"], ["assistant", "hello"]],
+                        "window": [["user", "hi"], ["assistant", "hello"]],
                     },
                     "medium_term": {
                         "summary": "prior chat",
                     },
-                    "block": "## Relevant memory\nalice likes tea",
                     "degraded": False,
                 },
             )
@@ -66,10 +68,10 @@ class TestRecall:
         assert seen["payload"]["short_term_token_budget"] == 512
         assert seen["payload"]["scope"]["level"] == "session"
         assert isinstance(recalled, RecalledMemory)
-        assert recalled.facts[0]["memory"] == "alice likes tea"
-        assert recalled.summary == "prior chat"
-        assert recalled.recent == [("user", "hi"), ("assistant", "hello")]
-        assert recalled.block.startswith("## Relevant memory")
+        assert recalled.long_term.facts[0]["memory"] == "alice likes tea"
+        assert recalled.medium_term.summary == "prior chat"
+        assert recalled.short_term.window == [("user", "hi"), ("assistant", "hello")]
+        assert recalled.long_term.block.startswith("## Relevant memory")
         assert recalled.degraded is False
         await mem.close()
 
@@ -100,10 +102,9 @@ class TestRecall:
             return httpx.Response(
                 200,
                 json={
-                    "facts": [],
-                    "short_term": {"recent": [["user", "hi"]]},
+                    "long_term": {"facts": [], "block": ""},
+                    "short_term": {"window": [["user", "hi"]]},
                     "medium_term": {"summary": ""},
-                    "block": "## Recent turns\nuser: hi",
                     "degraded": True,
                 },
             )
@@ -111,7 +112,7 @@ class TestRecall:
         mem = _client(handler)
         recalled = await mem.recall(_scope(), "tea")
         assert recalled.degraded is True
-        assert recalled.recent == [("user", "hi")]
+        assert recalled.short_term.window == [("user", "hi")]
         await mem.close()
 
 

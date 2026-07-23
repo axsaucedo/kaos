@@ -412,9 +412,8 @@ class AgentServerSettings(BaseSettings):
     # backend; when empty the runtime falls back to the in-process short-term
     # LocalMemory backend (no long-term tier, pod-local).
     memory_store_endpoint: str = ""
-    # Automatic recall uses one default read scope; read entitlements default to it.
-    memory_default_read_scope: str = "session"
-    memory_read_scopes: str = ""
+    # Automatic recall and explicit search are capped at this scope.
+    memory_max_read_scope: str = "session"
     # Additive explicit memory tools exposed to the agent on top of the automatic
     # recall-inject/write-extract baseline: "all" (save + search), "read" (search
     # only), "write" (save only), or empty (none). Long-term tools require a bound
@@ -457,21 +456,7 @@ class AgentServerSettings(BaseSettings):
     model_config = {"env_file": ".env", "case_sensitive": False}
 
     @model_validator(mode="after")
-    def validate_memory_scopes(self):
-        valid = {"session", "agent", "user", "group"}
-        if self.memory_default_read_scope not in valid:
-            raise ValueError(f"unknown memory_default_read_scope: {self.memory_default_read_scope}")
-
-        if not self.memory_read_scopes:
-            scopes = [self.memory_default_read_scope]
-        else:
-            scopes = [scope.strip() for scope in self.memory_read_scopes.split(",")]
-            if any(not scope for scope in scopes):
-                raise ValueError("memory_read_scopes contains an empty scope")
-        unknown = [scope for scope in scopes if scope not in valid]
-        if unknown:
-            raise ValueError(f"unknown memory_read_scopes: {', '.join(unknown)}")
-        if self.memory_default_read_scope not in scopes:
-            raise ValueError("memory_default_read_scope must be included in memory_read_scopes")
-        self.memory_read_scopes = ",".join(scopes)
+    def validate_memory_scope(self):
+        if self.memory_max_read_scope not in {"session", "agent", "user"}:
+            raise ValueError(f"unknown memory_max_read_scope: {self.memory_max_read_scope}")
         return self

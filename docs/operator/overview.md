@@ -173,7 +173,7 @@ The operator translates CRD fields to container environment variables:
 | `config.memory.enabled` | `MEMORY_ENABLED` |
 | `config.memory.type` | `MEMORY_TYPE` |
 | MemoryStore endpoint (remote only) | `MEMORY_STORE_ENDPOINT` |
-| `config.memory.defaultReadScope` | `MEMORY_DEFAULT_READ_SCOPE` |
+| `config.memory.maxReadScope` | `MEMORY_MAX_READ_SCOPE` |
 | `config.memory.tools` | `MEMORY_TOOLS` |
 | `config.memory.failureMode` | `MEMORY_FAILURE_MODE` |
 | `config.memory.clientParams.tokenBudget` | `MEMORY_SHORT_TERM_TOKEN_BUDGET` |

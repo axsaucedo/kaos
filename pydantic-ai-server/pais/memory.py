@@ -15,6 +15,7 @@ from kaos_memory.contract import Attribution, Scope, ScopeLevel
 from kaos_memory.client import (
     MemoryServiceClient,
     RecalledMemory,
+    LongTermRecall,
     ShortTermRecall,
     MediumTermRecall,
 )
@@ -101,7 +102,7 @@ class Memory(ABC):
         query: str,
         *,
         top_k: int = 10,
-        include_short_term: bool = True,
+        include: Optional[List[str]] = None,
         token_budget: Optional[int] = None,
     ) -> "RecalledMemory":
         """Assemble the context visible at ``scope`` for ``query``.
@@ -513,14 +514,14 @@ class RemoteMemory(Memory):
         query: str,
         *,
         top_k: int = 10,
-        include_short_term: bool = True,
+        include: Optional[List[str]] = None,
         token_budget: Optional[int] = None,
     ) -> "RecalledMemory":
         return await self._service.recall(
             scope,
             query,
             top_k=top_k,
-            include_short_term=include_short_term,
+            include=include,
             token_budget=token_budget,
         )
 

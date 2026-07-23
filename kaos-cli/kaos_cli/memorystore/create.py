@@ -15,7 +15,7 @@ def create_memorystore(
     embedding_model: str,
     short_term_token_budget: int | None,
     medium_term_enabled: bool,
-    default_read_scope: str | None,
+    max_read_scope: str | None,
     failure_mode: str | None,
     namespace: str | None,
     dry_run: bool,
@@ -41,8 +41,8 @@ spec:
       modelAPI: {modelapi}
       model: {embedding_model}
 """
-    if default_read_scope:
-        yaml_content += f"  defaultReadScope: {default_read_scope}\n"
+    if max_read_scope:
+        yaml_content += f"  maxReadScope: {max_read_scope}\n"
     if failure_mode:
         yaml_content += f"  defaultFailureMode: {failure_mode}\n"
     if short_term_token_budget is not None:

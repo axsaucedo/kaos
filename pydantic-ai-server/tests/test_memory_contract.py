@@ -13,6 +13,7 @@ from pais.memory import (
     Memory,
     MemoryAttribution,
     MediumTermRecall,
+    LongTermRecall,
     MemoryScope,
     NullMemory,
     RecalledMemory,
@@ -35,46 +36,42 @@ class TestMemoryScope:
             "principal": "alice",
             "agent_client_id": "agent-1",
             "session_id": "sess-1",
-            "user_scoping_required": False,
         }
-
-        required = MemoryScope.model_validate({**payload, "user_scoping_required": True})
-        assert required.user_scoping_required is True
 
     def test_scope_level_values(self):
         assert ScopeLevel.AGENT.value == "agent"
         assert ScopeLevel.USER.value == "user"
-        assert ScopeLevel.GROUP.value == "group"
+        assert ScopeLevel.STORE.value == "store"
         assert ScopeLevel.SESSION.value == "session"
 
     def test_under_specified_scope_is_representable(self):
-        scope = MemoryScope(level=ScopeLevel.GROUP)
+        scope = MemoryScope(level=ScopeLevel.STORE)
         assert scope.principal is None
-        assert scope.model_dump(mode="json")["level"] == "group"
+        assert scope.model_dump(mode="json")["level"] == "store"
 
 
 class TestRecalledMemory:
     def test_empty_by_default(self):
         recalled = RecalledMemory()
         assert recalled.is_empty
-        assert recalled.facts == []
-        assert recalled.recent == []
-        assert recalled.block == ""
+        assert recalled.long_term.facts == []
+        assert recalled.short_term.window == []
+        assert recalled.long_term.block == ""
         assert recalled.degraded is False
 
     def test_non_empty_when_facts_present(self):
-        recalled = RecalledMemory(facts=[{"memory": "x"}])
+        recalled = RecalledMemory(long_term=LongTermRecall(facts=[{"memory": "x"}]))
         assert not recalled.is_empty
 
     def test_non_empty_when_short_term_present(self):
-        recalled = RecalledMemory(short_term=ShortTermRecall(recent=[("user", "hi")]))
+        recalled = RecalledMemory(short_term=ShortTermRecall(window=[("user", "hi")]))
         assert not recalled.is_empty
-        assert recalled.recent == [("user", "hi")]
+        assert recalled.short_term.window == [("user", "hi")]
 
     def test_medium_term_summary_is_exposed(self):
         recalled = RecalledMemory(medium_term=MediumTermRecall(summary="digest"))
         assert not recalled.is_empty
-        assert recalled.summary == "digest"
+        assert recalled.medium_term.summary == "digest"
 
 
 class TestLongTermDefaultsAreNoOp:

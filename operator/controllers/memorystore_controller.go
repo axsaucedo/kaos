@@ -70,23 +70,6 @@ func (r *MemoryStoreReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		return ctrl.Result{Requeue: true}, nil
 	}
 
-	// A user default read scope needs a verified principal on every read, which
-	// only a cluster with user identity can supply; fail the store closed at
-	// reconcile time so bound agents do not inherit a scope that can never work.
-	if store.Spec.DefaultReadScope == "user" {
-		secCfg := security.GetConfig()
-		if !secCfg.SecurityEnabled() || strings.TrimSpace(secCfg.UserIssuer) == "" {
-			msg := "spec.defaultReadScope references user scope, but cluster security posture has no user identity"
-			store.Status.Phase = "Failed"
-			store.Status.Ready = false
-			store.Status.Message = msg
-			if err := r.Status().Update(ctx, store); err != nil {
-				return ctrl.Result{}, err
-			}
-			return ctrl.Result{}, nil
-		}
-	}
-
 	// Resolve and ready-gate the referenced ModelAPIs before deploying.
 	modelEnv, requeue, err := r.resolveModelEnv(ctx, store)
 	if err != nil {

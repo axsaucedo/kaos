@@ -335,12 +335,12 @@ def test_group_delete_removes_all_group_sessions(tmp_path):
         _fake_summarizer,
         group="team-a",
     )
-    first = Scope(level=ScopeLevel.GROUP, session_id="run-a")
-    second = Scope(level=ScopeLevel.GROUP, session_id="run-b")
+    first = Scope(level=ScopeLevel.STORE, session_id="run-a")
+    second = Scope(level=ScopeLevel.STORE, session_id="run-b")
     store.add(first, [("user", "alpha")])
     store.add(second, [("user", "beta")])
 
-    store.delete(Scope(level=ScopeLevel.GROUP))
+    store.delete(Scope(level=ScopeLevel.STORE))
 
     assert store.active_window(first) == []
     assert store.active_window(second) == []

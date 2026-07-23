@@ -60,8 +60,8 @@ We deploy the reusable `memory` sample: one `ModelAPI`, the local-mode `support-
 The important part is the agent's `config.memory` block:
 
 - `memoryStore: support-memory` binds all three agents to the store.
-- `user-assistant` uses `defaultReadScope: user`; `session-assistant` keeps the session fallback.
-- `agent-bot` states `defaultReadScope: agent` and exposes no explicit memory tools.
+- `user-assistant` uses `maxReadScope: user`; `session-assistant` uses `maxReadScope: session`.
+- `agent-bot` states `maxReadScope: agent` and exposes no explicit memory tools.
 - The store tunes its tiers with typed fields: a small `shortTerm.tokenBudget` makes conversational compaction easy to exercise, and `mediumTerm.enabled` turns on the rolling digest that folds the overflow.
 
 `DEBUG_MOCK_RESPONSES` makes the agent return a canned reply instead of calling the model, so the run is deterministic.
@@ -112,10 +112,10 @@ kill "$AGENT_PF" 2>./tmp/null || true
 
 ## Step 4: Verify the Agent Wrote to the Store
 
-Now we confirm the integration through `kaos memory`. `--all` uses the store's faithful list path, while session scope and `--short-term` return the same conversation's rolling summary and verbatim window:
+Now we confirm the integration through `kaos memory`. With no query the command uses the list path, and the default `--include all` returns the same conversation's rolling summary and verbatim window:
 
 ```bash
-kaos memory recall --store support-memory --scope session --session memory-session-1 --all --short-term -n "$NAMESPACE" --json > ./tmp/recall-session1.json
+kaos memory recall --store support-memory --scope session --session memory-session-1 -n "$NAMESPACE" --json > ./tmp/recall-session1.json
 cat ./tmp/recall-session1.json
 ```
 
@@ -123,7 +123,7 @@ cat ./tmp/recall-session1.json
 import json
 
 recall = json.load(open("./tmp/recall-session1.json"))
-recent = [tuple(pair) for pair in recall["short_term"]["recent"]]
+recent = [tuple(pair) for pair in recall["short_term"]["window"]]
 print("Stored turns:", recent)
 
 assert ("user", "My favourite deployment port is 8080") in recent
@@ -135,12 +135,12 @@ print("SUCCESS: the agent persisted the conversation to the MemoryStore")
 Recall a different session directly. Its verbatim conversational window starts empty because conversational tiers are always session-keyed:
 
 ```bash
-kaos memory recall --store support-memory --scope session --session memory-session-2 --all --short-term -n "$NAMESPACE" --json > ./tmp/recall-session2.json
+kaos memory recall --store support-memory --scope session --session memory-session-2 -n "$NAMESPACE" --json > ./tmp/recall-session2.json
 ```
 
 ```python
 recall = json.load(open("./tmp/recall-session2.json"))
-recent = [tuple(pair) for pair in recall["short_term"]["recent"]]
+recent = [tuple(pair) for pair in recall["short_term"]["window"]]
 print("Session 2 window:", recent)
 
 assert recent == []
@@ -154,7 +154,7 @@ Both assistants set `tools: read`. Memory always applies the **automatic baselin
 | Setting | Tools exposed | Arguments | The model can… |
 |---------|---------------|-----------|----------------|
 | _(unset)_ | none | — | rely purely on automatic recall/persist |
-| `read` | `search_memory` | `query`, required entitled `level` | look facts up at `session`, `agent`, `user`, or `group` when configured |
+| `read` | `search_memory` | `query`, required entitled `level` | look facts up at every level through `maxReadScope` |
 | `write` | `save_memory` | `content` | save a durable fact with server-derived attribution |
 | `all` | both | as above | save and search on demand |
 
@@ -162,10 +162,10 @@ Both assistants set `tools: read`. Memory always applies the **automatic baselin
 
 ## Scopes
 
-Reads are partitioned by scope through `defaultReadScope` and `readScopes`; writes attach every verified contributor without a level:
+Reads are partitioned by scope through `maxReadScope`; writes attach every verified contributor without a level:
 
 - `session` — one conversation only.
-- `group` — extracted facts are shared by every agent and session on the store; raw turns remain session-local.
+- `store` — the whole-store administrative view; unavailable to agent actor requests.
 - `user` — all sessions for an authenticated principal.
 - `agent` — only this specific agent.
 

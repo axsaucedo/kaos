@@ -83,7 +83,7 @@ class TestAgentCreationAndCard:
         )
         server._agent._user_toolsets.append(
             MemoryToolset(
-                [ScopeLevel.SESSION, ScopeLevel.GROUP],
+                [ScopeLevel.SESSION, ScopeLevel.STORE],
                 expose_save=False,
             )
         )
@@ -96,7 +96,7 @@ class TestAgentCreationAndCard:
         assert [tool["name"] for tool in tools] == ["search_memory"]
         assert tools[0]["parameters_json_schema"]["properties"]["level"]["enum"] == [
             "session",
-            "group",
+            "store",
         ]
 
     @pytest.mark.asyncio

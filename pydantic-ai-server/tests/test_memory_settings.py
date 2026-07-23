@@ -6,40 +6,26 @@ from pydantic import ValidationError
 from pais.serverutils import AgentServerSettings
 
 
-def test_read_scope_defaults_to_session():
+def test_max_read_scope_defaults_to_session():
     settings = AgentServerSettings(agent_name="test")
 
-    assert settings.memory_default_read_scope == "session"
-    assert settings.memory_read_scopes == "session"
+    assert settings.memory_max_read_scope == "session"
 
 
-def test_read_scopes_parse_from_environment(monkeypatch):
-    monkeypatch.setenv("MEMORY_DEFAULT_READ_SCOPE", "user")
-    monkeypatch.setenv("MEMORY_READ_SCOPES", "agent, user,group")
+def test_max_read_scope_parses_from_environment(monkeypatch):
+    monkeypatch.setenv("MEMORY_MAX_READ_SCOPE", "user")
 
     settings = AgentServerSettings(agent_name="test")
 
-    assert settings.memory_default_read_scope == "user"
-    assert settings.memory_read_scopes == "agent,user,group"
+    assert settings.memory_max_read_scope == "user"
 
 
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("memory_default_read_scope", "tenant"),
-        ("memory_read_scopes", "session,tenant"),
-        ("memory_read_scopes", "session,,agent"),
+        ("memory_max_read_scope", "tenant"),
     ],
 )
 def test_unknown_or_empty_scope_values_fail_closed(field, value):
     with pytest.raises(ValidationError):
         AgentServerSettings(agent_name="test", **{field: value})
-
-
-def test_default_read_scope_must_be_entitled():
-    with pytest.raises(ValidationError, match="must be included"):
-        AgentServerSettings(
-            agent_name="test",
-            memory_default_read_scope="user",
-            memory_read_scopes="agent,group",
-        )

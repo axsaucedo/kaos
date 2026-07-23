@@ -21,8 +21,7 @@ The memory system provides session management and event storage for agents. It t
 | `MEMORY_MAX_SESSIONS` | `1000` | Max sessions (LocalMemory) |
 | `MEMORY_MAX_SESSION_EVENTS` | `500` | Max events per session (LocalMemory) |
 | `MEMORY_STORE_ENDPOINT` | - | Central memory-service URL (set by the operator when a MemoryStore is bound; selects `RemoteMemory`) |
-| `MEMORY_DEFAULT_READ_SCOPE` | `session` | Single scope used by automatic recall |
-| `MEMORY_READ_SCOPES` | `MEMORY_DEFAULT_READ_SCOPE` | Comma-separated entitlement list offered by `search_memory` |
+| `MEMORY_MAX_READ_SCOPE` | `session` | Automatic recall scope and maximum level offered by `search_memory` |
 | `MEMORY_TOOLS` | - | Additive explicit tools: `all`, `read`, or `write` |
 
 ### Via Agent CRD
@@ -34,8 +33,7 @@ spec:
       enabled: true
       type: remote            # "remote" (bound MemoryStore) or "local" (pod-local)
       memoryStore: shared-memory
-      defaultReadScope: user  # Automatic recall scope
-      readScopes: [user, agent] # search_memory entitlements
+      maxReadScope: user  # Automatic recall scope and search_memory ceiling
       tools: all              # all | read | write
       failureMode: soft       # soft | strict
 ```

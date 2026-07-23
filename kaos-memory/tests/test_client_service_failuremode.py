@@ -95,8 +95,8 @@ async def test_recall_degrades_over_http_when_longterm_fails(tmp_path):
     # Long-term failure degrades the result, but the request succeeds and the
     # verbatim short-term window still comes back for replay.
     assert recalled.degraded is True
-    assert recalled.facts == []
-    assert ("user", "the budget is 5000") in recalled.short_term.recent
+    assert recalled.long_term.facts == []
+    assert ("user", "the budget is 5000") in recalled.short_term.window
 
 
 @pytest.mark.asyncio

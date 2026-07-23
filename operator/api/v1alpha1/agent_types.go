@@ -74,10 +74,7 @@ type MemoryClientParams struct {
 // +kubebuilder:validation:XValidation:rule="!has(self.type) || self.type != 'remote' || has(self.memoryStore)",message="type 'remote' requires memoryStore to be set"
 // +kubebuilder:validation:XValidation:rule="!has(self.type) || self.type != 'local' || !has(self.memoryStore)",message="type 'local' must not set memoryStore"
 // +kubebuilder:validation:XValidation:rule="!has(self.tools) || has(self.memoryStore)",message="tools requires memoryStore to be set"
-// +kubebuilder:validation:XValidation:rule="!has(self.defaultReadScope) || !has(self.readScopes) || self.defaultReadScope in self.readScopes",message="defaultReadScope must be included in readScopes"
-// +kubebuilder:validation:XValidation:rule="!has(self.defaultReadScope) || self.defaultReadScope == 'session' || has(self.memoryStore)",message="non-session defaultReadScope requires memoryStore to be set"
-// +kubebuilder:validation:XValidation:rule="!has(self.readScopes) || self.readScopes.all(scope, scope == 'session') || has(self.memoryStore)",message="non-session readScopes require memoryStore to be set"
-// +kubebuilder:validation:XValidation:rule="!has(self.readScopes) || size(self.readScopes) <= 1 || (has(self.tools) && (self.tools == 'read' || self.tools == 'all'))",message="multiple readScopes require tools to be 'read' or 'all'"
+// +kubebuilder:validation:XValidation:rule="!has(self.maxReadScope) || self.maxReadScope == 'session' || has(self.memoryStore)",message="non-session maxReadScope requires memoryStore to be set"
 type MemoryConfig struct {
 	// Enabled controls whether memory is enabled (default: true).
 	// When disabled the runtime uses a no-op memory implementation.
@@ -97,17 +94,10 @@ type MemoryConfig struct {
 	// +kubebuilder:validation:Optional
 	MemoryStore string `json:"memoryStore,omitempty"`
 
-	// DefaultReadScope selects the single scope used by automatic recall. When
-	// omitted it resolves to the MemoryStore defaultReadScope, then session.
-	// +kubebuilder:validation:Enum=agent;user;group;session
+	// MaxReadScope caps automatic recall and the explicit search_memory tool.
+	// +kubebuilder:validation:Enum=session;agent;user
 	// +kubebuilder:validation:Optional
-	DefaultReadScope string `json:"defaultReadScope,omitempty"`
-
-	// ReadScopes lists the scope levels available to the explicit search_memory
-	// tool. When omitted it resolves to only DefaultReadScope.
-	// +kubebuilder:validation:items:Enum=agent;user;group;session
-	// +kubebuilder:validation:Optional
-	ReadScopes []string `json:"readScopes,omitempty"`
+	MaxReadScope string `json:"maxReadScope,omitempty"`
 
 	// ClientParams carries the minimal per-agent runtime memory knobs.
 	// +kubebuilder:validation:Optional

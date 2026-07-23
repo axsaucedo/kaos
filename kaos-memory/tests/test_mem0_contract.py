@@ -115,7 +115,7 @@ def test_custom_session_and_group_erasure_uses_filtered_ids(mem0):
     store.delete_scope(Scope(level=ScopeLevel.SESSION, session_id="r1"))
     assert _texts(_all(memory)) == {"erase by group", "keep other group"}
 
-    store.delete_scope(Scope(level=ScopeLevel.GROUP))
+    store.delete_scope(Scope(level=ScopeLevel.STORE))
     assert _texts(_all(memory)) == {"keep other group"}
 
 
@@ -165,7 +165,6 @@ def test_two_entity_filter_requires_matching_user_and_agent(mem0):
         level=ScopeLevel.AGENT,
         principal="u1",
         agent_client_id="a1",
-        user_scoping_required=True,
     ).search_filters()
     searched = memory.search("equal query", filters=filters, top_k=10, threshold=0.0)
     listed = memory.get_all(filters=filters, top_k=100)

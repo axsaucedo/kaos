@@ -308,16 +308,6 @@ spec:
                 - soft
                 - strict
                 type: string
-              defaultReadScope:
-                description: |-
-                  DefaultReadScope is the store-wide default read scope for bound agents that
-                  do not set their own. When unset, session is used.
-                enum:
-                - agent
-                - user
-                - group
-                - session
-                type: string
               engine:
                 default: mem0
                 description: Engine is the long-term memory engine. Mem0 is the only
@@ -393,6 +383,14 @@ spec:
                     minimum: 0
                     type: number
                 type: object
+              maxReadScope:
+                default: agent
+                description: MaxReadScope caps read scope for every bound agent.
+                enum:
+                - session
+                - agent
+                - user
+                type: string
               mediumTerm:
                 description: MediumTerm tunes the opt-in medium-term rolling digest.
                 properties:

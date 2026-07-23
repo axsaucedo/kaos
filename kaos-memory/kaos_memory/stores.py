@@ -314,6 +314,8 @@ class ShortTermStore:
     ) -> List[Tuple[str, str]]:
         """Return the active verbatim window as ordered (role, content), within the budget."""
         key = scope_key(scope, self.group)
+        if not self._principal_matches(scope, key):
+            return []
         budget = token_budget if token_budget is not None else self.cfg.token_budget
         with self._lock:
             active = self._load_active_window_rows(key)
@@ -326,8 +328,23 @@ class ShortTermStore:
 
     def summary(self, scope: Scope) -> str:
         """Return the current medium-term summary text for the scope (empty if none)."""
+        key = scope_key(scope, self.group)
+        if not self._principal_matches(scope, key):
+            return ""
         with self._lock:
-            return self._load_summary(scope_key(scope, self.group))
+            return self._load_summary(key)
+
+    def _principal_matches(self, scope: Scope, key: str) -> bool:
+        """Return whether a principal-bound session belongs to that principal."""
+        if scope.principal is None:
+            return True
+        with self._lock:
+            row = self.db.execute(
+                "SELECT 1 FROM conversational_memory_attribution "
+                "WHERE scope_key = ? AND owner_key = ?",
+                (key, f"user_id:{scope.principal}"),
+            ).fetchone()
+        return row is not None
 
     def short_term_context(self, scope: Scope) -> Tuple[str, List[Tuple[str, str]]]:
         """Return (medium_term_summary, active_window) — the full short-term context for a run."""

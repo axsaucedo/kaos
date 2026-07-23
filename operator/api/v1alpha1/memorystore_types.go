@@ -269,11 +269,10 @@ type MemoryStoreSpec struct {
 	// +kubebuilder:default=soft
 	DefaultFailureMode string `json:"defaultFailureMode,omitempty"`
 
-	// DefaultReadScope is the store-wide default read scope for bound agents that
-	// do not set their own. When unset, session is used.
-	// +kubebuilder:validation:Enum=agent;user;group;session
-	// +kubebuilder:validation:Optional
-	DefaultReadScope string `json:"defaultReadScope,omitempty"`
+	// MaxReadScope caps read scope for every bound agent.
+	// +kubebuilder:validation:Enum=session;agent;user
+	// +kubebuilder:default=agent
+	MaxReadScope string `json:"maxReadScope,omitempty"`
 
 	// GatewayRoute configures Gateway API routing (timeout, etc.) for the memory
 	// service so agents reach it through the gateway data-plane rather than a

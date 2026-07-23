@@ -30,14 +30,16 @@ A `Scope` selects long-term read visibility and erasure. An `Attribution` write 
 
 | Scope level | Long-term read filter |
 | --- | --- |
-| `agent` | `agent_id = <real agent identity>` |
+| `agent` | `agent_id = <real agent identity>` and, when present, `user_id = <principal>` |
 | `user` | `user_id = <principal>`; includes everything that user contributed through any agent/session |
-| `session` | `user_id = "*"`, `kaos_run = <session id>` |
-| `group` | `user_id = "*"`, `kaos_group = <active collection name>` |
+| `session` | `kaos_run = <session id>` and, when present, `user_id = <principal>` |
+| `store` | `user_id = "*"`, `kaos_group = <active collection name>`; admin plane only |
 
-The wildcard is the pinned Mem0 2.0.10 convention required for custom-metadata filters. The group value is the configured local/external collection name because one `MemoryStore` is the physical group boundary; there is no synthetic agent sentinel. User/agent erasure uses native entity deletion, while session/group erasure filters custom attribution and deletes matching ids when Mem0 lacks a filtered-delete surface.
+The wildcard is the pinned Mem0 2.0.10 convention required for custom-metadata filters. The internal `kaos_group` value is the configured collection name because one `MemoryStore` is the physical boundary; there is no synthetic agent sentinel. User/agent erasure uses native entity deletion, while session/store erasure filters custom attribution and deletes matching ids when Mem0 lacks a filtered-delete surface.
 
-Short- and medium-term keys have the form `kaos_group:<store group>|run:<session id>` (or just `run:<session id>` without a configured group) for every scope. A missing session id fails loudly. The store group is the tenant boundary and the unguessable run id is the capability used through the scoped service and its network/RBAC boundary. A separate attribution index preserves user-, agent-, and group-level erasure without putting those identities into the session key. Group scope therefore shares extracted long-term facts across agents, not raw turns across sessions.
+Short- and medium-term keys have the form `kaos_group:<store group>|run:<session id>` (or just `run:<session id>` without a configured group). A principal-bound read must match the session's attribution; a mismatch returns empty. A separate attribution index preserves user-, agent-, and store-level erasure without putting those identities into the session key.
+
+Recall and list requests select tiers with `include: ["short_term", "medium_term", "long_term"]`. Responses contain only requested tier objects: `long_term.{facts,block}`, `medium_term.summary`, and `short_term.window`, plus top-level `degraded`.
 
 ## Development
 
