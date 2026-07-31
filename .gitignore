@@ -81,3 +81,8 @@ PLAN*
 
 # Nested clone of the Agentic Identity Broker (separate repo; not part of KAOS)
 agentic-identity-broker/
+
+# Local Claude Code state (only .claude/skills is tracked)
+.claude/settings.local.json
+.claude/worktrees/
+.worktrees/
