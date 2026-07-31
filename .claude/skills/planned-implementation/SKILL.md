@@ -99,7 +99,7 @@ Do not start cross-domain design until UI notes are complete.
 Read docs and repo instructions that describe the public surface or workflow being changed:
 
 - `.github/copilot-instructions.md`
-- `.github/skills/*/SKILL.md` for skill conventions
+- `.claude/skills/*/SKILL.md` for skill conventions
 - `.github/instructions/docs.instructions.md` for docs changes
 - Relevant pages under `docs/`
 
