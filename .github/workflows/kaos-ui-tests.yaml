@@ -209,6 +209,8 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: ./pydantic-ai-server
+          build-contexts: |
+            kaos-memory=./kaos-memory
           load: true
           tags: ${{ env.REGISTRY }}/kaos-agent:${{ env.AGENT_TAG }}
           cache-from: type=gha,scope=agent-ui-e2e
