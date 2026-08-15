@@ -10,8 +10,14 @@ Kubernetes-native AI agent orchestration framework.
 - Tests AND linting are the success criteria for development
 - Conventional commits after every task (not at the end)
 - End-to-end tests can be run in github actions CI; push a PR and track progress
-- Module specific instructions live under .claude/rules/ and auto-load when matching files are touched
-- Update documentation, CLAUDE.md and .claude/rules/* after changes; keep it succinct and functional
+- Module specific instructions live under .github/instructions/ and auto-load when matching files are touched
+- Update documentation, .github/copilot-instructions.md and .github/instructions/* after changes; keep it succinct and functional
+
+### Agent Instruction Files (SSOT + symlinks)
+The `.github` files are the single source of truth, mirrored to other harnesses via symlinks — **only ever edit the `.github` files**:
+- `CLAUDE.md` and `AGENTS.md` (repo root) are symlinks to `.github/copilot-instructions.md`
+- `.claude/rules/<name>.md` are symlinks to `.github/instructions/<name>.instructions.md`
+- Each instructions file carries dual frontmatter: `applyTo:` (Copilot) and `paths:` (Claude Code) with the same globs — keep both in sync when changing scope
 
 ### Commit Guidelines
 Use conventional commits: `feat(scope):`, `fix(scope):`, `refactor(scope):`, `test(scope):`, `docs:` - keep it functional and succinct. 
@@ -93,7 +99,7 @@ operator/                  # K8s operator (Go, kubebuilder)
 tmp/                       # Local work files (gitignored)
 
 .github/workflows/         # CI pipelines
-.claude/rules/             # Path-specific instructions (paths: globs, lazy-loaded)
+.github/instructions/      # Path-specific instructions (SSOT; symlinked from .claude/rules/)
 ```
 
 ## CRDs Overview
@@ -132,13 +138,13 @@ export GATEWAY_URL=http://localhost:8888
 ```
 
 ## Domain-Specific Instructions
-Detailed instructions are in `.claude/rules/`, scoped via `paths:` globs so they load automatically when matching files are touched:
-- `e2e.md`: E2E test setup, structure, gotchas and fast testing
-- `python.md`: Data Plane Python runtime framework details
-- `operator.md`: Control Plane Golang operator development
-- `docs.md`: VitePress docs, mermaid diagrams, multi-version builds
-- `release.md`: Release process, versioning, CI pipeline, validation checklist
-- `kaos-ui*.md`: UI development, components, K8s types, testing, visual testing
+Detailed instructions are in `.github/instructions/`, scoped via `applyTo:`/`paths:` globs so they load automatically when matching files are touched:
+- `e2e.instructions.md`: E2E test setup, structure, gotchas and fast testing
+- `python.instructions.md`: Data Plane Python runtime framework details
+- `operator.instructions.md`: Control Plane Golang operator development
+- `docs.instructions.md`: VitePress docs, mermaid diagrams, multi-version builds
+- `release.instructions.md`: Release process, versioning, CI pipeline, validation checklist
+- `kaos-ui*.instructions.md`: UI development, components, K8s types, testing, visual testing
 
 ### Skills
 - `/release-kaos`: Invoke with a version (e.g., "Use /release-kaos to release v0.5.0") — executes full release pipeline

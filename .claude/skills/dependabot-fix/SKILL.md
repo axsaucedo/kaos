@@ -63,13 +63,13 @@ Spawn **three parallel `explore` subagents** to load repo knowledge scoped to th
 
 ### Step 3 · Instructions subagent
 
-Ask it to read `.claude/rules/*.md` files relevant to the PR's touched paths and summarize conventions, test commands, and gotchas.
+Ask it to read `.github/instructions/*.instructions.md` files relevant to the PR's touched paths and summarize conventions, test commands, and gotchas.
 
 Mapping guide (pass relevant ones to the subagent):
-- `operator/**` or `gomod` bumps → `operator.md`, `e2e.md`
-- `pydantic-ai-server/**`, `kaos-cli/**`, `uv` / `pip` bumps → `python.md`
-- `kaos-ui/**` or npm bumps in `kaos-ui/` → `kaos-ui.md`, `kaos-ui-components.md`, `kaos-ui-testing.md`, `kaos-ui-kubernetes-types.md`
-- `docs/**` or npm bumps in `docs/` → `docs.md`
+- `operator/**` or `gomod` bumps → `operator.instructions.md`, `e2e.instructions.md`
+- `pydantic-ai-server/**`, `kaos-cli/**`, `uv` / `pip` bumps → `python.instructions.md`
+- `kaos-ui/**` or npm bumps in `kaos-ui/` → `kaos-ui.instructions.md`, `kaos-ui-components.instructions.md`, `kaos-ui-testing.instructions.md`, `kaos-ui-kubernetes-types.instructions.md`
+- `docs/**` or npm bumps in `docs/` → `docs.instructions.md`
 - `.github/workflows/**` (github_actions PRs) → release/CI-relevant instructions from above, plus `CLAUDE.md`
 
 ### Step 4 · Docs subagent
@@ -150,7 +150,7 @@ Tier the effort by Step 7's risk rating:
 
 - **Low (isolated)** — apply fix, run the narrowest relevant suite (e.g. one pytest file, one vitest spec, `go test ./pkg/...`). No reproduction step needed.
 - **Medium (cross-module or cross-ecosystem)** — first **reproduce** the failure on `main` locally to prove the regression is real (not a harness artefact). Then apply the fix, retest, and confirm the reproduction no longer fires.
-- **High (runtime / wire)** — reproduce against a locally-built Docker image for the affected component (see ecosystem appendix). If it touches operator/agent behaviour, bring up a KIND cluster per `.claude/rules/e2e.md` and run 1–3 E2E tests locally before pushing.
+- **High (runtime / wire)** — reproduce against a locally-built Docker image for the affected component (see ecosystem appendix). If it touches operator/agent behaviour, bring up a KIND cluster per `.github/instructions/e2e.instructions.md` and run 1–3 E2E tests locally before pushing.
 
 Keep all scratch output under `./tmp/`. Use `./tmp/null` as the sink when suppressing output:
 
@@ -292,7 +292,7 @@ Common failure modes observed on bundled Dependabot PRs in this repo. Treat thes
 - **Scope-reject first** (see Step 6.5). React / React Router / Vite / Vitest / Zod / Zustand / Tailwind majors bundled with routine bumps = reconfigure `dependabot.yml` and leave the PR open with a comment for the host to close, don't fix.
 - Risk is automatically **high** for any kaos-ui PR with a major bump on a framework package — visual regressions do not show up in CI.
 - Local reproduction: `cd kaos-ui && npm ci && npm run build && npm run lint && npm run test:unit`
-- **Playwright required**, not optional: `npm run test:e2e` against a running dev server + `kaos ui --no-browser` proxy + KIND cluster (per `kaos-ui-testing.md`). CI's E2E alone is not sufficient evidence.
+- **Playwright required**, not optional: `npm run test:e2e` against a running dev server + `kaos ui --no-browser` proxy + KIND cluster (per `kaos-ui-testing.instructions.md`). CI's E2E alone is not sufficient evidence.
 - **Merge policy** (Step 9.5): kaos-ui **minor/patch** bumps merge directly when CI is green; framework **major** bumps are **left open for human review**, never auto-merged. No `ask_user` gate.
 - Common breakage: `vitest` majors change config shape and matcher behaviour; `react-router` majors change route definitions; `@tanstack/react-query` majors change `useQuery` signature; ESLint 9 flat-config drift when `eslint-*` plugins bump.
 - **Lockfile desync** is the dominant failure mode on routine grouped PRs — every UI check fails at `npm ci` with `Missing: <pkg> from lock file`. Fix: delete **both** `node_modules` **and** `package-lock.json`, then `npm install`. Deleting only `node_modules` can trigger a secondary `Cannot find native binding` error from `rolldown`/vitest 4.x optional deps.

@@ -60,9 +60,9 @@ If the user says a local KAOS cluster is running, treat the local runtime as the
 
 Read only backend-relevant instructions, docs, source, and tests first. Use this mapping:
 
-- `pydantic-ai-server/**` -> `.claude/rules/python.md`
-- `operator/**/*.go` -> `.claude/rules/operator.md`
-- `operator/tests/**` -> `.claude/rules/e2e.md`
+- `pydantic-ai-server/**` -> `.github/instructions/python.instructions.md`
+- `operator/**/*.go` -> `.github/instructions/operator.instructions.md`
+- `operator/tests/**` -> `.github/instructions/e2e.instructions.md`
 - `kaos-cli/**` -> Python instructions plus CLI docs/tests
 
 Capture:
@@ -79,10 +79,10 @@ Do not start UI research until backend notes are complete.
 
 Read only UI-relevant instructions, source, and tests:
 
-- `.claude/rules/kaos-ui.md`
-- `.claude/rules/kaos-ui-testing.md`
-- `.claude/rules/kaos-ui-components.md` when components are touched
-- `.claude/rules/kaos-ui-kubernetes-types.md` when Kubernetes/CRD types are touched
+- `.github/instructions/kaos-ui.instructions.md`
+- `.github/instructions/kaos-ui-testing.instructions.md`
+- `.github/instructions/kaos-ui-components.instructions.md` when components are touched
+- `.github/instructions/kaos-ui-kubernetes-types.instructions.md` when Kubernetes/CRD types are touched
 
 Capture:
 
@@ -100,7 +100,7 @@ Read docs and repo instructions that describe the public surface or workflow bei
 
 - `CLAUDE.md`
 - `.claude/skills/*/SKILL.md` for skill conventions
-- `.claude/rules/docs.md` for docs changes
+- `.github/instructions/docs.instructions.md` for docs changes
 - Relevant pages under `docs/`
 
 Capture:
