@@ -1,5 +1,6 @@
 ---
-applyTo: "kaos-ui/tests/**"
+paths:
+  - "kaos-ui/tests/**"
 ---
 
 # KAOS-UI Testing Guidelines
@@ -68,7 +69,7 @@ npm run test:visual:update                 # Update screenshots for intentional 
 npm run test:visual:ci                     # CI command
 ```
 
-Visual-test details live in `kaos-ui-visual-testing.instructions.md`. Keep snapshots committed, keep failure artifacts uncommitted, and explain intentional screenshot updates in the PR.
+Visual-test details live in `kaos-ui-visual-testing.md`. Keep snapshots committed, keep failure artifacts uncommitted, and explain intentional screenshot updates in the PR.
 
 ## Writing Tests
 

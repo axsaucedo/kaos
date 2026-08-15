@@ -1,5 +1,6 @@
 ---
-applyTo: "pydantic-ai-server/**"
+paths:
+  - "pydantic-ai-server/**"
 ---
 
 # Python Agent Framework Instructions

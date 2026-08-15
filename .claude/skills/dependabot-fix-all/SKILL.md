@@ -1,6 +1,6 @@
 ---
 name: dependabot-fix-all
-description: Fix every open Dependabot PR end-to-end on autopilot. Use this skill when asked to run /dependabot-fix-all (no arguments). This skill acts as an orchestrator that discovers all open Dependabot PRs once, risk-orders them, then processes them one at a time by spawning an isolated non-interactive `copilot -p` child per PR that runs the dependabot-fix skill. It verifies each PR independently via gh, applies the merge policy, records state in a durable ledger, and is bounded so it always terminates. Never pauses for user input.
+description: Fix every open Dependabot PR end-to-end on autopilot. Use this skill when asked to run /dependabot-fix-all (no arguments). This skill acts as an orchestrator that discovers all open Dependabot PRs once, risk-orders them, then processes them one at a time by spawning an isolated non-interactive agent child per PR (e.g. `claude -p`) that runs the dependabot-fix skill. It verifies each PR independently via gh, applies the merge policy, records state in a durable ledger, and is bounded so it always terminates. Never pauses for user input.
 allowed-tools: shell
 ---
 
@@ -10,7 +10,7 @@ Orchestrate the `dependabot-fix` skill across **every open Dependabot PR**, full
 `/dependabot-fix-all` (no arguments).
 
 **This session is the orchestrator.** It does not diagnose or edit PRs itself — it spawns **one isolated
-`copilot -p` child per PR** (each child runs the heavyweight `dependabot-fix` skill in a fresh context), then
+non-interactive agent child per PR** (each child runs the heavyweight `dependabot-fix` skill in a fresh context), then
 **independently verifies** the result via `gh` and moves on. This keeps the orchestrator's context lean and avoids
 cross-PR contamination.
 
@@ -40,7 +40,7 @@ REPO=axsaucedo/kaos
 
 **Preflight** (abort early with a clear message if any fails):
 - `gh auth status` is OK.
-- `copilot` is on `PATH` (`command -v copilot`).
+- The agent CLI is on `PATH` (e.g. `command -v claude`).
 - Git working tree is clean and on the default branch:
   ```bash
   git rev-parse --abbrev-ref HEAD          # expect main
@@ -97,58 +97,26 @@ Mark the ledger row `in_progress`.
 
 ### 2. Spawn the child (isolated, non-interactive, with a timeout)
 
-Run **serially** and wait. The child runs the `dependabot-fix` skill in its own fresh context. **Use
-`--output-format json`** and redirect to a log file — **do not stream it into context**.
+Run **serially** and wait. The child is your agent CLI's non-interactive/prompt mode running the `dependabot-fix`
+skill in a fresh context — the harness does not matter, only these requirements:
 
-> Important: plain `copilot -p` text output does **not** include the agent's reply when redirected to a file (only a
-> usage footer is captured), and `-s/--silent` can come back empty. Use `--output-format json` (JSONL): each line is a
-> JSON event, and the final assistant reply (containing the `RESULT:` line) is the last `assistant.message`, followed by
-> a `result` event carrying `exitCode`.
-
-```bash
-timeout 1800 copilot -p "Use the dependabot-fix skill to fix Dependabot PR <n> fully autonomously. \
-Do not ask any questions; run on autopilot to completion and emit the final RESULT line." \
-  --allow-all-tools --allow-all-paths --output-format json --no-color \
-  > ./tmp/pr-<n>-child.jsonl 2>&1
-echo "child exit: $?"
-```
-
-Notes:
-- `--allow-all-tools --allow-all-paths` are required for unattended execution. Run from the repo root so the project
-  skill is discoverable.
-- `timeout 1800` (30 min) guards against a hung child; a timeout is treated as `blocked` (see classification).
+- **Prompt:** "Use the dependabot-fix skill to fix Dependabot PR `<n>` fully autonomously. Do not ask any questions;
+  run on autopilot to completion and emit the final RESULT line."
+- **Unattended:** grant whatever tool/path permissions the harness needs to run without approval prompts.
+- **JSON output to a log file** (`./tmp/pr-<n>-child.jsonl`), never streamed into context — plain text output
+  redirected to a file is unreliable across harnesses; the JSON events reliably carry the final reply.
+- **Wall-clock guard:** wrap in `timeout 1800` (30 min); a timeout is treated as `blocked` (see classification).
+- Run from the repo root so the project skill is discoverable, and capture the child's exit code.
 
 ### 3. Capture the result — token-efficiently (never load the whole JSONL)
 
-Extract **only** the final assistant message (the `RESULT:` line) and the `result` event's exit code. Do not read the
-full log — it is large.
+Extract **only** the `RESULT:` line and the success/error flag from the log's terminal result event. Do not read the
+full log — it is large. Use a small script (e.g. `python3` over the JSONL) that scans for the harness's terminal
+event: the final assistant reply carries the `RESULT:` line, and the terminal/result event carries the error flag or
+exit code (event shapes differ per harness — inspect the last few lines of the log once if unsure).
 
-```bash
-python3 - "$PWD/tmp/pr-<n>-child.jsonl" <<'PY'
-import json, sys
-last_msg, result = None, None
-for line in open(sys.argv[1], encoding="utf-8", errors="replace"):
-    line = line.strip()
-    if not line or not line.startswith("{"):
-        continue
-    try:
-        ev = json.loads(line)
-    except ValueError:
-        continue
-    if ev.get("type") == "assistant.message":
-        last_msg = ev.get("data", {}).get("content", "")
-    elif ev.get("type") == "result":
-        result = ev
-# print only the RESULT line from the final assistant message + the exit code
-for ln in (last_msg or "").splitlines():
-    if ln.startswith("RESULT:"):
-        print(ln)
-print("exitCode:", (result or {}).get("exitCode"))
-PY
-```
-
-If no `RESULT:` line is found or `exitCode` is non-zero/empty, treat the run as `blocked` and rely on the Phase 1.4
-`gh` verification to classify the real PR state.
+If no `RESULT:` line is found or the terminal event signals an error (or is missing), treat the run as `blocked` and
+rely on the Phase 1.4 `gh` verification to classify the real PR state.
 
 ### 4. Post-checks — independent verification (gh is the ground truth)
 
@@ -226,8 +194,8 @@ need emerges.
 - Discover PRs **once**; never re-list inside the loop (prevents endless growth from new bump/version PRs).
 - **Serial** children only (shared git checkout); clean tree + `main` between runs.
 - One attempt per PR; no orchestrator retry, no re-queue; every child has a `timeout`.
-- **Never** load full child output into context — extract only the final `assistant.message` `RESULT:` line + the
-  `result` exit code from the JSONL log; use `gh` as the ground truth.
+- **Never** load full child output into context — extract only the `RESULT:` line + error flag from the terminal
+  `result` JSON object in the log; use `gh` as the ground truth.
 - Fully non-interactive (autopilot); never call `ask_user`.
 - Never auto-merge a kaos-ui framework major; leave it open for human review.
 - Scratch under `./tmp/` (never `/tmp/`); the SQLite `todos` ledger is the durable, resumable state.

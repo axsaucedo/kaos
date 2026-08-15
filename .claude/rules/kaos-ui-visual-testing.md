@@ -1,5 +1,11 @@
 ---
-applyTo: "{kaos-ui/tests/visual/**,kaos-ui/playwright.visual.config.ts,kaos-ui/src/**/*.tsx,kaos-ui/src/index.css,kaos-ui/package.json,.github/workflows/kaos-ui-tests.yaml}"
+paths:
+  - "kaos-ui/tests/visual/**"
+  - "kaos-ui/playwright.visual.config.ts"
+  - "kaos-ui/src/**/*.tsx"
+  - "kaos-ui/src/index.css"
+  - "kaos-ui/package.json"
+  - ".github/workflows/kaos-ui-tests.yaml"
 ---
 
 # KAOS UI Visual Testing

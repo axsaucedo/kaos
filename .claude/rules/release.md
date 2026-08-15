@@ -1,3 +1,11 @@
+---
+paths:
+  - ".github/workflows/release.yaml"
+  - ".github/workflows/test-release.yaml"
+  - "operator/chart/Chart.yaml"
+  - "operator/chart/values.yaml"
+---
+
 # Release Instructions
 
 ## Quick Reference

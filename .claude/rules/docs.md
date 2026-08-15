@@ -1,3 +1,8 @@
+---
+paths:
+  - "docs/**"
+---
+
 # Documentation Instructions
 
 ## Quick Reference

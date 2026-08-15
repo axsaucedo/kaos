@@ -1,10 +1,11 @@
 ---
-applyTo: "kaos-ui/**"
+paths:
+  - "kaos-ui/**"
 ---
 
-# KAOS-UI Copilot Instructions
+# KAOS-UI Instructions
 
-Context and guidelines for GitHub Copilot and AI coding assistants working with the KAOS-UI codebase.
+Context and guidelines for AI coding assistants working with the KAOS-UI codebase.
 
 ## Project Overview
 
@@ -121,8 +122,8 @@ Bot (Agent), Server (MCP), Box (ModelAPI), Boxes (Pods), KeyRound (Secrets)
 
 ## Testing
 
-See `kaos-ui-testing.instructions.md` for full testing details.
-See `kaos-ui-visual-testing.instructions.md` before changing visual specs, snapshots, Tailwind/theme CSS, UI components, pages, or the visual CI workflow.
+See `kaos-ui-testing.md` for full testing details.
+See `kaos-ui-visual-testing.md` before changing visual specs, snapshots, Tailwind/theme CSS, UI components, pages, or the visual CI workflow.
 
 ```bash
 npm run dev              # UI at http://localhost:8081
@@ -137,7 +138,7 @@ npm run build            # Type-check + build
 CI runs automatically via `.github/workflows/kaos-ui-tests.yaml` on PRs touching `kaos-ui/`.
 
 ## Additional Instruction Files
-- `kaos-ui-components.instructions.md` — UI component patterns, Visual Map
-- `kaos-ui-testing.instructions.md` — Playwright test patterns
-- `kaos-ui-visual-testing.instructions.md` — visual regression snapshots and CI comments
-- `kaos-ui-kubernetes-types.instructions.md` — CRD type sync guidelines
+- `kaos-ui-components.md` — UI component patterns, Visual Map
+- `kaos-ui-testing.md` — Playwright test patterns
+- `kaos-ui-visual-testing.md` — visual regression snapshots and CI comments
+- `kaos-ui-kubernetes-types.md` — CRD type sync guidelines

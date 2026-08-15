@@ -1,5 +1,6 @@
 ---
-applyTo: "kaos-ui/src/types/**"
+paths:
+  - "kaos-ui/src/types/**"
 ---
 
 # Kubernetes Types Instructions

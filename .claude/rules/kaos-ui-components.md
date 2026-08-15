@@ -1,5 +1,6 @@
 ---
-applyTo: "kaos-ui/src/components/**"
+paths:
+  - "kaos-ui/src/components/**"
 ---
 
 # UI Component Guidelines
