@@ -87,6 +87,13 @@ updates:
       all-security:
         applies-to: security-updates
         patterns: ["*"]
+    ignore:
+      # typescript-eslint has no TypeScript 7 support yet: its peer range caps at
+      # <6.1.0 and it also hard-throws on major >= 7, so `npm ci` fails outright.
+      # Upstream typescript-eslint#10940 targets TS >= 7.1 — remove this once it
+      # ships. TS 6.x minor/patch updates are unaffected.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
 
   # npm - docs
   - package-ecosystem: "npm"
