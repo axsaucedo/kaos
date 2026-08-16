@@ -154,7 +154,11 @@ jobs:
   e2e-tests:
     name: E2E Tests (shard ${{ matrix.shard }}/3)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Shards spend ~8 min on setup (image builds, KIND, loading images) before
+    # ~75s of actual tests, landing at 9-10 min against the old 10 min budget.
+    # A job that exceeds timeout-minutes is reported as "cancelled" rather than
+    # "failed", so tipping over looked like flake and cost a re-run each time.
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
