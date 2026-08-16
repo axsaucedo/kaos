@@ -3,6 +3,10 @@ name: Test Release
 on:
   push:
     tags: ['v0.0.*']  # Only test tags
+  # Same contract as release.yaml: dispatch against the tag, not a branch.
+  # This is the safe rehearsal path for the create-tag + dispatch mechanism —
+  # it publishes docs only, no images and no PyPI.
+  workflow_dispatch:
 
 permissions:
   contents: write
