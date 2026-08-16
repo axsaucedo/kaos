@@ -70,7 +70,7 @@ Mapping guide (pass relevant ones to the subagent):
 - `pydantic-ai-server/**`, `kaos-cli/**`, `uv` / `pip` bumps → `python.instructions.md`
 - `kaos-ui/**` or npm bumps in `kaos-ui/` → `kaos-ui.instructions.md`, `kaos-ui-components.instructions.md`, `kaos-ui-testing.instructions.md`, `kaos-ui-kubernetes-types.instructions.md`
 - `docs/**` or npm bumps in `docs/` → `docs.instructions.md`
-- `.github/workflows/**` (github_actions PRs) → release/CI-relevant instructions from above, plus `CLAUDE.md`
+- `.github/workflows/**` (github_actions PRs) → release/CI-relevant instructions from above, plus `.github/copilot-instructions.md`
 
 ### Step 4 · Docs subagent
 
