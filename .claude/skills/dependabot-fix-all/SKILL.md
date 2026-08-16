@@ -164,12 +164,23 @@ gh pr checks <n> --repo $REPO --json name,state
 gh pr view <n> --repo $REPO --json state,mergeStateStatus,labels
 ```
 
-**Prefer REST over GraphQL for check state.** Some hosts (notably sandboxed cloud sessions) allow only a pinned set of GraphQL operations and return `403 This GraphQL query is not enabled for this session` for anything else — including a user-supplied `GH_TOKEN`. If a `gh` call fails that way, fall back to REST, which is not restricted:
+**In a cloud session, `gh` does not work at all — use the `mcp__github__*` tools.** This is measured behaviour, not a precaution. In a Claude Code cloud session every repo-scoped `gh` call fails: GraphQL returns `403 This GraphQL query is not enabled for this session`, and the REST path that error names (`gh api repos/{owner}/{repo}/...`) returns its own `403 GitHub access is not enabled for this session`. `gh auth status` fails too, because `GH_TOKEN` is the literal placeholder `proxy-injected` and `gh` treats it as an invalid token. Supplying your own `GH_TOKEN` changes nothing. Only non-repo paths such as `gh api user` succeed.
+
+Detect the environment once, at preflight, and pick a lane for the whole run:
 
 ```bash
-HEAD_SHA=$(gh api repos/axsaucedo/kaos/pulls/<n> --jq .head.sha)
-gh api repos/axsaucedo/kaos/commits/$HEAD_SHA/check-runs --jq '.check_runs[] | "\(.conclusion // .status)\t\(.name)"'
+gh api repos/axsaucedo/kaos --jq .full_name >/dev/null 2>&1 && echo "local: use gh" || echo "cloud: use mcp__github__* tools"
 ```
+
+| Operation | Local | Cloud session |
+|---|---|---|
+| Read PR / check state | `gh pr view`, `gh pr checks --json` | `mcp__github__pull_request_read`, `mcp__github__get_check_run` |
+| Create PR | `gh pr create` | `mcp__github__create_pull_request` |
+| Comment | `gh pr comment` | `mcp__github__add_issue_comment` |
+| Merge | `gh pr merge --merge` | `mcp__github__merge_pull_request` |
+| Re-run / dispatch a workflow | `gh run rerun`, `gh workflow run` | `mcp__github__actions_run_trigger` |
+
+Cloud sessions have **no** tool that writes `refs/tags/*` and **no** branch- or tag-deletion tool. So a cloud run cannot create a tag, cannot delete the `claude/` branches it creates, and must reach a release by dispatching `create-tag.yaml` followed by `release.yaml` at the resulting tag. Merged `claude/` branches accumulate and are reaped outside the session.
 
 Classify the outcome:
 - **merged** — `state=MERGED`.
@@ -259,7 +270,9 @@ need emerges.
 - **Serial** children only (shared git checkout); clean tree + `main` between runs.
 - One attempt per PR; no orchestrator retry, no re-queue; at most one workflow re-run per PR; every child has a `timeout`.
 - **Never** load full child output into context — extract only the final `RESULT:` line and the exit status; use `gh` as the ground truth.
-- **Prefer REST (`gh api repos/...`) over GraphQL** for check/PR state; GraphQL is restricted in some sandboxed sessions and a supplied `GH_TOKEN` does not lift that.
+- **In a cloud session `gh` is unusable** — every repo-scoped call 403s on both GraphQL and REST, and a supplied `GH_TOKEN` does not lift it. Detect at preflight and use `mcp__github__*` for all PR, check and workflow operations. Locally, `gh` is fine.
+- A cloud run **cannot create tags and cannot delete branches or tags**. Reach a release by dispatching `create-tag.yaml` then `release.yaml` at the tag; leave `claude/` branch cleanup to a local or scheduled reaper.
+- `tmp/` is gitignored — a report file written there needs `git add -f` to be committed.
 - **Never push to a `dependabot/**` branch.** Re-home onto a `claude/`-prefixed branch and supersede the original when the host disallows the push.
 - Merge only on `state=OPEN` + all checks `SUCCESS`/`NEUTRAL`/`SKIPPED` (and the suite actually ran) + `mergeStateStatus=CLEAN`; always `--merge`, never squash or rebase.
 - Fully non-interactive (autopilot); never call `ask_user`.
