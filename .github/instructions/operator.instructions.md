@@ -1,5 +1,7 @@
 ---
 applyTo: "operator/**/*.go"
+paths:
+  - "operator/**/*.go"
 ---
 
 # Go Operator Instructions

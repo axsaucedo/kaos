@@ -1,10 +1,12 @@
 ---
 applyTo: "kaos-ui/**"
+paths:
+  - "kaos-ui/**"
 ---
 
-# KAOS-UI Copilot Instructions
+# KAOS-UI Instructions
 
-Context and guidelines for GitHub Copilot and AI coding assistants working with the KAOS-UI codebase.
+Context and guidelines for AI coding assistants working with the KAOS-UI codebase.
 
 ## Project Overview
 

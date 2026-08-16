@@ -1,0 +1,1 @@
+../../.github/instructions/kaos-ui-kubernetes-types.instructions.md

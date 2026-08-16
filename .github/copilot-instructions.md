@@ -5,12 +5,19 @@ Kubernetes-native AI agent orchestration framework.
 ## Quick Reference
 
 ## Key Principles
+- **ALWAYS WORK IN A GIT WORKTREE** - The main checkout is shared by multiple concurrent agent sessions; never stage, commit, or switch branches on it. Create a dedicated worktree for every branch/PR.
 - **KEEP IT SIMPLE** - Avoid over-engineering
 - Tests AND linting are the success criteria for development
 - Conventional commits after every task (not at the end)
 - End-to-end tests can be run in github actions CI; push a PR and track progress
-- Review the module specific instructions under .github/instructions for context
+- Module specific instructions live under .github/instructions/ and auto-load when matching files are touched
 - Update documentation, .github/copilot-instructions.md and .github/instructions/* after changes; keep it succinct and functional
+
+### Agent Instruction Files (SSOT + symlinks)
+The `.github` files are the single source of truth, mirrored to other harnesses via symlinks — **only ever edit the `.github` files**:
+- `CLAUDE.md` and `AGENTS.md` (repo root) are symlinks to `.github/copilot-instructions.md`
+- `.claude/rules/<name>.md` are symlinks to `.github/instructions/<name>.instructions.md`
+- Each instructions file carries dual frontmatter: `applyTo:` (Copilot) and `paths:` (Claude Code) with the same globs — keep both in sync when changing scope
 
 ### Commit Guidelines
 Use conventional commits: `feat(scope):`, `fix(scope):`, `refactor(scope):`, `test(scope):`, `docs:` - keep it functional and succinct. 
@@ -92,7 +99,7 @@ operator/                  # K8s operator (Go, kubebuilder)
 tmp/                       # Local work files (gitignored)
 
 .github/workflows/         # CI pipelines
-.github/instructions/      # Path-specific instructions
+.github/instructions/      # Path-specific instructions (SSOT; symlinked from .claude/rules/)
 ```
 
 ## CRDs Overview
@@ -131,15 +138,16 @@ export GATEWAY_URL=http://localhost:8888
 ```
 
 ## Domain-Specific Instructions
-Detailed instructions are in `.github/instructions/`:
+Detailed instructions are in `.github/instructions/`, scoped via `applyTo:`/`paths:` globs so they load automatically when matching files are touched:
 - `e2e.instructions.md`: E2E test setup, structure, gotchas and fast testing
 - `python.instructions.md`: Data Plane Python runtime framework details
 - `operator.instructions.md`: Control Plane Golang operator development
 - `docs.instructions.md`: VitePress docs, mermaid diagrams, multi-version builds
 - `release.instructions.md`: Release process, versioning, CI pipeline, validation checklist
+- `kaos-ui*.instructions.md`: UI development, components, K8s types, testing, visual testing
 
 ### Skills
 - `/release-kaos`: Invoke with a version (e.g., "Use /release-kaos to release v0.5.0") — executes full release pipeline
 - `/planned-implementation`: Use for complex staged KAOS work that needs backend/UI context gathering, a written plan, task-scoped commits, PR/CI validation, and an uncommitted REPORT.md PR comment
 - `/dependabot-fix`: Invoke with a PR number (e.g., "Use /dependabot-fix 142") — diagnoses and fixes a single failing Dependabot PR autonomously, commits on the PR branch, posts a REPORT.md comment, and emits a machine-readable `RESULT:` line
-- `/dependabot-fix-all`: Invoke with no arguments — orchestrator that fixes every open Dependabot PR end-to-end on autopilot, spawning one isolated non-interactive `copilot -p` child per PR (serial), verifying each via `gh`, and recording state in the SQLite ledger
+- `/dependabot-fix-all`: Invoke with no arguments — orchestrator that fixes every open Dependabot PR end-to-end on autopilot, spawning one isolated non-interactive agent child per PR (serial), verifying each via `gh`, and recording state in the SQLite ledger

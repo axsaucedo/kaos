@@ -1,3 +1,9 @@
+---
+applyTo: "docs/**"
+paths:
+  - "docs/**"
+---
+
 # Documentation Instructions
 
 ## Quick Reference

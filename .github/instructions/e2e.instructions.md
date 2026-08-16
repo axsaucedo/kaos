@@ -1,5 +1,7 @@
 ---
 applyTo: "operator/tests/**"
+paths:
+  - "operator/tests/**"
 ---
 
 # E2E Test Instructions

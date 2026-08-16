@@ -63,7 +63,7 @@ Spawn **three parallel `explore` subagents** to load repo knowledge scoped to th
 
 ### Step 3 · Instructions subagent
 
-Ask it to read `.github/instructions/*.md` files relevant to the PR's touched paths and summarize conventions, test commands, and gotchas.
+Ask it to read `.github/instructions/*.instructions.md` files relevant to the PR's touched paths and summarize conventions, test commands, and gotchas.
 
 Mapping guide (pass relevant ones to the subagent):
 - `operator/**` or `gomod` bumps → `operator.instructions.md`, `e2e.instructions.md`

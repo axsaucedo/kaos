@@ -1,5 +1,7 @@
 ---
 applyTo: "kaos-ui/tests/**"
+paths:
+  - "kaos-ui/tests/**"
 ---
 
 # KAOS-UI Testing Guidelines
