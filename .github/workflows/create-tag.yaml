@@ -1,0 +1,77 @@
+name: Create Tag
+
+# Creates and pushes a release tag. Exists so a release can be started from
+# somewhere that cannot push a tag itself — notably a Claude Code cloud
+# session, whose git proxy accepts branch updates but rejects tag pushes, and
+# whose GitHub tooling can write refs/heads/* but not refs/tags/*.
+#
+# Pushing the tag from here does NOT start release.yaml: refs pushed with the
+# built-in GITHUB_TOKEN never trigger another workflow. That is deliberate.
+# Once this run finishes, dispatch release.yaml explicitly against the new tag:
+#
+#   gh workflow run release.yaml --ref v<version>
+#
+# release.yaml reads its version from the ref it runs on, so dispatching it at
+# the tag behaves exactly like a tag push.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to tag, without the leading v (e.g. 0.7.2)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  create-tag:
+    name: Create tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Validate version format
+        run: |
+          VERSION="${{ inputs.version }}"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Invalid version format: $VERSION (expected X.Y.Z)"
+            exit 1
+          fi
+          echo "✓ Version format valid: $VERSION"
+
+      - name: Check tag does not already exist
+        run: |
+          TAG="v${{ inputs.version }}"
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "::error::Tag $TAG already exists"
+            exit 1
+          fi
+          echo "✓ Tag $TAG is free"
+
+      - name: Create and push tag
+        run: |
+          TAG="v${{ inputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+          echo "✓ Pushed $TAG at $(git rev-parse --short HEAD)"
+
+      - name: Summary
+        run: |
+          TAG="v${{ inputs.version }}"
+          {
+            echo "### Tag created: \`$TAG\`"
+            echo ""
+            echo "This did **not** start a release. To release, dispatch \`release.yaml\` at this tag:"
+            echo ""
+            echo '```'
+            echo "gh workflow run release.yaml --ref $TAG"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
