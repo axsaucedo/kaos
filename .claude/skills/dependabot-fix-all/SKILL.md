@@ -1,6 +1,6 @@
 ---
 name: dependabot-fix-all
-description: Fix every open Dependabot PR end-to-end on autopilot. Use this skill when asked to run /dependabot-fix-all (no arguments). This skill acts as an orchestrator that discovers all open Dependabot PRs once, risk-orders them, then processes them one at a time by spawning an isolated non-interactive agent child per PR (e.g. depending on your harness `claude -p`, `copilot -p`, etc.) that runs the dependabot-fix skill. It verifies each PR independently via gh, applies the merge policy, records state in a durable ledger, and is bounded so it always terminates. Never pauses for user input.
+description: Fix every open Dependabot PR end-to-end on autopilot. Use this skill when asked to run /dependabot-fix-all (no arguments). This skill acts as an orchestrator that discovers all open Dependabot PRs once, triages their CI state, risk-orders the ones that actually need work, then processes them one at a time by spawning an isolated child agent per PR that runs the dependabot-fix skill. It verifies each PR independently via gh, applies the merge policy, records state in a durable ledger, and is bounded so it always terminates. Never pauses for user input.
 allowed-tools: shell
 ---
 
@@ -9,10 +9,9 @@ allowed-tools: shell
 Orchestrate the `dependabot-fix` skill across **every open Dependabot PR**, fully autonomously. Invoked as
 `/dependabot-fix-all` (no arguments).
 
-**This session is the orchestrator.** It does not diagnose or edit PRs itself — it spawns **one isolated
-non-interactive agent child per PR** (each child runs the heavyweight `dependabot-fix` skill in a fresh context), then
-**independently verifies** the result via `gh` and moves on. This keeps the orchestrator's context lean and avoids
-cross-PR contamination.
+**This session is the orchestrator.** It does not diagnose or edit PRs itself — it spawns **one isolated child agent per PR** (each child runs the heavyweight `dependabot-fix` skill in a fresh context), then **independently verifies** the result via `gh` and moves on. This keeps the orchestrator's context lean and avoids cross-PR contamination.
+
+**The child agent is whatever the host provides.** This skill is deliberately agent-agnostic: it never assumes a particular CLI is installed. See *Phase 1.3 — Spawn the child* for how to pick a backend. A PR whose CI is already green never gets a child at all.
 
 ## Core principles (do not violate)
 
@@ -40,7 +39,7 @@ REPO=axsaucedo/kaos
 
 **Preflight** (abort early with a clear message if any fails):
 - `gh auth status` is OK.
-- The agent CLI is on `PATH` (e.g. `command -v claude`).
+- A child-agent backend is available — see *Phase 1.3*. Resolve which one **now**, before the loop, and use the same backend for every PR in the run.
 - Git working tree is clean and on the default branch:
   ```bash
   git rev-parse --abbrev-ref HEAD          # expect main
@@ -90,62 +89,125 @@ gh pr view <n> --repo $REPO --json state,mergeStateStatus,labels,title
 ```
 
 - If `state` is `MERGED` or `CLOSED` → ledger `done` (note "already merged/closed"), continue.
-- Confirm working tree is clean and on `main` before handing off (the previous child should have restored it; if not,
-  `git checkout main` and clean up first).
+- Confirm working tree is clean and on `main` before handing off (the previous child should have restored it; if not, `git checkout main` and clean up first).
 
 Mark the ledger row `in_progress`.
 
-### 2. Spawn the child (isolated, non-interactive, with a timeout)
+### 2. CI triage — decide whether a child is needed at all
 
-Run **serially** and wait. The child is your agent CLI's non-interactive/prompt mode running the `dependabot-fix`
-skill in a fresh context — the harness does not matter, only these requirements:
+**Most Dependabot PRs do not need fixing.** Spawning a child for a PR whose CI is already green wastes 10–30 minutes and risks a child "fixing" something that was never broken. Triage first.
 
-- **Prompt:** "Use the dependabot-fix skill to fix Dependabot PR `<n>` fully autonomously. Do not ask any questions;
-  run on autopilot to completion and emit the final RESULT line."
-- **Unattended:** grant whatever tool/path permissions the harness needs to run without approval prompts.
-- **JSON output to a log file** (`./tmp/pr-<n>-child.jsonl`), never streamed into context — plain text output
-  redirected to a file is unreliable across harnesses; the JSON events reliably carry the final reply.
-- **Wall-clock guard:** wrap in `timeout 1800` (30 min); a timeout is treated as `blocked` (see classification).
-- Run from the repo root so the project skill is discoverable, and capture the child's exit code.
-
-### 3. Capture the result — token-efficiently (never load the whole JSONL)
-
-Extract **only** the `RESULT:` line and the success/error flag from the log's terminal result event. Do not read the
-full log — it is large. Use a small script (e.g. `python3` over the JSONL) that scans for the harness's terminal
-event: the final assistant reply carries the `RESULT:` line, and the terminal/result event carries the error flag or
-exit code (event shapes differ per harness — inspect the last few lines of the log once if unsure).
-
-If no `RESULT:` line is found or the terminal event signals an error (or is missing), treat the run as `blocked` and
-rely on the Phase 1.4 `gh` verification to classify the real PR state.
-
-### 4. Post-checks — independent verification (gh is the ground truth)
-
-Never trust the child's prose; re-derive truth:
+**Always read check state as JSON.** Plain `gh pr checks <n>` renders a **cancelled** run as `fail` in its human output, which makes a concurrency-cancelled or timed-out job look like a genuine failure. Use `--json` and read `state` literally:
 
 ```bash
-gh pr checks <n> --repo $REPO
+gh pr checks <n> --repo $REPO --json name,state,link > ./tmp/pr-<n>-checks.json
+python3 - "$PWD/tmp/pr-<n>-checks.json" <<'PY'
+import json, sys
+checks = json.load(open(sys.argv[1]))
+buckets = {}
+for c in checks:
+    buckets.setdefault(c["state"], []).append(c["name"])
+for state, names in sorted(buckets.items()):
+    print(f"{state}: {len(names)} -> {', '.join(sorted(names))}")
+PY
+```
+
+Classify into exactly one of three triage outcomes:
+
+- **green** — every check is `SUCCESS`/`NEUTRAL`/`SKIPPED`. **No child.** Skip straight to the merge policy (step 6).
+- **cancelled-only** — at least one `CANCELLED` and **zero** `FAILURE`/`TIMED_OUT`/`ACTION_REQUIRED`. This is almost always a superseded push (`cancel-in-progress`) or a job that tipped over its `timeout-minutes` — **not** a dependency problem. **No child.** Re-run the workflow and re-triage once:
+  ```bash
+  gh pr checks <n> --repo $REPO --json name,state,link   # grab a link to get the run id
+  gh run rerun <run-id> --failed
+  ```
+  If it comes back green → merge policy. If it comes back with a real `FAILURE` → treat as genuinely-failing below. Re-run **at most once** per PR; a second cancellation is `blocked`.
+- **genuinely-failing** — at least one `FAILURE`, `TIMED_OUT`, or `ACTION_REQUIRED`. **This is the only case that spawns a child.**
+
+If checks are still `PENDING`/`IN_PROGRESS`, wait for them (`gh pr checks <n> --watch --interval 30` with a wall-clock cap of 30 min) before classifying. A cap breach is `blocked`.
+
+Record the triage outcome in the ledger description — it is the audit trail for why a child did or did not run.
+
+### 3. Spawn the child (isolated, non-interactive, with a timeout)
+
+**Only for `genuinely-failing` PRs.** Run **serially** and wait. The child runs the `dependabot-fix` skill in its own fresh context.
+
+**Pick a backend from what the host actually offers** — do not hardcode a vendor. In order of preference:
+
+1. **The host's own subagent mechanism** (e.g. a `Task`/`Agent` tool that spawns a fresh-context child). Preferred: no PATH dependency, no auth setup, works in sandboxed and cloud sessions where no CLI is installed. The child's final message comes back as a return value, so there is no log to parse.
+2. **A headless agent CLI already on `PATH`.** Detect, do not assume — e.g. `command -v claude`, `command -v copilot`, `command -v codex`. Invoke it in whatever non-interactive, all-tools-allowed, machine-readable mode that CLI provides, wrapped in `timeout 1800`, with output redirected to `./tmp/pr-<n>-child.log` — **never streamed into context**.
+3. **No backend available** → do not fake it. Mark the PR `blocked` with note `no child-agent backend`, and continue.
+
+Whichever backend is used, the child gets the same brief:
+
+> Use the `dependabot-fix` skill to fix Dependabot PR `<n>` fully autonomously. Do not ask any questions; run on autopilot to completion and emit a final `RESULT:` line.
+
+Notes:
+- Run from the repo root so the project skill is discoverable.
+- `timeout 1800` (30 min) guards against a hung child; a timeout is treated as `blocked`.
+- Unattended execution needs the backend's "allow all tools / no approval prompts" mode. If the backend cannot be run without approval prompts, it is not a valid backend for this skill — fall through to the next one.
+
+### 4. Capture the result — token-efficiently (never load the whole log)
+
+Extract **only** the child's final `RESULT:` line and its exit status.
+
+- **Subagent backend** — read the returned final message directly and pull the `RESULT:` line out of it. Nothing else to do.
+- **CLI backend** — if the CLI emits JSONL events, parse only the last assistant message plus the terminating result event; if it emits plain text, `grep '^RESULT:' ./tmp/pr-<n>-child.log | tail -1`. Either way, **never** read the full log — it is large.
+
+If no `RESULT:` line is found or the child exited non-zero, treat the run as `blocked` and rely on the step 5 `gh` verification to classify the real PR state.
+
+### 5. Post-checks — independent verification (gh is the ground truth)
+
+Never trust the child's prose; re-derive truth. Use the **same JSON check reading** as step 2 — the cancelled-vs-failed distinction matters just as much here:
+
+```bash
+gh pr checks <n> --repo $REPO --json name,state
 gh pr view <n> --repo $REPO --json state,mergeStateStatus,labels
+```
+
+**Prefer REST over GraphQL for check state.** Some hosts (notably sandboxed cloud sessions) allow only a pinned set of GraphQL operations and return `403 This GraphQL query is not enabled for this session` for anything else — including a user-supplied `GH_TOKEN`. If a `gh` call fails that way, fall back to REST, which is not restricted:
+
+```bash
+HEAD_SHA=$(gh api repos/axsaucedo/kaos/pulls/<n> --jq .head.sha)
+gh api repos/axsaucedo/kaos/commits/$HEAD_SHA/check-runs --jq '.check_runs[] | "\(.conclusion // .status)\t\(.name)"'
 ```
 
 Classify the outcome:
 - **merged** — `state=MERGED`.
 - **green-left-open** — checks green, still open, and it is a kaos-ui framework major (intentional; see merge policy).
-- **superseded** — child scope-rejected: a `dependabot.yml` split PR was opened and a comment posted; original left
-  open for the host to close.
-- **blocked** — checks failing/timeout/child error, or any state that is none of the above.
+- **superseded** — the work was re-homed onto another PR (a `dependabot.yml` split, or a `claude/` replacement branch) and a comment posted on the original; note the replacement PR number.
+- **blocked** — checks genuinely failing, child timeout/error, no backend available, or any state that is none of the above.
 
-### 5. Apply merge policy (auto-merge safe)
+A PR that never needed a child (triage `green`, or `cancelled-only` that re-ran clean) is classified by the same list — it simply reaches it via the merge policy rather than via a child. Note `no-child-needed` in the ledger so the summary shows how much work was avoided.
 
-If the PR is **green + mergeable + still open + NOT a kaos-ui framework major + not already merged**, merge it:
+### 6. Apply merge policy (auto-merge safe)
+
+Merge only when **all** of these hold:
+
+- `state=OPEN` (not already merged/closed)
+- Every check is `SUCCESS`/`NEUTRAL`/`SKIPPED` — **no** `CANCELLED` left unresolved, and the expected check suite actually ran (a PR with zero checks is not green, it is unverified)
+- `mergeStateStatus=CLEAN` — reject `BEHIND` (needs a rebase first), `UNSTABLE`, `DIRTY`, `BLOCKED`
+- Not a kaos-ui framework major
 
 ```bash
 gh pr merge <n> --repo $REPO --merge
 ```
 
-The child already attempts this in its own Step 9; the orchestrator only acts if the PR is verifiably green but still
-open (and not a held kaos-ui major). **Never** merge a kaos-ui framework major — leave it open for human review.
+Always a **merge commit** — never squash, never rebase. The child already attempts this in its own Step 9; the orchestrator only acts if the PR is verifiably green but still open. **Never** merge a kaos-ui framework major — leave it open for human review.
 
-### 6. Record and continue
+#### Never push to a Dependabot branch
+
+A fix commit must never be pushed onto `dependabot/**`. Dependabot force-pushes those branches on its own schedule and will silently discard the work, and some hosts reject the push outright — a cloud/sandboxed session can only push to branches it owns (typically a `claude/`-prefixed branch), and a branch carrying commits authored by someone else, or backing someone else's open PR, is rejected on both counts.
+
+When the fix cannot live on the Dependabot branch, **re-home it**:
+
+1. Branch off the default branch: `git checkout -b claude/deps-<ecosystem>-<short-desc> origin/main`
+2. Apply the equivalent dependency bump plus whatever fix the child worked out, and commit.
+3. Push that branch and open a PR that states in its body which Dependabot PR it replaces.
+4. Comment on the original Dependabot PR pointing at the replacement, then close it.
+
+Ledger this as `superseded` with the replacement PR number in the note. This is the standard path in unattended cloud runs; locally, pushing to the Dependabot branch is still fine when the host allows it.
+
+### 7. Record and continue
 
 Update the ledger row to `done` (with a one-line outcome note: `merged` / `left-open` / `superseded` / `blocked
 <reason>`). Restore a clean state for the next child:
@@ -192,10 +254,14 @@ need emerges.
 ## Invariants
 
 - Discover PRs **once**; never re-list inside the loop (prevents endless growth from new bump/version PRs).
+- **Triage before spawning.** Read check state as `--json name,state` — never the human-rendered output, which shows `CANCELLED` as `fail`. Only `genuinely-failing` PRs get a child.
+- **Agent-agnostic.** Never hardcode a vendor CLI. Detect a backend at preflight; prefer the host's own subagent mechanism; `blocked` if none.
 - **Serial** children only (shared git checkout); clean tree + `main` between runs.
-- One attempt per PR; no orchestrator retry, no re-queue; every child has a `timeout`.
-- **Never** load full child output into context — extract only the `RESULT:` line + error flag from the terminal
-  `result` JSON object in the log; use `gh` as the ground truth.
+- One attempt per PR; no orchestrator retry, no re-queue; at most one workflow re-run per PR; every child has a `timeout`.
+- **Never** load full child output into context — extract only the final `RESULT:` line and the exit status; use `gh` as the ground truth.
+- **Prefer REST (`gh api repos/...`) over GraphQL** for check/PR state; GraphQL is restricted in some sandboxed sessions and a supplied `GH_TOKEN` does not lift that.
+- **Never push to a `dependabot/**` branch.** Re-home onto a `claude/`-prefixed branch and supersede the original when the host disallows the push.
+- Merge only on `state=OPEN` + all checks `SUCCESS`/`NEUTRAL`/`SKIPPED` (and the suite actually ran) + `mergeStateStatus=CLEAN`; always `--merge`, never squash or rebase.
 - Fully non-interactive (autopilot); never call `ask_user`.
 - Never auto-merge a kaos-ui framework major; leave it open for human review.
 - Scratch under `./tmp/` (never `/tmp/`); the SQLite `todos` ledger is the durable, resumable state.
