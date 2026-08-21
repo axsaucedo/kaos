@@ -10,7 +10,7 @@ controllerManager:
       readOnlyRootFilesystem: true
     image:
       repository: axsauze/kaos-operator
-      tag: 0.7.3-dev
+      tag: 0.7.4-dev
     imagePullPolicy: IfNotPresent
     resources:
       limits:
@@ -30,11 +30,11 @@ kubernetesClusterDomain: cluster.local
 
 # Default images for agent runtime and MCP servers
 defaultImages:
-  agentRuntime: axsauze/kaos-agent:0.7.3-dev
-  mcpServer: axsauze/kaos-mcp-server:0.7.3-dev
-  mcpPythonString: axsauze/kaos-mcp-python-string:0.7.3-dev
-  mcpPctxCodemode: axsauze/kaos-mcp-pctx-codemode:0.7.3-dev
-  mcpFastmcpCodemode: axsauze/kaos-mcp-fastmcp-codemode:0.7.3-dev
+  agentRuntime: axsauze/kaos-agent:0.7.4-dev
+  mcpServer: axsauze/kaos-mcp-server:0.7.4-dev
+  mcpPythonString: axsauze/kaos-mcp-python-string:0.7.4-dev
+  mcpPctxCodemode: axsauze/kaos-mcp-pctx-codemode:0.7.4-dev
+  mcpFastmcpCodemode: axsauze/kaos-mcp-fastmcp-codemode:0.7.4-dev
   mcpKubernetes: quay.io/containers/kubernetes_mcp_server:latest
   mcpSlack: zencoderai/slack-mcp:latest
   litellm: ghcr.io/berriai/litellm:main-stable
