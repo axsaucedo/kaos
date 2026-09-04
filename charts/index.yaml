@@ -1,0 +1,1177 @@
+apiVersion: v1
+entries:
+  kaos-operator:
+  - apiVersion: v2
+    appVersion: 0.7.5
+    created: "2026-09-04T04:33:00.011047472Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: 138103f3da133e45efd42d68ad2f632f5e71c7c9ccdbe514273fd2c2c1c085b5
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.7.5.tgz
+    version: 0.7.5
+  - apiVersion: v2
+    appVersion: 0.7.4
+    created: "2026-09-04T04:33:00.004485167Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: 2f02cfc0ae42b8698634f051f5c2ceeb3be6eefb715cace74fae7adbdb8b03db
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.7.4.tgz
+    version: 0.7.4
+  - apiVersion: v2
+    appVersion: 0.7.3
+    created: "2026-09-04T04:32:59.998246421Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: a3315e63ea6900639494458e9b891d9bc3db2bae645a6ae25d52b5bf10f59017
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.7.3.tgz
+    version: 0.7.3
+  - apiVersion: v2
+    appVersion: 0.7.2
+    created: "2026-09-04T04:32:59.992285549Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: 7f73bd2ee3619a7ce460573232e004841101848e82832ef8ba20e839ed7289d8
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.7.2.tgz
+    version: 0.7.2
+  - apiVersion: v2
+    appVersion: 0.7.1
+    created: "2026-09-04T04:32:59.986081843Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: 7bb672a2e173c93a5481eb50079d81eaba41a88b61931075ccf40a6dbfc7e7e8
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.7.1.tgz
+    version: 0.7.1
+  - apiVersion: v2
+    appVersion: 0.7.1-dev
+    created: "2026-09-04T04:32:59.979139686Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: be6c856d509e19dcd53642315802a5cfa0081ed3f14de283b83813b5496d2ba2
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.7.1-dev.tgz
+    version: 0.7.1-dev
+  - apiVersion: v2
+    appVersion: 0.7.0
+    created: "2026-09-04T04:32:59.973236592Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: 82d5607661b223cb8fdaca4e59fc5aeb6230f8bac55f4be767bd6a4c4451b6f3
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.7.0.tgz
+    version: 0.7.0
+  - apiVersion: v2
+    appVersion: 0.6.1-dev
+    created: "2026-09-04T04:32:59.967569424Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: 59e46db9794aa4e7855e3c120437148843f05b0a01b7f09e49676e6661163065
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.6.1-dev.tgz
+    version: 0.6.1-dev
+  - apiVersion: v2
+    appVersion: 0.6.0
+    created: "2026-09-04T04:32:59.961904481Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: ddbac1049d0db47408a96b14979bbd86523f83568b753d0f0e1b4e18f8aaf7aa
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.6.0.tgz
+    version: 0.6.0
+  - apiVersion: v2
+    appVersion: 0.5.1-dev
+    created: "2026-09-04T04:32:59.95658943Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: 670afcf1353bb7f880dd30f04bb1034ff40d45768d277012e4489f534324e8fe
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.5.1-dev.tgz
+    version: 0.5.1-dev
+  - apiVersion: v2
+    appVersion: 0.5.0
+    created: "2026-09-04T04:32:59.951247295Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: e07119e00ab8be5dc4c9b8d1efef2371fd60acc6e7d8adb4d7d36af745f11fbe
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.5.0.tgz
+    version: 0.5.0
+  - apiVersion: v2
+    appVersion: 0.4.8-dev
+    created: "2026-09-04T04:32:59.946028477Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: 4a6a24442625e5ea87bb5b8bff4da86337230ea5b4f60145ecb0f0ac7ba9711b
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.4.8-dev.tgz
+    version: 0.4.8-dev
+  - apiVersion: v2
+    appVersion: 0.4.7
+    created: "2026-09-04T04:32:59.940509965Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: 1f928d3ddb57fff0944a4df2b1dd006b92752c8f63342d8759f67cb9663e125d
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.4.7.tgz
+    version: 0.4.7
+  - apiVersion: v2
+    appVersion: 0.4.7-dev
+    created: "2026-09-04T04:32:59.93545173Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: f96a736a549c6af0d1adece738b05473de100bf8b7fc35d4c41508c6de9f9941
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.4.7-dev.tgz
+    version: 0.4.7-dev
+  - apiVersion: v2
+    appVersion: 0.4.6
+    created: "2026-09-04T04:32:59.930315292Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: 0a4c4b4e55a4baea8d064d13d6ae23649c64cb6e93e8190b500a7dd4b620a111
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.4.6.tgz
+    version: 0.4.6
+  - apiVersion: v2
+    appVersion: 0.4.5
+    created: "2026-09-04T04:32:59.924459307Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: 3b8f06ce23918637825e247548fed93ad506b79c082a88f2d56c5f596716d854
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.4.5.tgz
+    version: 0.4.5
+  - apiVersion: v2
+    appVersion: 0.4.5-dev
+    created: "2026-09-04T04:32:59.9191859Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: 0659228fa3f1ab2a095b0ac0f479f625a471f6f9563a1aa3df0a92e1360dcce2
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.4.5-dev.tgz
+    version: 0.4.5-dev
+  - apiVersion: v2
+    appVersion: 0.4.4
+    created: "2026-09-04T04:32:59.914127868Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: 8318d040afb66ba93fb61a520b983e31421a07f2738fd3cb4f259cd9dceefd17
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.4.4.tgz
+    version: 0.4.4
+  - apiVersion: v2
+    appVersion: 0.4.3
+    created: "2026-09-04T04:32:59.909021794Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: a7dc7ef6d9368783bb79a4cc079955ebaed43ce8f135f61f23fb5f16e09f290f
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.4.3.tgz
+    version: 0.4.3
+  - apiVersion: v2
+    appVersion: 0.4.2
+    created: "2026-09-04T04:32:59.903989448Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: 1c1e4c54254f3b015dcd83e076098d40267e1768ffefbd7633eeece0c6d33d7c
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.4.2.tgz
+    version: 0.4.2
+  - apiVersion: v2
+    appVersion: 0.4.2-dev
+    created: "2026-09-04T04:32:59.898955553Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: 297b2a43aa918313b4bf1ad18fd216ea0d8f882230e6234522327fc072edbab6
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.4.2-dev.tgz
+    version: 0.4.2-dev
+  - apiVersion: v2
+    appVersion: 0.4.1
+    created: "2026-09-04T04:32:59.893864458Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: ae8965f24620110658b6b36043aab7d69e1877c4e004104aa0304ffcd89bfd05
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.4.1.tgz
+    version: 0.4.1
+  - apiVersion: v2
+    appVersion: 0.4.0
+    created: "2026-09-04T04:32:59.888787876Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: 02a6b4879af44a246c39f50f05b618cb9c951415e8182ca06deb340608618111
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.4.0.tgz
+    version: 0.4.0
+  - apiVersion: v2
+    appVersion: 0.3.2-dev
+    created: "2026-09-04T04:32:59.883733178Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: bda7d3a341be7ad44bd3a1cee5011e2cc6fc8f6cca105e5b66af3f03da63bbdd
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.3.2-dev.tgz
+    version: 0.3.2-dev
+  - apiVersion: v2
+    appVersion: 0.3.1
+    created: "2026-09-04T04:32:59.878603641Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: 59e20b7b00bfc34110e37e45351f9b5f85c9bff85ba19fd72e23225fa6cc5e0a
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.3.1.tgz
+    version: 0.3.1
+  - apiVersion: v2
+    appVersion: 0.3.1-dev
+    created: "2026-09-04T04:32:59.873538645Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: b2688534199f66f715a975575365dbab993482909693a9167ea2833e8a46a69a
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.3.1-dev.tgz
+    version: 0.3.1-dev
+  - apiVersion: v2
+    appVersion: 0.3.0
+    created: "2026-09-04T04:32:59.868507573Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: 4016e0a8d60d60ff11e496652bdcdd258ba0241256c0d06833f46c8b1a2a96fe
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.3.0.tgz
+    version: 0.3.0
+  - apiVersion: v2
+    appVersion: 0.2.8-dev
+    created: "2026-09-04T04:32:59.86339122Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: 0b5d4f8a5aeb9c305d978c155137fa0ceaede97a5ca5d0e1e2be35139c0b92f4
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.2.8-dev.tgz
+    version: 0.2.8-dev
+  - apiVersion: v2
+    appVersion: 0.2.7
+    created: "2026-09-04T04:32:59.858353389Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: 230307acf8e560947e00924c5652ea28a34b9948eae9060284a291d2ca688c9c
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.2.7.tgz
+    version: 0.2.7
+  - apiVersion: v2
+    appVersion: 0.2.7-dev
+    created: "2026-09-04T04:32:59.853294814Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: fdcc6c50a49b5b892b5a6c8e9cb2b2a7953e220424dd6a2d079351511d6eaef6
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.2.7-dev.tgz
+    version: 0.2.7-dev
+  - apiVersion: v2
+    appVersion: 0.2.6
+    created: "2026-09-04T04:32:59.84815213Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: 4b550abfa5baacfc5d82004fbc6fc5d38159d7460aac9cf3d8f90301777f132f
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.2.6.tgz
+    version: 0.2.6
+  - apiVersion: v2
+    appVersion: 0.2.6-dev
+    created: "2026-09-04T04:32:59.843043896Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: c5fc7b59885499050d87e8920d9e5fd4784725104739f3726c16e2eb34f74a54
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.2.6-dev.tgz
+    version: 0.2.6-dev
+  - apiVersion: v2
+    appVersion: 0.2.5
+    created: "2026-09-04T04:32:59.837988173Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: b4e3d4ac381b8dbbd1128fbb96c62e82f565bacdba3444a5d0c969b9b0532697
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.2.5.tgz
+    version: 0.2.5
+  - apiVersion: v2
+    appVersion: 0.2.5-dev
+    created: "2026-09-04T04:32:59.832446913Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: 9d83a698b712e8619c6be1994c4068949f11afaf79a5ef0e53b1fdab6265458b
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.2.5-dev.tgz
+    version: 0.2.5-dev
+  - apiVersion: v2
+    appVersion: 0.2.4
+    created: "2026-09-04T04:32:59.827031414Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: 75325fc50efb6d40df73af68ee420796845c957fe2cbb5cf77cdb4328e8e3b52
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.2.4.tgz
+    version: 0.2.4
+  - apiVersion: v2
+    appVersion: 0.2.4-dev
+    created: "2026-09-04T04:32:59.82201434Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: 43db118aedc87b54a0826d2d759bde81a8af307eac1ffa01f3f85752c5fd0dac
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.2.4-dev.tgz
+    version: 0.2.4-dev
+  - apiVersion: v2
+    appVersion: 0.2.3
+    created: "2026-09-04T04:32:59.816717089Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: e0f5e6d926c5955aca2c21b5fc4992d2e84cb7e6dee44ecc2c9755fdb923b159
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.2.3.tgz
+    version: 0.2.3
+  - apiVersion: v2
+    appVersion: 0.2.2
+    created: "2026-09-04T04:32:59.811723242Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: 2f18bc80e15d11d721e718e8d74fc3cf8f9f9f7449b73531de8502bbae5f7370
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.2.2.tgz
+    version: 0.2.2
+  - apiVersion: v2
+    appVersion: 0.2.2-dev
+    created: "2026-09-04T04:32:59.806703598Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: b7057e4da3a95d04e19bc4f2b091517ad766daf7dbbaa6b4fa47d6c55deea2ef
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.2.2-dev.tgz
+    version: 0.2.2-dev
+  - apiVersion: v2
+    appVersion: 0.2.1
+    created: "2026-09-04T04:32:59.801636135Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: 79cfe472fb03893581cf4b6dc50c0203c58c15e0fdef3285131642160c93f02d
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.2.1.tgz
+    version: 0.2.1
+  - apiVersion: v2
+    appVersion: 0.2.1-dev
+    created: "2026-09-04T04:32:59.796610649Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: 1420f231054a8cdd35d181f607b077f64c6fcdeb71e17654b0ddfce57fea8f72
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.2.1-dev.tgz
+    version: 0.2.1-dev
+  - apiVersion: v2
+    appVersion: 0.2.0
+    created: "2026-09-04T04:32:59.791521474Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: 30a37f9c63012eac3f72073058c8ad92909d3d3832cb949b1908763cee197808
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.2.0.tgz
+    version: 0.2.0
+  - apiVersion: v2
+    appVersion: 0.1.5-dev
+    created: "2026-09-04T04:32:59.786428849Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: 14e1e92cb99a2eadf3ceab1574e5abde8ed5e90a5a1aef876644c0353cf882b9
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.1.5-dev.tgz
+    version: 0.1.5-dev
+  - apiVersion: v2
+    appVersion: 0.1.4
+    created: "2026-09-04T04:32:59.781104913Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: 6b68fe274bb5a17f8b1c4325d7b5da161f609c0b1f810b618ea29dc207df094a
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.1.4.tgz
+    version: 0.1.4
+  - apiVersion: v2
+    appVersion: v0.1.4-dev
+    created: "2026-09-04T04:33:00.018255621Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: 6d64cda37e1f0f08cff3bd0521cfecda01784aa230f96eed2956a712058c3118
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-v0.1.4-dev.tgz
+    version: v0.1.4-dev
+  - apiVersion: v2
+    appVersion: 0.1.4-dev
+    created: "2026-09-04T04:32:59.776024734Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: 9dd21124e36f6f6d19017a420268d42feea7b8a4de5eaaabf7649c9ea05fa0af
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.1.4-dev.tgz
+    version: 0.1.4-dev
+  - apiVersion: v2
+    appVersion: 0.1.3
+    created: "2026-09-04T04:32:59.770874529Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: 79107690393bdd4fef2e68e2dc47d43809e55840985c1a5f2c2a08a2778b4f4f
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.1.3.tgz
+    version: 0.1.3
+  - apiVersion: v2
+    appVersion: 0.1.3-dev
+    created: "2026-09-04T04:32:59.765864156Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: ad4cd534745a32b33805fe51cb92057898d1849c8c335f00d71f6601b9542d2b
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.1.3-dev.tgz
+    version: 0.1.3-dev
+  - apiVersion: v2
+    appVersion: 0.1.2
+    created: "2026-09-04T04:32:59.760565671Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: 2ffea68525ff643dfa39cd5b306880178be4160d78de4675e9b61ec4e20ca6f5
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.1.2.tgz
+    version: 0.1.2
+  - apiVersion: v2
+    appVersion: 0.0.98
+    created: "2026-09-04T04:32:59.755250805Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: cb8dd0911e7fee5b398940367571fe58605a0a8fd06e6f960a0671ecde2755e3
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.0.98.tgz
+    version: 0.0.98
+  - apiVersion: v2
+    appVersion: 0.0.2-dev
+    created: "2026-09-04T04:32:59.7490997Z"
+    description: Kubernetes operator for managing AI agents with A2A protocol support
+    digest: d890a910dba74aef03b76d390c6e2793beeba8a4f47ed33743d3328846be6dbf
+    home: https://github.com/axsaucedo/kaos
+    keywords:
+    - kubernetes
+    - operator
+    - ai
+    - agents
+    - a2a
+    - mcp
+    maintainers:
+    - name: axsaucedo
+      url: https://github.com/axsaucedo
+    name: kaos-operator
+    sources:
+    - https://github.com/axsaucedo/kaos
+    type: application
+    urls:
+    - https://axsaucedo.github.io/kaos/charts/kaos-operator-0.0.2-dev.tgz
+    version: 0.0.2-dev
+generated: "2026-09-04T04:32:59.742129789Z"
