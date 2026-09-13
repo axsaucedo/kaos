@@ -775,6 +775,57 @@ spec:
                     pattern: ^([0-9]+(h|m|s|ms)){1,4}$
                     type: string
                 type: object
+              harness:
+                description: |-
+                  Harness deploys this agent as a coding harness (e.g. pi, Claude Code)
+                  instead of the default agent runtime.
+                properties:
+                  runtime:
+                    description: |-
+                      Runtime keys into the kaos-harness-runtimes ConfigMap. Deliberately an
+                      unconstrained string (no Enum) - same as MCPServer.Spec.Runtime.
+                    type: string
+                  workspace:
+                    description: Workspace optionally clones a git repo into /workspace
+                      before start.
+                    properties:
+                      branch:
+                        description: 'Branch is the branch to clone (default: "main").'
+                        type: string
+                      credentialsSecretRef:
+                        description: CredentialsSecretRef supplies a token for clone/push
+                          (optional).
+                        properties:
+                          key:
+                            description: The key of the secret to select from.  Must
+                              be a valid secret key.
+                            type: string
+                          name:
+                            default: ""
+                            description: |-
+                              Name of the referent.
+                              This field is effectively required, but due to backwards compatibility is
+                              allowed to be empty. Instances of this type with an empty value here are
+                              almost certainly wrong.
+                              More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                            type: string
+                          optional:
+                            description: Specify whether the Secret or its key must
+                              be defined
+                            type: boolean
+                        required:
+                        - key
+                        type: object
+                        x-kubernetes-map-type: atomic
+                      repoURL:
+                        description: RepoURL is the https git URL to clone.
+                        type: string
+                    required:
+                    - repoURL
+                    type: object
+                required:
+                - runtime
+                type: object
               mcpServers:
                 description: MCPServers is a list of MCPServer names this agent can
                   use

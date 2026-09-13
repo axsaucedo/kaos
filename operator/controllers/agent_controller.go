@@ -38,8 +38,9 @@ const exchangeReflectionName = "kaos-token-exchange-reflection"
 // AgentReconciler reconciles an Agent object
 type AgentReconciler struct {
 	client.Client
-	Log    logr.Logger
-	Scheme *runtime.Scheme
+	Log             logr.Logger
+	Scheme          *runtime.Scheme
+	SystemNamespace string
 }
 
 //+kubebuilder:rbac:groups=kaos.tools,resources=agents,verbs=get;list;watch;create;update;patch;delete
