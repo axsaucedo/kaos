@@ -23,7 +23,7 @@ func TestContainerOverrideAppliesSecurityContextWorkingDirAndMounts(t *testing.T
 			{Name: "extra", MountPath: "/extra"},
 		},
 	}
-	deployment, err := (&AgentReconciler{}).constructDeployment(agent, &kaosv1alpha1.ModelAPI{}, nil, nil, "", "", "")
+	deployment, err := (&AgentReconciler{}).constructDeployment(agent, &kaosv1alpha1.ModelAPI{}, nil, nil, "", "", "", nil)
 	if err != nil {
 		t.Fatalf("constructDeployment: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestContainerOverrideLeavesFieldsUnsetWhenEmpty(t *testing.T) {
 	agent := newAgent("demo", "coder")
 	agent.Spec.Container = &kaosv1alpha1.ContainerOverride{Image: "example/custom:1"}
 
-	deployment, err := (&AgentReconciler{}).constructDeployment(agent, &kaosv1alpha1.ModelAPI{}, nil, nil, "", "", "")
+	deployment, err := (&AgentReconciler{}).constructDeployment(agent, &kaosv1alpha1.ModelAPI{}, nil, nil, "", "", "", nil)
 	if err != nil {
 		t.Fatalf("constructDeployment: %v", err)
 	}
