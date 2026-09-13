@@ -7,9 +7,11 @@ pod from a pydantic-ai one.
 
 import concurrent.futures as cf
 import json
+import os
 import time
 
 import httpx
+import pytest
 
 # --- operator-facing: agent_controller.go sets these two probes ---------------
 
@@ -238,7 +240,9 @@ def test_memory_sessions_listed(driver):
 
 
 def test_usage_is_recorded(driver):
-    """pi's rpc stream reports per-message usage and cost; `-p` would not."""
+    """pi's rpc stream reports per-message usage and cost; `claude -p` does not."""
+    if os.environ.get("HARNESS_DRIVER", "pi") != "pi":
+        pytest.skip("usage accounting is only available on pi's rpc stream")
     events = httpx.get(
         f"{driver}/memory/events", params={"session_id": "sess-stream"}, timeout=5
     ).json()["events"]

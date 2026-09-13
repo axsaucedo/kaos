@@ -145,7 +145,13 @@ fails. `pi` is an npm package, so point `HARNESS_BIN` at a local install:
 
 ```bash
 HARNESS_BIN=/path/to/node_modules/.bin/pi uv run pytest tests/ -v
+
+# The same suite runs against any adapter
+HARNESS_DRIVER=claude HARNESS_BIN=$(command -v claude) uv run pytest tests/ -v
 ```
+
+Verified locally: **23 passed** with `pi` 0.84.2, and **22 passed / 1 skipped**
+with Claude Code (the skip is usage accounting, which `claude -p` cannot report).
 
 ## Image
 
