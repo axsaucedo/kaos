@@ -1232,6 +1232,15 @@ func containerOverrideToPodSpecPatch(override kaosv1alpha1.ContainerOverride) co
 	if len(override.Env) > 0 {
 		c.Env = override.Env
 	}
+	if override.SecurityContext != nil {
+		c.SecurityContext = override.SecurityContext
+	}
+	if override.WorkingDir != "" {
+		c.WorkingDir = override.WorkingDir
+	}
+	if len(override.VolumeMounts) > 0 {
+		c.VolumeMounts = override.VolumeMounts
+	}
 	return corev1.PodSpec{
 		Containers: []corev1.Container{c},
 	}

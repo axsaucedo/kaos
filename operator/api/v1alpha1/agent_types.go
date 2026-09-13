@@ -31,6 +31,18 @@ type ContainerOverride struct {
 	// Env sets environment variables
 	// +kubebuilder:validation:Optional
 	Env []corev1.EnvVar `json:"env,omitempty"`
+
+	// SecurityContext overrides the container security context
+	// +kubebuilder:validation:Optional
+	SecurityContext *corev1.SecurityContext `json:"securityContext,omitempty"`
+
+	// WorkingDir overrides the container working directory
+	// +kubebuilder:validation:Optional
+	WorkingDir string `json:"workingDir,omitempty"`
+
+	// VolumeMounts adds volume mounts to the container
+	// +kubebuilder:validation:Optional
+	VolumeMounts []corev1.VolumeMount `json:"volumeMounts,omitempty"`
 }
 
 // +kubebuilder:object:generate=true
