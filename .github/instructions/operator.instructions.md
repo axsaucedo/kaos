@@ -38,7 +38,7 @@ If any changes are introduced, this documentation must be updated accordingly.
 
 ## Authorization
 
-Agent authorization is enforced by Envoy Gateway JWT verification followed by the fail-closed `kaos-pdp` gRPC external authorizer. `AuthzProjectionReconciler` (`operator/controllers/authz_projection_controller.go`) projects `policy.rego` and `data.json` from CRDs in automated mode; manual mode preserves administrator-owned data. The published contract is `data.kaos.grants`, issuer-keyed `data.kaos.jwks`, and `data.kaos.agents`. Exactly one identity provider is active: `serviceaccount`, `aib`, or `oidc`. Optional token exchange uses AIB-native service and permission-set administration; the operator polls AIB and reflects bindings into generated egress routes and per-Agent runtime targets. See `operator/internal/authz/data-schema.md` and `docs/security/authorization.md`.
+Agent authorization is enforced by Envoy Gateway JWT verification followed by the fail-closed `kaos-pdp` gRPC external authorizer. `AuthzProjectionReconciler` (`operator/controllers/authz_projection_controller.go`) projects `policy.rego` and `data.json` from CRDs in automated mode; manual mode preserves administrator-owned data. The published contract is `data.kaos.grants`, issuer-keyed `data.kaos.jwks`, and `data.kaos.agents`. Exactly one identity provider is active: `serviceaccount`, `aib`, or `oidc`. AIB uses RFC 8414 discovery and may resolve the CLI-seeded `kaos-identity` permission set for public v0.1.8 registration. Token exchange requires a separately deployed extProc sidecar; the public chart does not provide it. See `operator/internal/authz/data-schema.md` and `docs/security/authorization.md`.
 
 ## Key Commands
 ```bash

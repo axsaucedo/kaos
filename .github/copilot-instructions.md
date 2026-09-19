@@ -109,7 +109,7 @@ tmp/                       # Local work files (gitignored)
 - **MemoryStore**: central memory service backing long-term semantic memory (local or external pgvector storage; external defaults to 2 replicas + PDB; summarization/embedding model refs; `--pgvector-memory-enabled` installs dev Postgres)
 
 ## Authorization (optional, enabled by auth flags)
-Envoy Gateway verifies agent JWTs and calls the fail-closed `kaos-pdp` OPA Service over gRPC external authorization. `AuthzProjectionReconciler` projects `policy.rego` plus `data.json` from CRDs; the published data contract is `data.kaos.grants`, issuer-keyed `data.kaos.jwks`, and `data.kaos.agents`. Select agent identity with `--agent-auth-enabled` (`service-account`, `aib`, or `keycloak`) and user identity with `--user-auth-enabled` (`keycloak` or `none`). Keycloak agent identity uses OIDC DCR; provision its initial-access token in the referenced Secret before the operator starts. See `docs/security/authorization.md`.
+Envoy Gateway verifies agent JWTs and calls the fail-closed `kaos-pdp` OPA Service over gRPC external authorization. `AuthzProjectionReconciler` projects `policy.rego` plus `data.json` from CRDs; the published data contract is `data.kaos.grants`, issuer-keyed `data.kaos.jwks`, and `data.kaos.agents`. Select agent identity with `--agent-auth-enabled` (`service-account`, `aib`, or `keycloak`) and user identity with `--user-auth-enabled` (`keycloak` or `none`). AIB uses RFC 8414 discovery and the CLI-seeded `kaos-identity` bridge required by public v0.1.8. Keycloak agent identity uses OIDC DCR; provision its initial-access token in the referenced Secret before the operator starts. See `docs/security/authorization.md`.
 
 ## Key Files
 - `operator/api/v1alpha1/*_types.go`: CRD schemas
