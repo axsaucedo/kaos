@@ -7,6 +7,8 @@ import tempfile
 from pathlib import Path
 import typer
 
+from kaos_cli.utils.wait import wait_for_deployment_available
+
 
 AGENT_TEMPLATE = """apiVersion: kaos.tools/v1alpha1
 kind: Agent
@@ -184,16 +186,9 @@ def deploy_agent(
         # Wait for deployment if requested
         if wait:
             typer.echo("⏳ Waiting for deployment to be available...")
-            wait_args = [
-                "kubectl",
-                "wait",
-                f"deployment/agent-{name}",
-                "--for=condition=available",
-                f"--timeout={wait_timeout}s",
-            ]
-            if namespace:
-                wait_args.extend(["-n", namespace])
-            wait_result = subprocess.run(wait_args, capture_output=True, text=True)
+            wait_result = wait_for_deployment_available(
+                f"agent-{name}", namespace, wait_timeout
+            )
             if wait_result.returncode != 0:
                 typer.echo(wait_result.stderr or wait_result.stdout, err=True)
                 sys.exit(wait_result.returncode)

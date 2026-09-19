@@ -278,5 +278,20 @@ jobs:
           kubectl logs -n kaos-system -l app.kubernetes.io/name=kaos-operator --tail=100 || true
           echo "=== All Pods ==="
           kubectl get pods -A
+          echo "=== Unhealthy Pods (describe + logs) ==="
+          # When a workload pod never becomes ready the event stream only reports
+          # *that* it restarted, never why. The container's own output is the part
+          # that identifies the cause, and --previous is what reaches it once the
+          # pod is in CrashLoopBackOff.
+          kubectl get pods -A --no-headers 2>/dev/null \
+            | awk '$4 != "Completed" && $4 != "Succeeded" { split($3, r, "/"); if ($4 != "Running" || (r[1] + 0) < (r[2] + 0)) print $1, $2 }' \
+            | while read -r ns pod; do
+                echo "--- describe $ns/$pod ---"
+                kubectl describe pod -n "$ns" "$pod" 2>&1 | tail -40 || true
+                echo "--- logs $ns/$pod (current) ---"
+                kubectl logs -n "$ns" "$pod" --all-containers --tail=100 2>&1 || true
+                echo "--- logs $ns/$pod (previous) ---"
+                kubectl logs -n "$ns" "$pod" --all-containers --previous --tail=100 2>&1 || true
+              done
           echo "=== Events ==="
           kubectl get events -A --sort-by='.lastTimestamp' | tail -50

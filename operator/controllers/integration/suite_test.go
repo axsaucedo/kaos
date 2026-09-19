@@ -85,7 +85,7 @@ runtimes:
     transport: http
   kubernetes:
     type: go
-    image: quay.io/containers/kubernetes_mcp_server:latest
+    image: quay.io/containers/kubernetes_mcp_server:v0.0.67
     args: ["--port", "8000"]
     transport: http
   slack:
