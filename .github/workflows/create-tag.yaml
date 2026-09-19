@@ -21,9 +21,15 @@ on:
         description: 'Version to tag, without the leading v (e.g. 0.7.2)'
         required: true
         type: string
+      allow_red_ci:
+        description: 'Tag even if CI on main is not green (use only when you know why)'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: write
+  actions: read
 
 jobs:
   create-tag:
@@ -53,6 +59,35 @@ jobs:
             exit 1
           fi
           echo "✓ Tag $TAG is free"
+
+      # A tag is what release.yaml reads its version from, so tagging a red main
+      # spends a version number on a release that cannot finish. That is how
+      # v0.7.5 and v0.7.6 became tags with no release behind them.
+      #
+      # Each workflow's most recent run on main is checked, at whatever commit it
+      # last ran. Path filters mean not every workflow runs on every commit, so
+      # requiring a run at this exact SHA would fail on almost every tag.
+      - name: Require green CI on main
+        if: ${{ !inputs.allow_red_ci }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          FAILED=0
+          for WF in e2e-tests.yaml go-tests.yaml python-tests.yaml kaos-ui-tests.yaml; do
+            CONCLUSION="$(gh run list --workflow="$WF" --branch main --status completed \
+              --limit 1 --json conclusion --jq '.[0].conclusion // "no-runs"')"
+            if [ "$CONCLUSION" = "success" ]; then
+              echo "✓ $WF: success"
+            else
+              echo "::error::$WF on main is '$CONCLUSION'"
+              FAILED=1
+            fi
+          done
+          if [ "$FAILED" -ne 0 ]; then
+            echo "::error::Refusing to tag while CI on main is not green. Re-run with allow_red_ci to override."
+            exit 1
+          fi
+          echo "✓ CI on main is green"
 
       - name: Create and push tag
         run: |

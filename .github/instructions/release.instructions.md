@@ -109,7 +109,14 @@ Both packages use [OIDC trusted publishing](https://docs.pypi.org/trusted-publis
 
 ## Pre-Release Checklist
 
-1. Ensure all tests pass on main (check latest CI run)
+0. Write `.github/release-notes/vX.Y.Z.md` (see Release Notes Standard below)
+1. Ensure all tests pass on main — `create-tag.yaml` now enforces this and refuses
+   to tag unless the most recent completed run of `e2e-tests`, `go-tests`,
+   `python-tests` and `kaos-ui-tests` on main succeeded. Override with the
+   `allow_red_ci` input only when you know why the red run does not apply.
+   This guard exists because a tag is what `release.yaml` reads its version from,
+   so tagging a red main spends a version number on a release that cannot finish —
+   which is how v0.7.5 and v0.7.6 became tags with no release behind them.
 2. Verify PyPI trusted publisher configs match `release.yaml` filename
 3. Verify `pypi` environment exists in repo settings
 4. Verify Docker Hub credentials are valid
@@ -164,10 +171,13 @@ One or two short paragraphs describing the release as a coherent product, operat
 ## Highlights
 - Group related changes by user-visible outcome or operational impact.
 - Mention compatibility, migration, or validation notes when relevant.
-
-## Generated changelog
-<GitHub-generated notes / PR list>
 ```
+
+Write that into `.github/release-notes/vX.Y.Z.md` **before tagging**, ideally in the PR that prepares the release so the notes are reviewed with the code. `create-release` passes the matching file to `softprops/action-gh-release` as `body_path`, which pre-pends it to the generated notes — so the file holds the overview only and must **not** contain a "Generated changelog" section.
+
+A missing file is not an error; the release publishes with generated notes alone. Preparing the file is the only way to get an overview onto a release without editing it afterwards, which matters because a Claude Code cloud session has no release-write capability (`mcp__github__*` exposes only release *read* tools).
+
+These files live outside `docs/` deliberately: VitePress builds every `.md` under `docs/` into a deployed page, and release notes are not site content.
 
 When updating historical releases, preserve the original generated notes and assets. Add the semantic overview using evidence from the generated changelog, merged PRs, commits between adjacent tags, and changed files. If older releases lack enough context, say that the release is summarized from the available changelog rather than inventing detail.
 
