@@ -208,6 +208,14 @@ def install_command(
         typer.echo("See: https://helm.sh/docs/intro/install/", err=True)
         sys.exit(1)
 
+    if token_exchange_enabled:
+        typer.echo(
+            "Error: token exchange with public AIB v0.1.8 requires a separately "
+            "deployed extProc sidecar; this install path is deferred.",
+            err=True,
+        )
+        raise typer.Exit(1)
+
     # Phase 1: Kick off all infra installs (no waiting)
     if metallb_enabled:
         if not _install_metallb():
@@ -248,8 +256,7 @@ def install_command(
                 keycloak_namespace, keycloak_release
             )
 
-        # Install the identity broker from a local chart when provided (it is
-        # unpublished, so a chart path is required to install it here).
+        # Install the broker from the public chart checkout when provided.
         if (identity_provider == "aib" or token_exchange_enabled) and aib_chart_path:
             if token_exchange_enabled:
                 keycloak_issuer = user_auth_issuer or _default_user_auth_issuer(
@@ -432,6 +439,11 @@ def install_command(
                 policy_rego_override=policy_rego_override,
                 policy_configmap_name=policy_configmap_name or "",
                 policy_configmap_namespace=policy_configmap_namespace or "",
+                default_permission_set=(
+                    "kaos-identity"
+                    if identity_provider == "aib" and aib_chart_path
+                    else ""
+                ),
             )
         )
         if token_exchange_enabled:

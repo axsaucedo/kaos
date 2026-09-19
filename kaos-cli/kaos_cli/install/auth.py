@@ -1,8 +1,12 @@
 """Authentication provider installation and Helm argument helpers."""
 
 import json
+from urllib.parse import urlsplit
 
+import httpx
 import typer
+
+from kaos_cli.cluster_http import local_service_url
 
 from . import (
     AUTH_ADMIN_PORT, AUTH_ENDUSER_PORT, DEFAULT_AGENT_AUTH_AUDIENCE,
@@ -64,6 +68,7 @@ def _build_auth_operator_args(
     policy_rego_override: bool = False,
     policy_configmap_name: str = "",
     policy_configmap_namespace: str = "",
+    default_permission_set: str = "",
 ) -> list[str]:
     """Build the operator Helm --set arguments that enable agent-auth wiring.
 
@@ -101,6 +106,14 @@ def _build_auth_operator_args(
         )
     if identity_provider == "aib" and admin_url:
         args.extend(["--set", f"security.agentAuth.adminUrl={admin_url}"])
+        if default_permission_set:
+            args.extend(
+                [
+                    "--set",
+                    "security.agentAuth.defaultPermissionSet="
+                    f"{default_permission_set}",
+                ]
+            )
     if identity_provider == "oidc" and oidc_registration_secret_name:
         args.extend(
             [
@@ -180,7 +193,7 @@ def _install_aib(
     wait: bool,
     extra_set: list[str] | None = None,
 ) -> bool:
-    """Install the identity broker from a local chart (unpublished/dev path)."""
+    """Install the public identity-broker chart from a local v0.1.8 checkout."""
     typer.echo("Installing identity broker...")
     helm_args = [
         "upgrade",
@@ -203,7 +216,106 @@ def _install_aib(
         typer.echo(f"Error installing identity broker: {result.stderr}", err=True)
         return False
 
+    if not _seed_aib_identity_bootstrap(namespace, release):
+        return False
+
     typer.echo(f"✅ Identity broker installed in '{namespace}' namespace")
+    return True
+
+
+AIB_BOOTSTRAP_SERVICE = "kaos-identity-placeholder"
+AIB_BOOTSTRAP_PERMISSION_SET = "kaos-identity"
+AIB_BOOTSTRAP_DESCRIPTION = (
+    "KAOS identity-only bootstrap; remove once AIB allows agents without permission sets"
+)
+
+
+def _items(response: httpx.Response) -> list[dict]:
+    response.raise_for_status()
+    payload = response.json()
+    return payload if isinstance(payload, list) else payload.get("items", [])
+
+
+def _seed_aib_identity_bootstrap(namespace: str, release: str) -> bool:
+    """Idempotently seed the public AIB permission-set registration bridge."""
+    rollout = _root()._run_kubectl(
+        [
+            "rollout",
+            "status",
+            f"deployment/{_auth_broker_fullname(release)}",
+            "-n",
+            namespace,
+            "--timeout=120s",
+        ],
+        check=False,
+    )
+    if rollout.returncode != 0:
+        typer.echo(f"Error waiting for identity broker: {rollout.stderr}", err=True)
+        return False
+
+    admin_url = _default_auth_admin_url(namespace, release)
+    headers = {
+        "Host": urlsplit(admin_url).netloc,
+        "X-Remote-User": "kaos-operator",
+    }
+    try:
+        with local_service_url(admin_url) as local_url:
+            base = local_url.rstrip("/")
+            with httpx.Client(headers=headers, timeout=30.0) as client:
+                services = _items(client.get(f"{base}/services"))
+                service = next(
+                    (
+                        item
+                        for item in services
+                        if item.get("canonical_id") == AIB_BOOTSTRAP_SERVICE
+                        or item.get("display_name") == AIB_BOOTSTRAP_SERVICE
+                    ),
+                    None,
+                )
+                if service is None:
+                    response = client.post(
+                        f"{base}/services",
+                        json={
+                            "canonical_id": AIB_BOOTSTRAP_SERVICE,
+                            # AIB services have no description field, so the
+                            # descriptive marker lives in display_name.
+                            "display_name": AIB_BOOTSTRAP_DESCRIPTION,
+                            "client_id": AIB_BOOTSTRAP_SERVICE,
+                            "token_endpoint_auth_method": "none",
+                            "issuer_uri": "https://kaos-identity-placeholder.invalid",
+                            "discovery": {"enable_discovery": False},
+                            "endpoints": {
+                                "authorize_endpoint": "https://kaos-identity-placeholder.invalid/oauth2/authorize",
+                                "token_endpoint": "https://kaos-identity-placeholder.invalid/oauth2/token",
+                            },
+                            "scopes": [],
+                        },
+                    )
+                    response.raise_for_status()
+                    service = response.json()
+
+                permission_sets = _items(client.get(f"{base}/permission-sets"))
+                if not any(
+                    item.get("name") == AIB_BOOTSTRAP_PERMISSION_SET
+                    for item in permission_sets
+                ):
+                    response = client.post(
+                        f"{base}/permission-sets",
+                        json={
+                            "canonical_id": AIB_BOOTSTRAP_PERMISSION_SET,
+                            "name": AIB_BOOTSTRAP_PERMISSION_SET,
+                            "description": AIB_BOOTSTRAP_DESCRIPTION,
+                            "service_scopes": [
+                                {"service_id": service["id"], "scopes": []}
+                            ],
+                        },
+                    )
+                    response.raise_for_status()
+    except (httpx.HTTPError, KeyError, RuntimeError, ValueError) as exc:
+        typer.echo(f"Error seeding identity broker: {exc}", err=True)
+        return False
+
+    typer.echo("✅ Seeded AIB permission set 'kaos-identity'")
     return True
 
 def _build_aib_broker_public_url_args(public_url: str) -> list[str]:
@@ -224,50 +336,12 @@ def _build_token_exchange_aib_args(
     auth_release: str,
     keycloak_issuer: str,
 ) -> list[str]:
-    """Configure the self-managed AIB release for Keycloak-backed exchange."""
-    aib_issuer = _default_auth_issuer(auth_namespace, auth_release)
-    keycloak_token_endpoint = f"{keycloak_issuer}/protocol/openid-connect/token"
-    keycloak_authorize_endpoint = f"{keycloak_issuer}/protocol/openid-connect/auth"
-    extra_env = [
-        {"name": "EXTPROC_OAUTH2_ISSUER", "value": keycloak_issuer},
-        {"name": "EXTPROC_OAUTH2_CLIENT_ID", "value": DEFAULT_USER_AUTH_CLIENT_ID},
-        {
-            "name": "EXTPROC_OAUTH2_CLIENT_SECRET",
-            "value": DEFAULT_USER_AUTH_CLIENT_SECRET,
-        },
-        {"name": "EXTPROC_OAUTH2_CLIENT_ASSERTION_TYPE", "value": "access_token"},
-    ]
-    return [
-        "--set",
-        f"broker.server.enduser.publicUrl={aib_issuer}",
-        "--set",
-        "broker.oauth2AuthorizationServer.mode=proxy",
-        "--set",
-        f"broker.oauth2AuthorizationServer.proxy.upstreamIssuerUri={keycloak_issuer}",
-        "--set",
-        "broker.oauth2AuthorizationServer.proxy.upstreamAuthorizeEndpoint="
-        f"{keycloak_authorize_endpoint}",
-        "--set",
-        f"broker.oauth2AuthorizationServer.proxy.upstreamTokenEndpoint={keycloak_token_endpoint}",
-        "--set",
-        f"broker.tokenExchange.expectedAudience={DEFAULT_TOKEN_EXCHANGE_AUDIENCE}",
-        "--set",
-        "broker.tokenExchange.claimExtraction.principalExpression=subject_token.sub",
-        "--set",
-        "broker.tokenExchange.claimExtraction.agentIdExpression="
-        "resolveAgentIdByClientId(subject_token.azp)",
-        "--set",
-        "broker.tokenExchange.authorization.type=cel",
-        "--set",
-        "broker.tokenExchange.authorization.cel.expression="
-        f'client_assertion.azp == "{DEFAULT_USER_AUTH_CLIENT_ID}"',
-        "--set",
-        "extProc.enabled=true",
-        "--set",
-        f"extProc.oauth2.clientCredentialsEndpoint={keycloak_token_endpoint}",
-        "--set-json",
-        f"extProc.extraEnv={json.dumps(extra_env, separators=(',', ':'))}",
-    ]
+    """Reject chart-managed exchange until its extProc is deployed separately."""
+    del auth_namespace, auth_release, keycloak_issuer
+    raise ValueError(
+        "token exchange with public AIB v0.1.8 requires a separately deployed "
+        "extProc sidecar; chart-managed extProc is no longer supported"
+    )
 
 def _keycloak_realm_json(
     realm: str,
