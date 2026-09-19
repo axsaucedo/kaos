@@ -204,10 +204,15 @@ jobs:
           name: helm-chart
           path: ./charts
 
+      # body_path is pre-pended to the generated notes, giving the reviewed
+      # overview on top and the PR changelog beneath. A missing file is not an
+      # error: the action falls back to generated notes alone, so a release
+      # without prepared notes behaves exactly as it did before.
       - name: Create Release
         uses: softprops/action-gh-release@v3
         with:
           name: v${{ needs.validate.outputs.version }}
+          body_path: .github/release-notes/v${{ needs.validate.outputs.version }}.md
           generate_release_notes: true
           files: |
             ./charts/*.tgz
