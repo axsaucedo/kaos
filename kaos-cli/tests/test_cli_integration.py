@@ -1138,16 +1138,40 @@ def test_token_exchange_gateway_install_enables_backend_api():
     from kaos_cli.install import _install_gateway_api
 
     calls = []
+    kubectl_calls = []
 
     def fake_helm(args, check=False):
         calls.append(args)
         return SimpleNamespace(returncode=0, stdout="", stderr="")
 
-    with patch("kaos_cli.install.run_helm_command", side_effect=fake_helm):
+    def fake_kubectl(args, check=False, input=None):
+        kubectl_calls.append(args)
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    with patch("kaos_cli.install.run_helm_command", side_effect=fake_helm), patch(
+        "kaos_cli.install._run_kubectl", side_effect=fake_kubectl
+    ):
         assert _install_gateway_api(enable_backend=True)
 
     install_args = calls[-1]
     assert "config.envoyGateway.extensionApis.enableBackend=true" in install_args
+    assert kubectl_calls[-2:] == [
+        [
+            "rollout",
+            "restart",
+            "deployment/envoy-gateway",
+            "-n",
+            "envoy-gateway-system",
+        ],
+        [
+            "rollout",
+            "status",
+            "deployment/envoy-gateway",
+            "-n",
+            "envoy-gateway-system",
+            "--timeout=180s",
+        ],
+    ]
 
 
 class TestAuthWiring:

@@ -90,6 +90,32 @@ def _install_gateway_api(enable_backend: bool = False) -> bool:
         typer.echo(f"Error installing Envoy Gateway: {result.stderr}", err=True)
         return False
 
+    if enable_backend:
+        for args in (
+            [
+                "rollout",
+                "restart",
+                "deployment/envoy-gateway",
+                "-n",
+                "envoy-gateway-system",
+            ],
+            [
+                "rollout",
+                "status",
+                "deployment/envoy-gateway",
+                "-n",
+                "envoy-gateway-system",
+                "--timeout=180s",
+            ],
+        ):
+            rollout = _root()._run_kubectl(args, check=False)
+            if rollout.returncode != 0:
+                typer.echo(
+                    f"Error reloading Envoy Gateway Backend support: {rollout.stderr}",
+                    err=True,
+                )
+                return False
+
     typer.echo("✅ Envoy Gateway installed")
     return True
 
