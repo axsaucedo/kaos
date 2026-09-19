@@ -3,6 +3,7 @@ package adapters
 import (
 	"context"
 	"reflect"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -166,13 +167,36 @@ func TestReconcileOriginAttachesSecurityPolicy(t *testing.T) {
 
 func TestExtProcTargetsOnlyOperatorGeneratedEgressRoutes(t *testing.T) {
 	generated := &gatewayv1.HTTPRoute{ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "egress", Labels: managedRouteLabels("service-id")}}
-	policy, err := constructExtProcPolicy(generated, "extproc", "aib-system", 50051)
+	policy, err := constructExtProcPolicy(generated, "extproc", "aib-system", 50051, "https")
 	if err != nil {
 		t.Fatalf("generated route rejected: %v", err)
 	}
 	targets, _, _ := unstructuredNestedSlice(policy.Object, "spec", "targetRefs")
 	if targets[0].(map[string]any)["name"] != "egress" {
 		t.Fatalf("targetRefs = %#v", targets)
+	}
+	lua, _, _ := unstructuredNestedSlice(policy.Object, "spec", "lua")
+	if len(lua) != 1 {
+		t.Fatalf("lua filters = %#v, want one", lua)
+	}
+	inline := lua[0].(map[string]any)["inline"].(string)
+	for _, want := range []string{
+		`headers():get("authorization")`,
+		`metadata:set("aib.tokenexchange", "subject_token", subject_token)`,
+		`"resource_uri", "https://" .. authority .. path`,
+	} {
+		if !strings.Contains(inline, want) {
+			t.Errorf("Lua metadata producer missing %q:\n%s", want, inline)
+		}
+	}
+	extProc, _, _ := unstructuredNestedSlice(policy.Object, "spec", "extProc")
+	extProcConfig := extProc[0].(map[string]any)
+	if extProcConfig["failOpen"] != false {
+		t.Fatalf("extProc failOpen = %#v, want false", extProcConfig["failOpen"])
+	}
+	metadata := extProcConfig["metadata"].(map[string]any)
+	if !reflect.DeepEqual(metadata["accessibleNamespaces"], []any{"aib.tokenexchange"}) {
+		t.Fatalf("accessible metadata = %#v", metadata["accessibleNamespaces"])
 	}
 
 	for _, kind := range []string{"Agent", "MCPServer", "ModelAPI", "MemoryStore"} {
@@ -181,10 +205,13 @@ func TestExtProcTargetsOnlyOperatorGeneratedEgressRoutes(t *testing.T) {
 				Namespace: "demo", Name: "internal",
 				OwnerReferences: []metav1.OwnerReference{{APIVersion: "kaos.tools/v1alpha1", Kind: kind, Name: "internal"}},
 			}}
-			if policy, err := constructExtProcPolicy(internal, "extproc", "aib-system", 50051); err == nil || policy != nil {
+			if policy, err := constructExtProcPolicy(internal, "extproc", "aib-system", 50051, "https"); err == nil || policy != nil {
 				t.Fatalf("internal route accepted: policy=%#v err=%v", policy, err)
 			}
 		})
+	}
+	if policy, err := constructExtProcPolicy(generated, "extproc", "aib-system", 50051, "ftp"); err == nil || policy != nil {
+		t.Fatalf("invalid resource scheme accepted: policy=%#v err=%v", policy, err)
 	}
 }
 

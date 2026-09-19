@@ -336,7 +336,7 @@ func (p *ExchangeProjector) reconcileOrigin(ctx context.Context, owner *corev1.C
 		return fmt.Errorf("reconciling SecurityPolicy %s/%s: %w", owner.Namespace, name, err)
 	}
 
-	policy, err := constructExtProcPolicy(route, p.ExtProcName, p.ExtProcNamespace, p.ExtProcPort)
+	policy, err := constructExtProcPolicy(route, p.ExtProcName, p.ExtProcNamespace, p.ExtProcPort, origin.Scheme)
 	if err != nil {
 		return err
 	}
@@ -387,12 +387,15 @@ func constructExchangeRoute(namespace, serviceID string, origin exchangeOrigin, 
 
 // constructExtProcPolicy accepts only routes created by this reflector. This is
 // the safe-by-construction boundary that prevents attachment to internal routes.
-func constructExtProcPolicy(route *gatewayv1.HTTPRoute, backendName, backendNamespace string, backendPort int) (*unstructured.Unstructured, error) {
+func constructExtProcPolicy(route *gatewayv1.HTTPRoute, backendName, backendNamespace string, backendPort int, resourceScheme string) (*unstructured.Unstructured, error) {
 	if route.Labels[exchangeRouteLabel] != "true" || route.Labels[exchangeManagedLabel] != "true" {
 		return nil, fmt.Errorf("ext_proc can target only operator-generated third-party egress routes")
 	}
 	if backendName == "" || backendNamespace == "" || backendPort <= 0 {
 		return nil, fmt.Errorf("AIB ext_proc backend is incomplete")
+	}
+	if resourceScheme != "http" && resourceScheme != "https" {
+		return nil, fmt.Errorf("AIB ext_proc resource scheme must be http or https")
 	}
 	policy := &unstructured.Unstructured{}
 	policy.SetGroupVersionKind(extensionPolicyGVK)
@@ -401,12 +404,38 @@ func constructExtProcPolicy(route *gatewayv1.HTTPRoute, backendName, backendName
 	policy.SetLabels(route.Labels)
 	policy.Object["spec"] = map[string]any{
 		"targetRefs": []any{map[string]any{"group": "gateway.networking.k8s.io", "kind": "HTTPRoute", "name": route.Name}},
+		"lua": []any{map[string]any{
+			"type":   "Inline",
+			"inline": tokenExchangeMetadataLua(resourceScheme),
+		}},
 		"extProc": []any{map[string]any{
 			"backendRefs": []any{map[string]any{"group": "", "kind": "Service", "name": backendName, "namespace": backendNamespace, "port": int64(backendPort)}},
-			"failOpen":    false, "processingMode": map[string]any{"request": map[string]any{}},
+			"failOpen":    false,
+			"metadata": map[string]any{
+				"accessibleNamespaces": []any{"aib.tokenexchange"},
+			},
+			"processingMode": map[string]any{"request": map[string]any{}},
 		}},
 	}
 	return policy, nil
+}
+
+func tokenExchangeMetadataLua(resourceScheme string) string {
+	return fmt.Sprintf(`function envoy_on_request(handle)
+  local authorization = handle:headers():get("authorization")
+  if authorization == nil or string.lower(string.sub(authorization, 1, 7)) ~= "bearer " then
+    return
+  end
+  local subject_token = string.sub(authorization, 8)
+  local authority = handle:headers():get(":authority")
+  local path = handle:headers():get(":path")
+  if subject_token == "" or authority == nil or authority == "" or path == nil or path == "" then
+    return
+  end
+  local metadata = handle:streamInfo():dynamicMetadata()
+  metadata:set("aib.tokenexchange", "subject_token", subject_token)
+  metadata:set("aib.tokenexchange", "resource_uri", "%s://" .. authority .. path)
+end`, resourceScheme)
 }
 
 func reconcileExtProcReferenceGrant(ctx context.Context, c client.Client, sourceNamespace, backendNamespace, serviceName string) error {
