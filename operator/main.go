@@ -162,11 +162,12 @@ func main() {
 				getEnvWithDefault("AIB_PRINCIPAL_HEADER", "X-Remote-User"),
 				getDurationWithDefault("AIB_REQUEST_TIMEOUT", 10*time.Second),
 			),
-			SecretPrefix: getEnvWithDefault("SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX", "kaos-aib"),
-			Prune:        getBoolWithDefault("AUTHZ_PROJECTION_PRUNE_ENABLED", true),
-			HTTPClient:   &http.Client{Timeout: 5 * time.Second},
-			Issuer:       cfg.AgentIssuer(),
-			Namespaces:   projectionNamespaces,
+			SecretPrefix:         getEnvWithDefault("SECURITY_AGENT_AUTH_CREDENTIAL_SECRET_PREFIX", "kaos-aib"),
+			Prune:                getBoolWithDefault("AUTHZ_PROJECTION_PRUNE_ENABLED", true),
+			HTTPClient:           &http.Client{Timeout: 5 * time.Second},
+			Issuer:               cfg.AgentIssuer(),
+			Namespaces:           projectionNamespaces,
+			DefaultPermissionSet: os.Getenv("AIB_DEFAULT_PERMISSION_SET"),
 		})
 	}
 	if cfg.IdentityProviderOrDefault() == security.IdentityProviderOIDC && cfg.AgentIssuer() != "" && cfg.OIDCRegistrationInitialAccessToken != "" {
@@ -213,6 +214,7 @@ func main() {
 			Name:               policyName,
 			Namespace:          policyNamespace,
 			JWKSURI:            cfg.AuthzJWKSURI(),
+			DiscoverAIBKeys:    cfg.IdentityProviderOrDefault() == security.IdentityProviderAIB,
 			Issuer:             cfg.AgentIssuer(),
 			UserIssuer:         cfg.UserIssuer,
 			UserAudience:       cfg.UserAudience,

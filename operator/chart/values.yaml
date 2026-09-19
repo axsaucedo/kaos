@@ -161,6 +161,9 @@ security:
     adminPrincipal: "kaos-operator"
     # adminPrincipalHeader is the header carrying the admin principal identity.
     adminPrincipalHeader: "X-Remote-User"
+    # defaultPermissionSet bridges public AIB releases that require every agent
+    # to reference at least one permission set. Empty preserves legacy behavior.
+    defaultPermissionSet: ""
     # projection tunes the identity projection controller behavior.
     projection:
       # namespaces optionally restricts projection to a comma-separated list of

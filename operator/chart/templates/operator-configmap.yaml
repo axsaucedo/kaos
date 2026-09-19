@@ -98,6 +98,9 @@ data:
   AIB_ADMIN_URL: {{ .adminUrl | quote }}
   AIB_PRINCIPAL: {{ .adminPrincipal | default "kaos-operator" | quote }}
   AIB_PRINCIPAL_HEADER: {{ .adminPrincipalHeader | default "X-Remote-User" | quote }}
+  {{- if .defaultPermissionSet }}
+  AIB_DEFAULT_PERMISSION_SET: {{ .defaultPermissionSet | quote }}
+  {{- end }}
   {{- end }}
   {{- with .projection }}
   {{- if .namespaces }}

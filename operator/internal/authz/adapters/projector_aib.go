@@ -24,31 +24,40 @@ import (
 )
 
 // AgentBody is the identity-broker admin registration payload for an agent.
-func AgentBody(a projection.DesiredAgent) map[string]any {
-	return map[string]any{
+func AgentBody(a projection.DesiredAgent, permissionSetID string) map[string]any {
+	body := map[string]any{
 		"display_name": a.ExternalID(),
 		"description":  fmt.Sprintf("KAOS agent %s/%s", a.Namespace, a.Name),
 	}
+	if permissionSetID != "" {
+		body["permission_sets"] = []map[string]any{{
+			"permission_set_id": permissionSetID,
+			"requirement_type":  "mandatory",
+		}}
+	}
+	return body
 }
 
 // AIBAdmin is the subset of the broker admin client the projector needs.
 type AIBAdmin interface {
+	List(ctx context.Context, collection string) ([]map[string]any, error)
 	ListAgents(ctx context.Context) ([]map[string]any, error)
-	CreateOrGetAgent(ctx context.Context, externalID string, body map[string]any) (string, error)
+	UpsertAgent(ctx context.Context, externalID string, body map[string]any) (string, error)
 	DeleteAgent(ctx context.Context, id string) (bool, error)
 	MintCredentials(ctx context.Context, agentID string) (aib.Credentials, error)
 }
 
 // BrokerProjector provisions agent identities and credentials in the broker.
 type BrokerProjector struct {
-	Client       client.Client
-	Scheme       *runtime.Scheme
-	AIB          AIBAdmin
-	SecretPrefix string
-	Prune        bool
-	HTTPClient   *http.Client
-	Issuer       string
-	Namespaces   []string
+	Client               client.Client
+	Scheme               *runtime.Scheme
+	AIB                  AIBAdmin
+	SecretPrefix         string
+	Prune                bool
+	HTTPClient           *http.Client
+	Issuer               string
+	Namespaces           []string
+	DefaultPermissionSet string
 }
 
 // Apply registers agents and delivers their credentials through Secrets.
@@ -57,9 +66,21 @@ func (p *BrokerProjector) Apply(ctx context.Context, desired projection.DesiredS
 	if err := p.updateIssuerConditions(ctx); err != nil {
 		logger.Error(err, "unable to update AIB issuer consistency conditions")
 	}
+	permissionSetID, err := p.resolveDefaultPermissionSet(ctx)
+	if err != nil {
+		if conditionErr := p.updateProvisioningConditions(ctx, desired.Agents, metav1.ConditionTrue, "DefaultPermissionSetUnavailable", err.Error()); conditionErr != nil {
+			logger.Error(conditionErr, "unable to update AIB provisioning conditions")
+		}
+		return err
+	}
+	if permissionSetID != "" {
+		if err := p.updateProvisioningConditions(ctx, desired.Agents, metav1.ConditionFalse, "DefaultPermissionSetResolved", fmt.Sprintf("AIB permission set %q is available", p.DefaultPermissionSet)); err != nil {
+			logger.Error(err, "unable to clear AIB provisioning conditions")
+		}
+	}
 	var minted, failed int
 	for _, agent := range desired.Agents {
-		did, agentErr := p.reconcileAgent(ctx, agent)
+		did, agentErr := p.reconcileAgent(ctx, agent, permissionSetID)
 		if agentErr != nil {
 			failed++
 			logger.Error(agentErr, "agent reconcile failed", "agent", agent.ExternalID())
@@ -87,13 +108,14 @@ func (p *BrokerProjector) Apply(ctx context.Context, desired projection.DesiredS
 }
 
 const identityIssuerDegradedCondition = "IdentityIssuerDegraded"
+const identityProvisioningDegradedCondition = "IdentityProvisioningDegraded"
 
 func (p *BrokerProjector) updateIssuerConditions(ctx context.Context) error {
 	configured := strings.TrimSpace(p.Issuer)
 	if configured == "" {
 		return nil
 	}
-	discovered, checkErr := authz.DiscoverIssuer(ctx, p.HTTPClient, configured)
+	discovered, checkErr := authz.DiscoverAIBIssuer(ctx, p.HTTPClient, configured)
 	condition := metav1.Condition{
 		Type:    identityIssuerDegradedCondition,
 		Status:  metav1.ConditionFalse,
@@ -140,8 +162,45 @@ func (p *BrokerProjector) updateIssuerConditions(ctx context.Context) error {
 	return nil
 }
 
-func (p *BrokerProjector) reconcileAgent(ctx context.Context, agent projection.DesiredAgent) (bool, error) {
-	agentID, err := p.AIB.CreateOrGetAgent(ctx, agent.ExternalID(), AgentBody(agent))
+func (p *BrokerProjector) resolveDefaultPermissionSet(ctx context.Context) (string, error) {
+	name := strings.TrimSpace(p.DefaultPermissionSet)
+	if name == "" {
+		return "", nil
+	}
+	permissionSets, err := p.AIB.List(ctx, "permission-sets")
+	if err != nil {
+		return "", fmt.Errorf("listing AIB permission sets for default %q: %w", name, err)
+	}
+	for _, permissionSet := range permissionSets {
+		if itemName, _ := permissionSet["name"].(string); itemName == name {
+			if id, _ := permissionSet["id"].(string); id != "" {
+				return id, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("AIB default permission set %q not found", name)
+}
+
+func (p *BrokerProjector) updateProvisioningConditions(ctx context.Context, agents []projection.DesiredAgent, status metav1.ConditionStatus, reason, message string) error {
+	for _, desired := range agents {
+		agent := &kaosv1alpha1.Agent{}
+		key := types.NamespacedName{Namespace: desired.Namespace, Name: desired.Name}
+		if err := p.Client.Get(ctx, key, agent); err != nil {
+			return fmt.Errorf("reading Agent %s for provisioning condition: %w", key, err)
+		}
+		original := agent.DeepCopy()
+		condition := metav1.Condition{Type: identityProvisioningDegradedCondition, Status: status, Reason: reason, Message: message, ObservedGeneration: agent.Generation}
+		if meta.SetStatusCondition(&agent.Status.Conditions, condition) {
+			if err := p.Client.Status().Patch(ctx, agent, client.MergeFrom(original)); err != nil {
+				return fmt.Errorf("updating Agent %s provisioning condition: %w", key, err)
+			}
+		}
+	}
+	return nil
+}
+
+func (p *BrokerProjector) reconcileAgent(ctx context.Context, agent projection.DesiredAgent, permissionSetID string) (bool, error) {
+	agentID, err := p.AIB.UpsertAgent(ctx, agent.ExternalID(), AgentBody(agent, permissionSetID))
 	if err != nil {
 		return false, fmt.Errorf("creating agent: %w", err)
 	}

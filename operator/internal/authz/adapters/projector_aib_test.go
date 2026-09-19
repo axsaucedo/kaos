@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -22,6 +23,7 @@ type fakeAIB struct {
 	listed  map[string][]map[string]any
 	minted  int
 	deleted int
+	bodies  []map[string]any
 }
 
 func newFakeAIB() *fakeAIB {
@@ -32,8 +34,13 @@ func (f *fakeAIB) ListAgents(context.Context) ([]map[string]any, error) {
 	return f.listed["agents"], nil
 }
 
-func (f *fakeAIB) CreateOrGetAgent(_ context.Context, externalID string, _ map[string]any) (string, error) {
+func (f *fakeAIB) List(_ context.Context, collection string) ([]map[string]any, error) {
+	return f.listed[collection], nil
+}
+
+func (f *fakeAIB) UpsertAgent(_ context.Context, externalID string, body map[string]any) (string, error) {
 	f.created["agents"] = append(f.created["agents"], externalID)
+	f.bodies = append(f.bodies, body)
 	return "agents:" + externalID, nil
 }
 
@@ -123,7 +130,7 @@ func resourceFromAgent(a *kaosv1alpha1.Agent) projection.Resource {
 
 func TestAgentBodyContainsIdentityOnly(t *testing.T) {
 	agent := projection.DesiredAgent{Namespace: "demo", Name: "researcher"}
-	body := AgentBody(agent)
+	body := AgentBody(agent, "")
 	if _, leaks := body["client_id"]; leaks {
 		t.Fatalf("agent body leaks client_id: %v", body)
 	}
@@ -147,8 +154,50 @@ func TestAdminBodiesCarryNoApprovalStatus(t *testing.T) {
 
 	agent := projection.DesiredAgent{Namespace: "demo", Name: "researcher"}
 
-	body := AgentBody(agent)
+	body := AgentBody(agent, "")
 	check(body, "agent body")
+}
+
+func TestBrokerProjectorAddsConfiguredPermissionSet(t *testing.T) {
+	scheme := newTestScheme(t)
+	agent := &kaosv1alpha1.Agent{ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "researcher"}}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(agent).WithObjects(agent).Build()
+	admin := newFakeAIB()
+	admin.listed["permission-sets"] = []map[string]any{{"id": "permission-set-1", "name": "kaos-identity"}}
+	p := &BrokerProjector{Client: c, Scheme: scheme, AIB: admin, SecretPrefix: "kaos-aib", DefaultPermissionSet: "kaos-identity"}
+	desired := projection.DesiredState{Agents: []projection.DesiredAgent{{Namespace: "demo", Name: "researcher"}}}
+
+	if err := p.Apply(context.Background(), desired); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	entries, ok := admin.bodies[0]["permission_sets"].([]map[string]any)
+	if !ok || len(entries) != 1 || entries[0]["permission_set_id"] != "permission-set-1" || entries[0]["requirement_type"] != "mandatory" {
+		t.Fatalf("permission_sets = %#v", admin.bodies[0]["permission_sets"])
+	}
+}
+
+func TestBrokerProjectorBlocksRegistrationWhenPermissionSetMissing(t *testing.T) {
+	scheme := newTestScheme(t)
+	agent := &kaosv1alpha1.Agent{ObjectMeta: metav1.ObjectMeta{Namespace: "demo", Name: "researcher", Generation: 2}}
+	c := fake.NewClientBuilder().WithScheme(scheme).WithStatusSubresource(agent).WithObjects(agent).Build()
+	admin := newFakeAIB()
+	p := &BrokerProjector{Client: c, Scheme: scheme, AIB: admin, DefaultPermissionSet: "kaos-identity"}
+	desired := projection.DesiredState{Agents: []projection.DesiredAgent{{Namespace: "demo", Name: "researcher"}}}
+
+	if err := p.Apply(context.Background(), desired); err == nil {
+		t.Fatal("expected missing permission set to fail")
+	}
+	if len(admin.created["agents"]) != 0 {
+		t.Fatalf("registered agents = %v", admin.created["agents"])
+	}
+	updated := &kaosv1alpha1.Agent{}
+	if err := c.Get(context.Background(), types.NamespacedName{Namespace: "demo", Name: "researcher"}, updated); err != nil {
+		t.Fatalf("get Agent: %v", err)
+	}
+	condition := meta.FindStatusCondition(updated.Status.Conditions, identityProvisioningDegradedCondition)
+	if condition == nil || condition.Status != metav1.ConditionTrue || condition.Reason != "DefaultPermissionSetUnavailable" {
+		t.Fatalf("condition = %#v", condition)
+	}
 }
 
 func TestBrokerProjectorProjectsIdentityOnly(t *testing.T) {

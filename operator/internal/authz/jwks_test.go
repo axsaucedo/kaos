@@ -64,6 +64,47 @@ func TestDiscoverIssuerKeysRejectsIssuerMismatch(t *testing.T) {
 	}
 }
 
+func TestDiscoverAIBIssuerKeysUsesRFC8414Metadata(t *testing.T) {
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/oauth-authorization-server":
+			_, _ = w.Write([]byte(`{"issuer":"` + srv.URL + `","jwks_uri":"` + srv.URL + `/advertised-keys"}`))
+		case "/advertised-keys":
+			_, _ = w.Write([]byte(`{"keys":[{"kid":"aib-key"}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	got, err := DiscoverAIBIssuerKeys(context.Background(), srv.Client(), srv.URL)
+	if err != nil {
+		t.Fatalf("DiscoverAIBIssuerKeys: %v", err)
+	}
+	if got.Issuer != srv.URL || got.JWKS["keys"].([]any)[0].(map[string]any)["kid"] != "aib-key" {
+		t.Fatalf("discovery = %#v", got)
+	}
+}
+
+func TestDiscoverAIBIssuerKeysFallsBackToConventionalJWKS(t *testing.T) {
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/oauth-authorization-server":
+			_, _ = w.Write([]byte(`{"issuer":"` + srv.URL + `"}`))
+		case "/oauth2/jwks.json":
+			_, _ = w.Write([]byte(`{"keys":[]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	if _, err := DiscoverAIBIssuerKeys(context.Background(), srv.Client(), srv.URL); err != nil {
+		t.Fatalf("DiscoverAIBIssuerKeys: %v", err)
+	}
+}
+
 func TestDiscoverServiceAccountIssuerUsesKubernetesTLSAndCredentials(t *testing.T) {
 	var server *httptest.Server
 	server = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

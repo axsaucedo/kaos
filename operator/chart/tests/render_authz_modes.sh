@@ -191,8 +191,10 @@ expect "manual data source" "$out" 'SECURITY_AUTHORIZATION_POLICY_DATA_SOURCE:\s
 # Broker identity provisioning is independent of policy compilation.
 out="$(render \
 	--set security.agentAuth.identity.provider=aib \
-	--set security.agentAuth.adminUrl=http://aib:8000/api)"
+	--set security.agentAuth.adminUrl=http://aib:8000/api \
+	--set security.agentAuth.defaultPermissionSet=kaos-identity)"
 expect "broker admin url" "$out" 'AIB_ADMIN_URL:\s*"http://aib:8000/api"'
+expect "broker default permission set" "$out" 'AIB_DEFAULT_PERMISSION_SET:\s*"kaos-identity"'
 
 # ext_authz enforcement backend.
 out="$(render \
