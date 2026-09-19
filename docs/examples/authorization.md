@@ -69,9 +69,9 @@ This command wires everything together in a new cluster:
 kaos system install \
   --gateway-strict \         # Traffic can only go through gateway
   --authz-enabled \          # KAOS Authorization service enabled
-  --user-auth keycloak \     # Use Keycloak for User auth (alt: OIDC)
-  --agent-auth keycloak \    # Use Keycloak for Agent Auth (alt: Service Accts. or OIDC)
-  --token-exchange-enabled \ # Use AIB for token exchange
+  --user-auth-enabled keycloak \  # Use Keycloak for User auth
+  --agent-auth-enabled keycloak \ # Use Keycloak for Agent Auth (alt: Service Accts. or AIB)
+  --token-exchange-enabled \      # Use AIB for token exchange
 
                          # Other flags
   --wait \               # Block until everything is ready
@@ -615,7 +615,7 @@ security:
 
 `gatewayJwtOptional: true` means that for agent tokens, the Authz Service performs the full identity check; the gateway's own user-token check does not block agent calls. This is required for autonomous agents: their Kubernetes-issued ServiceAccount token is not a user login token, and the user login provider would otherwise reject it before the access check ever runs. The `serviceAccount` block is the short-lived mounted token described above: valid only for the gateway (`audience`), auto-refreshed (`expirationSeconds`), read from `tokenPath`.
 
-Switching the provider is the whole difference between the two modes — this is what `--agent-auth keycloak` sets:
+Switching the provider is the whole difference between the two modes — this is what `--agent-auth-enabled keycloak` sets:
 
 ```yaml
 security:
@@ -814,9 +814,9 @@ KAOS does the opposite of the shared bot on all three counts:
 
 ### 5.2 Enter the Agent Identity Broker (AIB)
 
-The component that holds each user's real credential is the **Agent Identity Broker** (AIB; deployed from the `agentic-identity-broker` chart). It runs as its own self-managed Helm release alongside the cluster, much like Keycloak — the KAOS operator deploys none of it. What it holds: each user's real third-party tokens, in a vault, put there when the user consents (5.4). What it does: exactly one thing — **exchange**. Present it proof of who the user is and which agent is acting, and it returns that user's stored third-party token. It never issues anyone's identity; agents get theirs from Agent Auth, users from User Auth, and the AIB only ever trades one proven identity for a stored credential.
+The component that holds each user's real credential is the **Agent Identity Broker** (AIB) — now open source as [zalando-incubator/agentic-identity-broker](https://github.com/zalando-incubator/agentic-identity-broker), with published images on `ghcr.io` and its Helm chart in the repo. It runs as its own self-managed Helm release alongside the cluster, much like Keycloak — the KAOS operator deploys none of it. What it holds: each user's real third-party tokens, in a vault, put there when the user consents (5.4). What it does: exactly one thing — **exchange**. Present it proof of who the user is and which agent is acting, and it returns that user's stored third-party token. It never issues anyone's identity; agents get theirs from Agent Auth, users from User Auth, and the AIB only ever trades one proven identity for a stored credential.
 
-**Nothing new is installed here.** Every component in this part went in with the single install command in 1.1 (`--agent-auth keycloak`, `--token-exchange-enabled`). On the Part 1 map, the greyed pieces simply light up, and it is everything *else* that goes grey:
+**Nothing new is installed here.** Every component in this part went in with the single install command in 1.1 (`--agent-auth-enabled keycloak`, `--token-exchange-enabled`). On the Part 1 map, the greyed pieces simply light up, and it is everything *else* that goes grey:
 
 ```mermaid
 flowchart TB
@@ -860,7 +860,7 @@ flowchart TB
   linkStyle 5 stroke:#dddddd,color:#bbbbbb
 ```
 
-This is also why the install needed `--agent-auth keycloak`: the AIB must be able to tie an exchange request to a specific agent, and for that the agent needs a login-service identity rather than a ServiceAccount. The KAOS Operator keeps the connection current from the other side — it registers each agent in the AIB under a stable **logical name** (`kaos/<namespace>/<name>`) and keeps that record's client id up to date across re-registrations, the greyed operator edge on the 4.1 chart.
+This is also why the install needed `--agent-auth-enabled keycloak`: the AIB must be able to tie an exchange request to a specific agent, and for that the agent needs a login-service identity rather than a ServiceAccount. The KAOS Operator keeps the connection current from the other side — it registers each agent in the AIB under a stable **logical name** (`kaos/<namespace>/<name>`) and keeps that record's client id up to date across re-registrations, the greyed operator edge on the 4.1 chart.
 
 ### 5.3 Register GitHub and create a permission set
 
@@ -874,26 +874,37 @@ Outside services are administered in the AIB itself, not as cluster objects, bec
 The declaration is AIB-native. There is no third-party YAML in your Git repo; the AIB is the config authority, and it is where third-party access is audited (the accepted trade-off for keeping it out of the cluster API).
 
 ```yaml
-# Administered in the AIB, not as a Kubernetes object.
-service:
+# Administered through the AIB admin API, not as a Kubernetes object.
+service:                       # POST /api/services
+  canonical_id: github
+  display_name: GitHub
+  oauth2_flavor: github
+  discovery:
+    enable_discovery: false    # GitHub is plain OAuth2, no discovery metadata
+  endpoints:
+    authorize_endpoint: https://github.com/login/oauth/authorize
+    token_endpoint: https://github.com/login/oauth/access_token
+  scopes:
+    - scope_value: repo
+    - scope_value: read:user
+  protected_resources: ["https://api.github.com"]
+
+permission_set:                # POST /api/permission-sets
   name: github
-  hostnames: ["api.github.com"]
-  oauth:
-    authorization_url: https://github.com/login/oauth/authorize
-    token_url: https://github.com/login/oauth/access_token
-  scopes: ["repo", "read:user"]
+  description: GitHub access for research agents
+  service_scopes:
+    - service_id: github
+      scopes: ["repo", "read:user"]
 
-permission_set:
-  service: github
-  scopes: ["repo", "read:user"]
-
-agent:
-  logical_name: kaos/kaos-system/researcher
+agent:                         # PUT /api/agents/{agent-id}
+  external_id: kaos/kaos-system/researcher
   client_id: <keycloak-dcr-uuid>
-  permission_sets: ["github"]
+  permission_sets:
+    - permission_set_id: github
+      requirement_type: mandatory
 ```
 
-The `logical_name` is the stable agent name the operator maintains; `client_id` is the agent's login-service client (the DCR UUID from 4.1), kept current across re-registrations. From this declaration the operator materializes the egress route to `api.github.com`, attaches the AIB's token-swap filter to *only* that generated route, and injects the exchange target into the bound agent. Nothing here touches the internal access-control path.
+The `external_id` is the stable logical agent name the operator maintains; `client_id` is the agent's login-service client (the DCR UUID from 4.1), kept current across re-registrations. From this declaration the operator materializes the egress route to `api.github.com`, attaches the AIB's token-swap filter to *only* that generated route, and injects the exchange target into the bound agent. Nothing here touches the internal access-control path.
 </details>
 
 Inside the cluster, nothing about the earlier checks changes: alice still has to be allowed to use the researcher, and the researcher still has to be granted its tools. The new part is only the *last hop*, the outbound call to GitHub.
