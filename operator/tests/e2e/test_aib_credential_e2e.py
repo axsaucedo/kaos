@@ -9,8 +9,9 @@ and loads them into agent pods:
 2. The operator mounts that Secret into the agent Deployment as ``AGENT_AUTH_*``
    environment variables and a read-only ``/var/run/aib`` volume.
 
-This test is opt-in: it requires a cluster installed with ``--auth-enabled``
-plus the identity broker (see the ``kind-e2e-aib`` make
+This test is opt-in: it requires a cluster installed with
+``--agent-auth-enabled aib --user-auth-enabled none`` plus the public identity
+broker (see the ``kind-e2e-aib`` make
 target). It is skipped unless ``KAOS_AIB_E2E`` is set so the default E2E suite,
 which runs without AIB, is unaffected.
 """
@@ -39,6 +40,11 @@ AIB_BROKER_SERVICE = "aib-agentic-identity-broker"
 AIB_ADMIN_PORT = 14000
 AIB_ADMIN_PRINCIPAL_HEADER = "X-Remote-User"
 AIB_ADMIN_PRINCIPAL = "kaos-operator"
+AIB_BOOTSTRAP_SERVICE = "kaos-identity-placeholder"
+AIB_BOOTSTRAP_PERMISSION_SET = "kaos-identity"
+AIB_BOOTSTRAP_DESCRIPTION = (
+    "KAOS identity-only bootstrap; remove once AIB allows agents without permission sets"
+)
 
 pytestmark = [
     pytest.mark.aib,
@@ -172,11 +178,18 @@ def test_operator_provisions_and_mounts_agent_credentials(aib_namespace: str):
 
 def _list_admin_collection(local_port: int, collection: str) -> list:
     """List an AIB admin collection via the pre-auth principal header."""
-    resp = httpx.get(
-        f"http://localhost:{local_port}/api/{collection}",
-        headers={AIB_ADMIN_PRINCIPAL_HEADER: AIB_ADMIN_PRINCIPAL},
-        timeout=10.0,
-    )
+    for attempt in range(50):
+        try:
+            resp = httpx.get(
+                f"http://localhost:{local_port}/api/{collection}",
+                headers={AIB_ADMIN_PRINCIPAL_HEADER: AIB_ADMIN_PRINCIPAL},
+                timeout=10.0,
+            )
+            break
+        except httpx.ConnectError:
+            if attempt == 49:
+                raise
+            time.sleep(0.1)
     resp.raise_for_status()
     payload = resp.json()
     if isinstance(payload, dict):
@@ -185,7 +198,7 @@ def _list_admin_collection(local_port: int, collection: str) -> list:
 
 
 def test_operator_projects_agent_identities_only(aib_namespace: str):
-    """Agents and credentials are projected without broker authorization data."""
+    """Agents reference only the removable identity bootstrap permission set."""
     namespace = aib_namespace
     modelapi_name = "aib-deleg-proxy"
     peer_name = "aib-deleg-peer"
@@ -220,8 +233,7 @@ def test_operator_projects_agent_identities_only(aib_namespace: str):
         secret = _wait_for_secret(namespace, secret_name)
         assert secret.get("data", {}).get("client_id"), f"{secret_name} missing credentials"
 
-    # Identity-only projection registers both agents and creates no broker
-    # permission sets or services.
+    # The CLI seeds exactly one service and permission set for public AIB v0.1.8.
     pf = subprocess.Popen(
         [
             "kubectl",
@@ -244,5 +256,20 @@ def test_operator_projects_agent_identities_only(aib_namespace: str):
     external_ids = {a.get("display_name") for a in agents}
     assert f"kaos://agent/{namespace}/{peer_name}" in external_ids
     assert f"kaos://agent/{namespace}/{delegator_name}" in external_ids
-    assert permission_sets == []
-    assert services == []
+    assert [item.get("name") for item in permission_sets] == [
+        AIB_BOOTSTRAP_PERMISSION_SET
+    ]
+    assert [item.get("canonical_id") for item in services] == [AIB_BOOTSTRAP_SERVICE]
+    assert services[0].get("display_name") == AIB_BOOTSTRAP_DESCRIPTION
+    permission_set_id = permission_sets[0]["id"]
+    for agent in agents:
+        if agent.get("display_name") in {
+            f"kaos://agent/{namespace}/{peer_name}",
+            f"kaos://agent/{namespace}/{delegator_name}",
+        }:
+            assert agent.get("permission_sets") == [
+                {
+                    "permission_set_id": permission_set_id,
+                    "requirement_type": "mandatory",
+                }
+            ]

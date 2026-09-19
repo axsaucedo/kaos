@@ -69,7 +69,9 @@ spec:
   filterOrder:
     - name: envoy.filters.http.ext_authz
       after: envoy.filters.http.jwt_authn
-    - name: envoy.filters.http.ext_proc
+    - name: envoy.filters.http.lua
       after: envoy.filters.http.ext_authz
+    - name: envoy.filters.http.ext_proc
+      after: envoy.filters.http.lua
 {{- end }}
 {{- end }}

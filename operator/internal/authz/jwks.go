@@ -51,6 +51,45 @@ func DiscoverIssuer(ctx context.Context, client *http.Client, issuer string) (st
 	return discovered, nil
 }
 
+// DiscoverAIBIssuer returns the issuer advertised by AIB's RFC 8414 metadata.
+func DiscoverAIBIssuer(ctx context.Context, client *http.Client, issuer string) (string, error) {
+	discovery, endpoint, err := discover(ctx, client, issuer, "/.well-known/oauth-authorization-server")
+	if err != nil {
+		return "", err
+	}
+	discovered := strings.TrimSpace(discovery.Issuer)
+	if discovered == "" {
+		return "", fmt.Errorf("OAuth authorization server discovery at %s returned an empty issuer", endpoint)
+	}
+	return discovered, nil
+}
+
+// DiscoverAIBIssuerKeys verifies AIB's RFC 8414 issuer and fetches the
+// advertised signing keys, falling back to AIB's conventional JWKS path.
+func DiscoverAIBIssuerKeys(ctx context.Context, client *http.Client, issuer string) (IssuerKeys, error) {
+	discovery, endpoint, err := discover(ctx, client, issuer, "/.well-known/oauth-authorization-server")
+	if err != nil {
+		return IssuerKeys{}, err
+	}
+	configured := strings.TrimSpace(issuer)
+	discovered := strings.TrimSpace(discovery.Issuer)
+	if discovered == "" {
+		return IssuerKeys{}, fmt.Errorf("OAuth authorization server discovery at %s returned an empty issuer", endpoint)
+	}
+	if discovered != configured {
+		return IssuerKeys{}, fmt.Errorf("configured issuer %q does not match OAuth authorization server discovery issuer %q", configured, discovered)
+	}
+	keysURL := strings.TrimSpace(discovery.JWKSURI)
+	if keysURL == "" {
+		keysURL = strings.TrimRight(configured, "/") + "/oauth2/jwks.json"
+	}
+	keys, err := FetchJWKS(ctx, client, keysURL)
+	if err != nil {
+		return IssuerKeys{}, err
+	}
+	return IssuerKeys{Issuer: discovered, JWKS: keys}, nil
+}
+
 // DiscoverIssuerKeys verifies an OIDC issuer through discovery and fetches its
 // signing keys. An explicit JWKS URI overrides the discovered jwks_uri.
 func DiscoverIssuerKeys(ctx context.Context, client *http.Client, issuer, jwksURI string) (IssuerKeys, error) {
@@ -81,10 +120,14 @@ func DiscoverIssuerKeys(ctx context.Context, client *http.Client, issuer, jwksUR
 }
 
 func discoverOIDC(ctx context.Context, client *http.Client, issuer string) (oidcDiscovery, string, error) {
+	return discover(ctx, client, issuer, "/.well-known/openid-configuration")
+}
+
+func discover(ctx context.Context, client *http.Client, issuer, path string) (oidcDiscovery, string, error) {
 	if client == nil {
 		client = http.DefaultClient
 	}
-	endpoint := strings.TrimRight(strings.TrimSpace(issuer), "/") + "/.well-known/openid-configuration"
+	endpoint := strings.TrimRight(strings.TrimSpace(issuer), "/") + path
 	var discovery oidcDiscovery
 	if err := fetchJSON(ctx, client, endpoint, &discovery); err != nil {
 		return oidcDiscovery{}, endpoint, fmt.Errorf("discovering issuer from %s: %w", endpoint, err)

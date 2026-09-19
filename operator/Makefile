@@ -167,20 +167,23 @@ e2e-clean:
 # Opt-in, local-only suite that stands up the identity broker alongside the
 # operator and verifies per-agent credential Secrets are minted (by the
 # operator's identity projection controller) and mounted into agent pods.
-# Requires the (gitignored) identity-broker clone checked out next to this
-# repository and its images built locally.
-AIB_CHART_PATH ?= $(PWD)/../agentic-identity-broker/charts/agentic-identity-broker
-AIB_VALUES_PATH ?= $(AIB_CHART_PATH)/values-dev.yaml
-AIB_IMAGE ?= agentic-identity-broker:0.1.0
+# Requires the public AIB v0.1.8 checkout next to this repository.
+AIB_CHART_PATH ?= $(PWD)/../../agentic-identity-broker/charts/agentic-identity-broker
+AIB_VALUES_PATH ?= $(PWD)/config/aib/values-dev.yaml
+AIB_IMAGE ?= ghcr.io/zalando-incubator/agentic-identity-broker:v0.1.8
+AIB_MIGRATE_IMAGE ?= ghcr.io/zalando-incubator/agentic-identity-broker-migrate:v0.1.8
 AIB_OPERATOR_TAG ?= aib-e2e
 AIB_AGENT_IMAGE ?= axsauze/kaos-agent:0.4.8-dev
 
 # Load the operator, agent, broker, and LiteLLM images into KIND.
 kind-load-aib-images:
+	@docker pull --quiet $(AIB_IMAGE)
+	@docker pull --quiet $(AIB_MIGRATE_IMAGE)
 	@kind load docker-image \
 		$(REGISTRY)/kaos-operator:$(AIB_OPERATOR_TAG) \
 		$(AIB_AGENT_IMAGE) \
 		$(AIB_IMAGE) \
+		$(AIB_MIGRATE_IMAGE) \
 		$(LITELLM_IMAGE) \
 		--name $(KIND_CLUSTER_NAME)
 
@@ -190,7 +193,7 @@ kind-e2e-install-aib:
 	@pip install -e ../kaos-cli -q 2>/dev/null || true
 	@kaos system install \
 		--namespace kaos-system \
-		--auth-enabled aib-only \
+		--agent-auth-enabled aib --user-auth-enabled none \
 		--gateway-enabled --metallb-enabled \
 		--chart-path chart/ \
 		--set controllerManager.manager.image.repository=$(REGISTRY)/kaos-operator \

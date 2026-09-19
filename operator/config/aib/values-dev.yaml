@@ -1,0 +1,46 @@
+# Local/KIND development only. Replace all fixed keys for production.
+image:
+  repository: ghcr.io/zalando-incubator/agentic-identity-broker
+  pullPolicy: IfNotPresent
+  tag: v0.1.8
+
+storage:
+  type: memory
+
+migration:
+  image:
+    repository: ghcr.io/zalando-incubator/agentic-identity-broker-migrate
+    pullPolicy: IfNotPresent
+    tag: v0.1.8
+
+broker:
+  server:
+    enduser:
+      publicUrl: http://aib-agentic-identity-broker.aib-system.svc.cluster.local:8000
+      authentication:
+        preauth:
+          principalHeaderName: X-Remote-User
+    admin:
+      publicUrl: http://aib-agentic-identity-broker.aib-system.svc.cluster.local:14000
+      authentication:
+        preauth:
+          principalHeaderName: X-Remote-User
+  thirdPartyOauth2:
+    # One Base64 layer is correct for jweSigningKey in the v0.1.8 chart.
+    jweSigningKey: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+  encryption:
+    memory:
+      # v0.1.8 decodes rawKey once more than jweSigningKey. Double Base64 is
+      # required so the broker's final decode yields the original 32 bytes.
+      rawKey: TURFeU16UTFOamM0T1dGaVkyUmxaakF4TWpNME5UWTNPRGxoWW1Oa1pXWT0=
+  oauth2AuthorizationServer:
+    mode: local
+  # Identity-only mode does not configure token exchange. Blank these chart
+  # defaults because their CEL expressions otherwise require exchange config.
+  tokenExchange:
+    claimExtraction:
+      principalExpression: ""
+      agentIdExpression: ""
+    authorization:
+      cel:
+        expression: ""

@@ -191,8 +191,10 @@ expect "manual data source" "$out" 'SECURITY_AUTHORIZATION_POLICY_DATA_SOURCE:\s
 # Broker identity provisioning is independent of policy compilation.
 out="$(render \
 	--set security.agentAuth.identity.provider=aib \
-	--set security.agentAuth.adminUrl=http://aib:8000/api)"
+	--set security.agentAuth.adminUrl=http://aib:8000/api \
+	--set security.agentAuth.defaultPermissionSet=kaos-identity)"
 expect "broker admin url" "$out" 'AIB_ADMIN_URL:\s*"http://aib:8000/api"'
+expect "broker default permission set" "$out" 'AIB_DEFAULT_PERMISSION_SET:\s*"kaos-identity"'
 
 # ext_authz enforcement backend.
 out="$(render \
@@ -221,7 +223,8 @@ expect "exchange AIB admin URL" "$out" 'TOKEN_EXCHANGE_AIB_ADMIN_URL:\s*"http://
 expect "ext_proc backend name" "$out" 'TOKEN_EXCHANGE_EXTPROC_SERVICE_NAME:\s*"aib-agentic-identity-broker-extproc"'
 expect "token exchange EnvoyProxy rendered" "$out" 'kind: EnvoyProxy'
 expect "ext_authz ordered after jwt_authn" "$out" 'after: envoy.filters.http.jwt_authn'
-expect "ext_proc ordered after ext_authz" "$out" 'after: envoy.filters.http.ext_authz'
+expect "Lua ordered after ext_authz" "$out" 'name: envoy.filters.http.lua'
+expect "ext_proc ordered after Lua" "$out" 'after: envoy.filters.http.lua'
 
 if incompatible_exchange="$(helm template t "$CHART_DIR" \
 	--set gatewayAPI.enabled=true \

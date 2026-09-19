@@ -191,9 +191,9 @@ func (c *Client) Update(ctx context.Context, collection, id string, body map[str
 	return nil
 }
 
-// CreateOrGetAgent registers an agent or returns its existing id.
-func (c *Client) CreateOrGetAgent(ctx context.Context, externalID string, body map[string]any) (string, error) {
-	return c.createOrGet(ctx, "agents", "display_name", externalID, body)
+// UpsertAgent registers an agent or updates its existing registration.
+func (c *Client) UpsertAgent(ctx context.Context, externalID string, body map[string]any) (string, error) {
+	return c.Upsert(ctx, "agents", "display_name", externalID, body)
 }
 
 // ListAgents returns all registered agents.

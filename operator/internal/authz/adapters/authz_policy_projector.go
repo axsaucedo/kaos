@@ -24,6 +24,7 @@ type AuthzPolicyProjector struct {
 	Name               string
 	Namespace          string
 	JWKSURI            string
+	DiscoverAIBKeys    bool
 	JWKSClient         *http.Client
 	Issuer             string
 	UserIssuer         string
@@ -48,7 +49,13 @@ func (p *AuthzPolicyProjector) Apply(ctx context.Context, desired projection.Des
 		grants := projection.GrantData(desired)
 		issuerJWKS := map[string]any{}
 		agentJWKS := p.StaticJWKS
-		if p.JWKSURI != "" {
+		if p.DiscoverAIBKeys && security.Configured(p.Issuer) {
+			discovered, err := authz.DiscoverAIBIssuerKeys(ctx, p.JWKSClient, p.Issuer)
+			if err != nil {
+				return err
+			}
+			agentJWKS = discovered.JWKS
+		} else if p.JWKSURI != "" {
 			fetched, err := authz.FetchJWKS(ctx, p.JWKSClient, p.JWKSURI)
 			if err != nil {
 				return err

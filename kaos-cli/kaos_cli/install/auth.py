@@ -1,11 +1,16 @@
 """Authentication provider installation and Helm argument helpers."""
 
 import json
+from urllib.parse import urlsplit
 
+import httpx
 import typer
 
+from kaos_cli.cluster_http import local_service_url
+
 from . import (
-    AUTH_ADMIN_PORT, AUTH_ENDUSER_PORT, DEFAULT_AGENT_AUTH_AUDIENCE,
+    AUTH_ADMIN_PORT, AUTH_ENDUSER_PORT, AUTH_EXTPROC_PORT,
+    DEFAULT_AGENT_AUTH_AUDIENCE, DEFAULT_AIB_EXTPROC_IMAGE,
     DEFAULT_KEYCLOAK_ADMIN_PASSWORD, DEFAULT_KEYCLOAK_ADMIN_USER,
     DEFAULT_KEYCLOAK_IMAGE, DEFAULT_OIDC_REGISTRATION_SECRET_KEY,
     DEFAULT_OIDC_REGISTRATION_SECRET_NAME, DEFAULT_TOKEN_EXCHANGE_AUDIENCE,
@@ -64,6 +69,7 @@ def _build_auth_operator_args(
     policy_rego_override: bool = False,
     policy_configmap_name: str = "",
     policy_configmap_namespace: str = "",
+    default_permission_set: str = "",
 ) -> list[str]:
     """Build the operator Helm --set arguments that enable agent-auth wiring.
 
@@ -101,6 +107,14 @@ def _build_auth_operator_args(
         )
     if identity_provider == "aib" and admin_url:
         args.extend(["--set", f"security.agentAuth.adminUrl={admin_url}"])
+        if default_permission_set:
+            args.extend(
+                [
+                    "--set",
+                    "security.agentAuth.defaultPermissionSet="
+                    f"{default_permission_set}",
+                ]
+            )
     if identity_provider == "oidc" and oidc_registration_secret_name:
         args.extend(
             [
@@ -179,8 +193,9 @@ def _install_aib(
     values_path: str | None,
     wait: bool,
     extra_set: list[str] | None = None,
+    seed_identity_bootstrap: bool = True,
 ) -> bool:
-    """Install the identity broker from a local chart (unpublished/dev path)."""
+    """Install the public identity-broker chart from a local v0.1.8 checkout."""
     typer.echo("Installing identity broker...")
     helm_args = [
         "upgrade",
@@ -203,8 +218,110 @@ def _install_aib(
         typer.echo(f"Error installing identity broker: {result.stderr}", err=True)
         return False
 
+    if seed_identity_bootstrap and not _seed_aib_identity_bootstrap(
+        namespace, release
+    ):
+        return False
+
     typer.echo(f"✅ Identity broker installed in '{namespace}' namespace")
     return True
+
+
+AIB_BOOTSTRAP_SERVICE = "kaos-identity-placeholder"
+AIB_BOOTSTRAP_PERMISSION_SET = "kaos-identity"
+AIB_BOOTSTRAP_DESCRIPTION = (
+    "KAOS identity-only bootstrap; remove once AIB allows agents without permission sets"
+)
+
+
+def _items(response: httpx.Response) -> list[dict]:
+    response.raise_for_status()
+    payload = response.json()
+    return payload if isinstance(payload, list) else payload.get("items", [])
+
+
+def _seed_aib_identity_bootstrap(namespace: str, release: str) -> bool:
+    """Idempotently seed the public AIB permission-set registration bridge."""
+    rollout = _root()._run_kubectl(
+        [
+            "rollout",
+            "status",
+            f"deployment/{_auth_broker_fullname(release)}",
+            "-n",
+            namespace,
+            "--timeout=120s",
+        ],
+        check=False,
+    )
+    if rollout.returncode != 0:
+        typer.echo(f"Error waiting for identity broker: {rollout.stderr}", err=True)
+        return False
+
+    admin_url = _default_auth_admin_url(namespace, release)
+    headers = {
+        "Host": urlsplit(admin_url).netloc,
+        "X-Remote-User": "kaos-operator",
+    }
+    try:
+        with local_service_url(admin_url) as local_url:
+            base = local_url.rstrip("/")
+            with httpx.Client(headers=headers, timeout=30.0) as client:
+                services = _items(client.get(f"{base}/services"))
+                service = next(
+                    (
+                        item
+                        for item in services
+                        if item.get("canonical_id") == AIB_BOOTSTRAP_SERVICE
+                        or item.get("display_name") == AIB_BOOTSTRAP_SERVICE
+                    ),
+                    None,
+                )
+                if service is None:
+                    response = client.post(
+                        f"{base}/services",
+                        json={
+                            "canonical_id": AIB_BOOTSTRAP_SERVICE,
+                            # AIB services have no description field, so the
+                            # descriptive marker lives in display_name.
+                            "display_name": AIB_BOOTSTRAP_DESCRIPTION,
+                            "client_id": AIB_BOOTSTRAP_SERVICE,
+                            "token_endpoint_auth_method": "none",
+                            "issuer_uri": "https://kaos-identity-placeholder.invalid",
+                            "discovery": {"enable_discovery": False},
+                            "endpoints": {
+                                "authorize_endpoint": "https://kaos-identity-placeholder.invalid/oauth2/authorize",
+                                "token_endpoint": "https://kaos-identity-placeholder.invalid/oauth2/token",
+                            },
+                            "scopes": [],
+                        },
+                    )
+                    response.raise_for_status()
+                    service = response.json()
+
+                permission_sets = _items(client.get(f"{base}/permission-sets"))
+                if not any(
+                    item.get("name") == AIB_BOOTSTRAP_PERMISSION_SET
+                    for item in permission_sets
+                ):
+                    response = client.post(
+                        f"{base}/permission-sets",
+                        json={
+                            "canonical_id": AIB_BOOTSTRAP_PERMISSION_SET,
+                            "name": AIB_BOOTSTRAP_PERMISSION_SET,
+                            "description": AIB_BOOTSTRAP_DESCRIPTION,
+                            "service_scopes": [
+                                {"service_id": service["id"], "scopes": []}
+                            ],
+                        },
+                    )
+                    response.raise_for_status()
+    except (httpx.HTTPError, KeyError, RuntimeError, ValueError) as exc:
+        typer.echo(f"Error seeding identity broker: {exc}", err=True)
+        return False
+
+    typer.echo("✅ Seeded AIB permission set 'kaos-identity'")
+    return True
+
 
 def _build_aib_broker_public_url_args(public_url: str) -> list[str]:
     """Set the broker enduser ``public_url`` to its in-cluster service URL.
@@ -219,25 +336,17 @@ def _build_aib_broker_public_url_args(public_url: str) -> list[str]:
     """
     return ["--set", f"broker.server.enduser.publicUrl={public_url}"]
 
+
 def _build_token_exchange_aib_args(
     auth_namespace: str,
     auth_release: str,
     keycloak_issuer: str,
 ) -> list[str]:
-    """Configure the self-managed AIB release for Keycloak-backed exchange."""
+    """Configure public AIB v0.1.8 for Keycloak-backed token exchange."""
     aib_issuer = _default_auth_issuer(auth_namespace, auth_release)
     keycloak_token_endpoint = f"{keycloak_issuer}/protocol/openid-connect/token"
     keycloak_authorize_endpoint = f"{keycloak_issuer}/protocol/openid-connect/auth"
-    extra_env = [
-        {"name": "EXTPROC_OAUTH2_ISSUER", "value": keycloak_issuer},
-        {"name": "EXTPROC_OAUTH2_CLIENT_ID", "value": DEFAULT_USER_AUTH_CLIENT_ID},
-        {
-            "name": "EXTPROC_OAUTH2_CLIENT_SECRET",
-            "value": DEFAULT_USER_AUTH_CLIENT_SECRET,
-        },
-        {"name": "EXTPROC_OAUTH2_CLIENT_ASSERTION_TYPE", "value": "access_token"},
-    ]
-    return [
+    args = [
         "--set",
         f"broker.server.enduser.publicUrl={aib_issuer}",
         "--set",
@@ -248,7 +357,8 @@ def _build_token_exchange_aib_args(
         "broker.oauth2AuthorizationServer.proxy.upstreamAuthorizeEndpoint="
         f"{keycloak_authorize_endpoint}",
         "--set",
-        f"broker.oauth2AuthorizationServer.proxy.upstreamTokenEndpoint={keycloak_token_endpoint}",
+        "broker.oauth2AuthorizationServer.proxy.upstreamTokenEndpoint="
+        f"{keycloak_token_endpoint}",
         "--set",
         f"broker.tokenExchange.expectedAudience={DEFAULT_TOKEN_EXCHANGE_AUDIENCE}",
         "--set",
@@ -261,13 +371,153 @@ def _build_token_exchange_aib_args(
         "--set",
         "broker.tokenExchange.authorization.cel.expression="
         f'client_assertion.azp == "{DEFAULT_USER_AUTH_CLIENT_ID}"',
-        "--set",
-        "extProc.enabled=true",
-        "--set",
-        f"extProc.oauth2.clientCredentialsEndpoint={keycloak_token_endpoint}",
-        "--set-json",
-        f"extProc.extraEnv={json.dumps(extra_env, separators=(',', ':'))}",
     ]
+    if keycloak_issuer.startswith("http://"):
+        args.extend(
+            ["--set", "broker.security.skipThirdpartyHttpsValidation=true"]
+        )
+    return args
+
+
+def _auth_extproc_name(auth_release: str) -> str:
+    return f"{auth_release}-agentic-identity-broker-extproc"
+
+
+def _aib_extproc_manifests(
+    namespace: str, release: str, keycloak_issuer: str
+) -> list[dict]:
+    """Build the public extProc workload using its v0.1.8 env contract."""
+    name = _auth_extproc_name(release)
+    labels = {"app.kubernetes.io/name": name}
+    secret_name = f"{name}-credentials"
+    token_endpoint = f"{_default_auth_issuer(namespace, release)}/oauth2/token"
+    client_credentials_endpoint = (
+        f"{keycloak_issuer}/protocol/openid-connect/token"
+    )
+    secret = {
+        "apiVersion": "v1",
+        "kind": "Secret",
+        "metadata": {"name": secret_name, "namespace": namespace},
+        "type": "Opaque",
+        "stringData": {"client-secret": DEFAULT_USER_AUTH_CLIENT_SECRET},
+    }
+    deployment = {
+        "apiVersion": "apps/v1",
+        "kind": "Deployment",
+        "metadata": {"name": name, "namespace": namespace, "labels": labels},
+        "spec": {
+            "replicas": 1,
+            "selector": {"matchLabels": labels},
+            "template": {
+                "metadata": {"labels": labels},
+                "spec": {
+                    "containers": [
+                        {
+                            "name": "extproc",
+                            "image": DEFAULT_AIB_EXTPROC_IMAGE,
+                            "imagePullPolicy": "IfNotPresent",
+                            "ports": [
+                                {"name": "grpc", "containerPort": AUTH_EXTPROC_PORT}
+                            ],
+                            "env": [
+                                {
+                                    "name": "EXTPROC_OAUTH2_TOKEN_ENDPOINT",
+                                    "value": token_endpoint,
+                                },
+                                {
+                                    "name": "EXTPROC_OAUTH2_ISSUER",
+                                    "value": keycloak_issuer,
+                                },
+                                {
+                                    "name": "EXTPROC_OAUTH2_CLIENT_ID",
+                                    "value": DEFAULT_USER_AUTH_CLIENT_ID,
+                                },
+                                {
+                                    "name": "EXTPROC_OAUTH2_CLIENT_SECRET",
+                                    "valueFrom": {
+                                        "secretKeyRef": {
+                                            "name": secret_name,
+                                            "key": "client-secret",
+                                        }
+                                    },
+                                },
+                                {
+                                    "name": (
+                                        "EXTPROC_OAUTH2_CLIENT_CREDENTIALS_ENDPOINT"
+                                    ),
+                                    "value": client_credentials_endpoint,
+                                },
+                                {
+                                    "name": "EXTPROC_OAUTH2_CLIENT_ASSERTION_TYPE",
+                                    "value": "access_token",
+                                },
+                                {
+                                    "name": "EXTPROC_OAUTH2_TLS_ALLOW_HTTP",
+                                    "value": "true",
+                                },
+                                {
+                                    "name": "EXTPROC_GRPC_PORT",
+                                    "value": str(AUTH_EXTPROC_PORT),
+                                },
+                            ],
+                            "readinessProbe": {
+                                "tcpSocket": {"port": "grpc"},
+                                "periodSeconds": 2,
+                            },
+                        }
+                    ]
+                },
+            },
+        },
+    }
+    service = {
+        "apiVersion": "v1",
+        "kind": "Service",
+        "metadata": {"name": name, "namespace": namespace, "labels": labels},
+        "spec": {
+            "selector": labels,
+            "ports": [
+                {
+                    "name": "grpc",
+                    "port": AUTH_EXTPROC_PORT,
+                    "targetPort": "grpc",
+                }
+            ],
+        },
+    }
+    return [secret, deployment, service]
+
+
+def _install_aib_extproc(
+    namespace: str, release: str, keycloak_issuer: str, wait: bool
+) -> bool:
+    """Apply KAOS-owned extProc resources for the public AIB release."""
+    typer.echo("Installing AIB token-exchange extProc...")
+    for manifest in _aib_extproc_manifests(namespace, release, keycloak_issuer):
+        result = _root()._run_kubectl(
+            ["apply", "-f", "-"], check=False, input=json.dumps(manifest)
+        )
+        if result.returncode != 0:
+            typer.echo(f"Error installing AIB extProc: {result.stderr}", err=True)
+            return False
+    if wait:
+        result = _root()._run_kubectl(
+            [
+                "rollout",
+                "status",
+                f"deployment/{_auth_extproc_name(release)}",
+                "-n",
+                namespace,
+                "--timeout=120s",
+            ],
+            check=False,
+        )
+        if result.returncode != 0:
+            typer.echo(f"Error waiting for AIB extProc: {result.stderr}", err=True)
+            return False
+    typer.echo(f"✅ AIB extProc installed in '{namespace}' namespace")
+    return True
+
 
 def _keycloak_realm_json(
     realm: str,
@@ -276,6 +526,7 @@ def _keycloak_realm_json(
     audience: str,
     username: str,
     password: str,
+    token_exchange_enabled: bool = False,
 ) -> dict:
     """Build a minimal Keycloak realm definition for non-interactive validation.
 
@@ -285,6 +536,32 @@ def _keycloak_realm_json(
     and group-based AccessGrants require.
     """
 
+    agent_audience_mappers = [
+        {
+            "name": "kaos-agent-audience",
+            "protocol": "openid-connect",
+            "protocolMapper": "oidc-audience-mapper",
+            "config": {
+                "included.custom.audience": DEFAULT_AGENT_AUTH_AUDIENCE,
+                "id.token.claim": "false",
+                "access.token.claim": "true",
+            },
+        }
+    ]
+    if token_exchange_enabled:
+        agent_audience_mappers.append(
+            {
+                "name": "token-exchange-audience",
+                "protocol": "openid-connect",
+                "protocolMapper": "oidc-audience-mapper",
+                "config": {
+                    "included.custom.audience": DEFAULT_TOKEN_EXCHANGE_AUDIENCE,
+                    "id.token.claim": "false",
+                    "access.token.claim": "true",
+                },
+            }
+        )
+
     return {
         "realm": realm,
         "enabled": True,
@@ -293,18 +570,7 @@ def _keycloak_realm_json(
                 "name": "kaos-agent-audience",
                 "protocol": "openid-connect",
                 "attributes": {"include.in.token.scope": "false"},
-                "protocolMappers": [
-                    {
-                        "name": "kaos-agent-audience",
-                        "protocol": "openid-connect",
-                        "protocolMapper": "oidc-audience-mapper",
-                        "config": {
-                            "included.custom.audience": DEFAULT_AGENT_AUTH_AUDIENCE,
-                            "id.token.claim": "false",
-                            "access.token.claim": "true",
-                        },
-                    }
-                ],
+                "protocolMappers": agent_audience_mappers,
             }
         ],
         "defaultDefaultClientScopes": ["kaos-agent-audience"],
@@ -385,15 +651,18 @@ def _keycloak_realm_json(
         ],
     }
 
+
 def _keycloak_realm_configmap_name(release: str) -> str:
     """Name of the ConfigMap holding the imported realm definition."""
     return f"{release}-realm-import"
+
 
 def _bootstrap_keycloak_realm(
     namespace: str,
     release: str,
     realm: str,
     audience: str,
+    token_exchange_enabled: bool = False,
 ) -> bool:
     """Create the realm-import ConfigMap consumed by Keycloak's --import-realm.
 
@@ -409,6 +678,7 @@ def _bootstrap_keycloak_realm(
             audience,
             DEFAULT_USER_AUTH_TEST_USER,
             DEFAULT_USER_AUTH_TEST_PASSWORD,
+            token_exchange_enabled,
         ),
         indent=2,
     )
@@ -521,6 +791,7 @@ def _keycloak_dev_manifests(
     }
     return [deployment, service]
 
+
 def _install_keycloak(
     namespace: str,
     release: str,
@@ -537,7 +808,9 @@ def _install_keycloak(
     dev path); otherwise a self-contained dev deployment is applied via kubectl.
     """
     typer.echo("Installing user identity provider (Keycloak)...")
-    if not _bootstrap_keycloak_realm(namespace, release, realm, audience):
+    if not _bootstrap_keycloak_realm(
+        namespace, release, realm, audience, token_exchange_enabled
+    ):
         return False
 
     if chart_path:

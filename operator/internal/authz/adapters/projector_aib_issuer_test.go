@@ -29,7 +29,7 @@ func TestBrokerProjectorIssuerConsistencyConditions(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			var server *httptest.Server
 			server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				if r.URL.Path != "/.well-known/openid-configuration" {
+				if r.URL.Path != "/.well-known/oauth-authorization-server" {
 					http.NotFound(w, r)
 					return
 				}

@@ -12,11 +12,15 @@ At startup, the operator discovers the Kubernetes issuer and JWKS from the API s
 
 ## AIB issuer
 
-`aib` uses the Agentic Identity Broker as the actor-token issuer. The operator registers each Agent with AIB and writes its client id and client secret to a per-agent Secret. Agent pods receive the provider-neutral `AGENT_AUTH_CLIENT_ID`, `AGENT_AUTH_CLIENT_SECRET_FILE`, and `AGENT_AUTH_TOKEN_ENDPOINT` settings.
+`aib` uses the public [Agentic Identity Broker](https://github.com/zalando-incubator/agentic-identity-broker) as the actor-token issuer. The operator registers each Agent with AIB and writes its client id and client secret to a per-agent Secret. Agent pods receive the provider-neutral `AGENT_AUTH_CLIENT_ID`, `AGENT_AUTH_CLIENT_SECRET_FILE`, and `AGENT_AUTH_TOKEN_ENDPOINT` settings.
 
 The runtime uses OAuth `client_credentials` to obtain a short-lived actor token. It caches the token until refresh is needed, rereads the mounted client-secret file so Secret rotation is visible, and refreshes and retries once after a gateway 401. AIB owns credential and token issuance; it does not make resource authorization decisions.
 
-The configured AIB issuer is the token `iss` value used by all verifiers. Gateway `SecurityPolicy` resources use `remoteJWKS` at the broker JWKS endpoint and require the `kaos-gateway` audience.
+The configured AIB issuer is the token `iss` value used by all verifiers. The operator reads RFC 8414 metadata from `/.well-known/oauth-authorization-server`, requires its `issuer` to match exactly, and uses the advertised `jwks_uri`. Gateway `SecurityPolicy` resources require the `kaos-gateway` audience.
+
+Public AIB v0.1.8 requires every Agent to reference a permission set. When KAOS installs the chart, the CLI idempotently seeds a scope-less `kaos-identity-placeholder` service and `kaos-identity` permission set. The operator attaches that set as mandatory. This bridge is identity-only and can be removed once AIB accepts agents without permission sets.
+
+For local development, check out AIB at tag `v0.1.8` and install with `--aib-chart-path agentic-identity-broker/charts/agentic-identity-broker --aib-values operator/config/aib/values-dev.yaml`. Those values use the published GHCR broker and migration images and contain fixed development keys; do not use them in production.
 
 ## OIDC issuer
 

@@ -23,7 +23,7 @@ The PDP runs stock `openpolicyagent/opa:1.18.1-envoy-static` with the Envoy plug
 Exactly one agent identity issuer is active:
 
 - `serviceaccount` uses one owned ServiceAccount per Agent. Kubernetes projects a short-lived token with audience `kaos-gateway` into the agent pod at `/var/run/secrets/kaos-agent/token`; `AGENT_AUTH_TOKEN_FILE` points the runtime to that file. The operator discovers the cluster issuer and JWKS through the Kubernetes API, embeds the JWKS in gateway policies, and projects the issuer-keyed keys into OPA data.
-- `aib` registers each Agent with the Agentic Identity Broker and delivers OAuth client credentials in a Secret. The runtime obtains actor tokens through `client_credentials`. One issuer URL configures the broker's public issuer and every KAOS verifier.
+- `aib` registers each Agent with the public [Agentic Identity Broker](https://github.com/zalando-incubator/agentic-identity-broker) and delivers OAuth client credentials in a Secret. The runtime obtains actor tokens through `client_credentials`. KAOS reads the broker's RFC 8414 metadata and uses its advertised issuer and JWKS endpoint.
 - `oidc` uses RFC 7591/7592 Dynamic Client Registration to create one OAuth client per Agent and deliver its credentials. Select it with `--agent-auth-enabled keycloak`; its initial access token Secret is provisioned manually before the operator starts.
 
 ServiceAccount identity needs no external identity service and is selected by `--agent-auth-enabled service-account`.
@@ -49,11 +49,20 @@ The former presets map to the new flags as follows:
 | `oidc-keycloak` | `--agent-auth-enabled keycloak --user-auth-enabled keycloak` |
 
 ```bash
+git clone --branch v0.1.8 --depth 1 \
+  https://github.com/zalando-incubator/agentic-identity-broker.git
+
 kaos system install --agent-auth-enabled service-account --user-auth-enabled none --metallb-enabled --wait
-kaos system install --agent-auth-enabled aib --user-auth-enabled none --aib-chart-path ./agentic-identity-broker/chart --wait
-kaos system install --agent-auth-enabled aib --user-auth-enabled keycloak --aib-chart-path ./agentic-identity-broker/chart --wait
+kaos system install --agent-auth-enabled aib --user-auth-enabled none \
+  --aib-chart-path ./agentic-identity-broker/charts/agentic-identity-broker \
+  --aib-values ./operator/config/aib/values-dev.yaml --wait
+kaos system install --agent-auth-enabled aib --user-auth-enabled keycloak \
+  --aib-chart-path ./agentic-identity-broker/charts/agentic-identity-broker \
+  --aib-values ./operator/config/aib/values-dev.yaml --wait
 kaos system install --agent-auth-enabled keycloak --user-auth-enabled keycloak --wait
 ```
+
+The development values pin the published `ghcr.io/zalando-incubator/agentic-identity-broker:v0.1.8` and `-migrate:v0.1.8` images. When the CLI installs AIB, it also creates the removable `kaos-identity-placeholder` service and `kaos-identity` permission set required by AIB v0.1.8 agent registration.
 
 ## Traffic confinement
 
