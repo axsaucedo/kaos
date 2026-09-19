@@ -136,9 +136,10 @@ func main() {
 	}
 
 	if err = (&controllers.AgentReconciler{
-		Client: mgr.GetClient(),
-		Log:    setupLog,
-		Scheme: mgr.GetScheme(),
+		Client:          mgr.GetClient(),
+		Log:             setupLog,
+		Scheme:          mgr.GetScheme(),
+		SystemNamespace: getEnvWithDefault("SYSTEM_NAMESPACE", "kaos"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Agent")
 		os.Exit(1)

@@ -44,6 +44,7 @@ defaultImages:
   litellm: ghcr.io/berriai/litellm:main-stable
   ollama: ollama/ollama:latest
   memoryService: axsauze/kaos-memory-service:0.4.8-dev
+  harnessPi: ghcr.io/axsaucedo/kaos-harness-pi:0.1.0
 
 # MCP Runtime registry configuration
 mcpRuntimes:
@@ -55,6 +56,17 @@ mcpRuntimes:
   #     type: python
   #     image: myregistry/my-mcp:v1
   #     description: "My custom MCP server"
+
+# Coding harness runtime registry configuration
+harnessRuntimes:
+  # Add custom harness runtimes here (will be merged into ConfigMap)
+  custom: {}
+  # Example:
+  # custom:
+  #   myharness:
+  #     image: myregistry/my-harness:v1
+  #     driver: myharness
+  #     description: "My custom coding harness"
 
 # Gateway API configuration
 gatewayAPI:
