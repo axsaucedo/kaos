@@ -38,6 +38,9 @@ DEFAULT_CREDENTIAL_SECRET_PREFIX = "kaos-aib"
 AUTH_ENDUSER_PORT = 8000
 AUTH_ADMIN_PORT = 14000
 AUTH_EXTPROC_PORT = 50051
+DEFAULT_AIB_EXTPROC_IMAGE = (
+    "ghcr.io/zalando-incubator/agentic-identity-broker-extproc:v0.1.8"
+)
 
 
 # Independent agent and user identity modes selected by the install flags.
@@ -121,8 +124,8 @@ from .auth import (
     _build_aib_broker_public_url_args, _build_auth_operator_args,
     _build_token_exchange_aib_args, _default_auth_admin_url,
     _default_auth_issuer, _default_user_auth_issuer, _install_aib,
-    _install_keycloak, _keycloak_dev_manifests, _keycloak_realm_configmap_name,
-    _keycloak_realm_json,
+    _install_aib_extproc, _install_keycloak, _keycloak_dev_manifests,
+    _keycloak_realm_configmap_name, _keycloak_realm_json,
 )
 
 
@@ -208,14 +211,6 @@ def install_command(
         typer.echo("See: https://helm.sh/docs/intro/install/", err=True)
         sys.exit(1)
 
-    if token_exchange_enabled:
-        typer.echo(
-            "Error: token exchange with public AIB v0.1.8 requires a separately "
-            "deployed extProc sidecar; this install path is deferred.",
-            err=True,
-        )
-        raise typer.Exit(1)
-
     # Phase 1: Kick off all infra installs (no waiting)
     if metallb_enabled:
         if not _install_metallb():
@@ -256,6 +251,22 @@ def install_command(
                 keycloak_namespace, keycloak_release
             )
 
+        # In exchange mode the public broker and extProc both contact Keycloak
+        # during startup, so apply Keycloak first.
+        if token_exchange_enabled:
+            if not _install_keycloak(
+                keycloak_namespace,
+                keycloak_release,
+                DEFAULT_USER_AUTH_REALM,
+                user_auth_audience,
+                keycloak_chart_path,
+                wait,
+                token_exchange_enabled,
+            ):
+                typer.echo(
+                    "Warning: Keycloak installation failed, continuing...", err=True
+                )
+
         # Install the broker from the public chart checkout when provided.
         if (identity_provider == "aib" or token_exchange_enabled) and aib_chart_path:
             if token_exchange_enabled:
@@ -276,6 +287,7 @@ def install_command(
                 aib_values_path,
                 wait,
                 extra_set=aib_extra_set,
+                seed_identity_bootstrap=identity_provider == "aib",
             ):
                 typer.echo(
                     "Warning: identity broker installation failed, continuing...",
@@ -292,7 +304,7 @@ def install_command(
 
         # Keycloak backs the user plane and the OIDC DCR agent mode. Install it
         # when either plane selects it.
-        if user_auth or identity_provider == "oidc":
+        if (user_auth or identity_provider == "oidc") and not token_exchange_enabled:
             if not _install_keycloak(
                 keycloak_namespace,
                 keycloak_release,
@@ -305,6 +317,17 @@ def install_command(
                 typer.echo(
                     "Warning: Keycloak installation failed, continuing...", err=True
                 )
+
+        if token_exchange_enabled and not _install_aib_extproc(
+            auth_namespace,
+            auth_release,
+            user_auth_issuer
+            or _default_user_auth_issuer(keycloak_namespace, keycloak_release),
+            wait,
+        ):
+            typer.echo(
+                "Warning: AIB extProc installation failed, continuing...", err=True
+            )
 
     # Phase 2: Wait for infra that the operator depends on
     if gateway_enabled:

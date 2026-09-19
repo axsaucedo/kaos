@@ -1,5 +1,6 @@
 """CLI integration tests using --dry-run to validate YAML generation."""
 
+import json
 import re
 import yaml
 import pytest
@@ -1221,6 +1222,67 @@ class TestAuthWiring:
             {"service_id": "service-1", "scopes": []}
         ]
 
+    def test_aib_extproc_manifest_uses_public_v018_contract(self):
+        from kaos_cli.install.auth import _aib_extproc_manifests
+
+        secret, deployment, service = _aib_extproc_manifests(
+            "aib-system",
+            "aib",
+            "http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos",
+        )
+
+        assert secret["kind"] == "Secret"
+        container = deployment["spec"]["template"]["spec"]["containers"][0]
+        assert container["image"].endswith(
+            "agentic-identity-broker-extproc:v0.1.8"
+        )
+        env = {item["name"]: item for item in container["env"]}
+        assert env["EXTPROC_OAUTH2_TOKEN_ENDPOINT"]["value"] == (
+            "http://aib-agentic-identity-broker.aib-system.svc.cluster.local:8000"
+            "/oauth2/token"
+        )
+        assert env["EXTPROC_OAUTH2_CLIENT_CREDENTIALS_ENDPOINT"]["value"].endswith(
+            "/realms/kaos/protocol/openid-connect/token"
+        )
+        assert env["EXTPROC_OAUTH2_CLIENT_ASSERTION_TYPE"]["value"] == "access_token"
+        assert env["EXTPROC_OAUTH2_TLS_ALLOW_HTTP"]["value"] == "true"
+        assert "valueFrom" in env["EXTPROC_OAUTH2_CLIENT_SECRET"]
+        assert service["metadata"]["name"] == (
+            "aib-agentic-identity-broker-extproc"
+        )
+        assert service["spec"]["ports"][0]["port"] == 50051
+
+    def test_install_aib_extproc_applies_and_waits(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
+
+        from kaos_cli.install.auth import _install_aib_extproc
+
+        calls = []
+
+        def fake_kubectl(args, check=False, input=None):
+            calls.append((args, input))
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with patch("kaos_cli.install._run_kubectl", side_effect=fake_kubectl):
+            assert _install_aib_extproc(
+                "aib-system",
+                "aib",
+                "http://keycloak:8080/realms/kaos",
+                wait=True,
+            )
+
+        assert [json.loads(body)["kind"] for _, body in calls[:3]] == [
+            "Secret",
+            "Deployment",
+            "Service",
+        ]
+        assert calls[3][0][:3] == [
+            "rollout",
+            "status",
+            "deployment/aib-agentic-identity-broker-extproc",
+        ]
+
     def test_install_uses_one_aib_issuer_for_broker_and_operator(self):
         from types import SimpleNamespace
         from unittest.mock import patch
@@ -1681,6 +1743,24 @@ class TestAuthWiring:
             "--import-realm",
             "--features=token-exchange,admin-fine-grained-authz",
         ]
+
+    def test_keycloak_te_realm_adds_exchange_audience_to_dynamic_clients(self):
+        from kaos_cli.install.auth import _keycloak_realm_json
+
+        realm = _keycloak_realm_json(
+            "kaos",
+            "kaos",
+            "secret",
+            "kaos",
+            "user",
+            "password",
+            token_exchange_enabled=True,
+        )
+        audiences = {
+            mapper["config"]["included.custom.audience"]
+            for mapper in realm["clientScopes"][0]["protocolMappers"]
+        }
+        assert audiences == {"kaos-gateway", "token-exchange-broker"}
 
     def test_auth_enabled_wires_user_auth_values(self):
         """aib-keycloak (user-auth on) adds security.userAuth.* args."""
@@ -2182,22 +2262,56 @@ class TestAuthWiring:
         assert result.exit_code != 0
         assert "No such option: --auth-enabled" in strip_ansi(result.output)
 
-    def test_token_exchange_requires_separately_deployed_extproc(self):
-        result = runner.invoke(
-            app,
-            [
-                "system",
-                "install",
-                "--token-exchange-enabled",
-                "--aib-chart-path",
-                "aib/chart",
-                "--chart-path",
-                "operator/chart",
-            ],
-        )
+    def test_token_exchange_deploys_public_extproc_and_wires_operator(self):
+        from types import SimpleNamespace
+        from unittest.mock import patch
 
-        assert result.exit_code != 0
-        assert "requires a separately deployed extProc sidecar" in result.output
+        captured = {}
+
+        def fake_helm(args, check=True, **kwargs):
+            captured["operator"] = args
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        with patch("kaos_cli.install.check_helm_installed", return_value=True), patch(
+            "kaos_cli.install.run_helm_command", side_effect=fake_helm
+        ), patch("kaos_cli.install._install_aib", return_value=True) as mock_aib, patch(
+            "kaos_cli.install._install_keycloak", return_value=True
+        ) as mock_keycloak, patch(
+            "kaos_cli.install._install_aib_extproc", return_value=True
+        ) as mock_extproc:
+            result = runner.invoke(
+                app,
+                [
+                    "system",
+                    "install",
+                    "--token-exchange-enabled",
+                    "--aib-chart-path",
+                    "aib/chart",
+                    "--chart-path",
+                    "operator/chart",
+                ],
+            )
+
+        assert result.exit_code == 0, result.output
+        mock_keycloak.assert_called_once()
+        mock_aib.assert_called_once()
+        mock_extproc.assert_called_once_with(
+            "aib-system",
+            "aib",
+            "http://keycloak.keycloak.svc.cluster.local:8080/realms/kaos",
+            False,
+        )
+        joined_aib = " ".join(mock_aib.call_args.kwargs["extra_set"])
+        assert mock_aib.call_args.kwargs["seed_identity_bootstrap"] is False
+        assert "broker.oauth2AuthorizationServer.mode=proxy" in joined_aib
+        assert "resolveAgentIdByClientId(subject_token.azp)" in joined_aib
+        assert 'client_assertion.azp == "kaos"' in joined_aib
+        assert "broker.security.skipThirdpartyHttpsValidation=true" in joined_aib
+        assert "extProc." not in joined_aib
+
+        joined_operator = " ".join(captured["operator"])
+        assert "security.tokenExchange.enabled=true" in joined_operator
+        assert "security.tokenExchange.extProc.port=50051" in joined_operator
 
     @pytest.mark.parametrize(
         "args,message",
