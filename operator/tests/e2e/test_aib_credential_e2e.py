@@ -178,11 +178,18 @@ def test_operator_provisions_and_mounts_agent_credentials(aib_namespace: str):
 
 def _list_admin_collection(local_port: int, collection: str) -> list:
     """List an AIB admin collection via the pre-auth principal header."""
-    resp = httpx.get(
-        f"http://localhost:{local_port}/api/{collection}",
-        headers={AIB_ADMIN_PRINCIPAL_HEADER: AIB_ADMIN_PRINCIPAL},
-        timeout=10.0,
-    )
+    for attempt in range(50):
+        try:
+            resp = httpx.get(
+                f"http://localhost:{local_port}/api/{collection}",
+                headers={AIB_ADMIN_PRINCIPAL_HEADER: AIB_ADMIN_PRINCIPAL},
+                timeout=10.0,
+            )
+            break
+        except httpx.ConnectError:
+            if attempt == 49:
+                raise
+            time.sleep(0.1)
     resp.raise_for_status()
     payload = resp.json()
     if isinstance(payload, dict):
