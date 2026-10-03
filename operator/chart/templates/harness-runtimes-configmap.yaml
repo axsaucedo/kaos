@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kaos-harness-runtimes
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "chart.labels" . | nindent 4 }}
+data:
+  runtimes.yaml: |
+    runtimes:
+      # === SYSTEM RUNTIMES (built by KAOS) ===
+
+      pi:
+        image: {{ .Values.defaultImages.harnessPi }}
+        driver: pi
+        description: "pi coding harness (MIT)"
+
+      # === BRING-YOUR-OWN RUNTIMES (empty image => spec.container.image required) ===
+
+      claude:
+        image: ""
+        driver: claude
+        description: "Claude Code (proprietary, bring your own image)"
+
+      # === USER-DEFINED RUNTIMES ===
+      # Add custom harness runtimes via Helm values or kubectl edit
+      {{- range $name, $config := .Values.harnessRuntimes.custom }}
+      {{ $name }}:
+        {{- toYaml $config | nindent 8 }}
+      {{- end }}
