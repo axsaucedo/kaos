@@ -43,6 +43,11 @@ cd kaos-memory
 uv run pytest tests/ -v         # Tests
 make lint                       # Linting (black --check + ty)
 
+# Coding-harness driver (harness-runtimes)
+cd harness-runtimes
+HARNESS_BIN=/path/to/pi uv run pytest tests/ -v   # Tests (skip without the binary)
+make lint                       # Linting (black --check + ty)
+
 # Go (operator)
 cd operator
 make generate manifests         # After changing CRD types
@@ -72,6 +77,14 @@ pydantic-ai-server/        # Agent runtime (Pydantic AI, pytest, black, ty) — 
 mcp-servers/               # Standalone MCP server implementations
 ├── python-string/         # Python code execution runtime
 └── fastmcp-codemode/      # MCP server aggregator with CodeMode transform
+
+harness-runtimes/          # Coding-harness driver (kaos_harness, uv, pytest, black, ty)
+├── kaos_harness/
+│   ├── driver.py          # FastAPI app serving the KAOS agent contract on :8000
+│   ├── harnesses.py       # Per-harness adapters (pi, claude), selected by HARNESS_DRIVER
+│   └── cli.py             # kaos-harness serve
+├── pi/Dockerfile          # Image bundling `pi` + the driver
+└── tests/                 # Contract suite (mock ModelAPI, no credential needed)
 
 kaos-memory/               # Memory library + central service (kaos_memory, uv, pytest, black, ty)
 ├── kaos_memory/
