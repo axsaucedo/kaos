@@ -98,6 +98,28 @@ runtimes:
 	}
 	Expect(k8sClient.Create(context.Background(), runtimesConfigMap)).To(Succeed())
 
+	// Create harness runtimes ConfigMap for coding-harness agents
+	harnessRuntimesConfigMap := &corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "kaos-harness-runtimes",
+			Namespace: "default",
+		},
+		Data: map[string]string{
+			"runtimes.yaml": `
+runtimes:
+  pi:
+    image: ghcr.io/axsaucedo/kaos-harness-pi:test
+    driver: pi
+    description: "pi coding harness (MIT)"
+  claude:
+    image: ""
+    driver: claude
+    description: "Claude Code (proprietary, bring your own image)"
+`,
+		},
+	}
+	Expect(k8sClient.Create(context.Background(), harnessRuntimesConfigMap)).To(Succeed())
+
 	// Set required environment variables for controller operation
 	os.Setenv("DEFAULT_AGENT_IMAGE", "axsauze/kaos-agent:test")
 	os.Setenv("DEFAULT_MCP_SERVER_IMAGE", "axsauze/kaos-mcp-server:test")
@@ -113,8 +135,9 @@ runtimes:
 	Expect(err).ToNot(HaveOccurred())
 
 	err = (&controllers.AgentReconciler{
-		Client: k8sManager.GetClient(),
-		Scheme: k8sManager.GetScheme(),
+		Client:          k8sManager.GetClient(),
+		Scheme:          k8sManager.GetScheme(),
+		SystemNamespace: "default",
 	}).SetupWithManager(k8sManager)
 	Expect(err).ToNot(HaveOccurred())
 

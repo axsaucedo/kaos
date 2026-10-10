@@ -14,7 +14,7 @@ func TestMemoryPostureEnvUsesUserSecurityMode(t *testing.T) {
 	agent.Spec.Config = &kaosv1alpha1.AgentConfig{Memory: &kaosv1alpha1.MemoryConfig{}}
 	model := &kaosv1alpha1.ModelAPI{}
 	env := (&AgentReconciler{}).constructEnvVars(
-		agent, model, nil, nil, "", "agent", "",
+		agent, model, nil, nil, "", "agent", "", nil,
 	)
 
 	want := map[string]string{"MEMORY_REQUIRE_PRINCIPAL": "true", "MEMORY_REQUIRE_AGENT_IDENTITY": "true"}
@@ -34,7 +34,7 @@ func TestMemoryPostureEnvForAgentOnlySecurity(t *testing.T) {
 	agent.Spec.Config = &kaosv1alpha1.AgentConfig{Memory: &kaosv1alpha1.MemoryConfig{}}
 	model := &kaosv1alpha1.ModelAPI{}
 	env := (&AgentReconciler{}).constructEnvVars(
-		agent, model, nil, nil, "", "agent", "",
+		agent, model, nil, nil, "", "agent", "", nil,
 	)
 
 	gotAgent := false
@@ -58,7 +58,7 @@ func TestMemoryPostureEnvRequiresSecurityEnforcement(t *testing.T) {
 	agent.Spec.Config = &kaosv1alpha1.AgentConfig{Memory: &kaosv1alpha1.MemoryConfig{}}
 	model := &kaosv1alpha1.ModelAPI{}
 	env := (&AgentReconciler{}).constructEnvVars(
-		agent, model, nil, nil, "", "agent", "",
+		agent, model, nil, nil, "", "agent", "", nil,
 	)
 
 	for _, item := range env {
