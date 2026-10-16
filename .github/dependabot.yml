@@ -1,4 +1,31 @@
 version: 2
+
+# Major-version policy
+# --------------------
+# Majors are never bundled into a grouped PR: every `all` version-update group
+# below is restricted to `minor` and `patch`, so a major always arrives as its
+# own reviewable PR instead of hiding inside a 36-package lock refresh. The
+# `all-security` groups are deliberately left unrestricted — a security fix may
+# only exist in a new major, and must never be filtered out.
+#
+# We do not adopt a major at its `.0.0`. A brand-new X.0.0 is the least-tested
+# release of that line, so we wait for X.1.0. Dependabot has no wildcard for
+# "any major's .0.*" — `ignore.versions` ranges are literal, and `cooldown`
+# cannot express it either (once X.0.0 ages past the cooldown window Dependabot
+# offers *that* version, which is the opposite of what we want). So the policy
+# is enforced per dependency, as each major actually appears:
+#
+#   When a major PR for X.0.0 shows up, close it and add:
+#
+#     ignore:
+#       - dependency-name: "<name>"
+#         versions: ["X.0.x"]        # adopt this major at X.1.0, not X.0.0
+#
+#   Dependabot then re-proposes the dependency once X.1.0 ships. Drop the entry
+#   again after the major is adopted, so later majors are not silently skipped.
+#
+# Use `update-types: ["version-update:semver-major"]` instead (see `typescript`
+# under /kaos-ui) only when a major must be blocked outright, not deferred.
 updates:
   # Python - kaos-cli
   - package-ecosystem: "pip"
@@ -10,6 +37,7 @@ updates:
       all:
         applies-to: version-updates
         patterns: ["*"]
+        update-types: ["minor", "patch"]
       all-security:
         applies-to: security-updates
         patterns: ["*"]
@@ -24,6 +52,7 @@ updates:
       all:
         applies-to: version-updates
         patterns: ["*"]
+        update-types: ["minor", "patch"]
       all-security:
         applies-to: security-updates
         patterns: ["*"]
@@ -38,6 +67,7 @@ updates:
       all:
         applies-to: version-updates
         patterns: ["*"]
+        update-types: ["minor", "patch"]
       all-security:
         applies-to: security-updates
         patterns: ["*"]
@@ -52,6 +82,7 @@ updates:
       all:
         applies-to: version-updates
         patterns: ["*"]
+        update-types: ["minor", "patch"]
       all-security:
         applies-to: security-updates
         patterns: ["*"]
@@ -66,14 +97,15 @@ updates:
       all:
         applies-to: version-updates
         patterns: ["*"]
+        update-types: ["minor", "patch"]
       all-security:
         applies-to: security-updates
         patterns: ["*"]
 
   # npm - kaos-ui
-  # Major bumps are excluded from the `all` group so each major gets its own
-  # PR — framework migrations (React, React Router, Vite, Zod, Zustand, etc.)
-  # need individual review and are unsafe to bundle.
+  # Framework majors here (React, React Router, Vite, Zod, Zustand, etc.) are
+  # migrations: review each individually, and never auto-merge one — CI cannot
+  # see visual regressions.
   - package-ecosystem: "npm"
     directory: "/kaos-ui"
     schedule:
@@ -105,6 +137,7 @@ updates:
       all:
         applies-to: version-updates
         patterns: ["*"]
+        update-types: ["minor", "patch"]
       all-security:
         applies-to: security-updates
         patterns: ["*"]
@@ -119,6 +152,7 @@ updates:
       all:
         applies-to: version-updates
         patterns: ["*"]
+        update-types: ["minor", "patch"]
       all-security:
         applies-to: security-updates
         patterns: ["*"]
@@ -133,6 +167,7 @@ updates:
       all:
         applies-to: version-updates
         patterns: ["*"]
+        update-types: ["minor", "patch"]
       all-security:
         applies-to: security-updates
         patterns: ["*"]
