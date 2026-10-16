@@ -116,7 +116,7 @@ Before planning a fix, check whether the PR is **in-scope** for fixing at all. A
 - The PR touches > ~40 packages and the majority are routine but a minority are migrations
 
 When triggered, **do not attempt a fix** and **do not close the PR yourself** — leave it open for the host to close. Instead:
-1. Update `.github/dependabot.yml` to split the offending group (typically add `update-types: ["minor", "patch"]` to the `all` group so majors get individual PRs).
+1. Update `.github/dependabot.yml`. Every `all` version-update group is **already** capped at `["minor", "patch"]`, so majors arrive as individual PRs by default — a group PR bundling majors should no longer happen. The usual action now is to defer the major instead: add an `ignore` entry with `versions: ["X.0.x"]` so the major is adopted at `X.1.0` rather than `X.0.0` (see the policy header in `dependabot.yml`).
 2. Open that config change as a separate small PR (leave it for the host to review/merge).
 3. **Verbalise the scope-reject decision as a comment** on the original Dependabot PR(s): explain why it cannot be fixed in one pass, link the config PR, and recommend the host close it once smaller PRs replace it next cycle. Leave the PR **open** — do not pause for a decision, do not close it.
 4. Skip Phase E's "commit on Dependabot branch" flow — there is no fix. The REPORT.md content can be folded into that comment.
