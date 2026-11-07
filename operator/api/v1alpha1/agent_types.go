@@ -31,6 +31,18 @@ type ContainerOverride struct {
 	// Env sets environment variables
 	// +kubebuilder:validation:Optional
 	Env []corev1.EnvVar `json:"env,omitempty"`
+
+	// SecurityContext overrides the container security context
+	// +kubebuilder:validation:Optional
+	SecurityContext *corev1.SecurityContext `json:"securityContext,omitempty"`
+
+	// WorkingDir overrides the container working directory
+	// +kubebuilder:validation:Optional
+	WorkingDir string `json:"workingDir,omitempty"`
+
+	// VolumeMounts adds volume mounts to the container
+	// +kubebuilder:validation:Optional
+	VolumeMounts []corev1.VolumeMount `json:"volumeMounts,omitempty"`
 }
 
 // +kubebuilder:object:generate=true
@@ -235,6 +247,35 @@ type TaskConfig struct {
 
 // +kubebuilder:object:generate=true
 
+// WorkspaceConfig clones a git repository into /workspace before the harness starts.
+type WorkspaceConfig struct {
+	// RepoURL is the https git URL to clone.
+	RepoURL string `json:"repoURL"`
+
+	// Branch is the branch to clone (default: "main").
+	// +kubebuilder:validation:Optional
+	Branch string `json:"branch,omitempty"`
+
+	// CredentialsSecretRef supplies a token for clone/push (optional).
+	// +kubebuilder:validation:Optional
+	CredentialsSecretRef *corev1.SecretKeySelector `json:"credentialsSecretRef,omitempty"`
+}
+
+// +kubebuilder:object:generate=true
+
+// HarnessConfig runs the agent as a coding harness instead of the default runtime.
+type HarnessConfig struct {
+	// Runtime keys into the kaos-harness-runtimes ConfigMap. Deliberately an
+	// unconstrained string (no Enum) - same as MCPServer.Spec.Runtime.
+	Runtime string `json:"runtime"`
+
+	// Workspace optionally clones a git repo into /workspace before start.
+	// +kubebuilder:validation:Optional
+	Workspace *WorkspaceConfig `json:"workspace,omitempty"`
+}
+
+// +kubebuilder:object:generate=true
+
 // AgentSpec defines the desired state of Agent
 type AgentSpec struct {
 	// ModelAPI is the name of the ModelAPI resource this agent uses
@@ -264,6 +305,11 @@ type AgentSpec struct {
 	// GatewayRoute configures Gateway API routing (timeout, etc.)
 	// +kubebuilder:validation:Optional
 	GatewayRoute *GatewayRoute `json:"gatewayRoute,omitempty"`
+
+	// Harness deploys this agent as a coding harness (e.g. pi, Claude Code)
+	// instead of the default agent runtime.
+	// +kubebuilder:validation:Optional
+	Harness *HarnessConfig `json:"harness,omitempty"`
 
 	// Container provides shorthand container overrides (image, env, resources)
 	// +kubebuilder:validation:Optional

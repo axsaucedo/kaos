@@ -38,8 +38,9 @@ const exchangeReflectionName = "kaos-token-exchange-reflection"
 // AgentReconciler reconciles an Agent object
 type AgentReconciler struct {
 	client.Client
-	Log    logr.Logger
-	Scheme *runtime.Scheme
+	Log             logr.Logger
+	Scheme          *runtime.Scheme
+	SystemNamespace string
 }
 
 //+kubebuilder:rbac:groups=kaos.tools,resources=agents,verbs=get;list;watch;create;update;patch;delete
@@ -349,6 +350,20 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 	}
 	maxReadScope := resolveMaxReadScope(memoryConfig, resolvedMemoryStore)
 
+	// Resolve the harness runtime from the registry ConfigMap (read live so
+	// registry edits apply without an operator restart). nil for normal agents.
+	harnessRuntime, err := r.resolveHarnessRuntime(ctx, agent)
+	if err != nil {
+		log.Error(err, "failed to resolve harness runtime")
+		agent.Status.Phase = "Failed"
+		agent.Status.Ready = false
+		agent.Status.Message = fmt.Sprintf("Failed to resolve harness runtime: %v", err)
+		if statusErr := r.Status().Update(ctx, agent); statusErr != nil {
+			return ctrl.Result{}, statusErr
+		}
+		return ctrl.Result{}, err
+	}
+
 	// Create or update Deployment
 	deployment := &appsv1.Deployment{}
 	deploymentName := fmt.Sprintf("agent-%s", agent.Name)
@@ -356,7 +371,7 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 
 	if err != nil && apierrors.IsNotFound(err) {
 		// Create new Deployment
-		deployment, err = r.constructDeployment(agent, modelapi, mcpServers, peerAgents, memoryEndpoint, maxReadScope, tokenExchangeConfig)
+		deployment, err = r.constructDeployment(agent, modelapi, mcpServers, peerAgents, memoryEndpoint, maxReadScope, tokenExchangeConfig, harnessRuntime)
 		if err != nil {
 			log.Error(err, "failed to construct Deployment")
 			agent.Status.Phase = "Failed"
@@ -386,7 +401,7 @@ func (r *AgentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl
 		return ctrl.Result{}, err
 	} else {
 		// Deployment exists - check if spec has changed using hash annotation
-		desiredDeployment, err := r.constructDeployment(agent, modelapi, mcpServers, peerAgents, memoryEndpoint, maxReadScope, tokenExchangeConfig)
+		desiredDeployment, err := r.constructDeployment(agent, modelapi, mcpServers, peerAgents, memoryEndpoint, maxReadScope, tokenExchangeConfig, harnessRuntime)
 		if err != nil {
 			log.Error(err, "failed to construct Deployment for comparison")
 			return ctrl.Result{}, err
@@ -633,7 +648,7 @@ func (r *AgentReconciler) agentDeploymentExists(ctx context.Context, agent *kaos
 }
 
 // constructDeployment creates a Deployment for the Agent
-func (r *AgentReconciler) constructDeployment(agent *kaosv1alpha1.Agent, modelapi *kaosv1alpha1.ModelAPI, mcpServers map[string]string, peerAgents map[string]string, memoryEndpoint, maxReadScope, tokenExchangeConfig string) (*appsv1.Deployment, error) {
+func (r *AgentReconciler) constructDeployment(agent *kaosv1alpha1.Agent, modelapi *kaosv1alpha1.ModelAPI, mcpServers map[string]string, peerAgents map[string]string, memoryEndpoint, maxReadScope, tokenExchangeConfig string, harnessRuntime *HarnessRuntimeConfig) (*appsv1.Deployment, error) {
 	labels := map[string]string{
 		"app":   "agent",
 		"agent": agent.Name,
@@ -642,12 +657,18 @@ func (r *AgentReconciler) constructDeployment(agent *kaosv1alpha1.Agent, modelap
 	replicas := int32(1)
 
 	// Build environment variables
-	env := r.constructEnvVars(agent, modelapi, mcpServers, peerAgents, memoryEndpoint, maxReadScope, tokenExchangeConfig)
+	env := r.constructEnvVars(agent, modelapi, mcpServers, peerAgents, memoryEndpoint, maxReadScope, tokenExchangeConfig, harnessRuntime)
 
 	// Get agent image from environment (required - set via ConfigMap)
 	agentImage := os.Getenv("DEFAULT_AGENT_IMAGE")
 	if agentImage == "" {
 		return nil, fmt.Errorf("DEFAULT_AGENT_IMAGE environment variable is required but not set")
+	}
+
+	// A harness agent runs the harness image resolved from the registry
+	// (spec.container.image precedence is already applied during resolution).
+	if harnessRuntime != nil {
+		agentImage = harnessRuntime.Image
 	}
 
 	container := corev1.Container{
@@ -705,6 +726,12 @@ func (r *AgentReconciler) constructDeployment(agent *kaosv1alpha1.Agent, modelap
 		basePodSpec.Containers[0].VolumeMounts = append(basePodSpec.Containers[0].VolumeMounts, *mount)
 	}
 
+	// Harness workspace plumbing is applied to the base pod spec so the
+	// spec.container and spec.podSpec merges below can still override it.
+	if harnessRuntime != nil && agent.Spec.Harness != nil {
+		applyHarnessWorkspace(&basePodSpec, agent.Spec.Harness.Workspace)
+	}
+
 	// Apply spec.container override using strategic merge patch
 	if agent.Spec.Container != nil {
 		containerPatch := containerOverrideToPodSpecPatch(*agent.Spec.Container)
@@ -751,7 +778,7 @@ func (r *AgentReconciler) constructDeployment(agent *kaosv1alpha1.Agent, modelap
 }
 
 // constructEnvVars builds environment variables for the agent
-func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *kaosv1alpha1.ModelAPI, mcpServers map[string]string, peerAgents map[string]string, memoryEndpoint, maxReadScope, tokenExchangeConfig string) []corev1.EnvVar {
+func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *kaosv1alpha1.ModelAPI, mcpServers map[string]string, peerAgents map[string]string, memoryEndpoint, maxReadScope, tokenExchangeConfig string, harnessRuntime *HarnessRuntimeConfig) []corev1.EnvVar {
 	var env []corev1.EnvVar
 
 	// Agent identity and configuration
@@ -1008,6 +1035,9 @@ func (r *AgentReconciler) constructEnvVars(agent *kaosv1alpha1.Agent, modelapi *
 		env = append(env, logLevelEnv...)
 	}
 
+	// Coding harness contract (driver plus workspace/state locations)
+	env = append(env, harnessEnvVars(harnessRuntime)...)
+
 	// Agent identity and credentials (when security credential mounting is enabled)
 	env = append(env, buildAgentAuthEnvVars(agent)...)
 	if tokenExchangeConfig != "" {
@@ -1231,6 +1261,15 @@ func containerOverrideToPodSpecPatch(override kaosv1alpha1.ContainerOverride) co
 	}
 	if len(override.Env) > 0 {
 		c.Env = override.Env
+	}
+	if override.SecurityContext != nil {
+		c.SecurityContext = override.SecurityContext
+	}
+	if override.WorkingDir != "" {
+		c.WorkingDir = override.WorkingDir
+	}
+	if len(override.VolumeMounts) > 0 {
+		c.VolumeMounts = override.VolumeMounts
 	}
 	return corev1.PodSpec{
 		Containers: []corev1.Container{c},
