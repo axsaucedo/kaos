@@ -186,6 +186,7 @@ spec:
 1. **Timeout errors**: Increase `PYTEST_TIMEOUT` or use `--timeout=300`
 2. **Gateway 503**: Wait for Gateway pods: `kubectl wait --for=condition=available deployment -n envoy-gateway-system --all`
 3. **CRD not found**: Ensure `make kind-e2e-install-kaos` completed successfully
+4. **`kind load` fails with `content digest ... not found`**: Docker's containerd image store can't `kind load` registry-pulled multi-platform images (e.g. `ollama/ollama`). Pull them inside the node instead: `docker exec <node> crictl pull <image>`. `kind load` is fine for locally built images.
 
 ### Important actions
 

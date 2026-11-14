@@ -79,10 +79,6 @@ docker build -t "${REGISTRY}/kaos-memory-service:${AGENT_TAG}" "${PROJECT_ROOT}/
 echo "Building minimal LiteLLM image..."
 docker build -t "${LITELLM_IMAGE}" -f "${SCRIPT_DIR}/Dockerfile.litellm" "${SCRIPT_DIR}"
 
-# Pull Ollama image
-echo "Pulling Ollama image..."
-docker pull "${OLLAMA_IMAGE}"
-
 # Load images into KIND cluster
 echo ""
 echo "Loading images into KIND cluster '${KIND_CLUSTER_NAME}'..."
@@ -94,7 +90,11 @@ kind load docker-image "${REGISTRY}/kaos-mcp-pctx-codemode:${AGENT_TAG}" --name 
 kind load docker-image "${REGISTRY}/kaos-mcp-fastmcp-codemode:${AGENT_TAG}" --name "${KIND_CLUSTER_NAME}"
 kind load docker-image "${REGISTRY}/kaos-memory-service:${AGENT_TAG}" --name "${KIND_CLUSTER_NAME}"
 kind load docker-image "${LITELLM_IMAGE}" --name "${KIND_CLUSTER_NAME}"
-kind load docker-image "${OLLAMA_IMAGE}" --name "${KIND_CLUSTER_NAME}"
+# Pull Ollama inside the node: `kind load` of a registry-pulled multi-platform
+# image fails under Docker's containerd image store ("content digest not found").
+for node in $(kind get nodes --name "${KIND_CLUSTER_NAME}"); do
+  docker exec "$node" crictl pull "${OLLAMA_IMAGE}"
+done
 
 echo ""
 echo "All images built and loaded into KIND!"
