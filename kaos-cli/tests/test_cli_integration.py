@@ -4,6 +4,7 @@ import json
 import re
 import yaml
 import pytest
+import typer
 from typer.testing import CliRunner
 
 from kaos_cli.main import app
@@ -1076,15 +1077,24 @@ class TestSystemInstallFlags:
     def test_install_help_shows_auth_flag(self):
         result = runner.invoke(app, ["system", "install", "--help"])
         assert result.exit_code == 0
-        output = strip_ansi(result.output)
-        assert "--agent-auth-enabled" in output
-        assert "--user-auth-enabled" in output
-        assert "--auth-enabled" not in output
+        # Assert on the registered options rather than rendered help text: the
+        # help table's column layout (and so truncation at CliRunner's 80-column
+        # width) varies across typer releases.
+        install = typer.main.get_command(app).commands["system"].commands["install"]
+        visible = {
+            o for p in install.params if not getattr(p, "hidden", False) for o in p.opts
+        }
+        hidden = {
+            o for p in install.params if getattr(p, "hidden", False) for o in p.opts
+        }
+        assert "--agent-auth-enabled" in visible
+        assert "--user-auth-enabled" in visible
+        assert "--auth-enabled" not in visible | hidden
         # The fine-grained auth knobs are collapsed into the preset and no longer
         # exposed on the command surface.
-        assert "--authz-provider" not in output
+        assert "--authz-provider" not in visible | hidden
         # Advanced dev chart paths remain available but hidden from help.
-        assert "--aib-chart-path" not in output
+        assert "--aib-chart-path" in hidden
 
 
 class TestPgvectorMemoryInstall:
