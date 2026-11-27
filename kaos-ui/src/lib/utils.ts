@@ -1,5 +1,12 @@
 import { clsx, type ClassValue } from "clsx";
-import { twMerge } from "tailwind-merge";
+import { extendTailwindMerge } from "tailwind-merge";
+
+// tailwind-merge >=3.7.1 no longer lets a later font-size class (text-base) drop an
+// earlier leading-* (e.g. CardTitle's default leading-none). Keep the previous
+// resolution so size overrides retain their natural line-height.
+const twMerge = extendTailwindMerge({
+  extend: { conflictingClassGroups: { "font-size": ["leading"] } },
+});
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
